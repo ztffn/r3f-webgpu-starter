@@ -2,10 +2,16 @@
 
 A browser-based reconstruction of **Delta Force 2** (NovaLogic, 1999), focused on
 faithfully reproducing its two defining technical traits: the **Voxel Space 32** heightfield
-terrain and its signature concealing **tall grass**. Built on **Three.js `WebGPURenderer`**
-with **TSL** shaders and **React Three Fiber** (forked from a WebGPU R3F starter).
+terrain and its signature concealing **tall grass**.
 
 This is a hobby/reconstruction project, not a commercial release.
+
+## Stack
+
+**Vite + TypeScript + React 19**, rendering with **Three.js `WebGPURenderer`** and **TSL**
+shaders via **React Three Fiber v9** / **drei v10**. Three.js falls back to WebGL2
+automatically where WebGPU is unavailable (verified: the terrain renders cleanly on the
+fallback path). The legacy Create React App / react-scripts setup has been removed.
 
 ## Status
 
@@ -36,26 +42,29 @@ See [`docs/`](./docs) for the full design:
 
 ```
 src/df2/
-  config.js          world constants (size, chunking, LOD, height/fog/water)
-  noise.js           deterministic value noise + fBm
-  Heightfield.js     CPU heightfield: bilinear sample() + analytic normal()
-  terrainGeometry.js per-chunk BufferGeometry (grid + skirt)
-  TerrainMaterial.js TSL biome material
-  Terrain.js         chunk grid + per-frame LOD selection
-  DF2Scene.js        scene composition (lights, fog, water, camera)
+  config.ts          world constants (size, chunking, LOD, height/fog/water)
+  noise.ts           deterministic value noise + fBm
+  Heightfield.ts     CPU heightfield: bilinear sample() + analytic normal()
+  terrainGeometry.ts per-chunk BufferGeometry (grid + skirt)
+  TerrainMaterial.ts TSL biome material
+  Terrain.tsx        chunk grid + per-frame LOD selection
+  DF2Scene.tsx       scene composition (lights, fog, water, camera)
 src/components/
-  GameCanvas.js      WebGPU + R3F canvas bootstrap
-  Overlay.js         UI overlay
+  GameCanvas.tsx     WebGPU + R3F canvas bootstrap (async WebGPU init)
+  Overlay.tsx        UI overlay
+src/main.tsx         entry
 ```
 
 ## Getting started
 
-Install [Node.js](https://nodejs.org/en/download/), then:
+Install [Node.js](https://nodejs.org/en/download/) (18+), then:
 
 ```shell
 npm install
-npm start      # dev server at localhost:3000
-npm run build  # production build
+npm run dev        # Vite dev server at localhost:3000
+npm run build      # typecheck + production build to /dist
+npm run preview    # serve the production build
+npm run typecheck  # tsc --noEmit
 ```
 
 A WebGPU-capable browser is recommended; Three.js falls back to WebGL2 automatically where

@@ -8,10 +8,12 @@ The runtime stack, why each piece was chosen, and how the code in `src/df2/` is 
 
 | Layer | Choice | Rationale |
 | --- | --- | --- |
-| Renderer | **Three.js `WebGPURenderer`** | Modern compute + node materials; production-ready since r171. Automatic, silent fallback to WebGL2 for browsers without WebGPU (~5%). |
+| Build tool | **Vite** (+ `@vitejs/plugin-react`) | Fast HMR — the thing that actually matters when iterating on terrain shaders. Replaces the deprecated Create React App / react-scripts the starter shipped with. |
+| Language | **TypeScript** (strict) | Typed heightfield/chunk/LOD interfaces; the asset pipeline (Phase 0) is already specced in TS. |
+| Renderer | **Three.js `WebGPURenderer`** (r185) | Modern compute + node materials. Automatic, silent fallback to WebGL2 for browsers without WebGPU (~5%). |
 | Shading | **TSL (Three Shading Language)** | One JS-authored shader graph compiles to **both** WGSL (WebGPU) and GLSL (WebGL2). No dual shader codebase. |
-| App shell | **React + React Three Fiber** | Declarative scene graph, hooks-based lifecycle, inherited from the starter this repo forked. |
-| Helpers | **@react-three/drei** | `MapControls`, loaders, misc. |
+| App shell | **React 19 + React Three Fiber v9** | Declarative scene graph, hooks-based lifecycle. R3F v9 supports an async `gl` factory, which the WebGPU init path uses. |
+| Helpers | **@react-three/drei v10** | `MapControls`, `Loader`, misc. |
 | Asset pipeline | **Node.js + TypeScript CLI** (`df2-extract`, Phase 0) | Runs offline as a build step, fully decoupled from the runtime engine. |
 | Physics (Phase 4) | **rapier** (preferred) or cannon-es | WASM, deterministic-ish, good R3F bindings via `@react-three/rapier`. |
 
@@ -33,14 +35,13 @@ The runtime stack, why each piece was chosen, and how the code in `src/df2/` is 
 
 ## 3. Renderer bootstrap
 
-`src/components/GameCanvas.js` (generalized from the starter's canvas) owns WebGPU setup:
+`src/components/GameCanvas.tsx` owns WebGPU setup:
 
 - Imports `three/webgpu` and `extend(THREE)` so R3F knows the node classes.
-- Constructs `WebGPURenderer` in the Canvas `gl` callback, calls `renderer.init()`, and
-  only flips the R3F frameloop from `"never"` to `"always"` once init resolves — this avoids
-  rendering before the device is ready.
+- Uses R3F v9's **async `gl` factory**: constructs `WebGPURenderer` and `await`s
+  `renderer.init()` before the first render, so we never draw before the device is ready.
 - Accepts a `camera` prop so scenes can set world-appropriate near/far/position (terrain
-  needs a far plane in the thousands of meters, unlike the original interior demo).
+  needs a far plane in the thousands of meters).
 
 If WebGPU is unavailable, Three.js transparently backs the same renderer with WebGL2; no
 app-level branching required.
@@ -51,24 +52,24 @@ app-level branching required.
 
 ```
 src/df2/
-  config.js          # world constants: size, chunking, LOD, height/fog/water scales
-  noise.js           # deterministic hash + value noise + fBm (no deps)
-  Heightfield.js     # CPU heightfield: precomputed fBm grid, bilinear sample(), analytic normal()
-  terrainGeometry.js # builds one chunk's BufferGeometry (grid + skirt) from a Heightfield
-  TerrainMaterial.js # TSL MeshStandardNodeMaterial: slope/height biome blend
-  Terrain.js         # R3F component: chunk grid, per-frame LOD selection, geometry cache
-  DF2Scene.js        # scene composition: lights, fog, water, <Terrain/>, MapControls
+  config.ts          # world constants: size, chunking, LOD, height/fog/water scales
+  noise.ts           # deterministic hash + value noise + fBm (no deps)
+  Heightfield.ts     # CPU heightfield: precomputed fBm grid, bilinear sample(), analytic normal()
+  terrainGeometry.ts # builds one chunk's BufferGeometry (grid + skirt) from a Heightfield
+  TerrainMaterial.ts # TSL MeshStandardNodeMaterial: slope/height biome blend
+  Terrain.tsx        # R3F component: chunk grid, per-frame LOD selection, geometry cache
+  DF2Scene.tsx       # scene composition: lights, fog, water, <Terrain/>, MapControls
 ```
 
 Design rules:
 
-- **`config.js` is the single place** for world scale, chunk count, LOD table, height/water
+- **`config.ts` is the single place** for world scale, chunk count, LOD table, height/water
   scales. Swapping synthetic data for real extracted terrain (Phase 4) should touch data and
-  `config.js`, not the renderer.
-- **`Heightfield.js` is engine-agnostic** — no Three.js import. It is both the mesh's height
+  `config.ts`, not the renderer.
+- **`Heightfield.ts` is engine-agnostic** — no Three.js import. It is both the mesh's height
   source and the seed of the Phase 3 gameplay heightfield (`04-...md`), which is why it lives
-  apart from `terrainGeometry.js`.
-- **`Terrain.js` manages meshes imperatively** inside a `useMemo`'d group and mutates
+  apart from `terrainGeometry.ts`.
+- **`Terrain.tsx` manages meshes imperatively** inside a `useMemo`'d group and mutates
   `mesh.geometry` in `useFrame`, bypassing React reconciliation on the hot path. Geometries
   are cached per `(chunk, lod)` and reused.
 
@@ -77,12 +78,12 @@ Design rules:
 ## 5. Data flow
 
 ```
-config.js ──▶ Heightfield (fBm grid)
+config.ts ──▶ Heightfield (fBm grid)
                  │  sample(x,z), normal(x,z)
                  ▼
           terrainGeometry ──▶ per-(chunk,lod) BufferGeometry ──┐
                                                                ▼
-Terrain.js (per-frame LOD pick) ──▶ meshes ──▶ TerrainMaterial (TSL) ──▶ WebGPURenderer
+Terrain.tsx (per-frame LOD pick) ──▶ meshes ──▶ TerrainMaterial (TSL) ──▶ WebGPURenderer
 ```
 
 When real assets land, `Heightfield`'s fBm grid is replaced by a sampler over the decoded
@@ -105,12 +106,14 @@ queries (Phase 3), shadows, the authentic-mode raycaster, or physics. These are 
 
 ## 7. Build & run
 
-Inherited Create-React-App scripts:
+Vite scripts:
 
 ```
 npm install
-npm start      # dev server at localhost:3000
-npm run build  # production build (used as the CI/scaffold sanity check)
+npm run dev        # dev server at localhost:3000
+npm run build      # tsc --noEmit + vite build -> /dist (CI/scaffold sanity check)
+npm run preview    # serve the production build
+npm run typecheck  # tsc --noEmit
 ```
 
 No pipeline dependencies are added yet; `df2-extract` (Phase 0) will live in its own

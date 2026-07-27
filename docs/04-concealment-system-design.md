@@ -21,7 +21,7 @@ different problems with different correctness requirements:
 Therefore concealment reads from a **gameplay heightfield + cover field** sampled on the CPU
 (or a compute pass dedicated to gameplay), never from the render meshes.
 
-The scaffold already honors this: `src/df2/Heightfield.js` is a standalone CPU sampler with
+The scaffold already honors this: `src/df2/Heightfield.ts` is a standalone CPU sampler with
 its own bilinear `sample()` and analytic `normal()`, deliberately not derived from the
 render geometry. It is the seed of the gameplay heightfield described here.
 
@@ -108,7 +108,7 @@ a scripted animation.
 
 ## 6. Integration order
 
-1. **Now (done):** CPU heightfield sampler exists and is decoupled (`Heightfield.js`).
+1. **Now (done):** CPU heightfield sampler exists and is decoupled (`Heightfield.ts`).
 2. **Phase 2:** author the cover field `C`/`D` alongside the render grass so both read the
    same density source.
 3. **Phase 3:** implement `canSee()` + stance + the tri-state result.

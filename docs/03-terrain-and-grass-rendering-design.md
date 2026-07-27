@@ -38,7 +38,7 @@ gives us:
 
 Each chunk can be built at one of several segment resolutions
 (`LOD_SEGMENTS = [64, 32, 16, 8, 4]`, highest → lowest). Every frame, each chunk picks a LOD
-from its center's distance to the camera (`Terrain.js`). Geometries are built lazily and
+from its center's distance to the camera (`Terrain.tsx`). Geometries are built lazily and
 **cached per (chunk, lod)**; switching LOD just swaps `mesh.geometry` to a cached buffer —
 no per-frame allocation.
 
@@ -61,7 +61,7 @@ shading, so LOD transitions don't pop in luminance, only in silhouette.
 
 ## 3. Terrain material (TSL)
 
-`TerrainMaterial.js` is a `MeshStandardNodeMaterial` whose `colorNode` is a TSL graph that
+`TerrainMaterial.ts` is a `MeshStandardNodeMaterial` whose `colorNode` is a TSL graph that
 blends biome albedos from **height** and **slope**:
 
 - low + flat → sand/beach near the water line,

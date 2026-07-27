@@ -4,33 +4,55 @@
 // every chunk picks a LOD from its distance to the camera; geometries are built
 // lazily and cached per (chunk, lod), so a LOD change is just a geometry swap
 // with no per-frame allocation
-// (03-terrain-and-grass-rendering-design.md §2, 05-...md §4).
+// (docs/03-terrain-and-grass-rendering-design.md §2, docs/05-...md §4).
 
 import { useThree, useFrame } from "@react-three/fiber";
 import { useMemo, useRef, useEffect } from "react";
 import * as THREE from "three/webgpu";
-import { Heightfield } from "./Heightfield.js";
-import { buildChunkGeometry } from "./terrainGeometry.js";
-import { createTerrainMaterial } from "./TerrainMaterial.js";
+import { Heightfield } from "./Heightfield";
+import { buildChunkGeometry } from "./terrainGeometry";
+import { createTerrainMaterial } from "./TerrainMaterial";
 import {
   CHUNK_COUNT,
   CHUNK_SIZE,
   HALF_WORLD,
   LOD_SEGMENTS,
   LOD_DISTANCES,
-} from "./config.js";
+} from "./config";
 
-export function Terrain({ wireframe = false }) {
+interface Chunk {
+  ox: number;
+  oz: number;
+  centerX: number;
+  centerZ: number;
+  mesh: THREE.Mesh;
+  cache: Map<number, THREE.BufferGeometry>;
+  currentLod: number;
+}
+
+interface TerrainState {
+  heightfield: Heightfield;
+  material: THREE.MeshStandardNodeMaterial;
+  group: THREE.Group;
+  chunks: Chunk[];
+  getGeometry: (chunk: Chunk, lod: number) => THREE.BufferGeometry;
+}
+
+export interface TerrainProps {
+  wireframe?: boolean;
+}
+
+export function Terrain({ wireframe = false }: TerrainProps) {
   const { camera } = useThree();
   const camPos = useRef(new THREE.Vector3());
 
-  const state = useMemo(() => {
+  const state = useMemo<TerrainState>(() => {
     const heightfield = new Heightfield();
     const material = createTerrainMaterial();
     const group = new THREE.Group();
     group.name = "terrain";
 
-    const getGeometry = (chunk, lod) => {
+    const getGeometry = (chunk: Chunk, lod: number): THREE.BufferGeometry => {
       let geo = chunk.cache.get(lod);
       if (!geo) {
         geo = buildChunkGeometry({
@@ -45,14 +67,14 @@ export function Terrain({ wireframe = false }) {
       return geo;
     };
 
-    const chunks = [];
+    const chunks: Chunk[] = [];
     const coarsest = LOD_SEGMENTS.length - 1;
     for (let cz = 0; cz < CHUNK_COUNT; cz++) {
       for (let cx = 0; cx < CHUNK_COUNT; cx++) {
         const ox = -HALF_WORLD + cx * CHUNK_SIZE;
         const oz = -HALF_WORLD + cz * CHUNK_SIZE;
         const mesh = new THREE.Mesh(undefined, material);
-        const chunk = {
+        const chunk: Chunk = {
           ox,
           oz,
           centerX: ox + CHUNK_SIZE / 2,

@@ -2,12 +2,12 @@
 //
 // Used to synthesize a heightfield stand-in until real DF2/TXP/EXP2 heightmaps
 // are available (Phase 0). Deterministic so the terrain — and the CPU-side
-// gameplay heightfield derived from it (04-concealment-system-design.md) — are
-// identical every run and across the client/server split a future multiplayer
-// mode would need.
+// gameplay heightfield derived from it (docs/04-concealment-system-design.md) —
+// are identical every run and across the client/server split a future
+// multiplayer mode would need.
 
 // Integer hash -> pseudo-random float in [0,1). 2D lattice point hash.
-function hash2(ix, iz, seed) {
+function hash2(ix: number, iz: number, seed: number): number {
   let h = ix * 374761393 + iz * 668265263 + seed * 2246822519;
   h = (h ^ (h >>> 13)) * 1274126177;
   h = h ^ (h >>> 16);
@@ -15,13 +15,13 @@ function hash2(ix, iz, seed) {
   return (h >>> 0) / 4294967296;
 }
 
-function smootherstep(t) {
+function smootherstep(t: number): number {
   // Ken Perlin's quintic smootherstep: smoother interpolation, C2 continuous.
   return t * t * t * (t * (t * 6 - 15) + 10);
 }
 
 // Value noise sampled at continuous (x, z) over the integer lattice.
-function valueNoise(x, z, seed) {
+function valueNoise(x: number, z: number, seed: number): number {
   const ix = Math.floor(x);
   const iz = Math.floor(z);
   const fx = x - ix;
@@ -40,15 +40,24 @@ function valueNoise(x, z, seed) {
   return a + (b - a) * uz; // [0,1]
 }
 
-// Fractal Brownian motion: sum of octaves of value noise.
-// Returns a value in [0,1].
-export function fbm(x, z, {
-  seed = 1337,
-  octaves = 6,
-  frequency = 1,
-  lacunarity = 2.0,
-  gain = 0.5,
-} = {}) {
+export interface FbmOptions {
+  seed?: number;
+  octaves?: number;
+  frequency?: number;
+  lacunarity?: number;
+  gain?: number;
+}
+
+// Fractal Brownian motion: sum of octaves of value noise. Returns a value in [0,1].
+export function fbm(x: number, z: number, opts: FbmOptions = {}): number {
+  const {
+    seed = 1337,
+    octaves = 6,
+    frequency = 1,
+    lacunarity = 2.0,
+    gain = 0.5,
+  } = opts;
+
   let amp = 0.5;
   let freq = frequency;
   let sum = 0;

@@ -114,16 +114,17 @@ This is a hobby/personal reconstruction project, not a commercial release.
 
 | Area | Status | Where |
 | --- | --- | --- |
-| WebGPU + R3F canvas bootstrap | ✅ inherited from starter | `src/components/GameCanvas.js` |
-| Synthetic heightfield (fBm) with CPU-side sampler + analytic normals | ✅ | `src/df2/Heightfield.js`, `src/df2/noise.js` |
-| Chunked terrain mesh generation with edge skirts | ✅ | `src/df2/terrainGeometry.js` |
-| Distance-based per-chunk LOD selection | ✅ | `src/df2/Terrain.js` |
-| TSL terrain material (slope/height biome blend) | ✅ | `src/df2/TerrainMaterial.js` |
-| Scene composition (sun/sky/hemisphere light, fog, water plane) | ✅ | `src/df2/DF2Scene.js` |
+| Vite + TypeScript + React 19 stack (replaces CRA) | ✅ | `vite.config.ts`, `tsconfig.json` |
+| WebGPU + R3F v9 canvas bootstrap (async init, WebGL2 fallback verified) | ✅ | `src/components/GameCanvas.tsx` |
+| Synthetic heightfield (fBm) with CPU-side sampler + analytic normals | ✅ | `src/df2/Heightfield.ts`, `src/df2/noise.ts` |
+| Chunked terrain mesh generation with edge skirts | ✅ | `src/df2/terrainGeometry.ts` |
+| Distance-based per-chunk LOD selection | ✅ | `src/df2/Terrain.tsx` |
+| TSL terrain material (slope/height biome blend) | ✅ | `src/df2/TerrainMaterial.ts` |
+| Scene composition (sun/sky/hemisphere light, fog, water plane) | ✅ | `src/df2/DF2Scene.tsx` |
 | Real asset ingestion (Phase 0) | ⛔ blocked on files | — |
 | Grass (Phase 2) | ⬜ not started | — |
 | Concealment (Phase 3) | ⬜ not started | — |
 | "Authentic mode" raycaster | ⬜ documented, not built | `03-...md` §7 |
 
-The CPU-side heightfield in `src/df2/Heightfield.js` is deliberately decoupled from the GPU
+The CPU-side heightfield in `src/df2/Heightfield.ts` is deliberately decoupled from the GPU
 mesh path so it can later serve as the Phase 3 gameplay heightfield without a rewrite.

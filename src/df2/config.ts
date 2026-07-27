@@ -1,7 +1,7 @@
 // Central world configuration for the DF2 terrain scaffold.
 //
 // Everything that will eventually be read from a real terrain's params blob
-// (02-asset-format-specification.md §4/§6) lives here as a constant, so that
+// (docs/02-asset-format-specification.md §4/§6) lives here as a constant, so that
 // swapping synthetic data for extracted assets (Phase 4) is a data change,
 // not a code change.
 
@@ -24,14 +24,14 @@ export const CHUNK_SIZE = WORLD_SIZE / CHUNK_COUNT; // meters per chunk edge (64
 
 // Segment resolutions per LOD, highest detail first. A chunk built at N
 // segments has (N+1)² grid vertices. LOD 0 (64 seg) ≈ 1 m grid near the camera.
-export const LOD_SEGMENTS = [64, 32, 16, 8, 4];
+export const LOD_SEGMENTS: number[] = [64, 32, 16, 8, 4];
 
 // Distance (meters, chunk-center to camera) at/under which each LOD is used.
 // Parallel to LOD_SEGMENTS; the last entry is the fallback for everything farther.
-export const LOD_DISTANCES = [110, 220, 400, 700, Infinity];
+export const LOD_DISTANCES: number[] = [110, 220, 400, 700, Infinity];
 
 // Perimeter skirt depth used to hide cracks between differing-LOD chunks
-// (03-terrain-and-grass-rendering-design.md §2.3).
+// (docs/03-terrain-and-grass-rendering-design.md §2.3).
 export const SKIRT_DEPTH = 12; // meters
 
 // --- Heightfield sampling grid ----------------------------------------------
@@ -47,6 +47,6 @@ export const FOG_NEAR = 260; // meters
 export const FOG_FAR = 1500; // meters
 
 // Sun direction (points from the scene toward the light) and camera planes.
-export const SUN_DIRECTION = [-0.5, 0.72, 0.48];
+export const SUN_DIRECTION: [number, number, number] = [-0.5, 0.72, 0.48];
 export const CAMERA_NEAR = 1;
 export const CAMERA_FAR = 4000;

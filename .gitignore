@@ -130,5 +130,5 @@ dist
 .pnp.*
 .vercel
 
-# Production build output (CRA)
-/build
+# Production build output (Vite)
+/dist

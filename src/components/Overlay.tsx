@@ -1,4 +1,9 @@
-export function Overlay({ wireframe, setWireframe }) {
+export interface OverlayProps {
+  wireframe: boolean;
+  setWireframe: (v: boolean) => void;
+}
+
+export function Overlay({ wireframe, setWireframe }: OverlayProps) {
   return (
     <div className="overlay">
       <header>

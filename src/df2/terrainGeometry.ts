@@ -3,29 +3,44 @@
 // Each chunk is a regular grid at a given LOD (segment count) plus a perimeter
 // "skirt" — a ring of edge vertices dropped straight down — to hide the cracks
 // that appear where neighbouring chunks are at different LODs
-// (03-terrain-and-grass-rendering-design.md §2.3).
+// (docs/03-terrain-and-grass-rendering-design.md §2.3).
 //
 // Normals come from the heightfield gradient, not the triangles, so shading is
 // identical across LODs (§2.4).
 
 import * as THREE from "three/webgpu";
-import { WORLD_SIZE, HALF_WORLD, SKIRT_DEPTH } from "./config.js";
+import { WORLD_SIZE, HALF_WORLD, SKIRT_DEPTH } from "./config";
+import type { Heightfield, Vec3Out } from "./Heightfield";
 
 // Global UV so a (future) colormap texture tiles continuously across chunk seams.
-function worldToUv(x, z) {
+function worldToUv(x: number, z: number): [number, number] {
   return [(x + HALF_WORLD) / WORLD_SIZE, (z + HALF_WORLD) / WORLD_SIZE];
 }
 
-export function buildChunkGeometry({ heightfield, ox, oz, size, segments }) {
+export interface ChunkGeometryParams {
+  heightfield: Heightfield;
+  ox: number;
+  oz: number;
+  size: number;
+  segments: number;
+}
+
+export function buildChunkGeometry({
+  heightfield,
+  ox,
+  oz,
+  size,
+  segments,
+}: ChunkGeometryParams): THREE.BufferGeometry {
   const N = segments;
   const rowStride = N + 1;
 
-  const positions = [];
-  const normals = [];
-  const uvs = [];
-  const indices = [];
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const uvs: number[] = [];
+  const indices: number[] = [];
 
-  const nrm = [0, 1, 0];
+  const nrm: Vec3Out = [0, 1, 0];
 
   // --- Grid vertices -------------------------------------------------------
   for (let j = 0; j <= N; j++) {
@@ -41,7 +56,7 @@ export function buildChunkGeometry({ heightfield, ox, oz, size, segments }) {
     }
   }
 
-  const gridIndex = (i, j) => j * rowStride + i;
+  const gridIndex = (i: number, j: number) => j * rowStride + i;
 
   // --- Grid faces ----------------------------------------------------------
   for (let j = 0; j < N; j++) {
@@ -57,7 +72,7 @@ export function buildChunkGeometry({ heightfield, ox, oz, size, segments }) {
   // --- Skirts --------------------------------------------------------------
   // Duplicate an edge vertex lowered by SKIRT_DEPTH; material is double-sided so
   // skirt winding does not matter.
-  const pushLowered = (g) => {
+  const pushLowered = (g: number): number => {
     const p = g * 3;
     positions.push(positions[p], positions[p + 1] - SKIRT_DEPTH, positions[p + 2]);
     normals.push(normals[p], normals[p + 1], normals[p + 2]);
@@ -65,7 +80,7 @@ export function buildChunkGeometry({ heightfield, ox, oz, size, segments }) {
     return positions.length / 3 - 1;
   };
 
-  const addSkirtEdge = (edgeVerts) => {
+  const addSkirtEdge = (edgeVerts: number[]): void => {
     for (let k = 0; k < edgeVerts.length - 1; k++) {
       const g0 = edgeVerts[k];
       const g1 = edgeVerts[k + 1];
@@ -75,10 +90,10 @@ export function buildChunkGeometry({ heightfield, ox, oz, size, segments }) {
     }
   };
 
-  const topEdge = [];
-  const bottomEdge = [];
-  const leftEdge = [];
-  const rightEdge = [];
+  const topEdge: number[] = [];
+  const bottomEdge: number[] = [];
+  const leftEdge: number[] = [];
+  const rightEdge: number[] = [];
   for (let i = 0; i <= N; i++) {
     topEdge.push(gridIndex(i, 0));
     bottomEdge.push(gridIndex(i, N));

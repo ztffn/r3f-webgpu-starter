@@ -1,10 +1,14 @@
 {
-  "name": "basic-demo",
-  "version": "1.0.0",
-  "description": "Shows how to form self-contained components with their own state and user interaction.",
+  "name": "df2-web-port",
+  "version": "0.1.0",
+  "description": "Browser reconstruction of Delta Force 2 (NovaLogic, 1999) — Phase 1 chunked LOD terrain on Three.js WebGPU + TSL.",
   "keywords": [
-    "interaction",
-    "pointer-events"
+    "delta-force-2",
+    "voxel-space",
+    "terrain",
+    "webgpu",
+    "tsl",
+    "three-fiber"
   ],
   "main": "src/index.js",
   "dependencies": {

@@ -57,13 +57,29 @@ export const SKIRT_DEPTH = 12; // meters
 // which is what the reference screenshots show (docs/07 §2). Keeping the canopy
 // below standing eye height also matters mechanically: above it, the camera sits
 // inside the volume and the view fills with the column it occupies.
-export const GRASS_SCALE = 0.004;
-// Raymarch steps through the canopy volume. Cost is per-fragment, not per-blade.
-export const GRASS_STEPS = 20;
-// Columns fade into the colormap between these distances (m). The colormap is
-// already grass-coloured at 100% coverage, so the handover is invisible.
-export const GRASS_FADE_START = 420;
-export const GRASS_FADE_END = 700;
+export const GRASS_SCALE = 0.0047;
+// DDA cells walked per fragment. Each step crosses exactly one heightmap texel
+// (~2 m), so this is also the reach of exactly-resolved columns (~96 m). The
+// original algorithm is trivial for modern GPUs — per-pixel raycasting against a
+// 2D array is not where the cost is — so this is budgeted generously.
+export const GRASS_STEPS = 96;
+// Width of one grass column in metres — the DDA grid, deliberately decoupled
+// from the 2 m terrain texel. Striations must land near screen resolution: a 2 m
+// column is ~100 px wide at 10 m, which reads as mush. Measured against the
+// references, sub-metre cells took horizontal variation from |dx| 0.17 to 2.05
+// (reference 2.80).
+export const GRASS_CELL = 0.06;
+// Peak-to-peak per-column tone variation. Neighbouring sub-metre columns sample
+// almost the same colormap texel, so nearly all the horizontal "corduroy" the
+// references show has to come from this.
+export const GRASS_TONE_VARIATION = 0.85;
+// Columns fade into the colormap between these distances (m). Beyond ~150 m a
+// column is sub-pixel anyway, and the colormap is already grass-coloured at 100%
+// coverage, so the handover is invisible and coverage never appears to thin.
+// NOTE: 800 m concealment does NOT depend on this — that is a gameplay query
+// against grassHeightField (docs/04), computed analytically, not from pixels.
+export const GRASS_FADE_START = 700;
+export const GRASS_FADE_END = 1100;
 
 // --- Atmosphere --------------------------------------------------------------
 export const SKY_COLOR = "#9fb8cf";

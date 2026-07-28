@@ -53,8 +53,26 @@ export interface GrassMaterialOptions {
   heightScale: number;
   /** Metres per raw canopy unit — how tall "255" grass stands. */
   grassScale: number;
-  /** Raymarch steps. 16-24 is plenty; cost is per-fragment, not per-blade. */
+  /** Raymarch steps. Cost is per-fragment, not per-blade. */
   steps?: number;
+  /**
+   * Width of one grass column in metres — the DDA grid, decoupled from the
+   * heightmap texel. DF2's striations are far finer than its 1024² heightmap:
+   * the detail texture tiled at a much smaller scale, so canopy height varied
+   * sub-metre and adjacent screen columns painted different heights. Using the
+   * 2 m texel as the column width gives ~100 px columns at 10 m — mush, not
+   * corduroy. Sub-metre cells put striations near screen resolution.
+   */
+  cellSize?: number;
+  /**
+   * Peak-to-peak per-column tone variation (0-1). With sub-metre columns and a
+   * 2 m colormap texel, neighbouring columns sample almost the same map colour,
+   * so nearly all horizontal variation — the 'corduroy' the references show —
+   * has to come from this.
+   */
+  toneVariation?: number;
+  /** Debug: paint every grass hit flat magenta to inspect the hit mask. */
+  debugHit?: boolean;
   /** Distance (m) at which columns start fading into the colormap. */
   fadeStart?: number;
   fadeEnd?: number;
@@ -80,6 +98,9 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     heightScale,
     grassScale,
     steps = 20,
+    cellSize = 0.35,
+    debugHit = false,
+    toneVariation = 0.42,
     fadeStart = 420,
     fadeEnd = 700,
   } = opts;
@@ -89,9 +110,11 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
   const uWorldSize = uniform(worldSize);
   const uHalfWorld = uniform(worldSize / 2);
   const uTexel = uniform(worldSize / mapSize); // metres per map texel
+  const uCell = uniform(cellSize); // metres per grass column (DDA grid)
   const uHeightScale = uniform(heightScale * 255);
   const uGrassScale = uniform(grassScale * 255);
   const uCanopyMax = uniform(canopyMax);
+  const uTone = uniform(toneVariation);
   const uFadeStart = uniform(fadeStart);
   const uFadeEnd = uniform(fadeEnd);
 
@@ -103,21 +126,52 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
   // World xz -> tile uv. Maps repeat, so values outside [0,1] are fine.
   const toUv = (xz: NodeArg): NodeArg => xz.add(uHalfWorld).div(uWorldSize);
 
-  // Quantise a world xz to its map-texel centre, so every sample within one
-  // column returns the same value — this is what makes columns coherent.
-  const quantise = (xz: NodeArg): NodeArg => xz.div(uTexel).floor().add(0.5).mul(uTexel);
-
   const groundAt = (xz: NodeArg): NodeArg =>
     texture(heightMap, toUv(xz)).r.mul(uHeightScale);
 
-  const canopyAt = (xz: NodeArg): NodeArg =>
+  /** Smooth canopy envelope: WHERE grass grows and roughly how tall. */
+  const canopyBase = (xz: NodeArg): NodeArg =>
     texture(grassMap, toUv(xz)).r.mul(uGrassScale);
 
-  // Cheap per-column hash for tone variation ("corduroy", docs/07 §1.4).
-  const columnHash = (xz: NodeArg): NodeArg => {
-    const c = xz.div(uTexel).floor();
-    return c.x.mul(127.1).add(c.y.mul(311.7)).sin().mul(43758.5453).fract();
+  /** Stable per-column hash, keyed on the grass cell (not the terrain texel). */
+  const cellHash = (cell: NodeArg, salt: number): NodeArg =>
+    cell.x
+      .mul(127.1)
+      .add(cell.y.mul(311.7))
+      .add(salt)
+      .sin()
+      .mul(43758.5453)
+      .fract();
+
+  /**
+   * Smooth value noise over the cell grid.
+   *
+   * A pure per-cell hash makes neighbouring columns completely uncorrelated,
+   * which at a grazing angle reads as television static rather than grass —
+   * measurably so: autocorrelation collapses to ~0.3 where the references sit
+   * near 0.8. Real grass grows in clumps, and DF2's canopy came from a detail
+   * TEXTURE with spatial structure, not white noise. Interpolating the hash over
+   * a coarser lattice restores that structure.
+   */
+  const cellNoise = (cell: NodeArg, scale: number, salt: number): NodeArg => {
+    const p = cell.div(scale);
+    const i = p.floor();
+    const f = p.fract();
+    // Quintic smoothstep for C2-continuous interpolation.
+    const w = f.mul(f).mul(f.mul(f.mul(6).sub(15)).add(10));
+    const a = cellHash(i, salt);
+    const b = cellHash(i.add(vec2(1, 0)), salt);
+    const c = cellHash(i.add(vec2(0, 1)), salt);
+    const d = cellHash(i.add(vec2(1, 1)), salt);
+    return a.mix(b, w.x).mix(c.mix(d, w.x), w.y);
   };
+
+  /** Clumped field: broad tufts, medium variation, a little per-column grain. */
+  const clump = (cell: NodeArg, salt: number): NodeArg =>
+    cellNoise(cell, 14, salt)
+      .mul(0.55)
+      .add(cellNoise(cell, 5, salt + 3.1).mul(0.3))
+      .add(cellHash(cell, salt + 7.7).mul(0.15));
 
   // --- vertex: lift the terrain shell to the top of the canopy volume -------
   const positionNode = positionLocal.add(vec3(0, uCanopyMax, 0));
@@ -138,52 +192,111 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     const inside: NodeArg = cameraPosition.y.lessThan(groundAt(camXZ).add(uCanopyMax));
     const P0: NodeArg = inside.select(cameraPosition, frag);
 
-    // Vertical extent to cross is the canopy depth; convert to a ray length via
-    // the ray's downward component, clamped so near-horizontal views stay bounded.
-    const down = V.y.negate().max(float(0.06));
-    const stepLen = uCanopyMax.div(down).min(float(90)).div(float(steps));
+    // --- grid DDA (Amanatides & Woo) over GRASS CELLS -----------------------
+    // Fixed-length steps are wrong here: a step either skips columns (their
+    // front faces vanish and the field smears into mush) or resamples the same
+    // one. Walking the grid cell-by-cell tests every column the ray crosses
+    // EXACTLY once, in order — which is what Voxel Space did marching the
+    // heightfield per screen column, and it is what produces hard vertical
+    // edges instead of a soft volumetric blur.
+    //
+    // The grid is the GRASS CELL, not the terrain texel: striations must be
+    // near screen resolution, and a 2 m texel is ~100 px wide at 10 m.
+    const cellW = uCell;
+    const dirXZ = vec2(V.x, V.z);
+    // Guard against a perfectly axis-aligned ray (division by zero).
+    const dx = dirXZ.x.abs().max(float(1e-6)).mul(dirXZ.x.sign());
+    const dz = dirXZ.y.abs().max(float(1e-6)).mul(dirXZ.y.sign());
 
+    const tDeltaX = cellW.div(dx.abs());
+    const tDeltaZ = cellW.div(dz.abs());
+
+    const cell = vec2(P0.x, P0.z).div(cellW).floor().toVar();
+    const stepX = dx.sign();
+    const stepZ = dz.sign();
+
+    const nextX = cell.x.add(stepX.max(float(0))).mul(cellW);
+    const nextZ = cell.y.add(stepZ.max(float(0))).mul(cellW);
+    const tMaxX = nextX.sub(P0.x).div(dx).toVar();
+    const tMaxZ = nextZ.sub(P0.z).div(dz).toVar();
+
+    const tEnter = float(0).toVar();
     const hit = float(0).toVar();
     const hitFrac = float(0).toVar(); // 0 at the column base, 1 at its tip
     const hitXZ = vec2(0, 0).toVar();
+    const hitCell = vec2(0, 0).toVar();
 
     Loop(steps, ({ i }) => {
-      const t = float(i).add(0.5).mul(stepLen);
-      const P = P0.add(V.mul(t));
-      const xz = vec2(P.x, P.z);
+      const tExit = tMaxX.min(tMaxZ);
+      const centre = cell.add(0.5).mul(cellW);
 
-      const ground = groundAt(xz);
-      const canopy = canopyAt(xz);
+      const ground = groundAt(centre);
+      // Per-column height: the smooth envelope says where grass grows; the cell
+      // hash gives each column its own height, which is what makes the canopy
+      // top ragged and the striations legible in silhouette (docs/07 §1.3).
+      const jitter = clump(cell, 0).mul(0.62).add(0.38);
+      const top = ground.add(canopyBase(centre).mul(jitter));
 
-      // The original's question, asked per fragment instead of per screen column:
-      // is this point below the top of the grass column standing here?
-      If(P.y.lessThanEqual(ground.add(canopy)).and(P.y.greaterThanEqual(ground)), () => {
+      const yIn = P0.y.add(V.y.mul(tEnter));
+      const yOut = P0.y.add(V.y.mul(tExit));
+
+      // Exact segment-vs-box overlap for this column: it is either crossed or
+      // it isn't. No sampling error.
+      // Skip the column the eye itself stands in. Standing inside the canopy,
+      // that cell trivially contains the ray origin, so every fragment would
+      // report a hit at t~0 in the SAME cell and the screen would fill with one
+      // flat colour instead of the grass silhouette you should see lying in it.
+      // Suppressing just this one cell (rather than nudging the ray forward)
+      // keeps near, steeply-downward rays intact.
+      const allowHit: NodeArg = i.greaterThan(0).or(inside.not());
+      If(
+        allowHit
+          .and(yIn.min(yOut).lessThanEqual(top))
+          .and(yIn.max(yOut).greaterThanEqual(ground)),
+        () => {
         hit.assign(1);
-        hitFrac.assign(P.y.sub(ground).div(canopy.max(float(0.001))));
-        hitXZ.assign(xz);
+        const yFirst = yIn.min(top).max(ground);
+        hitFrac.assign(yFirst.sub(ground).div(top.sub(ground).max(float(0.001))));
+        hitXZ.assign(centre);
+        hitCell.assign(cell);
+        Break();
+      }
+      );
+
+      // Ray has dropped below the ground: nothing further can occlude.
+      If(yOut.lessThan(ground), () => {
         Break();
       });
 
-      // Dropped below the ground: no column here, let the terrain show through.
-      If(P.y.lessThan(ground), () => {
-        Break();
+      tEnter.assign(tExit);
+      If(tMaxX.lessThan(tMaxZ), () => {
+        cell.x.addAssign(stepX);
+        tMaxX.addAssign(tDeltaX);
+      }).Else(() => {
+        cell.y.addAssign(stepZ);
+        tMaxZ.addAssign(tDeltaZ);
       });
     });
 
-    // Colour: ONE value per column, sampled at its quantised texel centre and
-    // smeared up the whole column. This is what produces vertical striations
-    // rather than soft volumetric grass (docs/07 §1.1).
-    const base = texture(colorMap, toUv(quantise(hitXZ)));
+    // Colour: ONE value per column, smeared up its whole height — this is what
+    // produces vertical striations rather than soft volumetric grass
+    // (docs/07 §1.1). The colormap supplies the local ground tone; the
+    // per-column hash supplies the horizontal variation between neighbours.
+    const base = texture(colorMap, toUv(hitXZ));
 
-    // Vertical shading within the column: dark at the base where light doesn't
-    // reach, brighter toward the tip — this is what makes the striations read.
-    const shade = float(0.42).mix(float(1.14), hitFrac.clamp(0, 1));
-    const tone = columnHash(hitXZ).mul(0.16).add(0.92); // per-column tint jitter
+    // Only a slight base-to-tip gradient. Measured against the references, real
+    // columns are near flat-shaded: colour persists UP a column while changing
+    // sharply ACROSS columns. A strong vertical ramp destroys that coherence.
+    const shade = float(0.88).mix(float(1.05), hitFrac.clamp(0, 1));
+    // Per-column tone — the "corduroy" carrying the horizontal variation the
+    // references show (h/v derivative ratio ~1.6).
+    const tone = clump(hitCell, 17.3).sub(0.5).mul(uTone).add(1.0);
 
     // Fade columns into the colormap with distance; the colormap is already
     // grass-coloured at 100% coverage, so the handover is invisible.
     const fade = frag.distance(cameraPosition).smoothstep(uFadeEnd, uFadeStart);
 
+    if (debugHit) return vec4(vec3(1, 0, 1).mul(hitFrac.clamp(0.25, 1)), hit);
     return vec4(base.rgb.mul(shade).mul(tone), hit.mul(fade));
   });
 

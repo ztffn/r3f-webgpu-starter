@@ -17,6 +17,8 @@ import {
   METERS_PER_TEXEL,
   GRASS_SCALE,
   GRASS_STEPS,
+  GRASS_CELL,
+  GRASS_TONE_VARIATION,
   GRASS_FADE_START,
   GRASS_FADE_END,
   WATER_COLOR,
@@ -97,6 +99,8 @@ export function DF2Scene({ wireframe = false, grass = true, onStatus }: DF2Scene
       heightScale: HEIGHT_SCALE,
       grassScale: GRASS_SCALE,
       steps: GRASS_STEPS,
+      cellSize: GRASS_CELL,
+      toneVariation: GRASS_TONE_VARIATION,
       fadeStart: GRASS_FADE_START,
       fadeEnd: GRASS_FADE_END,
     });

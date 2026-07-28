@@ -114,10 +114,13 @@ function grassFromColormap(rgba: Uint8ClampedArray, size: number): Uint8Array {
 
 function makeGrassTexture(data: Uint8Array, size: number): THREE.DataTexture {
   const tex = new THREE.DataTexture(data, size, size, THREE.RedFormat, THREE.UnsignedByteType);
-  // NEAREST is essential: the canopy must read as discrete columns with hard
-  // vertical edges, not a smoothly interpolated surface (docs/07 §1.1).
-  tex.magFilter = THREE.NearestFilter;
-  tex.minFilter = THREE.NearestFilter;
+  // LINEAR: this texture is the canopy ENVELOPE (where grass grows and roughly
+  // how tall), not the columns themselves. Per-column height and colour come
+  // from the shader's cell hash, which runs at sub-metre grass-cell resolution.
+  // Sampling the envelope NEAREST just stamps the 2 m terrain texel grid onto
+  // the canopy as visible blocks.
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearFilter;
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
   tex.needsUpdate = true;

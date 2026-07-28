@@ -1,149 +1,171 @@
-# 03 — Terrain & Grass Rendering Design
+# Terrain & Grass Rendering Design
 
-How the render path reproduces DF2's Voxel Space 32 look — heightfield terrain plus its
-signature concealing tall grass — on a modern GPU via Three.js/WebGPU/TSL.
+## 1. Design intent
 
----
+Reproduce two properties of DF2's original terrain/grass system that later mesh-based
+approaches (including DF2's own successor, Land Warrior) lost:
 
-## 1. Rendering strategy at a glance
+1. **Visual density that does not thin with distance.** Grass must not visibly sparsen or
+   "go naked" as draw distance increases.
+2. **A prone player can be concealed in grass at ranges up to ~800m**, and this must be a
+   reliable, cheap, gameplay-queryable property — not just a rendering side-effect.
 
-The original engine was a **column raycaster**: for each screen column it marched a ray
-over the heightmap front-to-back and drew vertical spans, with "stretched voxels" extruding
-grass columns upward. We do **not** make that the primary renderer. Instead:
+Both properties trace back to a single fact about how the original engine worked, covered
+in §2. Everything else in this document follows from that fact.
 
-- **Primary path — polygon heightfield.** The heightmap becomes a chunked, LOD'd triangle
-  mesh, textured with the colormap. This is what modern GPUs are built for and gives us
-  free shadows, MSAA, depth, and post-processing.
-- **Grass — hybrid.** A relief-mapped "grass slab" for the mid/far field (cheap, covers the
-  concealing bulk) plus real instanced blades near the camera (tactile detail).
-- **Authentic mode — optional.** A literal per-column raycaster implemented as a
-  full-screen fragment shader, toggleable for nostalgia / comparison (see §7). Not on the
-  critical path.
+## 2. How the original achieved it — full technical analysis
 
----
+DF2 ran NovaLogic's **Voxel Space 32** engine. Despite the "voxel" name, this is not a
+volumetric/sparse-voxel renderer — it is a **heightfield + colormap raycaster**. Per
+screen column (1 pixel wide), the renderer marches outward in world space, samples the
+heightfield at each step, projects the sampled height to a screen-space Y coordinate, and
+paints a **continuous vertical span** of color from the previous highest painted Y to the
+new one (a painter's-algorithm silhouette fill, occluding as it goes). This is the entire
+rendering primitive — there is no polygon, no discrete object, just a per-column height/
+color lookup and a fill.
 
-## 2. Terrain mesh — chunked LOD (Phase 1, scaffolded)
+"Stretched voxels" — the DF2-specific feature that enabled tall-grass concealment — extended
+this by adding extra height to a sampled point (amount driven by the detail map) before
+projecting it to screen space, using color from the detail elevation/color strip for the
+added span.
 
-### 2.1 Chunking
+**The critical consequence:** this fill has a completely different cost/scaling
+relationship than any primitive-based (polygon, billboard, or GPU-instanced blade)
+approach:
 
-The world is a grid of square **chunks** (default `CHUNK_COUNT × CHUNK_COUNT`, each
-`CHUNK_SIZE` meters). One `THREE.Mesh` per chunk, all sharing one terrain material. Chunking
-gives us:
+- **Primitive-based rendering** (billboards, instanced blade meshes, even modern
+  compute-driven pipelines like Sucker Punch's *Ghost of Tsushima* grass) represents grass
+  as a finite, countable set of objects. Every performance strategy for this class of
+  system — distance culling, frustum culling, LOD blade simplification, blade-count
+  thinning at LOD boundaries — exists to manage a **primitive budget**, and works by
+  *reducing actual coverage* and disguising the reduction (color-matching distant terrain
+  to grass-top color, gradual thinning rather than popping, etc). This is true even of the
+  best production-proven implementations: GoT's own GDC talk describes deliberately
+  dropping 3 of every 4 blades approaching LOD tile boundaries. **Sparse-by-construction,
+  with disguise layered on top**, is the ceiling of this entire technique family, no matter
+  the scale (Three.js/WebGPU compute demos exist rendering 1M+ blades in-browser as of
+  2026 — the ceiling moved, the shape of the problem didn't).
 
-- per-chunk frustum culling (Three.js does this automatically per mesh),
-- per-chunk LOD selection,
-- a bounded working set when we later stream real tiled terrain.
+- **Voxel Space's per-column fill** is **dense by construction**. There is no concept of a
+  "gap between blades" because there are no blades — every screen column, at native screen
+  resolution, independently samples the heightfield and paints a value. Coverage is
+  mathematically guaranteed to be 100% within the grass-flagged region, at every distance,
+  forever. Cost scales with **screen resolution × raymarch step count**, not with an
+  authored/instanced object count.
 
-### 2.2 Level of detail
+This is why DF2's grass reads as denser than modern blade systems at comparable or even
+much lower actual performance budgets: it was never solving a coverage problem, because
+its rendering primitive cannot produce gaps.
 
-Each chunk can be built at one of several segment resolutions
-(`LOD_SEGMENTS = [64, 32, 16, 8, 4]`, highest → lowest). Every frame, each chunk picks a LOD
-from its center's distance to the camera (`Terrain.tsx`). Geometries are built lazily and
-**cached per (chunk, lod)**; switching LOD just swaps `mesh.geometry` to a cached buffer —
-no per-frame allocation.
+## 3. The modern equivalent already exists: relief mapping / POM
 
-### 2.3 Crack hiding — skirts
+Per-fragment raymarching of a view ray through a heightfield stored in a texture is a
+well-established real-time graphics technique, in continuous use since 2000:
 
-Adjacent chunks at different LODs leave T-junction cracks at their shared edge. Rather than
-index-stitch (fiddly, and awkward to cache), each chunk geometry carries a **skirt**: a ring
-of perimeter vertices dropped straight down by `SKIRT_DEPTH` meters. The skirt fills any gap
-with vertical, correctly-colored wall, invisible in practice. This is the standard pragmatic
-choice and keeps each LOD a self-contained, cacheable buffer.
+- Relief Texture Mapping (Oliveira, Bishop, McAllister — SIGGRAPH 2000)
+- Parallax Mapping (Kaneko et al., 2001)
+- Parallax Occlusion Mapping / Steep Parallax Mapping (Brawley & Tatarchuk, 2004)
+- Relaxed Cone Stepping / Cone-Step Mapping (later refinements for fewer raymarch steps)
 
-### 2.4 Normals
+These techniques exist to fake surface depth (bumps, grooves, brick relief) on flat
+geometry without adding polygons, by raymarching a heightmap texture per-fragment.
+Applying the identical machinery to a **"grass-top-height" channel** instead of a
+brick/rock displacement channel produces, mechanically, the same class of result Voxel
+Space achieved: a continuous, per-pixel, resolution-scaling fill with a bounded,
+predictable, primitive-count-independent cost. This is the direct modern successor to
+stretched voxels — not a metaphorical one, an actually equivalent computation moved from
+"per raster column, CPU, 1999" to "per fragment, GPU shader, 2026."
 
-Vertex normals are computed **analytically from the heightfield gradient** (central
-differences in `Heightfield.normal()`), not from the mesh triangles. This keeps lighting
-identical across LOD levels — a chunk that drops from 64 to 8 segments keeps the same
-shading, so LOD transitions don't pop in luminance, only in silhouette.
+## 4. Chosen architecture: two-layer hybrid
 
----
+Neither technique alone is correct. Relief-mapped fill cannot bend under footsteps or show
+individual blade silhouette/parallax up close (the eye can tell continuous shaded
+"grass-texture" from real 3D geometry at close range — this was true in 1999 too, DF2's
+own grass looked flat/textured up close). GPU-compute blade instancing gives the tactile,
+interactive, close-range detail but cannot economically hold 100% coverage to the horizon.
+Use both, each doing the job it's actually good at:
 
-## 3. Terrain material (TSL)
+### 4.1 Primary layer — relief-mapped grass slab (mid-to-far field, ~15m to draw distance)
 
-`TerrainMaterial.ts` is a `MeshStandardNodeMaterial` whose `colorNode` is a TSL graph that
-blends biome albedos from **height** and **slope**:
+- A bounded-height fragment-shader raymarch: for each fragment covering grass-flagged
+  terrain, march a ray from terrain-surface-height up to
+  `terrain-height + grass-top-height(x,z)`, where `grass-top-height` is sampled from a
+  texture derived from the extracted detail-map + detail-elevation-strip data (§2 of the
+  asset-format spec).
+- Fixed, small step count (8–16 steps is a reasonable starting budget; cone-step/relaxed-
+  cone-stepping variants can reduce this further if profiling demands it), early-exit on
+  hit.
+- Bound the fragment cost to actual grass-covered screen area via a depth/stencil
+  pre-pass or a cheap grass-mask texture lookup, so non-grass terrain pays nothing extra.
+- No compute shader dependency — this is pure fragment-shader work, meaning it runs
+  identically well on the WebGL2 fallback path as on WebGPU. This is a meaningful
+  practical advantage: **the primary density layer does not require the ~95%-coverage
+  WebGPU path to look right** — only the near-field compute blades (§4.2) do, and those
+  gracefully degrade to shell-texturing or reduced instance counts on WebGL2.
+- Color/shading sourced from the detail color texture strip; wind can be applied as a
+  small per-fragment horizontal offset to the raymarch origin, driven by scrolling noise
+  (cheap, no geometry to animate).
+- This layer alone is responsible for the "more grass than that" density property and for
+  never visibly thinning with distance — it structurally cannot thin, by the argument in
+  §2–3.
 
-- low + flat → sand/beach near the water line,
-- mid + flat → grass (two-tone, height-varied),
-- steep → rock (slope-driven, overrides the height bands),
-- high → rock/snow caps.
+### 4.2 Secondary layer — GPU-compute blade instancing (near field, ~0–15m)
 
-Because it is a *Standard* node material it still responds to the scene's sun, hemisphere
-fill, and fog for free. When real assets arrive, the procedural `colorNode` is replaced by a
-`texture(colormap)` sample plus a detail-strip overlay — a localized change, the mesh and LOD
-code are untouched.
+Adopt the *Ghost of Tsushima* production pipeline as reference, adapted to Three.js
+WebGPURenderer + TSL compute:
 
-Authoring the shader in TSL (not raw WGSL/GLSL) is what lets the same graph run on both the
-WebGPU and WebGL2 backends (`05-...md` §2).
-
----
-
-## 4. Grass — the concealment layer (Phase 2, not yet built)
-
-DF2's grass is a *gameplay* feature, not just decoration: it hides a prone soldier at
-range while remaining walk-through terrain. The render design must therefore produce visual
-density that reads as opaque cover at distance. Two coordinated layers:
-
-### 4.1 Mid/far field — relief-mapped "grass slab"
-
-A second skin over the terrain (or a shader term on the terrain itself) that uses
-**relief / parallax-occlusion mapping** driven by the detail-elevation strip to fake a deep
-grass canopy without geometry. This is the primary concealing bulk — cheap per pixel, covers
-the whole draw distance, and is where the "invisible at 800m" property visually comes from.
-Height/density come from the detail map (material zone) × detail-elevation strip.
-
-### 4.2 Near field — instanced blades (0–15 m)
-
-Real 3D blades, GPU-instanced, populated by a **compute shader** that scatters instances on
-the heightfield inside a moving ring around the camera and animates wind. This gives tactile,
-parallax-correct grass you can push through. Only the near ring is ever instanced, so blade
-count stays bounded regardless of world size.
+- Compute-shader blade placement, sourced from the same density/elevation data as §4.1
+  for consistency.
+- Layered culling before any geometry is built, cheapest test first: distance cull →
+  frustum cull → type cull (non-grass detail-map zone) → height cull (zero-density texel)
+  → occlusion cull (optional, marginal gain per GoT's own findings, add only if profiling
+  justifies it).
+- LOD blade complexity rather than blade-count thinning where possible within this
+  near-field band: full curvature near the player, simplified vertex count approaching the
+  crossfade boundary.
+- Wind: vertex-shader sine displacement driven by scrolling noise (same noise source as
+  §4.1 for visual continuity across the crossfade).
+- Interactivity: bend/displace blades near the player/vehicle position (read player world
+  position as a compute-shader uniform, apply local displacement falloff).
+- **WebGL2 fallback:** reduce instance count substantially and/or fall back toward
+  shell-texturing (concentric offset mesh layers with alpha-masked height cutoff) for this
+  near-field band only — the far-field relief-mapped layer is unaffected either way.
 
 ### 4.3 Crossfade
 
-Between the two layers there is a distance band where near-field blade alpha fades out as the
-relief-slab density fades in, so there is no visible seam as you move.
+Blend the two layers over a distance band (e.g. 10–20m) so the transition is not visible —
+either a simple alpha crossfade or, more robustly, thinning §4.2's blade density to zero
+across the band while §4.1 fades in, matching the density-preserving trick GoT uses at its
+own internal LOD boundaries.
 
-### 4.4 Wind
+## 5. Terrain base mesh (context for the grass layers above)
 
-A single shared wind function (time + world-position noise) drives both the blade bend and
-the relief-slab UV offset so the two layers move coherently.
+- Chunked, LOD'd heightmap mesh (standard geomipmapping or clipmap scheme), built from the
+  extracted heightmap, textured with the extracted colormap.
+- An optional literal Voxel Space raycast renderer, implemented as a full-screen
+  fragment-shader raymarch against the heightmap texture, retained as a toggleable
+  "authentic mode" for period-accurate horizon-warp/draw-distance behavior — not the
+  primary renderer, since a rasterized mesh integrates far better with the two grass
+  layers above, physics, and standard PBR lighting.
 
----
+## 6. Why this specifically answers "DF2 had more grass than that"
 
-## 5. Sky, water, fog
+Any pure blade-instancing approach — no matter how large the compute budget — is bounded
+by the primitive-sparsity ceiling described in §2. The relief-mapped slab in §4.1 has no
+such ceiling; its coverage is mathematically 100% by construction, identical in kind to
+what the original stretched-voxel columns guaranteed. The compute-blade layer in §4.2 adds
+tactile richness on top, in the band where it's actually visible to the eye, without ever
+being asked to carry the far-field density job it structurally can't do as cheaply as a
+raymarch can.
 
-- **Fog** is the key to selling draw distance and matching the terrain to the sky at the
-  horizon (Phase 5 does the precise color-match). Scaffold uses distance fog tuned to the
-  sky color.
-- **Water** is a flat plane at the map's water level; the scaffold uses a simple material,
-  a later pass can add reflection/refraction via node materials.
-- **Sky** is a gradient/solid matched to the fog color in the scaffold; a physical sky or a
-  sampled skybox from the terrain params (`02-...md` §4) comes later.
+## 7. Open implementation questions
 
----
-
-## 6. Performance model
-
-- Draw calls scale with visible chunk count, not world texel count.
-- Far chunks collapse to 4×4 = 32 triangles; the vertex budget is dominated by the handful
-  of near chunks at full LOD.
-- Grass cost is bounded by (a) the fixed near-field instance ring and (b) per-pixel relief
-  marching, both independent of world size.
-- Target: 60 fps at 1080p on a mid-range discrete GPU; graceful WebGL2 fallback at reduced
-  draw distance.
-
----
-
-## 7. "Authentic mode" raycaster (optional, documented, not built)
-
-A faithful Voxel Space column renderer implemented as a full-screen fragment shader:
-
-- For each screen column, march the heightfield front-to-back in world space.
-- Track the running min screen-Y ("y-buffer") and paint vertical colormap spans, extruding
-  grass columns by the detail-elevation strip to reproduce stretched voxels exactly.
-- Rendered to an offscreen target and composited, toggled from the UI.
-
-This is intentionally kept off the primary path: it is a comparison/nostalgia feature, and
-the polygon path is what everything else (shadows, physics debug, post) builds on.
+- Exact raymarch step count vs. visual quality/performance tradeoff — needs profiling once
+  a prototype exists, likely device-tiered (desktop vs. mobile).
+- Whether cone-step/relaxed-cone-stepping preprocessing (build a max-height "cone" acceleration
+  structure from the density texture) is worth the extra offline bake step to cut runtime
+  step count — evaluate after a naive fixed-step version is profiled.
+- Grass color/shading response to time-of-day/lighting — DF2's colormap baked in static
+  lighting; a modern version should probably support dynamic lighting on both grass layers
+  for a genuine visual upgrade, but must keep the two layers' shading models close enough
+  that the crossfade in §4.3 is invisible.

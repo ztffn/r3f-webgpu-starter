@@ -1,115 +1,111 @@
-# 04 — Concealment System Design
+# Concealment System Design
 
-The gameplay counterpart to the grass renderer (`03-...md` §4). DF2's defining tactical
-property is that tall grass genuinely conceals — a prone soldier can be invisible at long
-range yet the grass is fully traversable. This document specifies how concealment is
-computed **independently of what the GPU happens to draw**.
+## 1. Design intent
 
----
+Reproduce DF2's signature gameplay property: a prone player in tall grass can be
+effectively invisible to an observer up to ~800m away, reliably and deterministically —
+this is a core mechanic (prone-and-snipe), not an incidental visual effect.
 
-## 1. Core principle: decouple gameplay from rendering
+## 2. Design principle: decouple gameplay concealment from render fidelity entirely
 
-Rendering grass and *resolving whether one entity can see another through grass* are
-different problems with different correctness requirements:
+The original engine achieved this "for free" because grass **was** terrain height data —
+a stretched voxel column simply had more height than a bare one, and the same heightfield
+that got rendered was implicitly what determined whether a lower-height object behind it
+was occluded. Render and gameplay were unified because both consumed the same heightfield.
 
-- The renderer may LOD-out, fade, or cull grass for performance — none of that must change
-  whether a target is concealed.
-- Concealment must be deterministic and identical regardless of camera position, resolution,
-  or graphics settings (critical the moment this becomes multiplayer-capable, even though
-  networking is a v1 non-goal).
+The two-layer hybrid renderer in `03-terrain-and-grass-rendering-design.md` intentionally
+reintroduces this unification: **both the relief-mapped grass slab and the concealment
+system described here read the same underlying grass-height texture.** This matters
+because it means concealment correctness never depends on which visual LOD tier is
+currently active, whether the near-field compute blade layer has thinned a given blade at
+a crossfade boundary, or which rendering backend (WebGPU/WebGL2) is in use. Concealment is
+computed from authored data, not from what happened to get drawn on screen.
 
-Therefore concealment reads from a **gameplay heightfield + cover field** sampled on the CPU
-(or a compute pass dedicated to gameplay), never from the render meshes.
+## 3. Data source
 
-The scaffold already honors this: `src/df2/Heightfield.ts` is a standalone CPU sampler with
-its own bilinear `sample()` and analytic `normal()`, deliberately not derived from the
-render geometry. It is the seed of the gameplay heightfield described here.
+A single world-space texture, `grassHeightField`, built during the asset pipeline from the
+extracted detail map + detail elevation strip (see `02-asset-format-specification.md`
+§5). Resolution should match or slightly exceed the detail-map's native resolution — no
+need to match full heightmap/colormap resolution, since grass-height detail coarser than
+that is not perceptible for concealment purposes.
 
----
+Each texel encodes: `grassTopHeight(x, z) = terrainHeight(x, z) + grassStretchAmount(x, z)`,
+i.e. an absolute world-space height, not a relative offset — simplifies the line-of-sight
+math in §4.
 
-## 2. Fields
+## 4. Line-of-sight / concealment query
 
-Two co-registered 2D fields over the world, at the terrain's native resolution:
+Given an observer position `O` and a target position `T` (e.g. a prone player's
+eye/body-representative point):
 
-1. **Ground height** `H(x, z)` — bare terrain elevation (the heightmap). Already present.
-2. **Cover height** `C(x, z)` — top of the concealing grass canopy above ground at that
-   texel, derived from detail-map material × detail-elevation strip (`02-...md` §4). `C = 0`
-   on bare/sand/rock, `C > 0` (up to ~1.5–2 m) in tall-grass zones.
+1. Step along the world-space segment `O → T` at a fixed sample interval (tune for
+   accuracy vs. cost — start with ~1–2m steps, refine if sniping ranges show
+   false-negatives/positives near grass edges).
+2. At each sample point `P`, compute the sightline height at that point (linear
+   interpolation of the `O.height → T.height` ray) and compare against
+   `grassHeightField(P.x, P.z)`.
+3. If the sightline height at any sample point is **below** the grass height at that
+   point, the line of sight is blocked — `T` is concealed from `O` at this instant.
+4. Concealment is therefore a per-observer, per-target, per-frame (or per-tick, if
+   throttled) boolean, driven entirely by texture lookups along a line — no scene raycast
+   against renderable geometry required.
 
-Optionally a scalar **cover density** `D(x, z) ∈ [0,1]` for partial concealment (thin grass
-attenuates rather than fully blocks).
+### 4.1 Cost
 
----
+A handful of texture samples per query (segment length / step interval). For an 800m
+sightline at 2m steps, that's 400 samples — trivial on CPU even without GPU involvement,
+and can be pushed to a compute shader for batched multi-observer/multi-target queries (AI
+squads checking visibility against many potential targets per tick) if profiling shows it
+matters.
 
-## 3. Line-of-sight query
+### 4.2 Player state input
 
-`canSee(observer, target)` — the fundamental query — is a segment march over the fields:
+Concealment queries need a per-entity "effective height" that reflects stance:
+- Prone: use a low height value (near-ground) at the target's `(x, z)`.
+- Crouched: intermediate height.
+- Standing: full eye-height — likely exceeds most grass-top heights, so standing players
+  are concealed only in exceptionally tall grass zones, matching original game behavior
+  (grass concealment favored prone/crouched play).
 
-```
-march the 3D segment observer -> target in steps of ~1 texel:
-  at each sample point p:
-    groundTop = H(p.xz)
-    coverTop  = groundTop + C(p.xz)
-    if p.y < groundTop:        return BLOCKED   (ray went into the hill -> terrain LOS block)
-    if p.y < coverTop:         accumulate occlusion += D(p.xz) * stepLen
-  if accumulatedOcclusion >= CONCEAL_THRESHOLD:  return CONCEALED
-  return VISIBLE
-```
+This stance-to-height mapping is a small gameplay-tuning table, not derived from any
+extracted asset data.
 
-- **Terrain blocking** and **grass concealment** fall out of the same march.
-- With binary cover (`D = 1`) it reduces to "is any sample of the segment below the canopy
-  and above ground" → the classic DF2 "prone in grass = invisible" behavior.
-- With density accumulation it supports partial cover and gives smooth "how hidden am I"
-  values for AI awareness rather than a hard boolean.
+## 5. Interaction with rendering
 
-### 3.1 Stance matters
+The renderer (`03-terrain-and-grass-rendering-design.md`) and this concealment system are
+independent consumers of the same `grassHeightField` texture but must not be coupled
+beyond that shared data source:
 
-Concealment is a function of the **eye/target height above ground**, i.e. stance:
+- The renderer is free to simplify/LOD/crossfade its visual representation of grass
+  however performance requires.
+- The concealment system always queries the authored field directly, regardless of what's
+  currently drawn.
+- This means it is possible (and correct) for a target to be concealed even in a frame
+  where, say, the near-field compute-blade layer has momentarily thinned blades at a
+  crossfade boundary near the target — visually this reads fine because the relief-mapped
+  far layer (§4.1 of the rendering doc) is what's actually providing coverage at any
+  distance beyond ~15–20m, which is where most 800m-class engagements are happening
+  anyway.
 
-| Stance | Eye height above ground | Concealed by ~1.2 m grass? |
-| --- | --- | --- |
-| Prone  | ~0.3 m | yes, even at long range |
-| Crouch | ~0.9 m | partially |
-| Stand  | ~1.6 m | no (head above canopy) |
+## 6. Edge cases to handle
 
-The march compares the segment's height at each sample to `coverTop`, so lowering stance
-lowers the segment and pushes more of it under the canopy — exactly the original's behavior,
-emergent rather than special-cased.
+- **Grass edges / zone boundaries**: a target standing exactly at a grass-to-bare-ground
+  boundary — expected to be a fair, visually-legible concealment loss, not a hard cliff;
+  consider a small tolerance/hysteresis band to avoid flicker in concealment state as a
+  target moves near a boundary.
+- **Terrain occlusion vs. grass occlusion**: this system only handles grass; a separate
+  (standard) terrain-heightfield or geometry raycast is still needed for hard terrain/hill
+  occlusion. The two checks are complementary — either one blocking line-of-sight is
+  sufficient to conceal.
+- **Multiple grass "layers" (unlikely but worth flagging)**: if any DF2 terrain data turns
+  out to encode more than one grass height band per texel (e.g. bushes above short grass),
+  the single-height-per-texel model here will need extending — resolve once real terrain
+  data is inspected.
 
----
+## 7. Open implementation questions
 
-## 4. AI perception hook
-
-AI does not read pixels. Each perception tick, an AI agent issues `canSee(self, playerEye)`
-(and vice-versa for the player's "am I spotted" feedback). The tri-state result
-(`BLOCKED / CONCEALED / VISIBLE`) plus accumulated occlusion feeds the agent's detection
-meter:
-
-- `VISIBLE` → detection rises fast (scaled by range/lighting).
-- `CONCEALED` → detection rises slowly or decays (target is in cover).
-- `BLOCKED` → detection decays (no LOS at all).
-
-This makes "go prone in the tall grass to break contact" a real, systemic tactic rather than
-a scripted animation.
-
----
-
-## 5. Performance & data source
-
-- The fields are small (terrain-resolution 2D arrays); `sample()` is O(1) bilinear.
-- A LOS march is a few hundred samples worst-case; fine for the handful of AI↔player queries
-  per tick. Batch/stride and early-out on the first terrain block.
-- Cover field `C` is built once per map at load: for each texel, look up its detail-map
-  material index, map that to a canopy height via the detail-elevation strip. Until the real
-  mapping is confirmed (`01-...md` §7), the scaffold can synthesize `C` from the same noise
-  domain as the render grass so gameplay and visuals agree.
-
----
-
-## 6. Integration order
-
-1. **Now (done):** CPU heightfield sampler exists and is decoupled (`Heightfield.ts`).
-2. **Phase 2:** author the cover field `C`/`D` alongside the render grass so both read the
-   same density source.
-3. **Phase 3:** implement `canSee()` + stance + the tri-state result.
-4. **Phase 4:** wire `canSee()` into the AI perception loop and the player's spotted-state UI.
+- Sample interval tuning for the line-of-sight walk (§4) — balance accuracy at grass edges
+  against per-query cost, especially for AI squads running many concurrent queries.
+- Whether to expose concealment as a continuous "concealment %" (e.g. partial cover at
+  grass edges, softer than a hard boolean) rather than a strict boolean, for a slightly
+  more forgiving/realistic feel than the original.

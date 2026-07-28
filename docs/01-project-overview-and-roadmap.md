@@ -73,14 +73,10 @@ This is a hobby/personal reconstruction project, not a commercial release.
 - Output: PNG heightmap/colormap/detail-map/detail-elevation-strip sets per terrain, and
   `.3DI` → glTF conversion for a first test character/vehicle model.
 
-### Phase 1 — Terrain renderer (unblocked, can start immediately with synthetic data) ✅ *scaffolded*
+### Phase 1 — Terrain renderer (unblocked, can start immediately with synthetic data)
 - Chunked/LOD heightmap mesh renderer in Three.js, textured with extracted (or
   placeholder) colormap.
 - Optional literal Voxel Space raycast "authentic mode" as a fragment-shader toggle.
-
-> **Status:** an initial Phase 1 scaffold now lives in `src/df2/` and runs on synthetic
-> fBm terrain. See §8 below and `05-engine-architecture-tech-stack.md` §6 for what is and
-> is not yet implemented.
 
 ### Phase 2 — Grass renderer (unblocked, can start immediately with synthetic density data)
 - Relief-mapped ("grass slab") mid/far-field grass — the primary density layer.
@@ -109,22 +105,3 @@ This is a hobby/personal reconstruction project, not a commercial release.
   palette.
 - Exact relationship between the "detail elevation strip" and per-texel grass height
   (linear scale? palette-index-to-height lookup table?).
-
-## 8. Current implementation status (this repo)
-
-| Area | Status | Where |
-| --- | --- | --- |
-| Vite + TypeScript + React 19 stack (replaces CRA) | ✅ | `vite.config.ts`, `tsconfig.json` |
-| WebGPU + R3F v9 canvas bootstrap (async init, WebGL2 fallback verified) | ✅ | `src/components/GameCanvas.tsx` |
-| Synthetic heightfield (fBm) with CPU-side sampler + analytic normals | ✅ | `src/df2/Heightfield.ts`, `src/df2/noise.ts` |
-| Chunked terrain mesh generation with edge skirts | ✅ | `src/df2/terrainGeometry.ts` |
-| Distance-based per-chunk LOD selection | ✅ | `src/df2/Terrain.tsx` |
-| TSL terrain material (slope/height biome blend) | ✅ | `src/df2/TerrainMaterial.ts` |
-| Scene composition (sun/sky/hemisphere light, fog, water plane) | ✅ | `src/df2/DF2Scene.tsx` |
-| Real asset ingestion (Phase 0) | ⛔ blocked on files | — |
-| Grass (Phase 2) | ⬜ not started | — |
-| Concealment (Phase 3) | ⬜ not started | — |
-| "Authentic mode" raycaster | ⬜ documented, not built | `03-...md` §7 |
-
-The CPU-side heightfield in `src/df2/Heightfield.ts` is deliberately decoupled from the GPU
-mesh path so it can later serve as the Phase 3 gameplay heightfield without a rewrite.

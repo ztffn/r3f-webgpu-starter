@@ -25,7 +25,7 @@ game assets required):
 - Sun + hemisphere lighting, distance fog, and a water plane.
 - Map-style camera (orbit / pan / zoom) and a wireframe toggle.
 
-The CPU-side heightfield (`src/df2/Heightfield.js`) is deliberately decoupled from the render
+The CPU-side heightfield (`src/df2/Heightfield.ts`) is deliberately decoupled from the render
 mesh so it can later serve as the gameplay/concealment field without a rewrite.
 
 See [`docs/`](./docs) for the full design:
@@ -54,6 +54,13 @@ src/components/
   Overlay.tsx        UI overlay
 src/main.tsx         entry
 ```
+
+`src/df2/` is the current Phase-1 spike. The **target** module layout is the one in
+[`docs/05`](./docs/05-engine-architecture-tech-stack.md) §7 (`/tools/df2-extract`,
+`/src/engine/{terrain,grass,concealment,physics,controller}`, `/src/game/` for ECS). The
+scaffold will be reorganized toward that layout as Phase 2+ lands — today's `Heightfield.ts`
+→ `engine/terrain`, and the fBm field becomes the shared source the `engine/concealment`
+line-of-sight query reads.
 
 ## Getting started
 

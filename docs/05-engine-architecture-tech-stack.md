@@ -1,120 +1,103 @@
-# 05 — Engine Architecture & Tech Stack
+# Engine Architecture & Tech Stack
 
-The runtime stack, why each piece was chosen, and how the code in `src/df2/` is laid out.
+## 1. Rendering foundation: Three.js + WebGPURenderer + TSL
 
----
+- **Three.js `WebGPURenderer`** (production-ready since r171) as the primary renderer,
+  with Three.js's own automatic, silent fallback to WebGL2 for browsers lacking WebGPU
+  support (WebGPU reached near-universal browser coverage in late 2025; remaining WebGL2-
+  only share is estimated ~5%).
+- **TSL (Three Shading Language)** for all custom shader work — a single JS-authored node
+  graph compiles to WGSL (WebGPU backend) and GLSL (WebGL2 backend) from one source. This
+  is what makes the two-layer grass system (see rendering design doc) practical to
+  maintain: one shader source, both backends, rather than a hand-maintained GLSL/WGSL fork.
+- Compute-shader support (via TSL `instancedArray`/`storage` node types) is used for the
+  near-field grass blade pipeline; the far-field relief-mapped grass slab is deliberately
+  kept to fragment-shader-only work so it degrades gracefully on the WebGL2 fallback path
+  without a separate implementation.
+- Existing prior art confirming feasibility at scale in-browser: a public 2026 showcase
+  (React Three Fiber + Three.js WebGPU/TSL) renders 1M+ grass blades plus procedural
+  terrain live in-browser via compute shaders — validates the compute-blade layer's
+  scaling headroom well beyond what this project needs.
 
-## 1. Stack summary
+## 2. Asset pipeline (offline, Node.js/TypeScript, separate from the runtime engine)
 
-| Layer | Choice | Rationale |
-| --- | --- | --- |
-| Build tool | **Vite** (+ `@vitejs/plugin-react`) | Fast HMR — the thing that actually matters when iterating on terrain shaders. Replaces the deprecated Create React App / react-scripts the starter shipped with. |
-| Language | **TypeScript** (strict) | Typed heightfield/chunk/LOD interfaces; the asset pipeline (Phase 0) is already specced in TS. |
-| Renderer | **Three.js `WebGPURenderer`** (r185) | Modern compute + node materials. Automatic, silent fallback to WebGL2 for browsers without WebGPU (~5%). |
-| Shading | **TSL (Three Shading Language)** | One JS-authored shader graph compiles to **both** WGSL (WebGPU) and GLSL (WebGL2). No dual shader codebase. |
-| App shell | **React 19 + React Three Fiber v9** | Declarative scene graph, hooks-based lifecycle. R3F v9 supports an async `gl` factory, which the WebGPU init path uses. |
-| Helpers | **@react-three/drei v10** | `MapControls`, `Loader`, misc. |
-| Asset pipeline | **Node.js + TypeScript CLI** (`df2-extract`, Phase 0) | Runs offline as a build step, fully decoupled from the runtime engine. |
-| Physics (Phase 4) | **rapier** (preferred) or cannon-es | WASM, deterministic-ish, good R3F bindings via `@react-three/rapier`. |
+- `df2-extract` CLI: ports `PffArchive.cs`, `TgaConvert.cs`, `PcxConvert.cs`, `File3di.cs`
+  logic (see `02-asset-format-specification.md`) from the reference C# implementation to
+  TypeScript. Pure format-parsing logic, no native/Windows dependency.
+- Pipeline stages:
+  1. `.pff` → raw file blobs (archive unpack)
+  2. Terrain TGA/PCX → PNG (colormap, heightmap, detail map, detail elevation strip)
+  3. Derived: bake `grassHeightField` texture from detail map + detail elevation strip
+     (consumed by both the rendering system and the concealment system — see both
+     respective design docs)
+  4. `.3DI` → glTF (character/vehicle models, textures, materials, sub-object/bone
+     hierarchy)
+- Runs entirely as a pre-build step; the web runtime never touches `.pff`/`.3DI`/`.tga`
+  directly, only the converted PNG/glTF/JSON output.
 
----
+## 3. Runtime architecture
 
-## 2. Why WebGPU + TSL specifically
+- **ECS**: a lightweight library (e.g. `bitECS`) to keep entity/component logic
+  (player, AI, projectiles, vehicles) manageable as the project grows past the initial
+  terrain/grass prototype.
+- **Physics**: `rapier` or `cannon-es` for player collision, prone/crouch stance
+  (feeds directly into the concealment system's stance-to-height mapping — see
+  `04-concealment-system-design.md` §4.2), and basic vehicle/projectile physics.
+- **First-person controller**: custom, built against the physics engine's character
+  controller primitives.
+- No networking in v1 (see project overview, non-goals).
 
-- **Compute shaders** are needed for the Phase 2 near-field grass (scatter + wind on the
-  GPU) and are first-class in WebGPU. WebGL2 has no compute; the fallback path uses a
-  reduced grass model, which TSL lets us express as graph branches rather than a separate
-  shader.
-- **Node materials** compose cleanly: the terrain's biome blend, the grass relief term, and
-  fog are all graph nodes on standard materials, so they keep PBR lighting and shadows for
-  free instead of reimplementing a lighting model in raw shader code.
-- **Single source of truth:** authoring in TSL means we never hand-maintain parallel WGSL
-  and GLSL. This was the deciding factor over hand-written WGSL.
+## 4. Terrain rendering module
 
----
+- Chunked/LOD heightmap mesh (geomipmapping or clipmap), streamed by camera distance.
+- Textured with extracted colormap; heightmap drives both visual mesh geometry and
+  physics collision.
+- Optional literal Voxel Space raycast "authentic mode": a full-screen fragment shader
+  raymarching the heightmap texture directly, toggleable, not the default renderer.
 
-## 3. Renderer bootstrap
+## 5. Grass rendering module
 
-`src/components/GameCanvas.tsx` owns WebGPU setup:
+Two TSL-authored layers, both consuming the shared `grassHeightField` (and companion
+color/density textures) from the asset pipeline:
 
-- Imports `three/webgpu` and `extend(THREE)` so R3F knows the node classes.
-- Uses R3F v9's **async `gl` factory**: constructs `WebGPURenderer` and `await`s
-  `renderer.init()` before the first render, so we never draw before the device is ready.
-- Accepts a `camera` prop so scenes can set world-appropriate near/far/position (terrain
-  needs a far plane in the thousands of meters).
+- **Far/mid layer**: fragment-shader relief-mapped grass slab (fragment-only, no compute
+  dependency — see rendering design doc §4.1).
+- **Near layer**: TSL compute-shader blade instancing with layered culling and LOD blade
+  complexity (rendering design doc §4.2), WebGL2-fallback path reduces instance density
+  and/or substitutes shell texturing.
+- Crossfade band between the two (rendering design doc §4.3).
 
-If WebGPU is unavailable, Three.js transparently backs the same renderer with WebGL2; no
-app-level branching required.
+## 6. Concealment module
 
----
+- Independent system, not part of the rendering pipeline, consuming the same
+  `grassHeightField` texture (see `04-concealment-system-design.md`).
+- Exposed as a query API (`isConcealed(observer, target): boolean`) usable by both player-
+  facing feedback (if any) and AI visibility checks.
 
-## 4. Module layout (`src/df2/`)
-
-```
-src/df2/
-  config.ts          # world constants: size, chunking, LOD, height/fog/water scales
-  noise.ts           # deterministic hash + value noise + fBm (no deps)
-  Heightfield.ts     # CPU heightfield: precomputed fBm grid, bilinear sample(), analytic normal()
-  terrainGeometry.ts # builds one chunk's BufferGeometry (grid + skirt) from a Heightfield
-  TerrainMaterial.ts # TSL MeshStandardNodeMaterial: slope/height biome blend
-  Terrain.tsx        # R3F component: chunk grid, per-frame LOD selection, geometry cache
-  DF2Scene.tsx       # scene composition: lights, fog, water, <Terrain/>, MapControls
-```
-
-Design rules:
-
-- **`config.ts` is the single place** for world scale, chunk count, LOD table, height/water
-  scales. Swapping synthetic data for real extracted terrain (Phase 4) should touch data and
-  `config.ts`, not the renderer.
-- **`Heightfield.ts` is engine-agnostic** — no Three.js import. It is both the mesh's height
-  source and the seed of the Phase 3 gameplay heightfield (`04-...md`), which is why it lives
-  apart from `terrainGeometry.ts`.
-- **`Terrain.tsx` manages meshes imperatively** inside a `useMemo`'d group and mutates
-  `mesh.geometry` in `useFrame`, bypassing React reconciliation on the hot path. Geometries
-  are cached per `(chunk, lod)` and reused.
-
----
-
-## 5. Data flow
-
-```
-config.ts ──▶ Heightfield (fBm grid)
-                 │  sample(x,z), normal(x,z)
-                 ▼
-          terrainGeometry ──▶ per-(chunk,lod) BufferGeometry ──┐
-                                                               ▼
-Terrain.tsx (per-frame LOD pick) ──▶ meshes ──▶ TerrainMaterial (TSL) ──▶ WebGPURenderer
-```
-
-When real assets land, `Heightfield`'s fBm grid is replaced by a sampler over the decoded
-heightmap PNG, and `TerrainMaterial`'s procedural color is replaced by a colormap texture
-sample — both behind the same interfaces.
-
----
-
-## 6. What the current scaffold does and does not do
-
-**Does:** chunked terrain, real distance-based LOD with a geometry cache, skirt crack-hiding,
-analytic normals for stable cross-LOD lighting, TSL biome material, sun + hemisphere light,
-distance fog, a water plane, and an orbit/map camera over synthetic fBm terrain.
-
-**Does not yet:** load real assets (Phase 0/4), grass of any kind (Phase 2), concealment
-queries (Phase 3), shadows, the authentic-mode raycaster, or physics. These are called out in
-`01-...md` §8 and their respective design docs.
-
----
-
-## 7. Build & run
-
-Vite scripts:
+## 7. Directory/module layout (proposed)
 
 ```
-npm install
-npm run dev        # dev server at localhost:3000
-npm run build      # tsc --noEmit + vite build -> /dist (CI/scaffold sanity check)
-npm run preview    # serve the production build
-npm run typecheck  # tsc --noEmit
+/tools/df2-extract/          # Node/TS asset pipeline CLI (Phase 0)
+/src/engine/
+  terrain/                   # chunked mesh, LOD, heightfield sampling
+  grass/
+    relief-slab.ts           # far/mid TSL fragment shader layer
+    compute-blades.ts        # near-field TSL compute layer
+  concealment/
+    heightfield-query.ts     # line-of-sight sampling (shared data w/ grass/)
+  physics/
+  controller/
+/src/game/                   # ECS components/systems, entities
+/assets/converted/           # pipeline output (PNG/glTF/JSON), gitignored if sourced
+                              # from non-redistributable retail data
 ```
 
-No pipeline dependencies are added yet; `df2-extract` (Phase 0) will live in its own
-`tools/` workspace so the runtime bundle stays lean.
+## 8. Compatibility/performance targets (initial)
+
+- Primary target: desktop, WebGPU path, 60fps at draw distances supporting the ~800m
+  concealment-relevant sniping range.
+- Fallback target: WebGL2, reduced near-field grass density, relief-mapped far layer
+  unaffected (see rendering design doc §4.1) — this is the reason that layer was
+  deliberately kept compute-independent.
+- Mobile: out of scope for v1 but the architecture (fragment-only far layer, tunable
+  near-field instance budget) leaves room for a future mobile tier without a rewrite.

@@ -1,148 +1,208 @@
-# 02 — Asset Format Specification
+# Asset Format Specification
 
-Structural reference for the NovaLogic file formats used by Delta Force 2. The
-authoritative source for the reverse-engineered layouts below is the open-source
-[`Acruid/NovalogicTools`](https://github.com/Acruid/NovalogicTools) C# codebase
-(`PffArchive.cs`, `TgaConvert.cs`, `PcxConvert.cs`, `File3di.cs`); this document restates
-that knowledge in a renderer-agnostic form and flags the fields we still need to confirm
-empirically against real TXP/EXP2b data.
-
-> **Confidence key:** ✅ confirmed structurally · 🟡 believed / needs empirical confirmation
-> against real terrain files · ⛔ unknown.
+Source of truth for all structures below: `Acruid/NovalogicTools` (GitHub, MIT-adjacent,
+DF2-specific mod tools, C#), cross-referenced against community documentation from NovaHQ's
+terrain-authoring guide. All structures confirmed by reading source directly, not inferred.
 
 ---
 
-## 1. PFF archive container (`.pff`) ✅
+## 1. PFF3 / PFF2 archive container
 
-A flat, uncompressed archive. Two versions are seen in DF-era content: `PFF2` and `PFF3`.
-DF2 uses `PFF3`.
+The `.pff` file is a flat archive: a file-table (directory) plus raw file blobs. Two
+signature variants share an identical layout (`PFF2`, `PFF3`).
 
-### 1.1 Header (20 bytes)
+### 1.1 Header (20 bytes, at file offset 0)
 
-| Offset | Size | Type   | Field            | Notes |
-| ------ | ---- | ------ | ---------------- | ----- |
-| 0x00   | 4    | u32    | header length    | usually 20 |
-| 0x04   | 4    | char[4]| magic            | `"PFF3"` (or `"PFF2"`) |
-| 0x08   | 4    | u32    | file count       | number of file records |
-| 0x0C   | 4    | u32    | record size      | 32 for PFF3 |
-| 0x10   | 4    | u32    | record table offset | absolute offset to first file record |
+| Field         | Type   | Notes                                   |
+|---------------|--------|------------------------------------------|
+| HeaderSize    | u32    | Always 20 for supported variants          |
+| Signature     | u32    | Magic: `'PFF3'` = 0x33464650, `'PFF2'` = 0x32464650 |
+| RecordCount   | u32    | Number of file-table entries              |
+| RecordSize    | u32    | Bytes per entry (32 for supported variant)|
+| RecordOffset  | u32    | Byte offset to start of file-table        |
 
-### 1.2 File record (32 bytes, PFF3)
+### 1.2 File-table entry (32 bytes each, repeated `RecordCount` times starting at `RecordOffset`)
 
-| Offset | Size | Type    | Field        | Notes |
-| ------ | ---- | ------- | ------------ | ----- |
-| 0x00   | 4    | u32     | deleted flag | 0 = live entry |
-| 0x04   | 4    | u32     | data offset  | absolute offset of file bytes |
-| 0x08   | 4    | u32     | data length  | bytes |
-| 0x0C   | 4    | u32     | modified time| unix-ish timestamp |
-| 0x10   | 16   | char[16]| filename     | null-padded, original 8.3-ish name |
+| Field         | Type        | Notes                              |
+|---------------|-------------|--------------------------------------|
+| Deleted       | u32         | Nonzero = tombstoned entry           |
+| FileOffset    | u32         | Byte offset of file contents in archive |
+| FileSize      | u32         | Byte length of file contents         |
+| FileModified  | u32         | Packed timestamp                     |
+| FileName      | byte[15]    | Null-padded ASCII                    |
+| Null          | byte[1]     | Padding to 32-byte alignment         |
 
-Extraction is therefore: read header → seek to record table → for each of `file count`
-records, read the 32-byte entry, then read `data length` bytes at `data offset`. There is
-no per-file compression to undo.
+### 1.3 Extraction algorithm
 
-### 1.3 TypeScript port note (Phase 0)
+1. Read header, verify signature/headerSize/recordSize against supported values.
+2. Seek to `RecordOffset`, read `RecordCount` × 32-byte entries.
+3. For each non-deleted entry, seek to `FileOffset`, read `FileSize` bytes.
+4. Write to `FileName` (as extracted from the archive's own basename), preserving
+   `FileModified` if desired.
 
-The Node CLI (`df2-extract`) mirrors `PffArchive.cs`:
+Trivially portable to a ~40-line Node.js `DataView`/`Buffer` reader — no native
+dependencies required.
+
+---
+
+## 2. TGA loader
+
+Handles NovaLogic's TGA usage specifically: uncompressed truecolor images at 24-bit or
+32-bit pixel depth (`ImageType == UNCOMP_TRUECOLOR`). Does not need to handle
+color-mapped, RLE-compressed, or grayscale TGA variants for this project's known data
+(those code paths exist in the reference but throw `NotImplementedException`, meaning DF2
+assets don't exercise them, or do so rarely enough that the original author didn't hit it).
+
+Standard TGA layout applies:
+- 18-byte header (id length, color-map type, image type, color-map spec, image spec:
+  x-origin/y-origin/width/height/pixel-depth/descriptor)
+- Optional image ID field (`IdLength` bytes)
+- Optional color map
+- Raw scanline data, bottom-to-top by TGA convention (reference implementation applies a
+  180° flip on load to correct this)
+- Optional 26-byte footer (new-format TGA signature)
+
+Output: standard RGB/RGBA bitmap, directly convertible to PNG.
+
+---
+
+## 3. PCX loader
+
+Standard PCX with an embedded palette (`Colormap`, 48-byte field found via
+`[FieldOffset(16)]` in the reference header struct — i.e. a 16-color EGA-style palette
+embedded in the header, distinct from PCX's separate 256-color VGA palette appended at
+end-of-file for 8-bit PCX variants). Used for some texture/UI assets; terrain files may or
+may not use this format (see §5).
+
+---
+
+## 4. `.3DI` model format (character/vehicle/object geometry)
+
+Confirmed structure for `FileVersion.V8` (only version this project needs to support,
+per the reference tool — other versions throw `NotSupportedException`).
+
+### 4.1 Top-level file layout
 
 ```
-readHeader() -> { magic, count, recordSize, tableOffset }
-readRecords() -> Record[]           // 32-byte structs
-extract(record) -> Uint8Array       // slice of the mmap'd buffer
+[u32 Signature/Version]
+[Header — 128 bytes]
+[TextureCount × ModelTexture]
+[LodInfo.Count × ModelLod]
 ```
 
-All integers are little-endian. Use a `DataView` over the whole file buffer; do not stream.
+### 4.2 Header (128 bytes)
+
+| Field         | Type       | Notes                                    |
+|---------------|------------|--------------------------------------------|
+| Signature     | u32        | `FileVersion`, must equal V8                |
+| Name          | char[12]   | Null-terminated/padded model name           |
+| (gap)         | u32        | Unused                                      |
+| LodInfo       | struct(20B)| See §4.3                                    |
+| (gap)         | byte[68]   | Unused (17×4 bytes)                         |
+| TextureCount  | i32        | Number of embedded textures                 |
+
+### 4.3 `HeaderLodInfo` (20 bytes)
+
+| Field       | Type | Notes                                  |
+|-------------|------|------------------------------------------|
+| Count       | u32  | Number of LOD levels present             |
+| DistHigh    | u32  | Distance threshold, highest LOD          |
+| DistMedium  | u32  | Distance threshold, medium LOD           |
+| DistLow     | u32  | Distance threshold, low LOD              |
+| DistTiny    | u32  | Distance threshold, lowest/tiny LOD      |
+| RendHigh/Medium/Low/Tiny | enum (per LOD) | Render-type flag per LOD level |
+
+### 4.4 `ModelTexHeader` (52 bytes) — per embedded texture
+
+| Field        | Type       | Notes                          |
+|--------------|------------|-----------------------------------|
+| Name         | char[28]   | Null-terminated texture name      |
+| _bmSize      | i32        | Bitmap data size                  |
+| Index        | u16        | Texture index                     |
+| _flags       | u16        | Unknown flags                     |
+| _bmWidth     | u16        | Width                             |
+| _bmHeight    | u16        | Height                            |
+| PTR_BMLines  | u32        | In-memory pointer (ignore on disk)|
+| PTR_Palette  | u32        | In-memory pointer (ignore on disk)|
+| PTR_PaletteEnd | u32      | In-memory pointer (ignore on disk)|
+
+### 4.5 Per-LOD block (`ModelLod`) — repeated `LodInfo.Count` times
+
+**`ModelLodHeader`** (192 bytes) — leads each LOD block, gives counts for everything that
+follows: `nVertices`, `nNormals`, `nFaces`, `nSubObjects`, `nPartAnims`, `nMaterials`,
+`nColPlanes`, `nColVolumes`, plus bounding data (`xMin/xMax/yMin/yMax/zMin/zMax`,
+`SphereRadius`, `CircleRadius`) and a `Flags` field (bit 0 indicates bone-relative vertex
+offsetting is in effect — relevant for rigged models).
+
+Immediately following the header, in order:
+
+1. **Vertices** (`nVertices` × 8 bytes) — `int16 x, y, z, w` each.
+2. **Normals** (`nNormals` × 8 bytes) — `int16 x, y, z, w` each.
+3. **Faces** (`nFaces` × `ModelFace`, 72 bytes each):
+
+   | Field | Type | Notes |
+   |---|---|---|
+   | SurfaceIndex | i16 | |
+   | tu1, tu2, tu3 | i32 each | Baked UV U-coords per triangle vertex |
+   | tv1, tv2, tv3 | i32 each | Baked UV V-coords per triangle vertex |
+   | Vertex1/2/3 | i16 each | Indices into the vertex array |
+   | Normal1/2/3 | i16 each | Indices into the normal array |
+   | Distance, xMin/xMax/yMin/yMax/zMin/zMax | i32 each | Per-face bounds (culling data) |
+   | MaterialIndex | i32 | Index into the material array |
+
+4. **SubObjects** (`nSubObjects` × `ModelSubObject`, 112 bytes each) — hierarchical
+   parts/bones: vertex/face/normal/collision-volume counts + pointers (ignore pointers on
+   disk), `parentBone` index, and bone offset vectors (`VecXoff/Yoff/Zoff`,
+   `diffXoff/Yoff/Zoff`) used to reposition sub-object vertices relative to their parent
+   bone at load time.
+5. **PartAnims** (`nPartAnims` × 12 bytes) — currently treated as opaque/unparsed in the
+   reference implementation (read-and-discard). Needs further reversal if per-part
+   animation is required.
+6. **ColPlanes** (`nColPlanes` × 8 bytes) — collision planes, currently skipped
+   (`reader.BaseStream.Position += 0x08 * nColPlanes` in reference).
+7. **ColVolumes** (`nColVolumes` × 0x50 bytes) — collision volumes, currently skipped
+   (`+= 0x50 * nColVolumes` in reference).
+8. **Materials** (`nMaterials` × `ModelMaterial`, 0x78/120 bytes each):
+
+   | Field | Type | Notes |
+   |---|---|---|
+   | Name | char[16] | |
+   | BitFlags | byte | |
+   | IndexG/B/W/A | byte each | Texture index references; `TexIndex` property returns `IndexG` |
+
+### 4.6 Conversion target
+
+Vertices/normals/faces/materials/sub-object hierarchy above is sufficient to emit a
+complete textured, riggable OBJ or glTF: vertex positions (scale int16 by whatever unit
+factor the extracted terrain scale implies), per-face vertex/normal indices, per-face UV
+from the baked `tu/tv` integers (needs a divisor — determine empirically from a known
+texture's dimensions, likely UV stored in fixed-point), and material → texture-index
+mapping from `ModelMaterial.TexIndex` into the `ModelTexture` list.
 
 ---
 
-## 2. Image payloads: TGA and PCX ✅ (format) / 🟡 (which is used where)
+## 5. Terrain files — believed format (unconfirmed pending real data)
 
-Individual assets inside the archive are stored as ordinary **TGA** (truecolor or 8-bit
-palettized) and **PCX** (8-bit RLE) images. Both are well-documented public formats:
+No terrain-specific binary parser exists in the reference tools repository — searched and
+confirmed absent. Cross-referencing the NovaHQ terrain-authoring guide (community,
+contemporaneous with DF2's active modding era), terrain data is described entirely in
+terms of standard 2D image files, strongly implying **no proprietary terrain container
+format** — just plain TGA/PCX assets (readable with the loaders in §2/§3) sitting inside
+the `.pff`, named/typed per the list below, interpreted by the *game engine* rather than
+requiring a special *file* decoder:
 
-- **TGA** — the subset NovaLogic emits is uncompressed (type 2, truecolor) and 8-bit
-  color-mapped (type 1). `TgaConvert.cs` handles both. Watch the image-descriptor byte
-  (origin corner): NovaLogic images are typically stored top-left, so a vertical flip may
-  be needed when emitting a bottom-left PNG.
-- **PCX** — 8-bit, RLE-compressed, palette in the trailing 768 bytes (256×RGB). This is the
-  classic ZSoft PCX. `PcxConvert.cs` handles decode.
+| File | Role | Likely format |
+|---|---|---|
+| Colormap | Visible terrain surface color (pre-shaded, includes baked lighting/shadow) | TGA, RGB |
+| Heightmap | Greyscale elevation, one value per terrain texel | TGA or PCX, 8-bit greyscale |
+| Detail map | 8-bit/256-color palette map; palette index encodes grass/sand/rock zoning | PCX (palette-native) or 8-bit TGA |
+| Detail color texture strip | Small strip of actual grass/sand/rock textures referenced by detail-map indices | TGA, RGB |
+| Detail elevation greyscale strip | Per-detail-texture-index height/stretch amount for stretched-voxel grass | TGA or PCX, 8-bit greyscale |
+| `.cal` | Character/shading calibration data | Unknown, needs a real sample |
+| Sky map, cloud height, horizon type, water map/height, filter, gamma, saturation, sunslope | Environment parameters | Mix of small images and scalar config values, format TBD |
 
-The Phase 0 pipeline decodes each to raw RGBA and re-encodes as PNG for the web build.
-
----
-
-## 3. `.3DI` model format (V8) ✅ structure / 🟡 some sub-tables
-
-NovaLogic's proprietary model container for characters and vehicles. Version **V8** is
-confirmed for DF2. Reverse-engineered by `File3di.cs`. High-level structure:
-
-- **File header** — magic + version, counts and offsets for the sub-tables below,
-  bounding info.
-- **LOD table** — `.3DI` models are multi-LOD; each LOD entry points at its own vertex and
-  face lists. (This maps naturally onto glTF LOD extensions or separate meshes.)
-- **Vertex list** — positions (fixed-point or float; confirm scale factor per file). 🟡
-- **Face list** — indexed polygons with a material/texture index and per-face flags
-  (double-sided, transparent, etc.).
-- **Texture table** — references into an embedded or sibling texture set (often 8-bit
-  palettized, same decode path as §2).
-- **Sub-object / bone hierarchy** — used for animated parts (turrets, limbs). 🟡 exact
-  animation-track layout still to be validated.
-
-### 3.1 Conversion target
-
-`.3DI` → glTF 2.0. Each LOD becomes a mesh primitive (or a separate node tagged with a
-screen-coverage threshold). Palettized textures are expanded to RGBA PNG and referenced as
-glTF images. The first conversion milestone is a single static character/vehicle model
-rendered in-engine, no animation.
-
----
-
-## 4. Terrain asset set (per map) 🟡
-
-Each terrain is a small bundle of 2D images plus scalar parameters. Believed contents:
-
-| Asset | Format | Meaning |
-| --- | --- | --- |
-| **Colormap** | truecolor image | per-texel surface albedo used by the raycaster |
-| **Heightmap** | 8-bit greyscale | per-texel elevation (0–255 → world height via a scale) |
-| **Detail map** | 8-bit palettized | material/zone index per texel (grass / sand / rock / water). Palette meaning is TBD — see §5 and `01-...md` §7 |
-| **Detail color strip** | truecolor strip | small texture atlas of close-up ground detail, tiled under the colormap |
-| **Detail elevation strip** | 8-bit greyscale strip | per-material tall-grass / relief height source — the "stretched voxel" height driver |
-| **Sky / water / lighting params** | small binary or text | fog color, water level, sun direction, palette selection |
-
-The **detail elevation strip** is the single most important unknown for grass fidelity: it
-is believed to encode, per detail-map material index, how tall the "stretched voxels"
-extrude. Confirming its exact mapping (§7 of `01-...md`) directly drives the Phase 2 grass
-height field.
-
----
-
-## 5. Terrain packing convention 🟡
-
-Working hypothesis (to confirm against real files): terrain images are **not** a bespoke
-binary format — they are plain TGA/PCX images packed into the map's `.pff` alongside a
-small params blob, distinguished only by filename convention. If confirmed, Phase 0 needs
-no terrain-specific decoder beyond §1–§2; it just classifies extracted images by name.
-
-Empirical confirmation steps once files arrive:
-
-1. Unpack a known EXP2b terrain (e.g. **River**) with `df2-extract`.
-2. Enumerate members; classify by extension/name/dimensions.
-3. Verify the heightmap is single-channel and the detail map is 8-bit palettized.
-4. Cross-check heightmap dimensions against colormap dimensions (expected equal or a fixed
-   ratio).
-
----
-
-## 6. Coordinate & scale conventions (to pin down) 🟡
-
-- **World scale:** meters-per-texel of the heightmap. Comanche-era Voxel Space used square
-  maps; DF2 is reported larger/tiled. Until confirmed, the renderer treats world scale as a
-  single configurable constant (`METERS_PER_TEXEL`).
-- **Height scale:** 8-bit height → world height multiplier. Configurable constant
-  (`HEIGHT_SCALE`) until read from the params blob.
-- **Axis convention:** heightmap is a top-down image; Three.js uses +Y up, so image (u,v)
-  maps to world (x,z) and the sampled height to world y.
-
-The synthetic scaffold in `src/df2/` already exposes these as constants so that swapping in
-real data (Phase 4) is a data change, not a code change.
+**This section is the first thing to verify once real terrain files arrive** — confirm
+actual file extensions/names inside a real `.pff` terrain entry, confirm heightmap/colormap
+resolution, and confirm whether detail-map palette assignment is fixed across all DF2
+terrains or authored per-terrain (this determines whether grass/sand/rock zone detection
+can be hardcoded or must be read per-map).

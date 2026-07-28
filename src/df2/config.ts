@@ -52,10 +52,12 @@ export const LOD_DISTANCE_CHUNKS: number[] = [1.2, 2.5, 4.5, 8, Infinity];
 export const SKIRT_DEPTH = 12; // meters
 
 // --- Grass (docs/07-grass-visual-reference.md) --------------------------------
-// Metres per raw canopy unit. Raw 255 therefore stands GRASS_SCALE*255 tall;
-// 0.008 puts the tallest canopy at ~2 m and typical grass near 1 m, matching the
-// reference screenshots where grass reaches a standing soldier's waist.
-export const GRASS_SCALE = 0.008;
+// Metres per raw canopy unit. Raw 255 therefore stands GRASS_SCALE*255 tall.
+// 0.004 puts the TALLEST canopy near 1 m — waist height on a 1.8 m soldier,
+// which is what the reference screenshots show (docs/07 §2). Keeping the canopy
+// below standing eye height also matters mechanically: above it, the camera sits
+// inside the volume and the view fills with the column it occupies.
+export const GRASS_SCALE = 0.004;
 // Raymarch steps through the canopy volume. Cost is per-fragment, not per-blade.
 export const GRASS_STEPS = 20;
 // Columns fade into the colormap between these distances (m). The colormap is

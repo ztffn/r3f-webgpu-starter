@@ -36,7 +36,6 @@ import {
   positionLocal,
   positionWorld,
   cameraPosition,
-  normalWorld,
 } from "three/tsl";
 
 export interface GrassMaterialOptions {
@@ -65,11 +64,10 @@ export interface GrassMaterial {
   material: THREE.MeshStandardNodeMaterial;
   /** Metres the shell is lifted above the terrain — also the tallest canopy. */
   canopyMax: number;
-  uniforms: {
-    grassScale: ReturnType<typeof uniform>;
-    fadeStart: ReturnType<typeof uniform>;
-    fadeEnd: ReturnType<typeof uniform>;
-  };
+  /** Live-tunable graph inputs (see setScale for the derived ones). */
+  uniforms: Record<string, ReturnType<typeof uniform>>;
+  /** Re-derive world/height scaling when the calibration dials change. */
+  setScale(metersPerTexel: number, heightScale: number, grassScale: number): void;
 }
 
 export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
@@ -129,8 +127,16 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
   // functions return a single node, and calling it once lets both colorNode and
   // opacityNode share the result instead of marching twice.
   const grassShade = Fn(() => {
-    const P0 = positionWorld;
-    const V = P0.sub(cameraPosition).normalize();
+    const frag = positionWorld;
+    const V = frag.sub(cameraPosition).normalize();
+
+    // When the camera stands INSIDE the canopy — which is the whole point of
+    // this system — the shell is above the eye and we're looking at its
+    // underside, so the ray must start at the camera, not at the rasterised
+    // fragment. Otherwise the near field renders no grass at all.
+    const camXZ = vec2(cameraPosition.x, cameraPosition.z);
+    const inside: NodeArg = cameraPosition.y.lessThan(groundAt(camXZ).add(uCanopyMax));
+    const P0: NodeArg = inside.select(cameraPosition, frag);
 
     // Vertical extent to cross is the canopy depth; convert to a ray length via
     // the ray's downward component, clamped so near-horizontal views stay bounded.
@@ -176,7 +182,7 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
 
     // Fade columns into the colormap with distance; the colormap is already
     // grass-coloured at 100% coverage, so the handover is invisible.
-    const fade = positionWorld.distance(cameraPosition).smoothstep(uFadeEnd, uFadeStart);
+    const fade = frag.distance(cameraPosition).smoothstep(uFadeEnd, uFadeStart);
 
     return vec4(base.rgb.mul(shade).mul(tone), hit.mul(fade));
   });
@@ -194,14 +200,32 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
   material.opacityNode = shaded.w;
   material.transparent = false;
   material.alphaTest = 0.5;
-  material.side = THREE.FrontSide;
-  // The canopy is lit as a rough horizontal surface; using the terrain normal
-  // keeps its shading consistent with the ground it sits on.
-  material.normalNode = normalWorld;
+  // Double-sided: standing inside the canopy we see the shell from underneath.
+  // Lighting is left to the material so three flips normals for back faces —
+  // overriding normalNode with a world normal shades every back face black.
+  material.side = THREE.DoubleSide;
 
   return {
     material,
     canopyMax,
-    uniforms: { grassScale: uGrassScale, fadeStart: uFadeStart, fadeEnd: uFadeEnd },
+    uniforms: {
+      worldSize: uWorldSize,
+      halfWorld: uHalfWorld,
+      texel: uTexel,
+      heightScale: uHeightScale,
+      grassScale: uGrassScale,
+      canopyMax: uCanopyMax,
+      fadeStart: uFadeStart,
+      fadeEnd: uFadeEnd,
+    },
+    setScale(metersPerTexel: number, heightScaleM: number, grassScaleM: number) {
+      const world = mapSize * metersPerTexel;
+      uWorldSize.value = world;
+      uHalfWorld.value = world / 2;
+      uTexel.value = metersPerTexel;
+      uHeightScale.value = heightScaleM * 255;
+      uGrassScale.value = grassScaleM * 255;
+      uCanopyMax.value = grassScaleM * 255;
+    },
   };
 }

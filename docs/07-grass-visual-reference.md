@@ -209,6 +209,24 @@ standing is visible and the scope is what makes it readable.** That is the DF2
 mechanic reproduced on real extracted terrain: concealment is symmetric and
 stance-driven, and optics are what defeat it against an exposed target.
 
+### Range sweep, 2 m player capsule in teal camo green
+
+Target colour is deliberately close to the canopy — a saturated marker would
+flatter the test. Capsule is 2.0 m end to end in both stances, so prone presents
+a ~0.56 m silhouette.
+
+| range | canopy at target | stance | naked eye | scoped 10x |
+| --- | --- | --- | --- | --- |
+| 50 m | 0.97 m | standing | 26 px | **525 px** |
+| 50 m | 0.97 m | prone | **0** | **0** |
+| 300 m | 0.99 m | standing | 0 px | **8 px** |
+| 300 m | 0.99 m | prone | **0** | **0** |
+
+Reads exactly like the original's tactical shape: prone is gone at every range
+tested, even scoped; a standing figure at 300 m is barely detectable and ONLY
+through optics — 8 px rather than the ~30 px an unoccluded 2 m target would
+subtend, because ~1 m of canopy hides its lower half.
+
 ### The scenario has to be set up correctly or it lies
 
 A first run showed prone and standing at 168 vs 171 px — apparently identical,
@@ -217,7 +235,19 @@ had put the capsule on a **ridge, silhouetted against open sky**, with no canopy
 anywhere between it and the eye. The renderer was fine; the sightline was
 meaningless.
 
-The rig now scores candidate bearings for level ground, a sightline that stays
-clear of intervening terrain, and canopy present at the target. Any future
-concealment test must do the same — a skylined target will always read as
-visible no matter how good the grass is.
+The inverse failure appeared immediately afterwards: a 300 m test returned 0 px
+for BOTH stances, which looks like perfect concealment and is actually a hill in
+the way (`clear=1.3`, terrain 1.3 m above the sightline).
+
+Both failures are silent — one reads as "concealment broken", the other as
+"concealment perfect", and neither involves the grass at all. The rig therefore
+emits a verdict with every scenario and refuses to present a reading as
+meaningful unless it is `valid`:
+
+- `TERRAIN-BLOCKED` — terrain rises >0.5 m above the sightline
+- `NO CANOPY AT TARGET` — canopy <0.15 m where the target stands
+- `valid` — level-ish, clear, and grass actually present
+
+At long range a single vantage often has no clear bearing at all; three camera
+positions were tried before one gave a valid 300 m sightline. Any future
+concealment work must check the verdict before believing the pixel counts.

@@ -9,6 +9,10 @@ import * as THREE from "three/webgpu";
 import { texture, uv } from "three/tsl";
 import { createGrassMaterial } from "../../../src/df2/GrassMaterial";
 
+// Teal-leaning camo green. Deliberately not a saturated marker colour: a target
+// that reads clearly against grass would flatter the concealment test.
+export const TARGET_COLOR = 0x3e7f6e;
+
 const MPT = 2.0; // metres per texel
 const HS = 1.0; // metres per raw elevation unit
 const EYE_DEFAULT = 1.7;
@@ -156,6 +160,8 @@ export async function run(opts) {
   // stays below the eye-to-target line.
   function chooseBearing(dist) {
     let best = null;
+    // Also try stepping the camera to nearby vantage points: at long range a
+    // single spot often has no bearing at all that clears the terrain.
     for (let k = 0; k < 72; k++) {
       const a = (k / 72) * Math.PI * 2;
       const tx = camX + Math.sin(a) * dist;
@@ -179,6 +185,19 @@ export async function run(opts) {
     return best;
   }
 
+  /**
+   * A concealment reading is only meaningful when the target is neither hidden
+   * behind terrain nor skylined against open sky. Both produce 0 target pixels
+   * or full visibility for reasons that have nothing to do with grass, and both
+   * have already produced a wrong conclusion once (docs/07 §8).
+   */
+  function sightlineVerdict(pick) {
+    if (!pick) return "no-target";
+    if (pick.above > 0.5) return "TERRAIN-BLOCKED (invalid concealment test)";
+    if (pick.canopyThere < 0.15) return "NO CANOPY AT TARGET (invalid)";
+    return "valid";
+  }
+
   // --- target: a capsule standing in for a player at range -----------------
   // Standing ~1.8 m upright, prone ~0.4 m lying down. This is the concealment
   // test: at range a prone target should disappear into the canopy while a
@@ -192,22 +211,26 @@ export async function run(opts) {
     const tz = pick ? pick.tz : camZ + Math.cos(yaw) * d;
     const ty = groundAt(tx, tz);
     const prone = opts.target.stance === "prone";
-    const mat = new THREE.MeshBasicMaterial({ color: 0x2ad24a });
-    // radius 0.28 m, so standing total height ~1.75 m
-    const geo2 = new THREE.CapsuleGeometry(0.28, prone ? 1.1 : 1.2, 6, 12);
-    const mesh2 = new THREE.Mesh(geo2, mat);
+    // 2 m player: radius 0.28 + 1.44 cylinder = 2.00 m end to end, standing or
+    // lying. Teal camo green — close enough to the canopy to be a fair test of
+    // concealment rather than a high-contrast marker that would always show.
+    const R = 0.28, LEN = 2.0 - 2 * R;
+    const mat = new THREE.MeshBasicMaterial({ color: TARGET_COLOR });
+    const mesh2 = new THREE.Mesh(new THREE.CapsuleGeometry(R, LEN, 6, 12), mat);
     if (prone) {
+      // Lying along the sightline, so its silhouette is only ~0.56 m tall.
       mesh2.rotation.z = Math.PI / 2;
       mesh2.rotation.y = yaw;
-      mesh2.position.set(tx, ty + 0.28, tz);
+      mesh2.position.set(tx, ty + R, tz);
     } else {
-      mesh2.position.set(tx, ty + 0.88, tz);
+      mesh2.position.set(tx, ty + 1.0, tz);
     }
     scene.add(mesh2);
     targetInfo = {
       x: tx, y: ty, z: tz, prone, distance: d,
       canopyAtTarget: sampleField(grassData, size, (tx + half) / MPT, (tz + half) / MPT) * grassScale,
       sightlineClearance: pick ? +pick.above.toFixed(2) : null,
+      verdict: sightlineVerdict(pick),
     };
   }
 

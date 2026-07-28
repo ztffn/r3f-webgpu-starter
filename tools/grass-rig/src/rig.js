@@ -88,8 +88,8 @@ export async function run(opts) {
   const grassData = grassFromColormap(imageRgba(cTex.image), size);
 
   // --- terrain patch around the camera (plain grid, no LOD) ----------------
-  const SPAN = 300; // metres of terrain either side of the camera
-  const N = 220;
+  const SPAN = opts.span ?? 300; // metres of terrain either side of the camera
+  const N = opts.meshRes ?? 220;
   const pos = [], nor = [], uvs = [], idx = [];
   const half = (size * MPT) / 2;
   const groundAt = (x, z) => sampleField(heights, size, (x + half) / MPT, (z + half) / MPT) * HS;

@@ -35,6 +35,7 @@ import {
   texture,
   positionLocal,
   positionWorld,
+  modelWorldMatrix,
   cameraPosition,
   cameraViewMatrix,
   cameraNear,
@@ -235,8 +236,20 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
       .add(cellNoise(cell, 5, salt + 3.1).mul(0.3))
       .add(cellHash(cell, salt + 7.7).mul(0.15));
 
-  // --- vertex: lift the terrain shell to the top of the canopy volume -------
-  const positionNode = positionLocal.add(vec3(0, uCanopyMax, 0));
+  // --- vertex: lift the shell to the LOCAL canopy top -----------------------
+  // Lifting by the global maximum put the shell above the terrain everywhere,
+  // including over bare ground. At a ridge it therefore overhung the true
+  // silhouette, and fragments in that overhang still found columns to shade —
+  // drawing a band of grass FLOATING above the skyline (measured: a full-width
+  // band ~4 px thick, 10 px at worst).
+  //
+  // Lifting by the canopy actually present at each vertex makes the shell hug
+  // the grass: it collapses onto the terrain where nothing grows, so there is no
+  // overhang to shade and no wasted overdraw either.
+  const vtxWorld = modelWorldMatrix.mul(vec4(positionLocal, 1));
+  const vtxCanopy = canopyBase(vec2(vtxWorld.x, vtxWorld.z));
+  // Small margin: a column's height is canopyBase * jitter, jitter <= 1.
+  const positionNode = positionLocal.add(vec3(0, vtxCanopy.mul(1.04), 0));
 
   // --- fragment: march down through the volume ------------------------------
   // The march is expensive, so it runs ONCE and returns a struct: colour,

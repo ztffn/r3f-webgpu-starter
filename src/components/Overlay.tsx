@@ -1,13 +1,15 @@
 import type { LoadedTerrain } from "../df2/loadTerrain";
+import type { PerfSample } from "../df2/PerfMonitor";
 
 export interface OverlayProps {
   wireframe: boolean;
   setWireframe: (v: boolean) => void;
   loading: boolean;
   terrain: LoadedTerrain | null;
+  perf?: PerfSample | null;
 }
 
-export function Overlay({ wireframe, setWireframe, loading, terrain }: OverlayProps) {
+export function Overlay({ wireframe, setWireframe, loading, terrain, perf }: OverlayProps) {
   const subtitle = loading
     ? "Loading terrain…"
     : terrain
@@ -16,6 +18,15 @@ export function Overlay({ wireframe, setWireframe, loading, terrain }: OverlayPr
 
   return (
     <div className="overlay">
+      {perf && (
+        <div className="perf">
+          <span className="perf-fps">{perf.fps.toFixed(0)} fps</span>
+          <span>{perf.ms.toFixed(1)} ms</span>
+          <span>peak {perf.worstMs.toFixed(1)} ms</span>
+          <span>{perf.drawCalls} calls</span>
+          <span>{(perf.triangles / 1000).toFixed(0)}k tris</span>
+        </div>
+      )}
       <header>
         <h1>
           DELTA FORCE <span>2</span>

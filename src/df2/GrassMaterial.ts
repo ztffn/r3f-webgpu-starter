@@ -36,6 +36,11 @@ import {
   positionLocal,
   positionWorld,
   cameraPosition,
+  cameraViewMatrix,
+  cameraNear,
+  cameraFar,
+  viewZToPerspectiveDepth,
+  struct,
 } from "three/tsl";
 
 export interface GrassMaterialOptions {
@@ -192,9 +197,12 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
   const positionNode = positionLocal.add(vec3(0, uCanopyMax, 0));
 
   // --- fragment: march down through the volume ------------------------------
-  // One graph function does march + shading and returns vec4(rgb, hit): TSL
-  // functions return a single node, and calling it once lets both colorNode and
-  // opacityNode share the result instead of marching twice.
+  // The march is expensive, so it runs ONCE and returns a struct: colour,
+  // coverage and hit depth all come from the same traversal. (A TSL function
+  // returns a single node, so multiple outputs need a struct rather than
+  // separate functions, which would re-march per output.)
+  const GrassHit = struct({ rgb: "vec3", hit: "float", depth: "float" }, "GrassHit");
+
   const grassShade = Fn(() => {
     const frag = positionWorld;
     const V = frag.sub(cameraPosition).normalize();
@@ -240,6 +248,7 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     const hitFrac = float(0).toVar(); // 0 at the column base, 1 at its tip
     const hitXZ = vec2(0, 0).toVar();
     const hitCell = vec2(0, 0).toVar();
+    const hitT = float(0).toVar(); // ray distance to the hit, for depth output
 
     Loop(steps, ({ i }) => {
       const tExit = tMaxX.min(tMaxZ);
@@ -274,6 +283,9 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
         hitFrac.assign(yFirst.sub(ground).div(top.sub(ground).max(float(0.001))));
         hitXZ.assign(centre);
         hitCell.assign(cell);
+        // Distance to where the ray actually enters the column, so depth can be
+        // written at the grass surface rather than at the lifted shell.
+        hitT.assign(V.y.abs().greaterThan(float(1e-5)).select(yFirst.sub(P0.y).div(V.y), tEnter));
         Break();
       }
       );
@@ -316,8 +328,22 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     // grass-coloured at 100% coverage, so the handover is invisible.
     const fade = frag.distance(cameraPosition).smoothstep(uFadeEnd, uFadeStart);
 
-    if (debugHit) return vec4(vec3(1, 0, 1).mul(hitFrac.clamp(0.25, 1)), hit);
-    return vec4(base.rgb.mul(shade).mul(tone), hit.mul(fade));
+    // Depth at the RAYMARCH HIT, not at the shell. The shell is the terrain
+    // lifted by the tallest canopy, so its rasterised depth is up to a
+    // canopy-height too near. Left uncorrected, anything standing IN the grass —
+    // a soldier, a vehicle — depth-tests against a surface floating above the
+    // grass and pops in front of it, which breaks the one thing this system
+    // exists for. (This is the integration hurdle for GPU Voxel Space ports:
+    // mixing polygonal objects, not raw speed.)
+    const hitWorld = P0.add(V.mul(hitT.max(float(0))));
+    const viewZ = cameraViewMatrix.mul(vec4(hitWorld, 1)).z;
+    const hitDepth = viewZToPerspectiveDepth(viewZ, cameraNear, cameraFar);
+
+    const rgb = debugHit
+      ? vec3(1, 0, 1).mul(hitFrac.clamp(0.25, 1))
+      : base.rgb.mul(shade).mul(tone);
+
+    return GrassHit(rgb, debugHit ? hit : hit.mul(fade), hitDepth);
   });
 
   const shaded = grassShade();
@@ -329,10 +355,15 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
   // zero, leaving black rim artifacts along the canopy edges.
   const material = new THREE.MeshBasicNodeMaterial();
   material.positionNode = positionNode;
-  material.colorNode = shaded.xyz;
+  // struct field accessors are loosely typed; the graph is validated by running it.
+  material.colorNode = shaded.get('rgb') as NodeArg;
   // Alpha-tested rather than blended: grass is opaque where it exists, and this
   // keeps it in the opaque queue with correct depth against the terrain.
-  material.opacityNode = shaded.w;
+  material.opacityNode = shaded.get('hit') as NodeArg;
+  // Correct depth so polygonal objects intersect the grass properly. This does
+  // disable early-Z for the grass pass — a real cost, accepted because without
+  // it nothing can stand in the grass convincingly.
+  material.depthNode = shaded.get('depth') as NodeArg;
   material.transparent = false;
   material.alphaTest = 0.5;
   // Double-sided: standing inside the canopy we see the shell from underneath.

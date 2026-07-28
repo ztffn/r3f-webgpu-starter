@@ -284,3 +284,25 @@ footer button::after {
     transform: translateX(-50%);
   }
 }
+
+/* Perf readout — fixed top-right, tabular so digits don't jitter. */
+.perf {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 1200;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid rgba(150, 180, 190, 0.25);
+  border-radius: 3px;
+  background: rgba(10, 16, 20, 0.72);
+  color: #8fa3ab;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+.perf-fps { color: #e8a33d; font-size: 12px; }

@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from "react";
 import { MapControls } from "@react-three/drei";
 import * as THREE from "three/webgpu";
 import { Terrain } from "./Terrain";
+import { PerfMonitor, type PerfSample } from "./PerfMonitor";
 import { Heightfield } from "./Heightfield";
 import { createTerrainMaterial } from "./TerrainMaterial";
 import { createGrassMaterial } from "./GrassMaterial";
@@ -34,10 +35,11 @@ const SUN_DISTANCE = 2000;
 export interface DF2SceneProps {
   wireframe?: boolean;
   grass?: boolean;
+  onPerf?: (s: PerfSample) => void;
   onStatus?: (status: { loading: boolean; terrain: LoadedTerrain | null }) => void;
 }
 
-export function DF2Scene({ wireframe = false, grass = true, onStatus }: DF2SceneProps) {
+export function DF2Scene({ wireframe = false, grass = true, onStatus, onPerf }: DF2SceneProps) {
   // undefined = still loading, null = no assets (synthetic), object = real map
   const [loaded, setLoaded] = useState<LoadedTerrain | null | undefined>(undefined);
 
@@ -138,6 +140,8 @@ export function DF2Scene({ wireframe = false, grass = true, onStatus }: DF2Scene
 
   return (
     <>
+      {onPerf && <PerfMonitor onSample={onPerf} />}
+
       <color attach="background" args={[SKY_COLOR]} />
       <fog attach="fog" args={[FOG_COLOR, FOG_NEAR, FOG_FAR]} />
 

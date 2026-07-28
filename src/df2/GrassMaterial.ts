@@ -82,6 +82,18 @@ export interface GrassMaterialOptions {
    * extends far beyond steps*cellSize.
    */
   angularStep?: number;
+  /**
+   * Metres ahead of the eye at which the march begins when standing INSIDE the
+   * canopy.
+   *
+   * Prone in grass you should see only grass — that symmetry (concealed means
+   * blind) is the mechanic, not a bug. But the fill has to read as grass, and
+   * starting at the eye makes every ray hit the same column: at 2 cm range
+   * adjacent pixels diverge by ~0.1 mm, so no column width can separate them and
+   * the screen resolves to one flat colour. Beginning the march a little way out
+   * puts hits where columns actually subtend a few pixels.
+   */
+  nearClip?: number;
   /** Debug: paint every grass hit flat magenta to inspect the hit mask. */
   debugHit?: boolean;
   /** Distance (m) at which columns start fading into the colormap. */
@@ -111,6 +123,7 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     steps = 20,
     cellSize = 0.35,
     angularStep = 0.02,
+    nearClip = 0.45,
     debugHit = false,
     toneVariation = 0.42,
     fadeStart = 420,
@@ -126,6 +139,7 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
   // Step growth per unit distance — keeps each step near one pixel wide, the
   // same trade the original made with its increasing deltaz.
   const uAngular = uniform(angularStep);
+  const uNearClip = uniform(nearClip);
   const uHeightScale = uniform(heightScale * 255);
   const uGrassScale = uniform(grassScale * 255);
   const uCanopyMax = uniform(canopyMax);
@@ -253,7 +267,7 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     // canopy, that column trivially contains the ray origin, so testing it would
     // make every fragment hit at t~0 in the SAME cell and fill the screen with
     // one flat colour instead of the silhouette you should see lying in it.
-    t.assign(inside.select(cellW.mul(2), float(0)));
+    t.assign(inside.select(uNearClip, float(0)));
 
     Loop(steps, () => {
       const step = cellW.max(t.mul(uAngular));

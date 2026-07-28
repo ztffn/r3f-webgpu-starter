@@ -39,6 +39,8 @@ import {
   cameraViewMatrix,
   cameraNear,
   cameraFar,
+  cameraProjectionMatrix,
+  screenSize,
   viewZToPerspectiveDepth,
   struct,
 } from "three/tsl";
@@ -77,11 +79,19 @@ export interface GrassMaterialOptions {
    */
   toneVariation?: number;
   /**
-   * Step growth per unit of distance. 0.02 means a step is ~2% of the current
-   * range, i.e. roughly constant angular size, so cost stays bounded while reach
-   * extends far beyond steps*cellSize.
+   * Steps per screen pixel. The march step is derived from the camera's actual
+   * angular resolution, so it is NOT a fixed fraction of distance.
+   *
+   * Whether a column is sub-pixel depends on FIELD OF VIEW, not range. Through a
+   * 10x scope a 65 deg view becomes ~6.5 deg and angular resolution rises 10x,
+   * so grass at 400 m that was sub-pixel unaided now covers ~10 px. A constant
+   * distance-proportional step would be 10x too coarse exactly when a sniper is
+   * looking hardest — and this is the range the concealment mechanic is defined
+   * at, so the render and the gameplay query must not disagree there.
+   *
+   * 1.0 = one march step per pixel of angular size. Lower is finer and costlier.
    */
-  angularStep?: number;
+  pixelsPerStep?: number;
   /**
    * Metres ahead of the eye at which the march begins when standing INSIDE the
    * canopy.
@@ -111,6 +121,9 @@ export interface GrassMaterial {
   setScale(metersPerTexel: number, heightScale: number, grassScale: number): void;
 }
 
+/** projection[1][1] at a 65-degree vertical FOV = 1/tan(32.5 deg). */
+const REFERENCE_P11 = 1 / Math.tan((65 * Math.PI) / 180 / 2);
+
 export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
   const {
     grassMap,
@@ -122,7 +135,7 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     grassScale,
     steps = 20,
     cellSize = 0.35,
-    angularStep = 0.02,
+    pixelsPerStep = 1.0,
     nearClip = 0.45,
     debugHit = false,
     toneVariation = 0.42,
@@ -138,7 +151,7 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
   const uCell = uniform(cellSize); // metres per grass column
   // Step growth per unit distance — keeps each step near one pixel wide, the
   // same trade the original made with its increasing deltaz.
-  const uAngular = uniform(angularStep);
+  const uPixelsPerStep = uniform(pixelsPerStep);
   const uNearClip = uniform(nearClip);
   const uHeightScale = uniform(heightScale * 255);
   const uGrassScale = uniform(grassScale * 255);
@@ -269,8 +282,17 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     // one flat colour instead of the silhouette you should see lying in it.
     t.assign(inside.select(uNearClip, float(0)));
 
+    // Vertical angular size of one pixel: projection[1][1] = 1/tan(fovY/2), so
+    // the half-height in radians is 1/P11 and one pixel spans 2/(P11 * height).
+    // Deriving it this way means a scope narrowing the FOV automatically
+    // tightens the march instead of needing a separate LOD path.
+    const pixelAngle = float(2)
+      .div((cameraProjectionMatrix as NodeArg)[1].y.mul(screenSize.y))
+      .mul(uPixelsPerStep);
+
     Loop(steps, () => {
-      const step = cellW.max(t.mul(uAngular));
+      // Step at the column width up close, then at whatever spans one pixel.
+      const step = cellW.max(t.mul(pixelAngle));
       const tNext = t.add(step);
 
       const P = P0.add(V.mul(t));
@@ -329,7 +351,19 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
 
     // Fade columns into the colormap with distance; the colormap is already
     // grass-coloured at 100% coverage, so the handover is invisible.
-    const fade = frag.distance(cameraPosition).smoothstep(uFadeEnd, uFadeStart);
+    //
+    // The fade distances scale with ZOOM for the same reason the march step
+    // does: the handover is only invisible while columns are sub-pixel. Through
+    // a scope they are not, so a fixed fade would dissolve grass into flat
+    // colour exactly where a sniper is looking — and ~800 m is where the
+    // concealment mechanic is defined, so the picture and the gameplay query
+    // would disagree at the one range that matters.
+    const p11: NodeArg = (cameraProjectionMatrix as NodeArg)[1].y;
+    const zoom = p11.div(float(REFERENCE_P11)).max(float(1));
+    const fade: NodeArg = (frag.distance(cameraPosition) as NodeArg).smoothstep(
+      uFadeEnd.mul(zoom) as NodeArg,
+      uFadeStart.mul(zoom) as NodeArg
+    );
 
     // Depth at the RAYMARCH HIT, not at the shell. The shell is the terrain
     // lifted by the tallest canopy, so its rasterised depth is up to a

@@ -79,7 +79,7 @@ export interface GrassMaterialOptions {
 }
 
 export interface GrassMaterial {
-  material: THREE.MeshStandardNodeMaterial;
+  material: THREE.MeshBasicNodeMaterial;
   /** Metres the shell is lifted above the terrain — also the tallest canopy. */
   canopyMax: number;
   /** Live-tunable graph inputs (see setScale for the derived ones). */
@@ -305,7 +305,12 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     const shade = float(0.88).mix(float(1.05), hitFrac.clamp(0, 1));
     // Per-column tone — the "corduroy" carrying the horizontal variation the
     // references show (h/v derivative ratio ~1.6).
-    const tone = clump(hitCell, 17.3).sub(0.5).mul(uTone).add(1.0);
+    // Per-column tone. Applied around 1.0 but with the downward swing damped:
+    // the colormap is pre-shaded, so its ravine shadows are already near-black,
+    // and a raw multiply crushed them to true black along the baked shadow
+    // lines. Vary brightness without eating the existing shadow detail.
+    const t = clump(hitCell, 17.3).sub(0.5).mul(uTone);
+    const tone = t.max(t.mul(0.35)).add(1.0);
 
     // Fade columns into the colormap with distance; the colormap is already
     // grass-coloured at 100% coverage, so the handover is invisible.
@@ -317,10 +322,12 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
 
   const shaded = grassShade();
 
-  const material = new THREE.MeshStandardNodeMaterial({
-    roughness: 1.0,
-    metalness: 0.0,
-  });
+  // UNLIT. The colormap is pre-shaded — it already bakes lighting and shadow
+  // (docs/06 §6) — and the original renderer applied no lighting at all, it just
+  // painted map.color. Running PBR on top double-shades it, and at shell
+  // silhouettes the interpolated normal goes edge-on and diffuse collapses to
+  // zero, leaving black rim artifacts along the canopy edges.
+  const material = new THREE.MeshBasicNodeMaterial();
   material.positionNode = positionNode;
   material.colorNode = shaded.xyz;
   // Alpha-tested rather than blended: grass is opaque where it exists, and this

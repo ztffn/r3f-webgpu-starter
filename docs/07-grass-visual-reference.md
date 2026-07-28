@@ -188,3 +188,36 @@ Next steps, in order:
    the original's tops come from a detail texture and are far smoother.
 3. Investigate black speckle artifacts appearing along shell silhouettes
    (visible as dotted lines) — likely alpha-test edges on the lifted shell.
+
+---
+
+## 8. Concealment verified end-to-end (range scenario)
+
+`tools/grass-rig` renders a green capsule standing in for a player at a set range
+and stance, with a scoped picture-in-picture inset so naked-eye and 10x views are
+comparable in one frame. Measured by counting target pixels in each view.
+
+At 50 m, target standing in 0.97 m canopy, clear sightline:
+
+| stance | naked eye | scoped 10x |
+| --- | --- | --- |
+| standing | 20 px | **383 px** |
+| prone | 5 px | **0 px** |
+
+**Prone is completely concealed — invisible even through the scope — while
+standing is visible and the scope is what makes it readable.** That is the DF2
+mechanic reproduced on real extracted terrain: concealment is symmetric and
+stance-driven, and optics are what defeat it against an exposed target.
+
+### The scenario has to be set up correctly or it lies
+
+A first run showed prone and standing at 168 vs 171 px — apparently identical,
+suggesting concealment was broken. It wasn't: aiming down an arbitrary bearing
+had put the capsule on a **ridge, silhouetted against open sky**, with no canopy
+anywhere between it and the eye. The renderer was fine; the sightline was
+meaningless.
+
+The rig now scores candidate bearings for level ground, a sightline that stays
+clear of intervening terrain, and canopy present at the target. Any future
+concealment test must do the same — a skylined target will always read as
+visible no matter how good the grass is.

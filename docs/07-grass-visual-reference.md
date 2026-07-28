@@ -251,3 +251,47 @@ meaningful unless it is `valid`:
 At long range a single vantage often has no clear bearing at all; three camera
 positions were tried before one gave a valid 300 m sightline. Any future
 concealment work must check the verdict before believing the pixel counts.
+
+---
+
+## 9. Two reported artifacts, diagnosed
+
+### "Floating grass" along ridgelines — mostly a test-harness limit
+
+Grass appeared detached above ridge silhouettes. Measured on the exact frame:
+3390 px of grass drawn where the terrain-only render shows sky, a fringe ~19 px
+tall, contiguous with the terrain (gap 0).
+
+Cause: **the grass march samples the infinitely-wrapped heightfield, but the rig
+drew terrain only ±300 m.** Rays passing over a ridge kept marching and found
+columns on terrain that was never rendered, so grass painted over open sky.
+Widening the patch to 2000 m dropped it to 1456 px / ~9 px, and the remainder is
+real grass standing on the ridge, which *should* show above the bare-terrain
+line. The rig's default patch is now 1400 m, which must stay above
+`GRASS_FADE_END`.
+
+**The invariant this exposes: terrain must be drawn at least as far as grass is
+rendered.** The app satisfies it — terrain reaches 2304 m (9 chunks x 256 m)
+against a 1100 m grass fade — but any change to `VIEW_RADIUS_CHUNKS`,
+`CHUNK_COUNT` or `GRASS_FADE_END` can silently break it, and the failure looks
+like grass floating in the sky rather than like a draw-distance bug.
+
+Ruled out along the way, each by measurement: shell overhang (fixed anyway — the
+shell now hugs the local canopy instead of the global maximum, which also cuts
+overdraw over bare ground), and coarse mesh silhouette vs the exact heightfield
+the march samples (12 m quads vs 1.5 m changed the fringe by under a pixel).
+
+### Dark blotches — the colormap, not the shader
+
+Dark regions occupy the same places with and without grass (IoU **0.95**), and
+drawing grass slightly *reduces* dark pixels (201516 -> 192369). The colormap is
+pre-shaded (`06-...md` §6), so baked tree and shadow features are in the source
+data. Nothing to fix in the renderer; lifting them would be an art decision about
+fighting the pre-baked lighting, not a bug fix.
+
+### Method note
+
+The first pass diagnosed the wrong frame — diagnostics were run at a fixed
+bearing while the reported screenshot used the scenario's auto-chosen bearing,
+giving a 4 px fringe instead of the real 19 px. Reproduce the exact frame before
+measuring an artifact.

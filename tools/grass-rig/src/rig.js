@@ -88,7 +88,13 @@ export async function run(opts) {
   const grassData = grassFromColormap(imageRgba(cTex.image), size);
 
   // --- terrain patch around the camera (plain grid, no LOD) ----------------
-  const SPAN = opts.span ?? 300; // metres of terrain either side of the camera
+  // Terrain patch half-width. MUST exceed the grass fade distance: the march
+  // samples the infinitely-wrapped heightfield, so with a small patch it finds
+  // columns on terrain that was never drawn and paints grass over open sky —
+  // which reads as "floating grass" along ridgelines. At 300 m against a 1100 m
+  // fade that produced a 19 px fringe; at 2000 m it drops to the ~9 px of real
+  // grass standing on the ridge.
+  const SPAN = opts.span ?? 1400;
   const N = opts.meshRes ?? 220;
   const pos = [], nor = [], uvs = [], idx = [];
   const half = (size * MPT) / 2;

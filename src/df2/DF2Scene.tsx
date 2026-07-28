@@ -9,10 +9,16 @@ import * as THREE from "three/webgpu";
 import { Terrain } from "./Terrain";
 import { Heightfield } from "./Heightfield";
 import { createTerrainMaterial } from "./TerrainMaterial";
+import { createGrassMaterial } from "./GrassMaterial";
 import { loadTerrain, type LoadedTerrain } from "./loadTerrain";
 import {
   TERRAIN_SLUG,
   HEIGHT_SCALE,
+  METERS_PER_TEXEL,
+  GRASS_SCALE,
+  GRASS_STEPS,
+  GRASS_FADE_START,
+  GRASS_FADE_END,
   WATER_COLOR,
   SUN_DIRECTION,
   SKY_COLOR,
@@ -25,10 +31,11 @@ const SUN_DISTANCE = 2000;
 
 export interface DF2SceneProps {
   wireframe?: boolean;
+  grass?: boolean;
   onStatus?: (status: { loading: boolean; terrain: LoadedTerrain | null }) => void;
 }
 
-export function DF2Scene({ wireframe = false, onStatus }: DF2SceneProps) {
+export function DF2Scene({ wireframe = false, grass = true, onStatus }: DF2SceneProps) {
   // undefined = still loading, null = no assets (synthetic), object = real map
   const [loaded, setLoaded] = useState<LoadedTerrain | null | undefined>(undefined);
 
@@ -62,6 +69,47 @@ export function DF2Scene({ wireframe = false, onStatus }: DF2SceneProps) {
   }, [loaded]);
 
   useEffect(() => () => material?.dispose(), [material]);
+
+  // --- columnar grass (docs/07) ---------------------------------------------
+  const grassKit = useMemo(() => {
+    if (!loaded || !loaded.grassMap || !loaded.colorMap) return null;
+    // Elevation as a texture for the fragment march. Built from the same raw
+    // samples as the CPU heightfield, so shader and gameplay agree exactly.
+    const heightTex = new THREE.DataTexture(
+      loaded.heights,
+      loaded.size,
+      loaded.size,
+      THREE.RedFormat,
+      THREE.UnsignedByteType
+    );
+    heightTex.magFilter = THREE.LinearFilter;
+    heightTex.minFilter = THREE.LinearFilter;
+    heightTex.wrapS = THREE.RepeatWrapping;
+    heightTex.wrapT = THREE.RepeatWrapping;
+    heightTex.needsUpdate = true;
+
+    const kit = createGrassMaterial({
+      grassMap: loaded.grassMap,
+      heightMap: heightTex,
+      colorMap: loaded.colorMap,
+      worldSize: loaded.size * METERS_PER_TEXEL,
+      mapSize: loaded.size,
+      heightScale: HEIGHT_SCALE,
+      grassScale: GRASS_SCALE,
+      steps: GRASS_STEPS,
+      fadeStart: GRASS_FADE_START,
+      fadeEnd: GRASS_FADE_END,
+    });
+    return { ...kit, heightTex };
+  }, [loaded]);
+
+  useEffect(
+    () => () => {
+      grassKit?.material.dispose();
+      grassKit?.heightTex.dispose();
+    },
+    [grassKit]
+  );
 
   const waterMaterial = useMemo(() => {
     const m = new THREE.MeshStandardNodeMaterial();
@@ -103,7 +151,13 @@ export function DF2Scene({ wireframe = false, onStatus }: DF2SceneProps) {
       <hemisphereLight args={[SKY_COLOR, "#5a5340", 0.75]} position={[0, 400, 0]} />
 
       {heightfield && material && (
-        <Terrain heightfield={heightfield} material={material} wireframe={wireframe} />
+        <Terrain
+          heightfield={heightfield}
+          material={material}
+          grassMaterial={grass ? (grassKit?.material ?? null) : null}
+          grassDistance={GRASS_FADE_END}
+          wireframe={wireframe}
+        />
       )}
 
       {showWater && (
@@ -118,7 +172,7 @@ export function DF2Scene({ wireframe = false, onStatus }: DF2SceneProps) {
         target={[0, camTarget, 0]}
         enableDamping
         dampingFactor={0.08}
-        minDistance={40}
+        minDistance={3}
         maxDistance={worldSize * 1.6}
         maxPolarAngle={1.45}
       />

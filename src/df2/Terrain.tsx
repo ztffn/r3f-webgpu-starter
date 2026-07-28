@@ -24,6 +24,7 @@ import {
 
 interface Slot {
   mesh: THREE.Mesh;
+  grass: THREE.Mesh | null;
   /** Absolute chunk indices currently displayed (can be negative / unbounded). */
   cx: number;
   cz: number;
@@ -33,10 +34,20 @@ interface Slot {
 export interface TerrainProps {
   heightfield: Heightfield;
   material: THREE.Material;
+  /** Optional columnar-grass shell drawn over the same chunk geometry. */
+  grassMaterial?: THREE.Material | null;
+  /** Distance (m) beyond which the grass shell is not drawn at all. */
+  grassDistance?: number;
   wireframe?: boolean;
 }
 
-export function Terrain({ heightfield, material, wireframe = false }: TerrainProps) {
+export function Terrain({
+  heightfield,
+  material,
+  grassMaterial = null,
+  grassDistance = 700,
+  wireframe = false,
+}: TerrainProps) {
   const { camera } = useThree();
   const camPos = useRef(new THREE.Vector3());
 
@@ -75,11 +86,21 @@ export function Terrain({ heightfield, material, wireframe = false }: TerrainPro
       const mesh = new THREE.Mesh(undefined, material);
       mesh.frustumCulled = true;
       group.add(mesh);
-      slots.push({ mesh, cx: NaN, cz: NaN, lod: -1 });
+
+      // The grass shell reuses the terrain chunk geometry; the material lifts it
+      // to the canopy top in the vertex stage and marches back down per fragment.
+      let grass: THREE.Mesh | null = null;
+      if (grassMaterial) {
+        grass = new THREE.Mesh(undefined, grassMaterial);
+        grass.frustumCulled = true;
+        grass.renderOrder = 1;
+        group.add(grass);
+      }
+      slots.push({ mesh, grass, cx: NaN, cz: NaN, lod: -1 });
     }
 
     return { group, slots, getGeometry, chunkSize, lodDistances, cache };
-  }, [heightfield, material]);
+  }, [heightfield, material, grassMaterial]);
 
   useEffect(() => {
     (material as THREE.MeshStandardMaterial).wireframe = wireframe;
@@ -125,14 +146,19 @@ export function Terrain({ heightfield, material, wireframe = false }: TerrainPro
 
         if (slot.cx !== cx || slot.cz !== cz) {
           slot.mesh.position.set(ox, 0, oz);
+          slot.grass?.position.set(ox, 0, oz);
           slot.cx = cx;
           slot.cz = cz;
           slot.lod = -1; // force geometry refresh for the new location
         }
         if (slot.lod !== lod) {
-          slot.mesh.geometry = getGeometry(cx, cz, lod);
+          const geo = getGeometry(cx, cz, lod);
+          slot.mesh.geometry = geo;
+          if (slot.grass) slot.grass.geometry = geo;
           slot.lod = lod;
         }
+        // Grass is only drawn where columns are actually resolvable.
+        if (slot.grass) slot.grass.visible = dist < grassDistance;
       }
     }
   });

@@ -51,6 +51,18 @@ export const LOD_DISTANCE_CHUNKS: number[] = [1.2, 2.5, 4.5, 8, Infinity];
 // (docs/03-terrain-and-grass-rendering-design.md §2.3).
 export const SKIRT_DEPTH = 12; // meters
 
+// --- Grass (docs/07-grass-visual-reference.md) --------------------------------
+// Metres per raw canopy unit. Raw 255 therefore stands GRASS_SCALE*255 tall;
+// 0.008 puts the tallest canopy at ~2 m and typical grass near 1 m, matching the
+// reference screenshots where grass reaches a standing soldier's waist.
+export const GRASS_SCALE = 0.008;
+// Raymarch steps through the canopy volume. Cost is per-fragment, not per-blade.
+export const GRASS_STEPS = 20;
+// Columns fade into the colormap between these distances (m). The colormap is
+// already grass-coloured at 100% coverage, so the handover is invisible.
+export const GRASS_FADE_START = 420;
+export const GRASS_FADE_END = 700;
+
 // --- Atmosphere --------------------------------------------------------------
 export const SKY_COLOR = "#9fb8cf";
 export const FOG_COLOR = "#aac2d6";

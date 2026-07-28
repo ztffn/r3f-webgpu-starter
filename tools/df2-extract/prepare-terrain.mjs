@@ -87,21 +87,80 @@ if (detailPath) {
   meta.missing.push(trn.detail_map);
 }
 
-// --- detail elevation strip (grass stretch heights) — often base-game only ---
-const dmPath = find(trn.detail_elev, [".pcx"]);
+// --- detail elevation strip (grass stretch heights) -------------------------
+// Often a shared base-game asset that isn't bundled with a terrain pack; pass
+// --detail-elev <file.pcx> to substitute a strip we do have (docs/06 §7).
+const elevOverride = process.argv.indexOf("--detail-elev");
+const dmPath =
+  elevOverride > -1 ? process.argv[elevOverride + 1] : find(trn.detail_elev, [".pcx"]);
+
 if (dmPath) {
   const dm = decodePcx(readFileSync(dmPath));
+  const tileW = dm.width;
+  const tileCount = Math.floor(dm.height / tileW);
+  const substituted = elevOverride > -1;
   writeFileSync(join(outDir, "detail_elev.png"), encodePng(dm.width, dm.height, dm.pixels, 1));
   meta.assets.detailElev = {
     file: "detail_elev.png",
     width: dm.width,
     height: dm.height,
-    tiles: dm.height / dm.width,
+    tileSize: tileW,
+    tiles: tileCount,
+    substituted,
+    substitutedFrom: substituted ? dmPath.split("/").pop() : undefined,
+    referencedName: trn.detail_elev,
   };
-  console.log(`  detail_elev.png ${dm.width}x${dm.height}`);
+  console.log(
+    `  detail_elev.png ${dm.width}x${dm.height} (${tileCount} tiles of ${tileW}px)` +
+      (substituted ? `  [SUBSTITUTED for missing "${trn.detail_elev}"]` : "")
+  );
+
+  // --- bake grassHeightField -----------------------------------------------
+  // docs/06 §6: detail_map[x,z] -> index -> detail_elev tile -> stretch height.
+  // The detail textures tile across the ground, so within a tile we read
+  // (x mod tileW, z mod tileW) — this preserves the per-column height variation
+  // that gives the canopy its ragged silhouette (docs/07 §1.3).
+  if (detailPath) {
+    const d = decodePcx(readFileSync(detailPath));
+    const grass = new Uint8Array(d.width * d.height);
+    const usedIdx = new Set();
+    for (let z = 0; z < d.height; z++) {
+      const tz = z % tileW;
+      for (let x = 0; x < d.width; x++) {
+        const idx = d.pixels[z * d.width + x];
+        usedIdx.add(idx);
+        const tile = idx % tileCount;
+        grass[z * d.width + x] = dm.pixels[(tile * tileW + tz) * tileW + (x % tileW)];
+      }
+    }
+    let gMin = 255;
+    let gMax = 0;
+    let gSum = 0;
+    for (const v of grass) {
+      if (v < gMin) gMin = v;
+      if (v > gMax) gMax = v;
+      gSum += v;
+    }
+    writeFileSync(join(outDir, "grass.png"), encodePng(d.width, d.height, grass, 1));
+    meta.assets.grass = {
+      file: "grass.png",
+      width: d.width,
+      height: d.height,
+      rawMin: gMin,
+      rawMax: gMax,
+      rawMean: +(gSum / grass.length).toFixed(1),
+      detailIndicesUsed: usedIdx.size,
+      substituted,
+    };
+    console.log(
+      `  grass.png   ${d.width}x${d.height}  stretch ${gMin}..${gMax} (mean ${(gSum / grass.length).toFixed(1)})`
+    );
+  }
 } else {
   meta.missing.push(trn.detail_elev);
-  console.log(`  ! detail_elev "${trn.detail_elev}" not present (base-game asset) — grass data unavailable for this terrain`);
+  console.log(
+    `  ! detail_elev "${trn.detail_elev}" not present (base-game asset) — pass --detail-elev <strip.pcx> to substitute`
+  );
 }
 
 writeFileSync(join(outDir, "terrain.json"), JSON.stringify(meta, null, 2));

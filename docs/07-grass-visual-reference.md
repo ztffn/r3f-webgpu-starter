@@ -105,3 +105,86 @@ near blades). The references sharpen two points:
 An "authentic mode" toggle that renders columns only — no near blades, no soft blending —
 is therefore worth building *first*, since it is both the fidelity target and the simpler
 shader.
+
+---
+
+## 5. Measurement methodology (added during Phase 2 work)
+
+Impressions are not good enough for this — "looks grassy" passed several builds
+that were measurably wrong. Two statistics, computed on a crop of canopy:
+
+- **`|dx|` / `|dy|`** — mean absolute difference between horizontally and
+  vertically adjacent pixels. Columnar grass changes colour ACROSS columns much
+  more than UP them.
+- **Autocorrelation at lag 8** in each axis — how far structure persists.
+
+Scores on the references (`df2_grass_3` grass field):
+
+| metric | reference |
+| --- | --- |
+| `h/v` ratio | **1.60** |
+| `|dx|` | **2.80** |
+| `|dy|` | **1.75** |
+| hAC@8 | +0.79 |
+| vAC@8 | +0.82 |
+
+**Both numbers matter.** An early build scored h/v 1.46 and looked like a match
+until the crop was inspected: it was bare terrain, where both derivatives are
+near zero and the ratio is meaningless. Always check `|dx|` is in range too.
+
+A headless rig (single tile, fixed vantage, one frame, canvas dumped and scored)
+makes a config testable in ~1.5 s, versus minutes through the full app.
+
+## 6. What the canonical implementation settles
+
+Reading `s-macke/VoxelSpace` (the reverse-engineered Comanche renderer) resolved
+several guesses:
+
+```js
+var mapoffset = ((Math.floor(ply) & mapwidthperiod) << map.shift)
+              + (Math.floor(plx) & mapheightperiod);
+var heightonscreen = (camera.height - map.altitude[mapoffset]) * invz + camera.horizon;
+DrawVerticalLine(i, heightonscreen, hiddeny[i], map.color[mapoffset]);
+if (heightonscreen < hiddeny[i]) hiddeny[i] = heightonscreen;
+```
+
+1. **Colour is a NEAREST lookup at texel granularity** (`map.color[mapoffset]`),
+   and the whole vertical span is painted in that ONE colour. So horizontal
+   variation comes from the colormap itself, and vertical coherence comes from a
+   single texel's colour covering a tall run of pixels. Sampling the colormap
+   smoothly and synthesising variation with noise gets both wrong.
+2. **Columns are ONE TEXEL wide**, not sub-metre. Sub-metre cells are
+   over-engineering (and produce speckle, see §7).
+3. **`deltaz` starts at 1.0 (one texel) and grows by 0.005 per step** —
+   distance-adaptive stepping, confirming step size should scale with range.
+4. **Wrapping is `& 1023`** — bitmask tiling, matching the infinite tiling in
+   `06-...md` §10.
+
+## 7. Current state and the remaining gap (honest)
+
+Implemented: Amanatides-Woo grid DDA (every column tested exactly once, in
+order), NEAREST texel colour per the reference, clumped multi-scale canopy
+variation, total coverage, and the camera-inside-canopy case.
+
+Measured progress: `|dx|` went from **0.17 → 1.83** (reference 2.80) as the
+march moved from fixed steps to DDA and the colour rule was corrected.
+
+**Not yet matching:** vertical autocorrelation sits at **~0.42 against 0.82**,
+and side-by-side the canopy reads as isotropic speckle where the original reads
+as vertical streaks.
+
+The cause is now understood and is geometric, not algorithmic: **you only see
+striations when the visible surface is column FACES, not column TOPS.** With the
+eye above the canopy looking down, every hit lands on a ~1 texel square top,
+which is isotropic by construction. The reference views that show striations are
+all cases where faces are presented — prone inside the canopy, or a grass slope
+tilted toward the camera.
+
+Next steps, in order:
+1. Fix the prone/inside-canopy path. Suppressing the eye's own column currently
+   also kills near, steeply-downward rays, so the prone foreground renders bare
+   terrain — exactly the view that should be most striated.
+2. Reduce canopy-top roughness. Per-cell height noise makes tops speckle;
+   the original's tops come from a detail texture and are far smoother.
+3. Investigate black speckle artifacts appearing along shell silhouettes
+   (visible as dotted lines) — likely alpha-test edges on the lifted shell.

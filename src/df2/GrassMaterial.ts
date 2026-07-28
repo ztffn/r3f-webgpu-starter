@@ -126,6 +126,21 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
   // World xz -> tile uv. Maps repeat, so values outside [0,1] are fine.
   const toUv = (xz: NodeArg): NodeArg => xz.add(uHalfWorld).div(uWorldSize);
 
+  /**
+   * Snap a world xz to its TERRAIN TEXEL centre.
+   *
+   * s-macke/VoxelSpace shows the original took colour as
+   * `map.color[mapoffset]` — a NEAREST lookup at texel granularity — and then
+   * DrawVerticalLine painted the whole vertical span in that ONE colour. So the
+   * horizontal variation between columns comes from the colormap itself, and
+   * the vertical coherence comes from a texel's colour covering a tall run of
+   * pixels. Sampling the colormap smoothly (and synthesising variation with
+   * noise instead) gets both wrong. Sampling at the texel centre reproduces the
+   * nearest-neighbour lookup without needing a second texture.
+   */
+  const texelCentre = (xz: NodeArg): NodeArg =>
+    xz.div(uTexel).floor().add(0.5).mul(uTexel);
+
   const groundAt = (xz: NodeArg): NodeArg =>
     texture(heightMap, toUv(xz)).r.mul(uHeightScale);
 
@@ -282,7 +297,7 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     // produces vertical striations rather than soft volumetric grass
     // (docs/07 §1.1). The colormap supplies the local ground tone; the
     // per-column hash supplies the horizontal variation between neighbours.
-    const base = texture(colorMap, toUv(hitXZ));
+    const base = texture(colorMap, toUv(texelCentre(hitXZ)));
 
     // Only a slight base-to-tip gradient. Measured against the references, real
     // columns are near flat-shaded: colour persists UP a column while changing

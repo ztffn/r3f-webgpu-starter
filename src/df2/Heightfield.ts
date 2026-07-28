@@ -6,12 +6,14 @@
 //      (docs/04-concealment-system-design.md §1), which must be sampled
 //      independently of whatever the GPU draws.
 //
-// Two construction paths, one interface:
-//   new Heightfield()                 — synthetic fBm (no assets needed)
-//   Heightfield.fromHeightmap(...)    — a real extracted DF heightmap
+// THE MAP TILES INFINITELY. DF2 terrain has no edges — it repeats forever in x
+// and z (docs/06-asset-extraction-findings.md §10). So the field stores exactly
+// `period x period` distinct samples and every lookup wraps modulo that period;
+// there is no duplicated edge row and no clamping.
 //
-// The instance carries its own world extent, so the rest of the renderer works
-// unchanged whether the map is a 1 km synthetic field or a ~2 km real one.
+// Two construction paths, one interface:
+//   Heightfield.synthetic()           — periodic fBm (no assets needed)
+//   Heightfield.fromHeightmap(...)    — a real extracted DF heightmap
 
 import { fbm } from "./noise";
 import {
@@ -22,7 +24,8 @@ import {
   HEIGHT_SCALE,
 } from "./config";
 
-// How many noise lattice units the synthetic world spans at the coarsest octave.
+// Lattice units the synthetic tile spans at the base octave. Integer, so the
+// noise wraps cleanly and the tile is seamless.
 const BASE_FREQUENCY = 5;
 
 export type Vec3Out = [number, number, number];
@@ -36,25 +39,23 @@ export interface HeightmapSource {
 }
 
 export class Heightfield {
-  /** Cells per side; the sample grid is (n+1) x (n+1). */
-  readonly n: number;
-  readonly stride: number;
+  /** Samples per side. Also the tiling period — index i wraps to i % period. */
+  readonly period: number;
   /** Metres between adjacent samples. */
   readonly cellSize: number;
-  /** Total world extent in metres (n * cellSize). */
+  /** Size of one tile in metres (period * cellSize). The world repeats this. */
   readonly worldSize: number;
   readonly halfWorld: number;
   readonly grid: Float32Array;
-  minHeight = 0;
-  maxHeight = 0;
+  readonly minHeight: number;
+  readonly maxHeight: number;
   /** True when built from real extracted terrain data rather than noise. */
   readonly isReal: boolean;
 
-  private constructor(n: number, cellSize: number, grid: Float32Array, isReal: boolean) {
-    this.n = n;
-    this.stride = n + 1;
+  private constructor(period: number, cellSize: number, grid: Float32Array, isReal: boolean) {
+    this.period = period;
     this.cellSize = cellSize;
-    this.worldSize = n * cellSize;
+    this.worldSize = period * cellSize;
     this.halfWorld = this.worldSize / 2;
     this.grid = grid;
     this.isReal = isReal;
@@ -69,24 +70,21 @@ export class Heightfield {
     this.maxHeight = max;
   }
 
-  /** Synthetic fBm terrain — the no-assets fallback. */
+  /** Synthetic, seamlessly tiling fBm terrain — the no-assets fallback. */
   static synthetic(seed = 1337): Heightfield {
-    const n = GRID_CELLS;
-    const stride = n + 1;
-    const cellSize = WORLD_SIZE / n;
-    const half = WORLD_SIZE / 2;
-    const grid = new Float32Array(stride * stride);
-    for (let j = 0; j <= n; j++) {
-      const z = -half + j * cellSize;
-      const nz = ((z + half) / WORLD_SIZE) * BASE_FREQUENCY;
-      for (let i = 0; i <= n; i++) {
-        const x = -half + i * cellSize;
-        const nx = ((x + half) / WORLD_SIZE) * BASE_FREQUENCY;
+    const period = GRID_CELLS;
+    const cellSize = WORLD_SIZE / period;
+    const grid = new Float32Array(period * period);
+    for (let j = 0; j < period; j++) {
+      const nz = (j / period) * BASE_FREQUENCY;
+      for (let i = 0; i < period; i++) {
+        const nx = (i / period) * BASE_FREQUENCY;
         // Power curve flattens lowlands and keeps highlands sharper.
-        grid[j * stride + i] = Math.pow(fbm(nx, nz, { seed, octaves: 6 }), 1.85) * TERRAIN_HEIGHT;
+        const v = fbm(nx, nz, { seed, octaves: 6, period: BASE_FREQUENCY });
+        grid[j * period + i] = Math.pow(v, 1.85) * TERRAIN_HEIGHT;
       }
     }
-    return new Heightfield(n, cellSize, grid, false);
+    return new Heightfield(period, cellSize, grid, false);
   }
 
   /** Build from a real extracted DF heightmap (8-bit greyscale, size x size). */
@@ -94,37 +92,30 @@ export class Heightfield {
     const { data, size } = src;
     const cellSize = src.metersPerTexel ?? METERS_PER_TEXEL;
     const scale = src.heightScale ?? HEIGHT_SCALE;
-    // `size` samples per side => size-1 cells.
-    const n = size - 1;
     const grid = new Float32Array(size * size);
     for (let i = 0; i < size * size; i++) grid[i] = data[i] * scale;
-    return new Heightfield(n, cellSize, grid, true);
+    return new Heightfield(size, cellSize, grid, true);
   }
 
-  /** Bilinear elevation at world (x, z). Outside the map, clamps to the edge. */
+  /** Bilinear elevation at world (x, z). Wraps — the map has no edges. */
   sample(x: number, z: number): number {
-    const { stride, grid, n, cellSize, halfWorld } = this;
-    let gx = (x + halfWorld) / cellSize;
-    let gz = (z + halfWorld) / cellSize;
-    if (gx < 0) gx = 0;
-    else if (gx > n) gx = n;
-    if (gz < 0) gz = 0;
-    else if (gz > n) gz = n;
+    const { grid, period, cellSize, halfWorld } = this;
+    const gx = (x + halfWorld) / cellSize;
+    const gz = (z + halfWorld) / cellSize;
 
-    const i0 = Math.floor(gx);
-    const j0 = Math.floor(gz);
-    const i1 = i0 < n ? i0 + 1 : i0;
-    const j1 = j0 < n ? j0 + 1 : j0;
-    const fx = gx - i0;
-    const fz = gz - j0;
+    const fx0 = Math.floor(gx);
+    const fz0 = Math.floor(gz);
+    const i0 = ((fx0 % period) + period) % period;
+    const j0 = ((fz0 % period) + period) % period;
+    const i1 = i0 + 1 === period ? 0 : i0 + 1;
+    const j1 = j0 + 1 === period ? 0 : j0 + 1;
+    const fx = gx - fx0;
+    const fz = gz - fz0;
 
-    const h00 = grid[j0 * stride + i0];
-    const h10 = grid[j0 * stride + i1];
-    const h01 = grid[j1 * stride + i0];
-    const h11 = grid[j1 * stride + i1];
-
-    const a = h00 + (h10 - h00) * fx;
-    const b = h01 + (h11 - h01) * fx;
+    const r0 = j0 * period;
+    const r1 = j1 * period;
+    const a = grid[r0 + i0] + (grid[r0 + i1] - grid[r0 + i0]) * fx;
+    const b = grid[r1 + i0] + (grid[r1 + i1] - grid[r1 + i0]) * fx;
     return a + (b - a) * fz;
   }
 

@@ -86,8 +86,10 @@ export async function loadTerrain(slug: string): Promise<LoadedTerrain | null> {
       colorMap.flipY = false;
       colorMap.colorSpace = THREE.SRGBColorSpace;
       colorMap.anisotropy = 8;
-      colorMap.wrapS = THREE.ClampToEdgeWrapping;
-      colorMap.wrapT = THREE.ClampToEdgeWrapping;
+      // The map tiles infinitely (docs/06 §10), so UVs run past [0,1] and the
+      // colormap must repeat rather than smear its edge pixels.
+      colorMap.wrapS = THREE.RepeatWrapping;
+      colorMap.wrapT = THREE.RepeatWrapping;
     }
 
     return {

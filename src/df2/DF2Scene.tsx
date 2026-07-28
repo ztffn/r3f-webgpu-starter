@@ -77,6 +77,9 @@ export function DF2Scene({ wireframe = false, onStatus }: DF2SceneProps) {
   // .trn water_height is in raw elevation units, same scale as the heightmap.
   const waterLevel = (loaded?.waterHeight ?? 0) * HEIGHT_SCALE;
   const showWater = !!heightfield && waterLevel > heightfield.minHeight;
+  // The terrain tiles forever, so water must too — make the plane large enough
+  // to exceed the fog distance from anywhere the camera can be.
+  const waterSpan = Math.max(worldSize * 4, FOG_FAR * 4);
 
   // Frame the camera to the map: high enough to see the whole terrain.
   const camTarget = heightfield ? (heightfield.minHeight + heightfield.maxHeight) / 2 : 30;
@@ -105,7 +108,7 @@ export function DF2Scene({ wireframe = false, onStatus }: DF2SceneProps) {
 
       {showWater && (
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, waterLevel, 0]}>
-          <planeGeometry args={[worldSize, worldSize]} />
+          <planeGeometry args={[waterSpan, waterSpan]} />
           <primitive object={waterMaterial} attach="material" />
         </mesh>
       )}

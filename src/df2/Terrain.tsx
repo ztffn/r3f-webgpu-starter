@@ -1,29 +1,33 @@
-// Chunked, LOD'd terrain renderer.
+// Infinite chunked, LOD'd terrain renderer.
 //
-// One THREE.Mesh per chunk, all sharing one TSL terrain material. Each frame,
-// every chunk picks a LOD from its distance to the camera; geometries are built
-// lazily and cached per (chunk, lod), so a LOD change is just a geometry swap
-// with no per-frame allocation
-// (docs/03-terrain-and-grass-rendering-design.md §2, docs/05-...md §4).
+// DF2 terrain tiles forever — there is no map edge (docs/06 §10). So instead of
+// a fixed grid over one map, this maintains a moving window of chunks centred on
+// the camera. As the camera crosses a chunk boundary the window re-indexes and
+// meshes are repositioned; nothing is allocated per frame.
 //
-// Chunk extent is derived from the heightfield, so the same code renders a 1 km
-// synthetic field and a ~2 km extracted DF map.
+// The tiling makes geometry highly reusable: chunk (cx, cz) has exactly the same
+// shape as chunk (cx + period, cz), so geometries are cached by
+// (wrapped chunk index, lod) and shared across every repeat on screen. A chunk's
+// geometry is built in local space and placed with mesh.position.
 
 import { useThree, useFrame } from "@react-three/fiber";
 import { useMemo, useRef, useEffect } from "react";
 import * as THREE from "three/webgpu";
 import type { Heightfield } from "./Heightfield";
 import { buildChunkGeometry } from "./terrainGeometry";
-import { CHUNK_COUNT, LOD_SEGMENTS, LOD_DISTANCE_CHUNKS } from "./config";
+import {
+  CHUNK_COUNT,
+  VIEW_RADIUS_CHUNKS,
+  LOD_SEGMENTS,
+  LOD_DISTANCE_CHUNKS,
+} from "./config";
 
-interface Chunk {
-  ox: number;
-  oz: number;
-  centerX: number;
-  centerZ: number;
+interface Slot {
   mesh: THREE.Mesh;
-  cache: Map<number, THREE.BufferGeometry>;
-  currentLod: number;
+  /** Absolute chunk indices currently displayed (can be negative / unbounded). */
+  cx: number;
+  cz: number;
+  lod: number;
 }
 
 export interface TerrainProps {
@@ -39,84 +43,96 @@ export function Terrain({ heightfield, material, wireframe = false }: TerrainPro
   const state = useMemo(() => {
     const group = new THREE.Group();
     group.name = "terrain";
-    const chunkSize = heightfield.worldSize / CHUNK_COUNT;
-    const half = heightfield.halfWorld;
-    const lodDistances = LOD_DISTANCE_CHUNKS.map((c) => c * chunkSize);
 
-    const getGeometry = (chunk: Chunk, lod: number): THREE.BufferGeometry => {
-      let geo = chunk.cache.get(lod);
+    const chunkSize = heightfield.worldSize / CHUNK_COUNT;
+    const lodDistances = LOD_DISTANCE_CHUNKS.map((c) => c * chunkSize);
+    // Geometry cache keyed by "wrappedCx,wrappedCz,lod" — shared across repeats.
+    const cache = new Map<string, THREE.BufferGeometry>();
+
+    const getGeometry = (cx: number, cz: number, lod: number): THREE.BufferGeometry => {
+      const wx = ((cx % CHUNK_COUNT) + CHUNK_COUNT) % CHUNK_COUNT;
+      const wz = ((cz % CHUNK_COUNT) + CHUNK_COUNT) % CHUNK_COUNT;
+      const key = `${wx},${wz},${lod}`;
+      let geo = cache.get(key);
       if (!geo) {
         geo = buildChunkGeometry({
           heightfield,
-          ox: chunk.ox,
-          oz: chunk.oz,
+          // Sample from the base tile; sample() wraps so this is the canonical
+          // shape shared by every repeat of this chunk.
+          ox: -heightfield.halfWorld + wx * chunkSize,
+          oz: -heightfield.halfWorld + wz * chunkSize,
           size: chunkSize,
           segments: LOD_SEGMENTS[lod],
         });
-        chunk.cache.set(lod, geo);
+        cache.set(key, geo);
       }
       return geo;
     };
 
-    const chunks: Chunk[] = [];
-    const coarsest = LOD_SEGMENTS.length - 1;
-    for (let cz = 0; cz < CHUNK_COUNT; cz++) {
-      for (let cx = 0; cx < CHUNK_COUNT; cx++) {
-        const ox = -half + cx * chunkSize;
-        const oz = -half + cz * chunkSize;
-        const mesh = new THREE.Mesh(undefined, material);
-        const chunk: Chunk = {
-          ox,
-          oz,
-          centerX: ox + chunkSize / 2,
-          centerZ: oz + chunkSize / 2,
-          mesh,
-          cache: new Map(),
-          currentLod: coarsest,
-        };
-        // Start every chunk at the cheapest LOD; useFrame refines from there.
-        mesh.geometry = getGeometry(chunk, coarsest);
-        group.add(mesh);
-        chunks.push(chunk);
-      }
+    const span = VIEW_RADIUS_CHUNKS * 2 + 1;
+    const slots: Slot[] = [];
+    for (let k = 0; k < span * span; k++) {
+      const mesh = new THREE.Mesh(undefined, material);
+      mesh.frustumCulled = true;
+      group.add(mesh);
+      slots.push({ mesh, cx: NaN, cz: NaN, lod: -1 });
     }
 
-    return { group, chunks, getGeometry, lodDistances };
+    return { group, slots, getGeometry, chunkSize, lodDistances, cache };
   }, [heightfield, material]);
 
-  // Keep material wireframe in sync with the prop.
   useEffect(() => {
     (material as THREE.MeshStandardMaterial).wireframe = wireframe;
   }, [material, wireframe]);
 
-  // Dispose cached geometries when the heightfield changes or on unmount.
   useEffect(() => {
-    const { chunks } = state;
+    const { cache } = state;
     return () => {
-      for (const chunk of chunks) {
-        for (const geo of chunk.cache.values()) geo.dispose();
-      }
+      for (const geo of cache.values()) geo.dispose();
+      cache.clear();
     };
   }, [state]);
 
   useFrame(() => {
     const p = camPos.current;
     camera.getWorldPosition(p);
-    const { chunks, lodDistances, getGeometry } = state;
-    for (const chunk of chunks) {
-      const dist = Math.hypot(chunk.centerX - p.x, chunk.centerZ - p.z);
 
-      let lod = lodDistances.length - 1;
-      for (let l = 0; l < lodDistances.length; l++) {
-        if (dist <= lodDistances[l]) {
-          lod = l;
-          break;
+    const { slots, getGeometry, chunkSize, lodDistances } = state;
+    const half = heightfield.halfWorld;
+
+    // Chunk the camera currently occupies, in absolute (unwrapped) indices.
+    const camCx = Math.floor((p.x + half) / chunkSize);
+    const camCz = Math.floor((p.z + half) / chunkSize);
+
+    let k = 0;
+    for (let dz = -VIEW_RADIUS_CHUNKS; dz <= VIEW_RADIUS_CHUNKS; dz++) {
+      for (let dx = -VIEW_RADIUS_CHUNKS; dx <= VIEW_RADIUS_CHUNKS; dx++, k++) {
+        const slot = slots[k];
+        const cx = camCx + dx;
+        const cz = camCz + dz;
+
+        const ox = -half + cx * chunkSize;
+        const oz = -half + cz * chunkSize;
+        const dist = Math.hypot(ox + chunkSize / 2 - p.x, oz + chunkSize / 2 - p.z);
+
+        let lod = lodDistances.length - 1;
+        for (let l = 0; l < lodDistances.length; l++) {
+          if (dist <= lodDistances[l]) {
+            lod = l;
+            break;
+          }
         }
-      }
 
-      if (lod !== chunk.currentLod) {
-        chunk.mesh.geometry = getGeometry(chunk, lod);
-        chunk.currentLod = lod;
+        if (slot.cx !== cx || slot.cz !== cz) {
+          slot.mesh.position.set(ox, 0, oz);
+          slot.cx = cx;
+          slot.cz = cz;
+          slot.lod = -1; // force geometry refresh for the new location
+        }
+        if (slot.lod !== lod) {
+          slot.mesh.geometry = getGeometry(cx, cz, lod);
+          slot.lod = lod;
+        }
       }
     }
   });

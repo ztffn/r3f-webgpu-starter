@@ -28,19 +28,24 @@ export const GRID_CELLS = 512; // -> 513x513 samples
 export const CELL_SIZE = WORLD_SIZE / GRID_CELLS;
 
 // --- Chunking & LOD ----------------------------------------------------------
-// The world is a CHUNK_COUNT x CHUNK_COUNT grid of square chunks. Chunk size is
-// derived from the active heightfield's world size, so this works for both the
-// synthetic and real-map paths.
-export const CHUNK_COUNT = 16;
+// DF terrain tiles infinitely, so chunks are not a fixed grid over one map —
+// they form a moving window centred on the camera (docs/06 §10). One tile is
+// CHUNK_COUNT x CHUNK_COUNT chunks; the window repeats that tile outward.
+export const CHUNK_COUNT = 8;
+
+// How many chunks out from the camera to draw, in each direction. The visible
+// window is (2*VIEW_RADIUS_CHUNKS + 1)^2 chunks; frustum culling removes most.
+// At a ~256 m chunk this reaches ~2.3 km, matching FOG_FAR.
+export const VIEW_RADIUS_CHUNKS = 9;
 
 // Segment resolutions per LOD, highest detail first. A chunk built at N segments
-// has (N+1)^2 grid vertices. At 64 segments over a ~128 m chunk the vertex
+// has (N+1)^2 grid vertices. At 128 segments over a ~256 m chunk the vertex
 // spacing matches the source heightmap's 2 m texel spacing exactly.
-export const LOD_SEGMENTS: number[] = [64, 32, 16, 8, 4];
+export const LOD_SEGMENTS: number[] = [128, 64, 32, 16, 8];
 
 // LOD switch distances, expressed in CHUNK WIDTHS from the camera so they scale
 // with the map. Parallel to LOD_SEGMENTS; last entry catches everything beyond.
-export const LOD_DISTANCE_CHUNKS: number[] = [1.5, 3, 6, 11, Infinity];
+export const LOD_DISTANCE_CHUNKS: number[] = [1.2, 2.5, 4.5, 8, Infinity];
 
 // Perimeter skirt depth used to hide cracks between differing-LOD chunks
 // (docs/03-terrain-and-grass-rendering-design.md §2.3).

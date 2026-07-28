@@ -1,8 +1,15 @@
 // Builds a single terrain chunk's BufferGeometry from a Heightfield.
 //
-// Each chunk is a regular grid at a given LOD (segment count) plus a perimeter
-// "skirt" — a ring of edge vertices dropped straight down — to hide the cracks
-// that appear where neighbouring chunks are at different LODs
+// Vertices are emitted in LOCAL space (0..size on x/z) with the world origin
+// supplied separately, so one geometry can be reused at every tile repeat of the
+// same chunk — the map tiles infinitely, so chunk (cx, cz) and chunk
+// (cx + period, cz) have identical shape (docs/06 §10).
+//
+// UVs are the *wrapped* world position over one tile; the colormap uses
+// RepeatWrapping, so the same UVs are correct at every repeat.
+//
+// Each chunk carries a perimeter "skirt" — a ring of edge vertices dropped
+// straight down — to hide cracks where neighbouring chunks sit at different LODs
 // (docs/03-terrain-and-grass-rendering-design.md §2.3).
 //
 // Normals come from the heightfield gradient, not the triangles, so shading is
@@ -14,6 +21,7 @@ import type { Heightfield, Vec3Out } from "./Heightfield";
 
 export interface ChunkGeometryParams {
   heightfield: Heightfield;
+  /** World-space corner of the chunk used for sampling (may be any tile repeat). */
   ox: number;
   oz: number;
   size: number;
@@ -36,24 +44,20 @@ export function buildChunkGeometry({
   const indices: number[] = [];
 
   const nrm: Vec3Out = [0, 1, 0];
-
-  // Global UV (0..1 across the whole map) so the colormap is continuous across
-  // chunk seams. Derived from the heightfield's own extent, so this works for
-  // both the synthetic and real-map paths.
   const { halfWorld, worldSize } = heightfield;
 
-  // --- Grid vertices -------------------------------------------------------
+  // --- Grid vertices (local space) -----------------------------------------
   for (let j = 0; j <= N; j++) {
-    const z = oz + (j / N) * size;
+    const lz = (j / N) * size;
+    const wz = oz + lz;
     for (let i = 0; i <= N; i++) {
-      const x = ox + (i / N) * size;
-      const y = heightfield.sample(x, z);
-      heightfield.normal(x, z, nrm);
-      const u = (x + halfWorld) / worldSize;
-      const v = (z + halfWorld) / worldSize;
-      positions.push(x, y, z);
+      const lx = (i / N) * size;
+      const wx = ox + lx;
+      // sample()/normal() wrap, so world coords outside the base tile are fine.
+      positions.push(lx, heightfield.sample(wx, wz), lz);
+      heightfield.normal(wx, wz, nrm);
       normals.push(nrm[0], nrm[1], nrm[2]);
-      uvs.push(u, v);
+      uvs.push((wx + halfWorld) / worldSize, (wz + halfWorld) / worldSize);
     }
   }
 
@@ -110,10 +114,7 @@ export function buildChunkGeometry({
 
   // --- Assemble ------------------------------------------------------------
   const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute(
-    "position",
-    new THREE.Float32BufferAttribute(positions, 3)
-  );
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
   geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
   geometry.setIndex(indices);

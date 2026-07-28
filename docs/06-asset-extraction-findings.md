@@ -173,3 +173,30 @@ grass using `ct1_dm`/`ct2_dm` as a stand-in stretch set.
 `tools/df2-extract/` currently implements the **validated** parts: PFF3 unpack + `.trn`
 parse + inventory. Image decoders (PCX 8-bit RLE, TGA, JPEG passthrough) and the
 `grassHeightField` bake are the remaining Phase 0 work — see `01-...md` roadmap.
+
+---
+
+## 10. Terrain tiles infinitely (confirmed by original play experience)
+
+DF2 terrain has **no edges** — the 1024² tile repeats seamlessly in x and z forever. This is
+intrinsic to the Voxel Space column raycaster: the ray march samples the heightfield modulo
+the map size, so there is no boundary to reach. Players could drive or fly in one direction
+indefinitely and terrain kept coming.
+
+**Implications, now implemented:**
+
+- Heightfield sampling **wraps modulo the map period**, never clamps. The field stores
+  exactly `period × period` distinct samples (no duplicated edge row).
+- The colormap uses `RepeatWrapping`; UVs run past `[0,1]` and repeat.
+- The renderer maintains a **camera-centred moving window of chunks** rather than a fixed
+  grid over one map instance. Because the map tiles, chunk `(cx, cz)` and
+  `(cx + period, cz)` are identical, so geometry is cached by *wrapped* chunk index and
+  shared across every repeat on screen.
+- The synthetic fallback uses **periodic** fBm (lattice wrapped per octave) so it tiles
+  seamlessly too.
+- Verified numerically: sampling one tile-width apart returns bit-identical heights
+  (error 0.000000), and crossing a tile seam shows no discontinuity beyond
+  finite-difference epsilon (~0.01% of relief).
+
+Any future gameplay system (concealment line-of-sight in particular) must wrap the same
+way, or sightlines will break at an invisible boundary.

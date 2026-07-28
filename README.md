@@ -28,15 +28,27 @@ game assets required):
 The CPU-side heightfield (`src/df2/Heightfield.ts`) is deliberately decoupled from the render
 mesh so it can later serve as the gameplay/concealment field without a rewrite.
 
+### Real asset extraction — done
+
+Real DF-era terrain data has been extracted from community modding installers (statically,
+no Wine needed): **27 terrains** from a 2003 TerrainPack (DF1 desert/snow, 20 Land Warrior
+maps) and **9** from the TerraNova EXP2b expansion (Green Mile, Balnakiel, 1stLook, River…).
+Confirmed: colormap = JPEG 1024², heightmap = PCX 1024² 8-bit, plus a per-texel detail map
+and 256-tile grass **stretch-height** strips. `tools/df2-extract` unpacks `.pff` archives and
+`.trn` manifests. Findings: [`docs/06`](./docs/06-asset-extraction-findings.md).
+
+Extracted assets are **not** committed (NovaLogic + community authorship).
+
 See [`docs/`](./docs) for the full design:
 
 | Doc | Topic |
 | --- | --- |
 | [`01`](./docs/01-project-overview-and-roadmap.md) | Project overview & phased roadmap |
-| [`02`](./docs/02-asset-format-specification.md) | PFF/TGA/PCX/`.3DI` asset formats |
+| [`02`](./docs/02-asset-format-specification.md) | PFF/TGA/PCX/`.3DI` + terrain formats |
 | [`03`](./docs/03-terrain-and-grass-rendering-design.md) | Terrain & grass rendering design |
 | [`04`](./docs/04-concealment-system-design.md) | Concealment / line-of-sight system |
 | [`05`](./docs/05-engine-architecture-tech-stack.md) | Engine architecture & tech stack |
+| [`06`](./docs/06-asset-extraction-findings.md) | **Asset extraction findings (ground truth)** |
 
 ## Source layout
 
@@ -79,10 +91,13 @@ WebGPU is unavailable.
 
 ## Roadmap (next)
 
-- **Phase 0** — `df2-extract` asset pipeline (PFF3 unpack, TGA/PCX→PNG, `.3DI`→glTF).
+- **▶ Phase 1.5 — real-map demo (next milestone):** decode a real terrain's heightmap +
+  colormap into the existing chunked renderer, calibrate world scale, apply the `.trn`
+  environment scalars. Validates "does this feel like DF2?" before any grass work.
+- **Phase 0 (remainder)** — PCX/TGA decoders → PNG, and bake the `grassHeightField`.
 - **Phase 2** — grass: relief-mapped far field + compute-instanced near-field blades.
-- **Phase 3** — concealment / line-of-sight against a decoupled gameplay heightfield.
-- **Phase 4** — swap synthetic data for real extracted terrain; controller, physics, AI.
+- **Phase 3** — concealment / line-of-sight, reading the same `grassHeightField`.
+- **Phase 4** — first-person controller, physics, ECS, AI/objectives.
 
 ## Credits
 

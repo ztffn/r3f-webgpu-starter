@@ -132,3 +132,8 @@ dist
 
 # Production build output (Vite)
 /dist
+
+# Extracted game assets — never commit (NovaLogic + community authorship)
+/assets/
+*.pff
+*.trn

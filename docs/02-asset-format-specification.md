@@ -8,6 +8,9 @@ terrain-authoring guide. All structures confirmed by reading source directly, no
 
 ## 1. PFF3 / PFF2 archive container
 
+> **Verified byte-exact** against real DF-era `.pff` archives (July 2026) — see
+> `06-asset-extraction-findings.md`. The parser lives in `tools/df2-extract`.
+
 The `.pff` file is a flat archive: a file-table (directory) plus raw file blobs. Two
 signature variants share an identical layout (`PFF2`, `PFF3`).
 
@@ -181,28 +184,38 @@ mapping from `ModelMaterial.TexIndex` into the `ModelTexture` list.
 
 ---
 
-## 5. Terrain files — believed format (unconfirmed pending real data)
+## 5. Terrain files — CONFIRMED against real data
 
-No terrain-specific binary parser exists in the reference tools repository — searched and
-confirmed absent. Cross-referencing the NovaHQ terrain-authoring guide (community,
-contemporaneous with DF2's active modding era), terrain data is described entirely in
-terms of standard 2D image files, strongly implying **no proprietary terrain container
-format** — just plain TGA/PCX assets (readable with the loaders in §2/§3) sitting inside
-the `.pff`, named/typed per the list below, interpreted by the *game engine* rather than
-requiring a special *file* decoder:
+> The hypothesis below was **verified** by extracting real DF-era terrains (July 2026). Full
+> notes, inventory, and the grass data model in `06-asset-extraction-findings.md`; this is a
+> summary. As predicted, there is **no proprietary terrain container** — just plain
+> JPEG/PCX/TGA images plus a plaintext `.trn` manifest inside the `.pff`.
 
-| File | Role | Likely format |
+Each terrain is defined by a small **plaintext `.trn` manifest** that references its images
+by base name. Confirmed keys: `terrain_name`, `terrain_creator`, `color_map`, `elev_map`,
+`detail_map`, `detail_color`, `detail_elev`, `char_data`, `sky_map`, `sky_palette`,
+`sky_height`, `horizon`, `water_map`, `water_height`, `filter` (RGB), `gamma`, `saturation`,
+`sun_slope`. Naming convention: `_c` colormap, `_d` elevation, `_m` detail map, `_dm`
+detail-elevation strip, `_cm` detail-color strip.
+
+| Role (`.trn` key) | File | **Confirmed** format & size |
 |---|---|---|
-| Colormap | Visible terrain surface color (pre-shaded, includes baked lighting/shadow) | TGA, RGB |
-| Heightmap | Greyscale elevation, one value per terrain texel | TGA or PCX, 8-bit greyscale |
-| Detail map | 8-bit/256-color palette map; palette index encodes grass/sand/rock zoning | PCX (palette-native) or 8-bit TGA |
-| Detail color texture strip | Small strip of actual grass/sand/rock textures referenced by detail-map indices | TGA, RGB |
-| Detail elevation greyscale strip | Per-detail-texture-index height/stretch amount for stretched-voxel grass | TGA or PCX, 8-bit greyscale |
-| `.cal` | Character/shading calibration data | Unknown, needs a real sample |
-| Sky map, cloud height, horizon type, water map/height, filter, gamma, saturation, sunslope | Environment parameters | Mix of small images and scalar config values, format TBD |
+| `color_map` | `<t>_c.jpg` | **JPEG**, 1024×1024 RGB (pre-shaded; baked lighting/shadow) |
+| `elev_map` (heightmap) | `<t>_d.pcx` | **PCX, 1024×1024, 8-bit greyscale** — the heightmap |
+| `detail_map` | `<t>_m.pcx` | **PCX, 1024×1024, 8-bit palettized** — per-texel detail index (high-frequency; e.g. 62 distinct indices on Green Mile) |
+| `detail_color` | `<set>_cm.tga` | **64×16384 RGBA strip = 256 tiles of 64×64** — ground textures per detail index |
+| `detail_elev` | `<set>_dm.pcx` | **64×16384 greyscale strip = 256 tiles of 64×64** — per-index grass **stretch height** |
+| env params | (in `.trn`) | `sky_height`, `horizon`, `water_map`, `water_height`, `filter` RGB, `gamma`, `saturation`, `sun_slope` — plain scalars |
 
-**This section is the first thing to verify once real terrain files arrive** — confirm
-actual file extensions/names inside a real `.pff` terrain entry, confirm heightmap/colormap
-resolution, and confirm whether detail-map palette assignment is fixed across all DF2
-terrains or authored per-terrain (this determines whether grass/sand/rock zone detection
-can be hardcoded or must be read per-map).
+**Corrections to the original guess:** colormap is **JPEG** (not TGA); the heightmap is the
+`_d.pcx` (`_d` = elevation — the `_m.pcx` is the *detail* map, not the heightmap); the
+detail-color/detail-elevation "strips" are concretely **256 stacked 64×64 tiles**, indexed
+by the detail-map value.
+
+**Grass model:** `detail_map[x,z]` → index → `detail_elev` tile → stretch height. Baking that
+over the whole map yields the `grassHeightField` shared by the renderer (`03-...md` §4.1) and
+concealment (`04-...md`). Detail-map palettes are **authored per-terrain**, not fixed.
+
+**Still open:** the greyscale→world-height scale for both heightmap and stretch strip (tune
+visually / calibrate), and the contents of the base-game grass set `dfdg1_dm` (not present in
+the modding packs — see `06-...md` §7).

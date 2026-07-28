@@ -9,13 +9,8 @@
 // identical across LODs (§2.4).
 
 import * as THREE from "three/webgpu";
-import { WORLD_SIZE, HALF_WORLD, SKIRT_DEPTH } from "./config";
+import { SKIRT_DEPTH } from "./config";
 import type { Heightfield, Vec3Out } from "./Heightfield";
-
-// Global UV so a (future) colormap texture tiles continuously across chunk seams.
-function worldToUv(x: number, z: number): [number, number] {
-  return [(x + HALF_WORLD) / WORLD_SIZE, (z + HALF_WORLD) / WORLD_SIZE];
-}
 
 export interface ChunkGeometryParams {
   heightfield: Heightfield;
@@ -42,6 +37,11 @@ export function buildChunkGeometry({
 
   const nrm: Vec3Out = [0, 1, 0];
 
+  // Global UV (0..1 across the whole map) so the colormap is continuous across
+  // chunk seams. Derived from the heightfield's own extent, so this works for
+  // both the synthetic and real-map paths.
+  const { halfWorld, worldSize } = heightfield;
+
   // --- Grid vertices -------------------------------------------------------
   for (let j = 0; j <= N; j++) {
     const z = oz + (j / N) * size;
@@ -49,7 +49,8 @@ export function buildChunkGeometry({
       const x = ox + (i / N) * size;
       const y = heightfield.sample(x, z);
       heightfield.normal(x, z, nrm);
-      const [u, v] = worldToUv(x, z);
+      const u = (x + halfWorld) / worldSize;
+      const v = (z + halfWorld) / worldSize;
       positions.push(x, y, z);
       normals.push(nrm[0], nrm[1], nrm[2]);
       uvs.push(u, v);

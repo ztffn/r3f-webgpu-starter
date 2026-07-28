@@ -21,7 +21,8 @@ interface CameraConfig {
 }
 
 const DEFAULT_CAMERA: CameraConfig = {
-  position: [0, 210, 380],
+  // Framed for a ~2 km extracted map; MapControls lets you drop to ground level.
+  position: [0, 520, 900],
   near: CAMERA_NEAR,
   far: CAMERA_FAR,
   fov: 60,

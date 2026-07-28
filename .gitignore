@@ -137,3 +137,6 @@ dist
 /assets/
 *.pff
 *.trn
+
+# Prepared terrain assets (derived from extracted game data)
+/public/assets/

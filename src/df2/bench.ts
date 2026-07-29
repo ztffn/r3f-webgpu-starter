@@ -15,8 +15,12 @@ export interface BenchConfig {
   enabled: boolean;
   /** Device pixel ratio override; the ray-count axis. */
   dpr?: number;
-  /** Grass march iteration cap; the steps-per-ray axis. */
+  /** Coarse bracket samples per ray; the dominant cost axis. */
   steps?: number;
+  /** Bisections inside the bracket. Baked into the graph, so reload to change. */
+  refine?: number;
+  /** Show the live grass slider panel. Independent of `bench`. */
+  debug?: boolean;
   grass?: boolean;
   stance?: Stance;
   /** Fixed camera position, world metres. */
@@ -31,7 +35,9 @@ export interface BenchConfig {
 function parse(): BenchConfig {
   if (typeof window === "undefined") return { enabled: false };
   const q = new URLSearchParams(window.location.search);
-  if (q.get("bench") !== "1") return { enabled: false };
+  const debug = q.get("debug") === "1";
+  // The slider panel is useful on its own, without the fixed benchmark vantage.
+  if (q.get("bench") !== "1") return { enabled: false, debug };
 
   const num = (k: string): number | undefined => {
     const v = q.get(k);
@@ -43,8 +49,10 @@ function parse(): BenchConfig {
 
   return {
     enabled: true,
+    debug,
     dpr: num("dpr"),
     steps: num("steps"),
+    refine: num("refine"),
     grass: q.get("grass") === null ? undefined : q.get("grass") !== "0",
     stance:
       stance === "stand" || stance === "crouch" || stance === "prone" ? stance : undefined,

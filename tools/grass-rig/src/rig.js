@@ -158,12 +158,13 @@ export async function run(opts) {
       // Defaults track src/df2/config.ts so an un-parameterised run measures what
       // actually ships. They had drifted apart: the rig's own README documented
       // cellSize 0.03 and nearClip 1.2 while these defaults said 0.35 and 0.45.
-      steps: opts.steps ?? 96,
+      steps: opts.steps ?? 12,
       cellSize: opts.cellSize ?? 0.03,
       debugHit: opts.debugHit ?? false,
       debugDistance: opts.debugDistance ?? false,
       toneVariation: opts.toneVariation ?? 0.85,
-      pixelsPerStep: opts.pixelsPerStep ?? 1.0,
+      refineSteps: opts.refineSteps ?? 4,
+      maxSpan: opts.maxSpan ?? 48,
       nearClip: opts.nearClip ?? 1.2,
       hashPeriod: opts.hashPeriod ?? 120,
       fadeStart: opts.fadeStart ?? 700,

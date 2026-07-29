@@ -15,7 +15,7 @@ import { PerfMonitor, type PerfSample } from "./PerfMonitor";
 import { FlyControls, type FlyState, type Stance } from "./FlyControls";
 import { Heightfield } from "./Heightfield";
 import { createTerrainMaterial } from "./TerrainMaterial";
-import { createGrassMaterial } from "./GrassMaterial";
+import { createGrassMaterial, type GrassUniforms } from "./GrassMaterial";
 import { bakeSyntheticMaps } from "./syntheticMaps";
 import { loadTerrain, type LoadedTerrain } from "./loadTerrain";
 import { BENCH } from "./bench";
@@ -27,7 +27,9 @@ import {
   GRASS_STEPS,
   GRASS_CELL,
   GRASS_NEAR_CLIP,
-  GRASS_PIXELS_PER_STEP,
+  GRASS_REFINE_STEPS,
+  GRASS_MAX_SPAN,
+  GRASS_STRIPE_PIXELS,
   GRASS_HASH_PERIOD,
   GRASS_TONE_VARIATION,
   GRASS_FADE_START,
@@ -53,6 +55,8 @@ export interface DF2SceneProps {
   onToggleGround?: () => void;
   onStance?: (s: Stance) => void;
   onStatus?: (status: { loading: boolean; terrain: LoadedTerrain | null }) => void;
+  /** Hands the grass shader's live uniforms out so a debug panel can drive them. */
+  onGrassReady?: (u: GrassUniforms | null) => void;
 }
 
 /**
@@ -96,6 +100,7 @@ export function DF2Scene({
   onFly,
   onToggleGround,
   onStance,
+  onGrassReady,
 }: DF2SceneProps) {
   // undefined = still loading, null = no assets (synthetic), object = real map
   const [loaded, setLoaded] = useState<LoadedTerrain | null | undefined>(undefined);
@@ -189,7 +194,9 @@ export function DF2Scene({
       steps: BENCH.steps ?? GRASS_STEPS,
       cellSize: GRASS_CELL,
       nearClip: GRASS_NEAR_CLIP,
-      pixelsPerStep: GRASS_PIXELS_PER_STEP,
+      refineSteps: BENCH.refine ?? GRASS_REFINE_STEPS,
+      maxSpan: GRASS_MAX_SPAN,
+      stripePixels: GRASS_STRIPE_PIXELS,
       hashPeriod: GRASS_HASH_PERIOD,
       toneVariation: GRASS_TONE_VARIATION,
       fadeStart: GRASS_FADE_START,
@@ -206,6 +213,10 @@ export function DF2Scene({
     },
     [grassKit]
   );
+
+  useEffect(() => {
+    onGrassReady?.(grassKit?.uniforms ?? null);
+  }, [grassKit, onGrassReady]);
 
   const waterMaterial = useMemo(() => {
     const m = new THREE.MeshStandardNodeMaterial();

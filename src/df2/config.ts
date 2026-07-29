@@ -93,8 +93,15 @@ export const GRASS_CELL = 0.03;
 // silently took the material's own 0.45 default, which the material's own
 // documentation says is too close to separate adjacent columns.
 export const GRASS_NEAR_CLIP = 1.2;
-// March steps per screen pixel of angular size. 1.0 = one step per pixel.
-export const GRASS_PIXELS_PER_STEP = 1.0;
+// Bisections inside the coarse bracket. Each halves the residual error, so four
+// takes a 4 m bracket to 0.25 m and a steep ray's 0.18 m bracket to 11 mm.
+export const GRASS_REFINE_STEPS = 4;
+// Longest span a single ray will search, metres. Only near-horizontal rays reach
+// it; everything else is bounded by canopy height over the ray's vertical rate.
+export const GRASS_MAX_SPAN = 48;
+// Width of one tone stripe in pixels, used when the tone is keyed on ray bearing
+// rather than on the world cell. Live-switchable in the ?debug=1 panel.
+export const GRASS_STRIPE_PIXELS = 3;
 // Metres after which the per-column hash pattern repeats.
 //
 // The hash wraps cell indices into a small range because a sin-based hash loses

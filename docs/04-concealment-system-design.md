@@ -33,6 +33,18 @@ Each texel encodes: `grassTopHeight(x, z) = terrainHeight(x, z) + grassStretchAm
 i.e. an absolute world-space height, not a relative offset — simplifies the line-of-sight
 math in §4.
 
+> **AS BUILT — provenance matters here more than anywhere else.** `prepare-terrain.mjs`
+> bakes this field, and `loadTerrain.ts` tags every load with a `GrassSource`
+> (`08-...md` §5.3). For the currently shipped map (EXP2-Green Mile) the real
+> `detail_elev` strip is **not available**, so the canopy is a labelled colormap-derived
+> **stand-in**: placement and height are invented, not authored. Terrain, colormap, water
+> height and filter are genuinely Green Mile.
+>
+> Consequence for this system: a concealment result computed against a stand-in field tests
+> the *query*, never the *map*. **Any concealment claim must state which `GrassSource` it
+> ran against.** A stand-in that says "concealed at 800 m" tells you the maths works; it
+> tells you nothing about whether that hillside really had grass on it.
+
 ## 4. Line-of-sight / concealment query
 
 Given an observer position `O` and a target position `T` (e.g. a prone player's
@@ -70,6 +82,12 @@ Concealment queries need a per-entity "effective height" that reflects stance:
 This stance-to-height mapping is a small gameplay-tuning table, not derived from any
 extracted asset data.
 
+> **AS BUILT.** The table now exists as `STANCE_EYE` in `src/df2/FlyControls.tsx`:
+> `{ stand: 1.7, crouch: 0.95, prone: 0.35 }` metres. It currently drives only the camera
+> rig. When the concealment query lands it must read **this same table** rather than
+> redeclaring its own — a camera at one prone height and a query at another is exactly the
+> render/gameplay divergence §2 exists to prevent.
+
 ## 5. Interaction with rendering
 
 The renderer (`03-terrain-and-grass-rendering-design.md`) and this concealment system are
@@ -82,10 +100,17 @@ beyond that shared data source:
   currently drawn.
 - This means it is possible (and correct) for a target to be concealed even in a frame
   where, say, the near-field compute-blade layer has momentarily thinned blades at a
-  crossfade boundary near the target — visually this reads fine because the relief-mapped
-  far layer (§4.1 of the rendering doc) is what's actually providing coverage at any
+  crossfade boundary near the target — visually this reads fine because the columnar march
+  layer (§4.1 of the rendering doc) is what's actually providing coverage at any
   distance beyond ~15–20m, which is where most 800m-class engagements are happening
   anyway.
+
+> **AS BUILT — the decoupling has one deliberate exception.** The renderer's grass *fade
+> distances scale with zoom*, for the same reason its march step does: the handover to flat
+> colormap is only invisible while columns are sub-pixel, and through a scope they are not.
+> A fixed fade would dissolve grass into flat colour exactly where a sniper is looking —
+> ~800 m, the range this whole system is defined at. That keeps picture and query agreeing
+> at the range that matters; it does **not** license coupling them anywhere else.
 
 ## 6. Edge cases to handle
 

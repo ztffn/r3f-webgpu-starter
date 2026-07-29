@@ -216,6 +216,15 @@ by the detail-map value.
 over the whole map yields the `grassHeightField` shared by the renderer (`03-...md` §4.1) and
 concealment (`04-...md`). Detail-map palettes are **authored per-terrain**, not fixed.
 
+> ⚠️ **Indices are per grass SET, not per terrain — do not substitute a strip.** A terrain's
+> `detail_map` indices only mean anything against the strip its `.trn` names. Feeding a
+> different set's `_dm` strip makes index 37 select *that* set's tile 37, so grass comes out
+> tall where the map should be bare and bare where it should be chest-high — plausible
+> looking and wrong, which is the worst failure mode for a project whose success metric is
+> grass. `loadTerrain.ts` therefore refuses a bake tagged `substituted` and falls back to a
+> labelled colormap-derived stand-in (`08-...md` §5.3). Green Mile is affected: it references
+> the base-game set `dfdg1_dm`, which is in no archive we have (`06-...md` §7).
+
 **Still open:** the greyscale→world-height scale for both heightmap and stretch strip (tune
 visually / calibrate), and the contents of the base-game grass set `dfdg1_dm` (not present in
 the modding packs — see `06-...md` §7).

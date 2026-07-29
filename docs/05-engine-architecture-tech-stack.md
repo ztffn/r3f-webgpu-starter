@@ -1,5 +1,11 @@
 # Engine Architecture & Tech Stack
 
+> **AS BUILT (July 2026).** The stack landed as specified, on these versions: **Vite 8 +
+> TypeScript (strict) + React 19 + R3F v9 + drei v10 + three 0.185**, `WebGPURenderer` with
+> TSL and the automatic WebGL2 fallback. The project started from a Create React App
+> template; **CRA/react-scripts has been removed** — if you find a reference to it anywhere,
+> it is stale. Module-by-module reality is in `08-implementation-spec.md`.
+
 ## 1. Rendering foundation: Three.js + WebGPURenderer + TSL
 
 - **Three.js `WebGPURenderer`** (production-ready since r171) as the primary renderer,
@@ -25,13 +31,15 @@
   logic (see `02-asset-format-specification.md`) from the reference C# implementation to
   TypeScript. Pure format-parsing logic, no native/Windows dependency.
 - Pipeline stages:
-  1. `.pff` → raw file blobs (archive unpack)
-  2. Terrain TGA/PCX → PNG (colormap, heightmap, detail map, detail elevation strip)
-  3. Derived: bake `grassHeightField` texture from detail map + detail elevation strip
+  1. ✅ `.pff` → raw file blobs (archive unpack)
+  2. ✅ Terrain TGA/PCX → PNG (colormap, heightmap, detail map, detail elevation strip).
+     Colormap is JPEG and passes through untouched.
+  3. ✅ Derived: bake `grassHeightField` texture from detail map + detail elevation strip
      (consumed by both the rendering system and the concealment system — see both
-     respective design docs)
-  4. `.3DI` → glTF (character/vehicle models, textures, materials, sub-object/bone
-     hierarchy)
+     respective design docs). Output is tagged with its provenance; a bake from a
+     substituted strip is refused at load time (`08-...md` §5.3).
+  4. ⬜ `.3DI` → glTF (character/vehicle models, textures, materials, sub-object/bone
+     hierarchy) — not started.
 - Runs entirely as a pre-build step; the web runtime never touches `.pff`/`.3DI`/`.tga`
   directly, only the converted PNG/glTF/JSON output.
 
@@ -44,8 +52,12 @@
   (feeds directly into the concealment system's stance-to-height mapping — see
   `04-concealment-system-design.md` §4.2), and basic vehicle/projectile physics.
 - **First-person controller**: custom, built against the physics engine's character
-  controller primitives.
-- No networking in v1 (see project overview, non-goals).
+  controller primitives. ⬜ Not started. What exists today is a camera rig only —
+  `FlyControls.tsx`, free-fly plus an on-foot mode that clamps to the surface at a stance
+  eye height. No physics, no collision beyond that clamp.
+- No networking in v1 (see project overview, non-goals) — **but** the intended end state is
+  a 64+ player shooter, deliberately on hold. Don't build for it; don't foreclose it
+  either (`01-...md` §2).
 
 ## 4. Terrain rendering module
 
@@ -60,12 +72,14 @@
 Two TSL-authored layers, both consuming the shared `grassHeightField` (and companion
 color/density textures) from the asset pipeline:
 
-- **Far/mid layer**: fragment-shader relief-mapped grass slab (fragment-only, no compute
-  dependency — see rendering design doc §4.1).
+- **Far/mid layer**: fragment-shader columnar march (fragment-only, no compute dependency).
+  ✅ built as `src/df2/GrassMaterial.ts`. The approach diverges from the "relief-mapped
+  slab" originally specified — see the AS BUILT table in rendering design doc §4.1. The
+  fragment-only property held, which is why it works on the WebGL2 fallback.
 - **Near layer**: TSL compute-shader blade instancing with layered culling and LOD blade
   complexity (rendering design doc §4.2), WebGL2-fallback path reduces instance density
-  and/or substitutes shell texturing.
-- Crossfade band between the two (rendering design doc §4.3).
+  and/or substitutes shell texturing. ⬜ not started.
+- Crossfade band between the two (rendering design doc §4.3). ⬜ not started.
 
 ## 6. Concealment module
 
@@ -76,12 +90,23 @@ color/density textures) from the asset pipeline:
 
 ## 7. Directory/module layout (proposed)
 
+> **AS BUILT — nothing has moved here yet.** All engine code currently lives in the
+> Phase-1 spike directory `src/df2/` (module map: `08-...md` §3). The layout below is still
+> the target; migrate toward it as Phase 2+ lands. One rename to carry over when you do:
+> `relief-slab.ts` should become something like `columnar-march.ts`, since that is what the
+> shader actually is (rendering design doc §4.1, AS BUILT).
+>
+> The one boundary already enforced in the spike, and the one worth protecting through any
+> reorganisation: **`Heightfield.ts` imports nothing from Three.js.** It is the seed of the
+> gameplay/concealment field and has to be samplable with no renderer present — including
+> server-side, if multiplayer ever happens.
+
 ```
 /tools/df2-extract/          # Node/TS asset pipeline CLI (Phase 0)
 /src/engine/
   terrain/                   # chunked mesh, LOD, heightfield sampling
   grass/
-    relief-slab.ts           # far/mid TSL fragment shader layer
+    columnar-march.ts        # far/mid TSL fragment shader layer
     compute-blades.ts        # near-field TSL compute layer
   concealment/
     heightfield-query.ts     # line-of-sight sampling (shared data w/ grass/)
@@ -94,9 +119,16 @@ color/density textures) from the asset pipeline:
 
 ## 8. Compatibility/performance targets (initial)
 
+> **AS BUILT — these targets are unmeasured.** No trustworthy GPU numbers exist for any part
+> of this project. Agent/CI containers here have no GPU, so WebGPU init fails and everything
+> runs on SwiftShader; and `renderAsync` returns on submission, so even on real hardware the
+> figures are CPU-side without timestamp queries. Draw-call and triangle counts are exact.
+> The HUD reports which backend actually initialised — check it before believing any frame
+> time (`08-...md` §10).
+
 - Primary target: desktop, WebGPU path, 60fps at draw distances supporting the ~800m
   concealment-relevant sniping range.
-- Fallback target: WebGL2, reduced near-field grass density, relief-mapped far layer
+- Fallback target: WebGL2, reduced near-field grass density, columnar-march far layer
   unaffected (see rendering design doc §4.1) — this is the reason that layer was
   deliberately kept compute-independent.
 - Mobile: out of scope for v1 but the architecture (fragment-only far layer, tunable

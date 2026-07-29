@@ -87,6 +87,30 @@ Use both, each doing the job it's actually good at:
 
 ### 4.1 Primary layer — relief-mapped grass slab (mid-to-far field, ~15m to draw distance)
 
+> ### ⚠ AS BUILT (July 2026) — read before changing `GrassMaterial.ts`
+>
+> The shipped shader follows this section's *principle* — a bounded per-fragment raymarch
+> against a canopy height field — but five of its specifics turned out to be wrong once
+> measured against the reference screenshots and the canonical Voxel Space source. The list
+> below is what the code does and why; the contract is `08-...md` §6.4, the evidence is
+> `07-...md` §§1, 5, 6.
+>
+> | This section says | As built | Why it changed |
+> |---|---|---|
+> | march *up* from terrain height to `terrain + grass-top` | render a **shell** (terrain lifted to the local canopy top) and march **down**; when the camera is *inside* the canopy, march from the **camera** instead of the fragment | marching from the fragment renders no near-field grass at all when you are standing in it — which is the entire mechanic |
+> | "fixed, small step count (8–16 steps)" | **96 steps**, `step = max(cellSize, t · pixelAngle)` | a fixed step cannot serve both a 0.06 m near column and an 800 m sightline. The step is derived from the camera's angular resolution, so a **scope** narrowing FOV automatically tightens the march — sub-pixel-ness depends on FOV, not range |
+> | colour from the **detail colour strip** (`_cm`) | colour from the **colormap**, sampled at the hit column's texel centre, one colour smeared up the whole column | the canonical implementation takes `map.color[mapoffset]` — a NEAREST colormap lookup — and paints the whole vertical span in it. Sampling per-step reads as soft modern grass, not DF2 grass (`07` §1.1, §6) |
+> | bound cost with a depth/stencil pre-pass or grass-mask lookup | grass shell meshes are simply **not drawn** beyond `GRASS_FADE_END`; the shell collapses onto the terrain where no grass grows | cheaper, and needs no extra pass. The local-canopy shell lift does the masking for free |
+> | *(not mentioned)* | the material **writes its own depth** at the raymarch hit (`material.depthNode`) | without it, anything standing *in* the grass depth-tests against a shell floating a canopy-height above ground and pops in front of it. **This is the real integration hurdle for GPU Voxel Space ports — not raw speed** |
+>
+> Also as built and not in the original plan: the material is **unlit** (the colormap is
+> pre-shaded, so PBR double-shades it), alpha-tested rather than blended, and `DoubleSide`
+> with **no** `normalNode` override.
+>
+> Still true and still the point: coverage is 100% by construction and structurally cannot
+> thin with distance (§6). Still open: the grass is measurably flatter than the reference —
+> `|dx|` ≈ 1.6 vs 2.23, vertical autocorrelation 0.42 vs 0.82 (`07` §7).
+
 - A bounded-height fragment-shader raymarch: for each fragment covering grass-flagged
   terrain, march a ray from terrain-surface-height up to
   `terrain-height + grass-top-height(x,z)`, where `grass-top-height` is sampled from a
@@ -142,6 +166,12 @@ own internal LOD boundaries.
 
 - Chunked, LOD'd heightmap mesh (standard geomipmapping or clipmap scheme), built from the
   extracted heightmap, textured with the extracted colormap.
+- **As built, plus one thing this section did not anticipate:** the mesh **tiles
+  infinitely**. DF2 terrain has no edges (`06-...md` §10), so chunks are not a fixed grid
+  over one map but a camera-centred moving window, with geometry cached by *wrapped* chunk
+  index. This is why the CPU heightfield stores exactly `period × period` samples with no
+  duplicated edge row, and why every terrain texture uses `RepeatWrapping`. Details and the
+  invariants it imposes: `08-...md` §§4, 6.2.
 - An optional literal Voxel Space raycast renderer, implemented as a full-screen
   fragment-shader raymarch against the heightmap texture, retained as a toggleable
   "authentic mode" for period-accurate horizon-warp/draw-distance behavior — not the
@@ -162,6 +192,12 @@ raymarch can.
 
 - Exact raymarch step count vs. visual quality/performance tradeoff — needs profiling once
   a prototype exists, likely device-tiered (desktop vs. mobile).
+  **Still open, and no real numbers exist yet:** every frame time measured so far came from
+  a GPU-less container running the WebGL2 fallback on SwiftShader, where ground-level frames
+  take 300–1000 ms *with grass off*. Draw-call and triangle counts are trustworthy; frame
+  times are not (`08-...md` §10). There is also an unconfirmed reading that the step count
+  may cap the march's reach to ~6 m when the camera is inside the canopy (`08-...md` §9) —
+  settle that before tuning anything.
 - Whether cone-step/relaxed-cone-stepping preprocessing (build a max-height "cone" acceleration
   structure from the density texture) is worth the extra offline bake step to cut runtime
   step count — evaluate after a naive fixed-step version is profiled.

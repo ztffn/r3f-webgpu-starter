@@ -14,21 +14,34 @@ the original's two defining technical/design traits:
 
 This is a hobby/personal reconstruction project, not a commercial release.
 
+> **Status pointer (July 2026).** For what the code actually does today — module map,
+> contracts, invariants and the traps that have already cost sessions — read
+> `08-implementation-spec.md`. This document is the plan; `08` is the as-built.
+
 ## 2. Non-goals (for v1)
 
-- Multiplayer / networking
+- Multiplayer / networking — **but see the note below**
 - Full campaign/mission-editor parity
 - Exact byte-for-byte engine emulation of Voxel Space's original raycasting rasterizer as
   the primary renderer (it is retained only as an optional "authentic mode" toggle — see
   `03-terrain-and-grass-rendering-design.md`)
+
+> **Multiplayer is the eventual use case, and is deliberately on hold.** The intended end
+> state is a multiplayer shooter, ideally 64+ players. It stays out of v1 scope and **must
+> not be designed for speculatively** — world rendering has to be good first, and the plan
+> has not been laid out yet. Two practical consequences for anyone working now:
+> **(a)** don't build networking, prediction or authority models; **(b)** don't make choices
+> that foreclose it either — in particular `Heightfield.ts` and the concealment field must
+> stay renderer-free so they can be sampled server-side (`08` §3).
 
 ## 3. Legal / asset-sourcing posture
 
 - **Preferred asset source:** TXP terrain pack and TerraNova's EXP2b expansion pack for
   DF2. These are freeware, community-authored, explicitly built for redistribution —
   cleaner footing than retail assets, and by most contemporary accounts higher-quality
-  terrain/grass authoring than the 1999 stock content. Confirmed named EXP2b tall-grass
-  terrains: **Balnakiel, Look, Mile, River**.
+  terrain/grass authoring than the 1999 stock content. Post-extraction the real inventory is
+  **9 EXP2b terrains and 27 from the TerrainPack** — full list in `06-...md` §3, which
+  supersedes the four names originally guessed here.
 - **Fallback asset source:** retail DF2 (currently ~$5 on Steam / Instant Gaming). Extracting
   assets from a purchased copy for personal, non-distributed use is reasonable; **do not**
   redistribute extracted retail assets or ship them in any public build.
@@ -71,49 +84,63 @@ This is a hobby/personal reconstruction project, not a commercial release.
 > running in the browser is now the immediate milestone**, because visual/spatial "feel"
 > against a map we actually played is the fastest way to validate the whole approach.
 
-### Phase 0 — Asset pipeline (⬛ largely unblocked; core done)
+### Phase 0 — Asset pipeline (✅ core done)
 - ✅ `.pff` (PFF3/PFF2) unpack + `.trn` manifest parse — implemented and validated in
   `tools/df2-extract`.
 - ✅ Terrain naming/format convention confirmed empirically (`02-...md` §5).
-- ⬜ **Next:** PCX (8-bit RLE) and TGA decoders + JPEG passthrough → PNG, so the runtime
-  consumes web-ready images.
-- ⬜ **Next:** bake `grassHeightField` = `detail_map` index → `detail_elev` tile height
-  (the shared field for grass rendering *and* concealment).
+- ✅ PCX (8-bit RLE) decoder + JPEG passthrough → PNG (`imageio.mjs`).
+- ✅ Bake `grassHeightField` = `detail_map` index → `detail_elev` tile height
+  (`prepare-terrain.mjs`) — the shared field for grass rendering *and* concealment.
 - ⬜ Later: `.3DI` → glTF for a first character/vehicle model (not on the terrain path).
 
-### Phase 1 — Terrain renderer (✅ scaffolded on synthetic data)
+### Phase 1 — Terrain renderer (✅ done)
 - ✅ Chunked/LOD heightmap mesh, skirts, analytic normals, TSL biome material.
+- ✅ **Infinite tiling** — a camera-centred chunk window with geometry cached by *wrapped*
+  chunk index. Not in the original plan; added once we confirmed DF2 terrain has no edges
+  (`06-...md` §10). See `08-...md` §6.2.
 - ⬜ Optional literal Voxel Space raycast "authentic mode" as a fragment-shader toggle.
 
-### ▶ Phase 1.5 — **Real-map demo (NEXT MILESTONE)**
+### Phase 1.5 — Real-map demo (✅ done, except calibration)
 Swap synthetic fBm for a real extracted terrain end-to-end. Deliberately pulled *ahead* of
 grass, because it is cheap (the renderer already exists), needs no missing base-game assets,
 and immediately answers "does this feel like DF2?".
-- Decode one terrain's `_d.pcx` heightmap → height source for the existing chunked mesh.
-- Drape its `_c.jpg` colormap as the surface texture (replacing the procedural biome blend).
-- Calibrate the two unknown scales — `HEIGHT_SCALE` (greyscale→meters) and
-  `METERS_PER_TEXEL` (1024² grid→world size) — visually against remembered scale, then fix
-  them as constants in `config.ts`.
-- Apply the `.trn` environment scalars: `water_height`, `filter` RGB tint, `sky_height`,
-  `horizon`, `sun_slope`.
-- **Candidate maps:** Green Mile / Balnakiel / 1stLook / River (EXP2b, fully present as
-  colormap+heightmap), or any of the 27 TerrainPack maps (Desert3, snow1, the 20 Land
-  Warrior maps). Grass is *not* required for this milestone.
+- ✅ Decode one terrain's `_d.pcx` heightmap → height source for the existing chunked mesh.
+- ✅ Drape its `_c.jpg` colormap as the surface texture (replacing the procedural biome blend).
+- ▶ **STILL OPEN — and now the top of the roadmap.** Calibrate the two unknown scales,
+  `HEIGHT_SCALE` (greyscale→meters) and `METERS_PER_TEXEL` (1024² grid→world size). They are
+  still the placeholder values in `config.ts`, so **the milestone's own question — "does this
+  feel like DF2?" — is not actually answered yet.** Do this before more grass work.
+- ✅ Apply the `.trn` environment scalars: `water_height`, `filter` RGB tint. (`sky_height`,
+  `horizon`, `sun_slope` are parsed but not yet used.)
+- ✅ **Shipped map:** EXP2-Green Mile (`TERRAIN_SLUG = "gmile"`). Others still available:
+  Balnakiel / 1stLook / River, or any of the 27 TerrainPack maps.
 
 ### Phase 2 — Grass renderer
-- Relief-mapped ("grass slab") mid/far-field grass — the primary density layer, driven by
-  the baked `grassHeightField`.
-- Compute-shader near-field 3D blade instancing (~0–15m) for tactile/interactive detail.
-- Distance crossfade between the two.
-- **Data note:** buildable *now* using the bundled `ct1_dm`/`ct2_dm` stretch strips; the
-  classic grass set (`dfdg1_dm`) used by the marquee maps needs a base-game `.pff` we don't
-  currently have (`06-...md` §7). Not a blocker — validate the tech on what we have.
+> **The built approach diverges from the plan below.** What shipped is a *columnar
+> per-fragment march* — closer to what the original actually did — not the relief-mapped
+> "grass slab" described here and in `03`. See the AS BUILT note in `03-...md` §4.1, the
+> evidence in `07-...md` §6, and the contract in `08-...md` §6.4. The near-field compute
+> blade layer has not been started and the plan for it still stands.
+
+- ✅ Columnar mid/far-field grass driven by the baked canopy field, writing its own depth.
+- ⬜ Compute-shader near-field 3D blade instancing (~0–15m) for tactile/interactive detail.
+- ⬜ Distance crossfade between the two.
+- ⚠️ **Data note — corrected.** An earlier version of this doc said to substitute the bundled
+  `ct1_dm`/`ct2_dm` strips for the missing `dfdg1_dm`. **Do not.** Strip tile *indices* are
+  per-grass-set, so another set's strip puts grass at arbitrary heights — plausible-looking
+  and wrong. `loadTerrain.ts` refuses a substituted bake and falls back to a labelled
+  colormap-derived stand-in instead (`08-...md` §5.3). Validating the *renderer* on that
+  stand-in is fine; validating grass *placement* is not.
 - Full design rationale in `03-terrain-and-grass-rendering-design.md`.
 
 ### Phase 3 — Concealment system
 - Decoupled gameplay heightfield sampled independently of the render path, for
   line-of-sight / prone-concealment logic at any range. Reads the *same*
   `grassHeightField` as Phase 2. Full design in `04-concealment-system-design.md`.
+- **Demonstrated, not yet built.** The mechanic is verified end-to-end in the test rig
+  (`07-...md` §8): prone reads 0 px of visible target even scoped at 50 m and 300 m, while
+  standing reads 525 px. That is a rendered-pixel measurement, not the analytic query this
+  phase specifies — the query API itself does not exist yet.
 
 ### Phase 4 — Integration
 - First-person controller, physics (rapier or cannon-es), basic AI/objectives.
@@ -141,7 +168,9 @@ and immediately answers "does this feel like DF2?".
   Phase 1.5; the ~800m concealment range is a useful sanity anchor.
 - **Stretch-height→world-units scale** for `detail_elev` (same calibration exercise).
 - **The classic grass set `dfdg1_dm`/`dfdg1_cm`**, referenced by Balnakiel/Green
-  Mile/1stLook/River but only present in a base-game `.pff`. Substitute `ct1_dm`/`ct2_dm`
-  until a base DF2 install is available.
+  Mile/1stLook/River but only present in a base-game `.pff`. **Do not substitute another
+  set's strip** — see the corrected data note in Phase 2 above and `08-...md` §5.3. Until a
+  base DF2 install turns up, those maps render a labelled colormap-derived stand-in canopy,
+  and any grass result measured against it must say so.
 - Whether `char_data` (always the `_cm` strip in observed data) carries anything beyond the
   detail-color strip.

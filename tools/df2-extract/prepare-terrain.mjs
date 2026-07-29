@@ -10,8 +10,9 @@
 //   detail.png    greyscale detail-map INDICES (from <detail_map>.pcx), if present
 //   terrain.json  parsed .trn + dimensions + which referenced assets were missing
 //
-// Output is intentionally written outside git (see .gitignore) — extracted game
-// assets are never committed. See docs/06-asset-extraction-findings.md.
+// Output goes to public/assets/terrain/<slug>/ and IS committed, alongside the raw
+// inputs in /assets/ — see README § Asset policy and docs/01 §3. What stays out is
+// retail-extracted data. See docs/06-asset-extraction-findings.md for the formats.
 
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, copyFileSync } from "node:fs";
 import { join, extname } from "node:path";
@@ -25,8 +26,12 @@ if (!extractedDir || !trnName || !outDir) {
 }
 
 // Case-insensitive lookup of "<base>.<any ext>" within the extracted directory.
+// Tolerates a missing base name: several .trn keys are optional, and the callers
+// below already handle "not found" by recording it in `missing` — but this used to
+// throw an unhelpful TypeError on `undefined.toLowerCase()` before reaching them.
 const files = readdirSync(extractedDir);
 function find(base, exts) {
+  if (typeof base !== "string" || !base) return null;
   const b = base.toLowerCase();
   for (const f of files) {
     const e = extname(f).toLowerCase();
@@ -76,9 +81,12 @@ if (colorPath) {
 }
 
 // --- detail map (detail_map) — emit palette INDICES as greyscale -------------
+// Decoded ONCE here and reused by the grass bake below. It used to be decoded a
+// second time down there, repeating a full RLE pass and a 1 MB allocation.
 const detailPath = find(trn.detail_map, [".pcx"]);
-if (detailPath) {
-  const d = decodePcx(readFileSync(detailPath));
+const detail = detailPath ? decodePcx(readFileSync(detailPath)) : null;
+if (detail) {
+  const d = detail;
   const uniq = new Set(d.pixels).size;
   writeFileSync(join(outDir, "detail.png"), encodePng(d.width, d.height, d.pixels, 1));
   meta.assets.detail = { file: "detail.png", width: d.width, height: d.height, distinctIndices: uniq };
@@ -120,18 +128,29 @@ if (dmPath) {
   // The detail textures tile across the ground, so within a tile we read
   // (x mod tileW, z mod tileW) — this preserves the per-column height variation
   // that gives the canopy its ragged silhouette (docs/07 §1.3).
-  if (detailPath) {
-    const d = decodePcx(readFileSync(detailPath));
+  if (detail) {
+    const d = detail;
     const grass = new Uint8Array(d.width * d.height);
     const usedIdx = new Set();
+    let outOfRange = 0;
     for (let z = 0; z < d.height; z++) {
       const tz = z % tileW;
       for (let x = 0; x < d.width; x++) {
         const idx = d.pixels[z * d.width + x];
         usedIdx.add(idx);
+        // A canonical strip carries 256 tiles, so index maps 1:1. A SUBSTITUTED
+        // strip may carry fewer, and the wrap silently aliases onto the wrong
+        // tile — worth counting rather than hiding, since it is exactly what
+        // makes a substituted canopy meaningless (docs/06 §7).
+        if (idx >= tileCount) outOfRange++;
         const tile = idx % tileCount;
         grass[z * d.width + x] = dm.pixels[(tile * tileW + tz) * tileW + (x % tileW)];
       }
+    }
+    if (outOfRange) {
+      console.log(
+        `  ! ${outOfRange} texels referenced a tile index >= ${tileCount} and wrapped`
+      );
     }
     let gMin = 255;
     let gMax = 0;

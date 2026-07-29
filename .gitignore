@@ -138,9 +138,13 @@ dist
 #
 # What is in here is community-authored mod data: TerraNova's EXP2b expansion and
 # a community TerrainPack — 25-year-old freeware built for redistribution — held
-# in a private repo. Keeping the raw .pff/.trn/.pcx alongside the prepared PNGs
+# in a PUBLIC repo — the authors are this project's own mod team, who hold the
+# rights and released it as freeware. Keeping the raw .pff/.trn/.pcx alongside the prepared PNGs
 # means the pipeline is reproducible from source rather than depending on a
 # working copy that lives on one machine.
 #
 # The line that still matters: RETAIL-extracted DF2 data is personal-use-only and
 # does not go in here. See README § Asset policy and docs/01 §3.
+
+# macOS Finder metadata
+.DS_Store

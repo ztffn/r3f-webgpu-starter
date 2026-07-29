@@ -64,7 +64,8 @@ player instinctively recognise this?* — applies to features, not to whether a 
   for Inno Setup wrappers, `unzip` for WinZip SFX. See `tools/df2-extract/README.md`.
 - **Game assets ARE committed** — raw archives in `/assets/` (`EXP2.PFF`, 36 `.trn`, all
   extracted PCX/JPEG/TGA; see `assets/README.md`) and prepared output in
-  `public/assets/terrain/<slug>/`. Community mod freeware in a private repo (`01-...md` §3),
+  `public/assets/terrain/<slug>/`. Community mod freeware authored by this project's own
+  mod team, who hold the rights (`01-...md` §3),
   so the pipeline reproduces from source. The distinction that still holds: **retail**-extracted
   DF2 data is personal-use-only and never committed.
 - Scale constants (`HEIGHT_SCALE`, `METERS_PER_TEXEL`) are **not yet calibrated** — they're

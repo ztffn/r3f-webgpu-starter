@@ -26,6 +26,14 @@ export interface ChunkGeometryParams {
   oz: number;
   size: number;
   segments: number;
+  /**
+   * Emit the perimeter skirt. True for terrain, false for the grass shell.
+   *
+   * The grass shell reuses this geometry, and a skirt on it is meaningless: the
+   * skirt is a vertical wall dropped below the surface to plug LOD cracks, so
+   * marching a canopy from it paints grass down the inside of a 12 m cliff.
+   */
+  skirt?: boolean;
 }
 
 export function buildChunkGeometry({
@@ -34,6 +42,7 @@ export function buildChunkGeometry({
   oz,
   size,
   segments,
+  skirt = true,
 }: ChunkGeometryParams): THREE.BufferGeometry {
   const N = segments;
   const rowStride = N + 1;
@@ -95,22 +104,24 @@ export function buildChunkGeometry({
     }
   };
 
-  const topEdge: number[] = [];
-  const bottomEdge: number[] = [];
-  const leftEdge: number[] = [];
-  const rightEdge: number[] = [];
-  for (let i = 0; i <= N; i++) {
-    topEdge.push(gridIndex(i, 0));
-    bottomEdge.push(gridIndex(i, N));
+  if (skirt) {
+    const topEdge: number[] = [];
+    const bottomEdge: number[] = [];
+    const leftEdge: number[] = [];
+    const rightEdge: number[] = [];
+    for (let i = 0; i <= N; i++) {
+      topEdge.push(gridIndex(i, 0));
+      bottomEdge.push(gridIndex(i, N));
+    }
+    for (let j = 0; j <= N; j++) {
+      leftEdge.push(gridIndex(0, j));
+      rightEdge.push(gridIndex(N, j));
+    }
+    addSkirtEdge(topEdge);
+    addSkirtEdge(bottomEdge);
+    addSkirtEdge(leftEdge);
+    addSkirtEdge(rightEdge);
   }
-  for (let j = 0; j <= N; j++) {
-    leftEdge.push(gridIndex(0, j));
-    rightEdge.push(gridIndex(N, j));
-  }
-  addSkirtEdge(topEdge);
-  addSkirtEdge(bottomEdge);
-  addSkirtEdge(leftEdge);
-  addSkirtEdge(rightEdge);
 
   // --- Assemble ------------------------------------------------------------
   const geometry = new THREE.BufferGeometry();

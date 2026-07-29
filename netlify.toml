@@ -1,15 +1,15 @@
 # Netlify config for the DF2 terrain test build.
 #
-# Two deploy paths, and the difference matters:
+# Both deploy paths now render the real map. Prepared terrain assets live in
+# public/assets/terrain/<slug>/ and ARE committed (README § Asset policy), and Vite
+# copies public/ into dist/, so a Git-connected build carries the map just as a
+# local `netlify deploy --prod --dir=dist` does.
 #
-#   1. `netlify deploy --prod --dir=dist` from a machine that has prepared
-#      terrain assets. Vite copies public/assets/ into dist/, so the upload
-#      carries the real extracted map without any of it entering git. This is
-#      the path that produces a build worth flying around.
+# This block used to say a Git-connected build fell back to synthetic terrain,
+# which stopped being true when the assets were committed.
 #
-#   2. Git-connected build (this file's [build] block). The prepared assets are
-#      git-ignored, so the site builds and runs but falls back to synthetic fBm
-#      terrain — useful for checking the shell, useless for judging feel.
+# The fallback still exists in the code for the case where the assets are absent,
+# and it renders synthetic terrain WITH grass (src/df2/syntheticMaps.ts).
 #
 # See README.md § Deploying a test build.
 

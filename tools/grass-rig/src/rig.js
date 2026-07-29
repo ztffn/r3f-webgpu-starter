@@ -8,6 +8,9 @@
 import * as THREE from "three/webgpu";
 import { texture, uv } from "three/tsl";
 import { createGrassMaterial } from "../../../src/df2/GrassMaterial";
+// The app's own stand-in canopy, not a copy of it. The rig had reimplemented this,
+// so the thing being measured could drift from the thing that ships.
+import { grassFromColormap } from "../../../src/df2/loadTerrain";
 
 // Teal-leaning camo green. Deliberately not a saturated marker colour: a target
 // that reads clearly against grass would flatter the concealment test.
@@ -33,17 +36,6 @@ function loadImage(src) {
     im.onerror = rej;
     im.src = src;
   });
-}
-
-function grassFromColormap(rgba, size) {
-  const out = new Uint8Array(size * size);
-  for (let i = 0; i < out.length; i++) {
-    const r = rgba[i * 4], g = rgba[i * 4 + 1], b = rgba[i * 4 + 2];
-    const greenness = Math.max(0, Math.min(1, (g - (r + b) / 2) / 64));
-    const h = (i * 2654435761) >>> 0;
-    out[i] = Math.round(255 * greenness * (0.74 + 0.26 * (((h >>> 8) & 255) / 255)));
-  }
-  return out;
 }
 
 function dataTex(data, size, nearest) {
@@ -85,7 +77,15 @@ export async function run(opts) {
   cTex.wrapS = cTex.wrapT = THREE.RepeatWrapping;
   cTex.anisotropy = 4;
 
-  const grassData = grassFromColormap(imageRgba(cTex.image), size);
+  // Sized from the COLORMAP's own dimensions. This used to pass the heightmap's
+  // size, so any difference between the two images read past the end of the RGBA
+  // array and silently zeroed the canopy.
+  const cImg = cTex.image;
+  if (cImg.width !== cImg.height) {
+    throw new Error(`colormap must be square, got ${cImg.width}x${cImg.height}`);
+  }
+  const grassData = grassFromColormap(imageRgba(cImg), cImg.width, cImg.height);
+  const grassSize = cImg.width;
 
   // --- terrain patch around the camera (plain grid, no LOD) ----------------
   // Terrain patch half-width. MUST exceed the grass fade distance: the march
@@ -139,28 +139,38 @@ export async function run(opts) {
   sun.position.set(-1000, 1440, 960);
   scene.add(sun);
 
-  const terrainMat = new THREE.MeshStandardNodeMaterial({ roughness: 0.96, metalness: 0 });
+  // Unlit, matching TerrainMaterial: the colormap is already pre-shaded, and if
+  // the rig lights it while the app does not then the rig is measuring a different
+  // picture from the one that ships.
+  const terrainMat = new THREE.MeshBasicNodeMaterial();
   terrainMat.colorNode = texture(cTex, uv());
   scene.add(new THREE.Mesh(geo, terrainMat));
 
   if (grass) {
     const kit = createGrassMaterial({
-      grassMap: dataTex(grassData, size, false),
+      grassMap: dataTex(grassData, grassSize, false),
       heightMap: dataTex(heights, size, false),
       colorMap: cTex,
       worldSize: size * MPT,
       mapSize: size,
       heightScale: HS,
       grassScale,
-      steps: opts.steps ?? 48,
-      cellSize: opts.cellSize ?? 0.35,
+      // Defaults track src/df2/config.ts so an un-parameterised run measures what
+      // actually ships. They had drifted apart: the rig's own README documented
+      // cellSize 0.03 and nearClip 1.2 while these defaults said 0.35 and 0.45.
+      steps: opts.steps ?? 96,
+      cellSize: opts.cellSize ?? 0.03,
       debugHit: opts.debugHit ?? false,
       debugDistance: opts.debugDistance ?? false,
-      toneVariation: opts.toneVariation ?? 0.42,
+      toneVariation: opts.toneVariation ?? 0.85,
       pixelsPerStep: opts.pixelsPerStep ?? 1.0,
-      nearClip: opts.nearClip ?? 0.45,
+      nearClip: opts.nearClip ?? 1.2,
+      hashPeriod: opts.hashPeriod ?? 120,
       fadeStart: opts.fadeStart ?? 700,
       fadeEnd: opts.fadeEnd ?? 1100,
+      // The rig sets its own FOV per variant, so the zoom reference must follow it
+      // rather than assume the app's default.
+      referenceP11: 1 / Math.tan(((fov ?? 60) * Math.PI) / 180 / 2),
     });
     const m = new THREE.Mesh(geo, kit.material);
     m.renderOrder = 1;
@@ -174,8 +184,9 @@ export async function run(opts) {
   // stays below the eye-to-target line.
   function chooseBearing(dist) {
     let best = null;
-    // Also try stepping the camera to nearby vantage points: at long range a
-    // single spot often has no bearing at all that clears the terrain.
+    // Sweeps BEARING only, from the one camera position. At long range a single
+    // spot can have no clear bearing at all, in which case sightlineVerdict below
+    // reports the reading as invalid rather than the caller getting a bad number.
     for (let k = 0; k < 72; k++) {
       const a = (k / 72) * Math.PI * 2;
       const tx = camX + Math.sin(a) * dist;
@@ -192,7 +203,7 @@ export async function run(opts) {
         above = Math.max(above, groundAt(px, pz) - lineY);
       }
       // Want: level ground, sightline clear, and grass where the target stands.
-      const canopyThere = sampleField(grassData, size, (tx + half) / MPT, (tz + half) / MPT) * grassScale;
+      const canopyThere = sampleField(grassData, grassSize, (tx + half) / MPT, (tz + half) / MPT) * grassScale;
       const score = drop * 1.0 + Math.max(0, above) * 4.0 - canopyThere * 12.0;
       if (!best || score < best.score) best = { score, a, tx, tz, tg, above, canopyThere };
     }
@@ -242,7 +253,7 @@ export async function run(opts) {
     scene.add(mesh2);
     targetInfo = {
       x: tx, y: ty, z: tz, prone, distance: d,
-      canopyAtTarget: sampleField(grassData, size, (tx + half) / MPT, (tz + half) / MPT) * grassScale,
+      canopyAtTarget: sampleField(grassData, grassSize, (tx + half) / MPT, (tz + half) / MPT) * grassScale,
       sightlineClearance: pick ? +pick.above.toFixed(2) : null,
       verdict: sightlineVerdict(pick),
     };
@@ -349,6 +360,6 @@ export async function run(opts) {
     groundY: gy,
     target: targetInfo,
     pip: { x: pipX, y: pipY, size: pipSize },
-    canopyAtCam: sampleField(grassData, size, (camX + half) / MPT, (camZ + half) / MPT) * grassScale,
+    canopyAtCam: sampleField(grassData, grassSize, (camX + half) / MPT, (camZ + half) / MPT) * grassScale,
   };
 }

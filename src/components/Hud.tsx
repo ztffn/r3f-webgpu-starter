@@ -60,8 +60,13 @@ export function Hud({
       <section className="panel" id="ident">
         <span className="eyebrow">Terrain</span>
         <h1>{terrain ? terrain.name : "Synthetic fBm"}</h1>
+        {/* Pack name comes from the manifest, not a literal: this panel claimed
+            "TerraNova EXP2b" for whatever terrain happened to load, which is wrong
+            for every TerrainPack map. */}
         <div className="by">
-          {terrain ? `${terrain.creator} · TerraNova EXP2b` : "no extracted assets found"}
+          {terrain
+            ? [terrain.creator, terrain.meta.source].filter(Boolean).join(" · ")
+            : "no extracted assets found"}
         </div>
         <dl className="rows">
           {terrain && (

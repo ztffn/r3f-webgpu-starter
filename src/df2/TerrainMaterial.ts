@@ -1,70 +1,41 @@
 // TSL terrain material.
 //
-// Two modes, one material class:
-//   - Real map: sample the extracted colormap (already pre-shaded by the original
-//     authoring tools — it bakes in lighting/shadow), optionally tinted by the
-//     terrain's `filter` RGB from its .trn manifest.
-//   - Synthetic: a procedural biome blend from world-space height and slope.
-//
-// Being a *Standard* node material it keeps PBR response to the scene's sun,
-// hemisphere fill, and fog for free (docs/03-terrain-and-grass-rendering-design.md §3).
+// UNLIT, and the same for both modes. Extracted DF colormaps are already
+// pre-shaded — they bake lighting and shadow (docs/06 §6) — and the original
+// renderer applied no lighting at all, it just painted map.color. Running PBR on
+// top double-shades it, which is exactly the reasoning GrassMaterial gives for
+// being unlit; when this material was Standard and the grass was Basic, the two
+// disagreed about the same texture and the grass read as a different tone to the
+// bare ground beside it. The synthetic fallback bakes its own shading in
+// (syntheticMaps.ts) so it can take this same path.
 
 import * as THREE from "three/webgpu";
-import { positionWorld, normalWorld, vec3, mix, smoothstep, texture, uv } from "three/tsl";
-import { TERRAIN_HEIGHT } from "./config";
+import { vec3, texture, uv } from "three/tsl";
 
 export interface TerrainMaterialOptions {
-  /** Extracted colormap. When present it replaces the procedural biome blend. */
-  colorMap?: THREE.Texture | null;
+  /** Colormap: extracted for a real map, CPU-baked for the synthetic fallback. */
+  colorMap: THREE.Texture;
   /** `filter` RGB from the .trn manifest (0-255 each, 128 = neutral). */
   filter?: [number, number, number];
-  /** Peak height of the synthetic field, used only for the procedural blend. */
-  peakHeight?: number;
-}
-
-function proceduralBiome(peakHeight: number) {
-  const h = positionWorld.y.div(peakHeight).clamp(0.0, 1.0);
-  const slope = normalWorld.y.clamp(0.0, 1.0);
-
-  const sand = vec3(0.76, 0.69, 0.5);
-  const grass = vec3(0.3, 0.43, 0.19);
-  const grassDark = vec3(0.2, 0.31, 0.13);
-  const rock = vec3(0.4, 0.38, 0.35);
-  const snow = vec3(0.9, 0.93, 0.97);
-
-  let color = mix(sand, grass, smoothstep(0.03, 0.1, h));
-  color = mix(color, grassDark, smoothstep(0.1, 0.42, h));
-  color = mix(color, rock, smoothstep(0.48, 0.72, h));
-  color = mix(color, snow, smoothstep(0.82, 0.95, h));
-
-  // Steep faces read as exposed rock, overriding the height bands.
-  const rockFactor = smoothstep(0.55, 0.82, slope).oneMinus();
-  return mix(color, rock, rockFactor.mul(0.9));
 }
 
 export function createTerrainMaterial(
-  opts: TerrainMaterialOptions = {}
-): THREE.MeshStandardNodeMaterial {
-  const { colorMap = null, filter, peakHeight = TERRAIN_HEIGHT } = opts;
+  opts: TerrainMaterialOptions
+): THREE.MeshBasicNodeMaterial {
+  const { colorMap, filter } = opts;
 
-  const material = new THREE.MeshStandardNodeMaterial({
-    roughness: 0.96,
-    metalness: 0.0,
-  });
+  const material = new THREE.MeshBasicNodeMaterial();
 
-  if (colorMap) {
-    const sampled = texture(colorMap, uv());
-    // .trn `filter` is an RGB tint where 128 is neutral.
-    const neutral = !filter || (filter[0] === 128 && filter[1] === 128 && filter[2] === 128);
-    material.colorNode = neutral
-      ? sampled
-      : sampled.mul(vec3(filter[0] / 128, filter[1] / 128, filter[2] / 128));
-  } else {
-    material.colorNode = proceduralBiome(peakHeight);
-  }
+  const sampled = texture(colorMap, uv());
+  // .trn `filter` is an RGB tint where 128 is neutral.
+  const neutral = !filter || (filter[0] === 128 && filter[1] === 128 && filter[2] === 128);
+  material.colorNode = neutral
+    ? sampled
+    : sampled.mul(vec3(filter[0] / 128, filter[1] / 128, filter[2] / 128));
 
   // Double-sided so LOD-crack skirts fill gaps regardless of winding
-  // (terrainGeometry.ts).
+  // (terrainGeometry.ts). Being unlit, a back face now shows terrain colour rather
+  // than the black that made near-plane clipping look like a void.
   material.side = THREE.DoubleSide;
   return material;
 }

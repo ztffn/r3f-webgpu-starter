@@ -11,9 +11,17 @@
 // `period x period` distinct samples and every lookup wraps modulo that period;
 // there is no duplicated edge row and no clamping.
 //
-// Two construction paths, one interface:
-//   Heightfield.synthetic()           — periodic fBm (no assets needed)
+// Two construction paths, one interface — and the synthetic one now goes THROUGH
+// the real one:
+//   Heightfield.syntheticBytes()      — periodic fBm, quantised to 8 bits
+//   Heightfield.synthetic()           — the above, fed to fromHeightmap
 //   Heightfield.fromHeightmap(...)    — a real extracted DF heightmap
+//
+// Quantising the synthetic field to 8 bits is not cosmetic. The grass shader reads
+// elevation from a TEXTURE while the mesh and the concealment query read this
+// field, and they must agree exactly or grass floats above or sinks into the
+// ground. A real map gets that for free because both sides come from the same
+// bytes; the synthetic path only gets it by being quantised the same way.
 
 import { fbm } from "./noise";
 import {
@@ -49,16 +57,21 @@ export class Heightfield {
   readonly grid: Float32Array;
   readonly minHeight: number;
   readonly maxHeight: number;
-  /** True when built from real extracted terrain data rather than noise. */
-  readonly isReal: boolean;
+  /** Metres per raw 8-bit unit of the source data this field was built from. */
+  readonly heightScale: number;
 
-  private constructor(period: number, cellSize: number, grid: Float32Array, isReal: boolean) {
+  private constructor(
+    period: number,
+    cellSize: number,
+    grid: Float32Array,
+    heightScale: number
+  ) {
     this.period = period;
     this.cellSize = cellSize;
     this.worldSize = period * cellSize;
     this.halfWorld = this.worldSize / 2;
     this.grid = grid;
-    this.isReal = isReal;
+    this.heightScale = heightScale;
 
     let min = Infinity;
     let max = -Infinity;
@@ -70,21 +83,34 @@ export class Heightfield {
     this.maxHeight = max;
   }
 
-  /** Synthetic, seamlessly tiling fBm terrain — the no-assets fallback. */
-  static synthetic(seed = 1337): Heightfield {
-    const period = GRID_CELLS;
-    const cellSize = WORLD_SIZE / period;
-    const grid = new Float32Array(period * period);
-    for (let j = 0; j < period; j++) {
-      const nz = (j / period) * BASE_FREQUENCY;
-      for (let i = 0; i < period; i++) {
-        const nx = (i / period) * BASE_FREQUENCY;
+  /**
+   * Synthetic, seamlessly tiling fBm elevation, quantised to 8 bits so it has the
+   * same shape as an extracted heightmap. See the header for why quantising here
+   * rather than downstream is what keeps the mesh and the grass shader in step.
+   */
+  static syntheticBytes(seed = 1337): Required<HeightmapSource> {
+    const size = GRID_CELLS;
+    const data = new Uint8Array(size * size);
+    for (let j = 0; j < size; j++) {
+      const nz = (j / size) * BASE_FREQUENCY;
+      for (let i = 0; i < size; i++) {
+        const nx = (i / size) * BASE_FREQUENCY;
         // Power curve flattens lowlands and keeps highlands sharper.
         const v = fbm(nx, nz, { seed, octaves: 6, period: BASE_FREQUENCY });
-        grid[j * period + i] = Math.pow(v, 1.85) * TERRAIN_HEIGHT;
+        data[j * size + i] = Math.round(Math.min(1, Math.pow(v, 1.85)) * 255);
       }
     }
-    return new Heightfield(period, cellSize, grid, false);
+    return {
+      data,
+      size,
+      metersPerTexel: WORLD_SIZE / size,
+      heightScale: TERRAIN_HEIGHT / 255,
+    };
+  }
+
+  /** Synthetic, seamlessly tiling fBm terrain — the no-assets fallback. */
+  static synthetic(seed = 1337): Heightfield {
+    return Heightfield.fromHeightmap(Heightfield.syntheticBytes(seed));
   }
 
   /** Build from a real extracted DF heightmap (8-bit greyscale, size x size). */
@@ -92,9 +118,12 @@ export class Heightfield {
     const { data, size } = src;
     const cellSize = src.metersPerTexel ?? METERS_PER_TEXEL;
     const scale = src.heightScale ?? HEIGHT_SCALE;
+    if (data.length < size * size) {
+      throw new Error(`heightmap has ${data.length} samples, expected ${size * size}`);
+    }
     const grid = new Float32Array(size * size);
     for (let i = 0; i < size * size; i++) grid[i] = data[i] * scale;
-    return new Heightfield(size, cellSize, grid, true);
+    return new Heightfield(size, cellSize, grid, scale);
   }
 
   /** Bilinear elevation at world (x, z). Wraps — the map has no edges. */

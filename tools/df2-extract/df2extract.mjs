@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 // df2-extract — Phase 0 asset pipeline (seed).
 //
-// Currently implements the VALIDATED parts: PFF3/PFF2 archive unpack and .trn
-// manifest parsing. Verified against real DF-era terrain archives — see
-// docs/06-asset-extraction-findings.md and docs/02-asset-format-specification.md §1/§5.
+// PFF3/PFF2 archive unpack and .trn manifest parsing, verified against real
+// DF-era terrain archives — see docs/06-asset-extraction-findings.md and
+// docs/02-asset-format-specification.md §1/§5.
 //
-// Remaining Phase 0 work (not yet here): PCX (8-bit RLE) / TGA decoders, JPEG
-// passthrough, and the grassHeightField bake (detail_map × detail_elev strip).
+// The rest of the pipeline lives alongside: PCX decoding and PNG encoding in
+// imageio.mjs, and JPEG passthrough plus the grassHeightField bake in
+// prepare-terrain.mjs.
 //
 // No dependencies — Node built-ins only. Runs on plain `node`.
 //
@@ -16,7 +17,8 @@
 //   node df2extract.mjs trn     <file.trn>
 
 import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, join, resolve, sep } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const SIG_PFF3 = 0x33464650; // 'PFF3'
 const SIG_PFF2 = 0x32464650; // 'PFF2'
@@ -43,8 +45,10 @@ export function parsePff(buf) {
     const fileOffset = dv.getUint32(o + 4, true);
     const fileSize = dv.getUint32(o + 8, true);
     const fileModified = dv.getUint32(o + 12, true);
+    // The name field is the remaining 16 bytes of the 32-byte record, NUL-padded.
+    // Reading only 15 truncated any name that filled the field.
     let name = "";
-    for (let k = 0; k < 15; k++) {
+    for (let k = 0; k < 16; k++) {
       const c = buf[o + 16 + k];
       if (c === 0) break;
       name += String.fromCharCode(c);
@@ -103,17 +107,41 @@ function main() {
   if (cmd === "extract") {
     if (!outdir) throw new Error("extract needs an <outdir>");
     mkdirSync(outdir, { recursive: true });
+    const root = resolve(outdir);
     let n = 0;
+    let skipped = 0;
     for (const e of pff.entries) {
       if (e.deleted) continue;
-      writeFileSync(join(outdir, e.name), buf.subarray(e.fileOffset, e.fileOffset + e.fileSize));
+
+      // Entry names come from 16 bytes of an UNTRUSTED archive, and this tool
+      // exists to unpack third-party community archives. Without this check a
+      // name like "../../.zshrc" writes wherever it likes.
+      const dest = resolve(root, e.name);
+      if (dest !== root && !dest.startsWith(root + sep)) {
+        console.warn(`  ! refusing "${e.name}" — escapes ${outdir}`);
+        skipped++;
+        continue;
+      }
+      // Truncated or corrupt records would otherwise write silently short files.
+      if (e.fileOffset + e.fileSize > buf.length) {
+        console.warn(
+          `  ! refusing "${e.name}" — extends past end of archive ` +
+            `(offset ${e.fileOffset} + size ${e.fileSize} > ${buf.length})`
+        );
+        skipped++;
+        continue;
+      }
+
+      writeFileSync(dest, buf.subarray(e.fileOffset, e.fileOffset + e.fileSize));
       n++;
     }
-    console.log(`Extracted ${n} files -> ${outdir}`);
+    console.log(`Extracted ${n} files -> ${outdir}${skipped ? ` (${skipped} refused)` : ""}`);
   } else if (cmd !== "list") {
     throw new Error(`unknown command: ${cmd}`);
   }
 }
 
-// Run as CLI only when invoked directly.
-if (import.meta.url === `file://${process.argv[1]}`) main();
+// Run as CLI only when invoked directly. pathToFileURL, not string concatenation:
+// import.meta.url percent-encodes, so a path containing a space or any non-ASCII
+// character never matched and the tool exited 0 having done nothing at all.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();

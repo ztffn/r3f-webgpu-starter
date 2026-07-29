@@ -8,7 +8,7 @@
 import { Canvas, extend } from "@react-three/fiber";
 import type { ReactNode } from "react";
 import * as THREE from "three/webgpu";
-import { CAMERA_NEAR, CAMERA_FAR } from "../df2/config";
+import { CAMERA_NEAR, CAMERA_FAR, CAMERA_FOV } from "../df2/config";
 
 // Make the full three (incl. WebGPU node) namespace available as JSX elements.
 extend(THREE as never);
@@ -26,7 +26,9 @@ const DEFAULT_CAMERA: CameraConfig = {
   position: [0, 520, 900],
   near: CAMERA_NEAR,
   far: CAMERA_FAR,
-  fov: 60,
+  // From config, not a literal: the grass shader measures its zoom factor against
+  // this FOV, so a mismatch made every unaided frame read as partly scoped.
+  fov: CAMERA_FOV,
 };
 
 export interface GameCanvasProps {

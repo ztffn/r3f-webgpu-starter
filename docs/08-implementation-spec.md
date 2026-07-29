@@ -133,7 +133,7 @@ and WebGL2 backends.
 **Assets are committed — raw and prepared both.** `/assets/` holds the source archives
 (`EXP2.PFF`, `.trn` manifests, PCX/JPEG/TGA — see `assets/README.md`) and
 `public/assets/terrain/<slug>/` the prepared output, so the pipeline reproduces from source and
-a Git-connected build renders the real map. Community mod freeware in a private repo. The
+a Git-connected build renders the real map. Community mod freeware authored by this project's own mod team, who hold the rights. The
 distinction that still holds: **retail**-extracted DF2 data is personal-use-only and does not
 get committed or shipped (`01` §3).
 

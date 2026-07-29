@@ -2,8 +2,13 @@
 //
 // Loads a real extracted DF terrain if its prepared assets are present
 // (see tools/df2-extract), otherwise falls back to synthetic fBm terrain.
+//
+// Both paths produce the SAME set of inputs — a pre-shaded colormap, an 8-bit
+// elevation grid and a canopy field — so terrain and grass need no mode switch and
+// the grass system is visible with no game data present.
 
 import { useEffect, useMemo, useState } from "react";
+import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three/webgpu";
 import { Terrain } from "./Terrain";
 import { PerfMonitor, type PerfSample } from "./PerfMonitor";
@@ -11,6 +16,7 @@ import { FlyControls, type FlyState, type Stance } from "./FlyControls";
 import { Heightfield } from "./Heightfield";
 import { createTerrainMaterial } from "./TerrainMaterial";
 import { createGrassMaterial } from "./GrassMaterial";
+import { bakeSyntheticMaps } from "./syntheticMaps";
 import { loadTerrain, type LoadedTerrain } from "./loadTerrain";
 import {
   TERRAIN_SLUG,
@@ -19,6 +25,9 @@ import {
   GRASS_SCALE,
   GRASS_STEPS,
   GRASS_CELL,
+  GRASS_NEAR_CLIP,
+  GRASS_PIXELS_PER_STEP,
+  GRASS_HASH_PERIOD,
   GRASS_TONE_VARIATION,
   GRASS_FADE_START,
   GRASS_FADE_END,
@@ -28,6 +37,7 @@ import {
   FOG_COLOR,
   FOG_NEAR,
   FOG_FAR,
+  REFERENCE_P11,
 } from "./config";
 
 const SUN_DISTANCE = 2000;
@@ -42,6 +52,37 @@ export interface DF2SceneProps {
   onToggleGround?: () => void;
   onStance?: (s: Stance) => void;
   onStatus?: (status: { loading: boolean; terrain: LoadedTerrain | null }) => void;
+}
+
+/**
+ * Water plane that follows the camera.
+ *
+ * The terrain tiles forever and its chunk window recentres every frame, so a plane
+ * pinned to the world origin ran out: past its half-extent the camera flew over
+ * terrain with no water and any basin below water level rendered dry. Snapped to a
+ * coarse grid so it does not shimmer as it moves.
+ */
+function Water({ level, span, material }: { level: number; span: number; material: THREE.Material }) {
+  const { camera } = useThree();
+  const mesh = useMemo(() => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(span, span), material);
+    m.rotation.x = -Math.PI / 2;
+    m.frustumCulled = false;
+    return m;
+  }, [span, material]);
+
+  useEffect(() => () => mesh.geometry.dispose(), [mesh]);
+
+  useFrame(() => {
+    const step = span / 8;
+    mesh.position.set(
+      Math.round(camera.position.x / step) * step,
+      level,
+      Math.round(camera.position.z / step) * step
+    );
+  });
+
+  return <primitive object={mesh} />;
 }
 
 export function DF2Scene({
@@ -72,32 +113,61 @@ export function DF2Scene({
     onStatus?.({ loading: loaded === undefined, terrain: loaded ?? null });
   }, [loaded, onStatus]);
 
-  const heightfield = useMemo(() => {
+  // One bundle for both modes: elevation bytes, colormap, canopy.
+  const world = useMemo(() => {
     if (loaded === undefined) return null; // don't build anything while loading
-    return loaded
-      ? Heightfield.fromHeightmap({ data: loaded.heights, size: loaded.size })
-      : Heightfield.synthetic();
+
+    if (loaded) {
+      const heightfield = Heightfield.fromHeightmap({
+        data: loaded.heights,
+        size: loaded.size,
+        metersPerTexel: METERS_PER_TEXEL,
+        heightScale: HEIGHT_SCALE,
+      });
+      return {
+        heightfield,
+        heights: loaded.heights,
+        heightSize: loaded.size,
+        size: loaded.size,
+        colorMap: loaded.colorMap,
+        grassMap: loaded.grassMap,
+        filter: loaded.filter,
+        waterHeight: loaded.waterHeight,
+      };
+    }
+
+    const bytes = Heightfield.syntheticBytes();
+    const heightfield = Heightfield.fromHeightmap(bytes);
+    const { colorMap, grassMap, size } = bakeSyntheticMaps(heightfield);
+    return {
+      heightfield,
+      heights: bytes.data,
+      // Elevation grid and colour grid differ here (see syntheticMaps). Both are
+      // sampled by normalised uv, so only the COLOUR texel size matters downstream.
+      heightSize: bytes.size,
+      size,
+      colorMap,
+      grassMap,
+      filter: undefined,
+      waterHeight: 0,
+    };
   }, [loaded]);
 
-  const material = useMemo(() => {
-    if (loaded === undefined) return null;
-    return createTerrainMaterial({
-      colorMap: loaded?.colorMap ?? null,
-      filter: loaded?.filter,
-    });
-  }, [loaded]);
-
+  const material = useMemo(
+    () => (world?.colorMap ? createTerrainMaterial({ colorMap: world.colorMap, filter: world.filter }) : null),
+    [world]
+  );
   useEffect(() => () => material?.dispose(), [material]);
 
   // --- columnar grass (docs/07) ---------------------------------------------
   const grassKit = useMemo(() => {
-    if (!loaded || !loaded.grassMap || !loaded.colorMap) return null;
+    if (!world?.grassMap || !world.colorMap) return null;
     // Elevation as a texture for the fragment march. Built from the same raw
     // samples as the CPU heightfield, so shader and gameplay agree exactly.
     const heightTex = new THREE.DataTexture(
-      loaded.heights,
-      loaded.size,
-      loaded.size,
+      world.heights,
+      world.heightSize,
+      world.heightSize,
       THREE.RedFormat,
       THREE.UnsignedByteType
     );
@@ -108,21 +178,25 @@ export function DF2Scene({
     heightTex.needsUpdate = true;
 
     const kit = createGrassMaterial({
-      grassMap: loaded.grassMap,
+      grassMap: world.grassMap,
       heightMap: heightTex,
-      colorMap: loaded.colorMap,
-      worldSize: loaded.size * METERS_PER_TEXEL,
-      mapSize: loaded.size,
-      heightScale: HEIGHT_SCALE,
+      colorMap: world.colorMap,
+      worldSize: world.heightfield.worldSize,
+      mapSize: world.size,
+      heightScale: world.heightfield.heightScale,
       grassScale: GRASS_SCALE,
       steps: GRASS_STEPS,
       cellSize: GRASS_CELL,
+      nearClip: GRASS_NEAR_CLIP,
+      pixelsPerStep: GRASS_PIXELS_PER_STEP,
+      hashPeriod: GRASS_HASH_PERIOD,
       toneVariation: GRASS_TONE_VARIATION,
       fadeStart: GRASS_FADE_START,
       fadeEnd: GRASS_FADE_END,
+      referenceP11: REFERENCE_P11,
     });
     return { ...kit, heightTex };
-  }, [loaded]);
+  }, [world]);
 
   useEffect(
     () => () => {
@@ -142,13 +216,12 @@ export function DF2Scene({
   }, []);
   useEffect(() => () => waterMaterial.dispose(), [waterMaterial]);
 
-  const worldSize = heightfield?.worldSize ?? 1024;
+  const heightfield = world?.heightfield ?? null;
   // .trn water_height is in raw elevation units, same scale as the heightmap.
-  const waterLevel = (loaded?.waterHeight ?? 0) * HEIGHT_SCALE;
+  const waterLevel = (world?.waterHeight ?? 0) * HEIGHT_SCALE;
   const showWater = !!heightfield && waterLevel > heightfield.minHeight;
-  // The terrain tiles forever, so water must too — make the plane large enough
-  // to exceed the fog distance from anywhere the camera can be.
-  const waterSpan = Math.max(worldSize * 4, FOG_FAR * 4);
+  // Follows the camera, so it only has to out-reach the fog, not the world.
+  const waterSpan = FOG_FAR * 3;
 
   return (
     <>
@@ -157,7 +230,8 @@ export function DF2Scene({
       <color attach="background" args={[SKY_COLOR]} />
       <fog attach="fog" args={[FOG_COLOR, FOG_NEAR, FOG_FAR]} />
 
-      {/* Sun */}
+      {/* Sun. The terrain is unlit (its colormap is pre-shaded); this lights the
+          water and anything else added to the scene later. */}
       <directionalLight
         position={[
           SUN_DIRECTION[0] * SUN_DISTANCE,
@@ -174,18 +248,14 @@ export function DF2Scene({
         <Terrain
           heightfield={heightfield}
           material={material}
-          grassMaterial={grass ? (grassKit?.material ?? null) : null}
+          grassMaterial={grassKit?.material ?? null}
+          grassEnabled={grass}
           grassDistance={GRASS_FADE_END}
           wireframe={wireframe}
         />
       )}
 
-      {showWater && (
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, waterLevel, 0]}>
-          <planeGeometry args={[waterSpan, waterSpan]} />
-          <primitive object={waterMaterial} attach="material" />
-        </mesh>
-      )}
+      {showWater && <Water level={waterLevel} span={waterSpan} material={waterMaterial} />}
 
       {heightfield && (
         <FlyControls

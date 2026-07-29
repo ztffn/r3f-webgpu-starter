@@ -13,7 +13,7 @@ because two "matching" scores turned out to be measuring bare terrain.
 npm install                 # from the repo root
 cd tools/grass-rig
 ln -s ../../node_modules node_modules
-cp -r ../../public/assets assets      # prepared terrain (git-ignored)
+cp -r ../../public/assets assets      # prepared terrain (committed; copied so the rig serves it)
 npx vite build
 python3 -m http.server 4180 --bind 127.0.0.1 &
 node drive.mjs '[{"name":"shot","camX":672,"camZ":288,"yaw":2.2,"pitch":0,"fov":65,

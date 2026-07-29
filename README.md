@@ -135,7 +135,7 @@ npx netlify deploy --prod --dir=dist    # or just push; a Git-connected build wo
 **Prepared terrain assets are committed** (`public/assets/terrain/<slug>/`, ~2.6 MB). What is
 in the repo is community-authored expansion terrain — Green Mile is by Celtic, from TerraNova's
 EXP2b pack — 25-year-old mod files distributed as freeware and explicitly built for
-redistribution, in a private repo. That is the cleanest footing available, and it is why EXP2b
+redistribution, authored by this project's own mod team who hold the rights. That is why EXP2b
 is the *preferred* asset source rather than retail data
 ([`docs/01`](./docs/01-project-overview-and-roadmap.md) §3).
 

@@ -3,9 +3,9 @@
 // Samples inside the render loop but reports on a throttle, so the readout
 // itself doesn't perturb what it measures (a setState per frame would).
 //
-// Frame time is reported alongside FPS because FPS compresses exactly where it
-// matters: 120->60fps and 60->40fps are both "‑60", but the first costs 8 ms and
-// the second 8 ms too — ms is the number to optimise against.
+// Frame time is reported alongside FPS because FPS hides the size of a change.
+// Going from 120 to 60 fps and from 60 to 40 fps cost the same 8 ms, but read as a
+// 60 fps drop and a 20 fps drop. Milliseconds are what you optimise against.
 
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useRef } from "react";

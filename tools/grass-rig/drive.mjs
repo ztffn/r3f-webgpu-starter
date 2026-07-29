@@ -2,16 +2,13 @@
 // from the reference screenshots: columnar grass changes colour ACROSS columns
 // far more than UP them, giving mean|d/dx| / mean|d/dy| ~= 1.6.
 
-import { chromium } from "playwright-core";
 import { writeFileSync } from "node:fs";
+import { launch } from "./browser.mjs";
 
 const VARIANTS = JSON.parse(process.argv[2] ?? "[]");
 const OUT = process.argv[3] ?? ".";
 
-const browser = await chromium.launch({
-  executablePath: "/opt/pw-browsers/chromium-1194/chrome-linux/chrome",
-  args: ["--no-sandbox", "--use-gl=angle", "--use-angle=swiftshader", "--disable-features=WebGPU"],
-});
+const browser = await launch();
 const page = await browser.newPage({ viewport: { width: 600, height: 420 } });
 const errs = [];
 page.on("pageerror", (e) => errs.push(String(e).split("\n")[0]));

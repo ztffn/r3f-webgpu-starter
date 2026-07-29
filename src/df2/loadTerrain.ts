@@ -1,11 +1,11 @@
 // Runtime loader for real extracted DF terrain assets.
 //
 // Reads what tools/df2-extract/prepare-terrain.mjs produced into
-// /assets/terrain/<slug>/ (a git-ignored directory — extracted game assets are
-// never committed, see docs/06-asset-extraction-findings.md).
+// /assets/terrain/<slug>/. Those files ARE committed (see README § Asset policy
+// and docs/01 §3); what is never committed is retail-extracted data.
 //
-// Returns null when the assets aren't present, so the app can fall back to
-// synthetic terrain without the user having to install anything.
+// Returns null when the assets aren't present, so the app can still fall back to
+// synthetic terrain — which now renders grass too (syntheticMaps.ts).
 
 import * as THREE from "three/webgpu";
 
@@ -51,7 +51,7 @@ export interface LoadedTerrain {
   heights: Uint8Array;
   size: number;
   colorMap: THREE.Texture | null;
-  /** Per-texel grass canopy height, 0-255. NEAREST-filtered: columns are discrete. */
+  /** Per-texel grass canopy height, 0-255. LINEAR-filtered — it is the envelope. */
   grassMap: THREE.DataTexture | null;
   grassSource: GrassSource;
   waterHeight: number;
@@ -59,13 +59,20 @@ export interface LoadedTerrain {
   meta: TerrainMeta;
 }
 
+interface Rgba {
+  rgba: Uint8ClampedArray;
+  width: number;
+  height: number;
+}
+
 /** Draw an image URL to a 2D canvas and return its raw RGBA. */
-async function loadRgba(
-  url: string
-): Promise<{ rgba: Uint8ClampedArray; width: number; height: number }> {
+async function loadRgba(url: string): Promise<Rgba> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`${url}: ${res.status}`);
-  const bitmap = await createImageBitmap(await res.blob());
+  // colorSpaceConversion "none": these bytes are DATA, not a picture. Elevation
+  // drives the mesh and the concealment field, so the decode has to be
+  // byte-exact rather than colour-managed into something that merely looks right.
+  const bitmap = await createImageBitmap(await res.blob(), { colorSpaceConversion: "none" });
   const { width, height } = bitmap;
 
   const canvas = document.createElement("canvas");
@@ -79,12 +86,32 @@ async function loadRgba(
   return { rgba: ctx.getImageData(0, 0, width, height).data, width, height };
 }
 
-/** Decode an 8-bit greyscale PNG to raw samples. */
-async function loadGreyscale(url: string): Promise<{ data: Uint8Array; size: number }> {
-  const { rgba, width } = await loadRgba(url);
-  const data = new Uint8Array(rgba.length / 4);
-  for (let i = 0; i < data.length; i++) data[i] = rgba[i * 4]; // R channel
-  return { data, size: width };
+/** Take the red channel of an RGBA buffer as raw 8-bit samples. */
+function redChannel({ rgba, width, height }: Rgba): { data: Uint8Array; width: number; height: number } {
+  const data = new Uint8Array(width * height);
+  for (let i = 0; i < data.length; i++) data[i] = rgba[i * 4];
+  return { data, width, height };
+}
+
+/**
+ * Decode an 8-bit greyscale PNG that is expected to be square.
+ *
+ * The square-ness is asserted rather than assumed. This used to return the width
+ * as a single `size` and discard the height, so a non-square asset produced a
+ * buffer of the wrong length with no error — and the dimensions already recorded
+ * in terrain.json went unread.
+ */
+async function loadSquare(url: string, expect?: { width: number; height: number }) {
+  const img = redChannel(await loadRgba(url));
+  if (img.width !== img.height) {
+    throw new Error(`${url}: expected a square map, got ${img.width}x${img.height}`);
+  }
+  if (expect && (expect.width !== img.width || expect.height !== img.height)) {
+    throw new Error(
+      `${url}: terrain.json says ${expect.width}x${expect.height}, file is ${img.width}x${img.height}`
+    );
+  }
+  return { data: img.data, size: img.width };
 }
 
 /**
@@ -95,9 +122,11 @@ async function loadGreyscale(url: string): Promise<{ data: Uint8Array; size: num
  * map, so grass lands in arbitrary places. Greenness at least puts canopy where
  * the map visibly has grass, letting the renderer be judged on its own terms.
  * Never presented as real data — see `grassSource`.
+ *
+ * Exported so tools/grass-rig uses this exact function rather than its own copy.
  */
-function grassFromColormap(rgba: Uint8ClampedArray, size: number): Uint8Array {
-  const out = new Uint8Array(size * size);
+export function grassFromColormap(rgba: Uint8ClampedArray, width: number, height: number): Uint8Array {
+  const out = new Uint8Array(width * height);
   for (let i = 0; i < out.length; i++) {
     const r = rgba[i * 4];
     const g = rgba[i * 4 + 1];
@@ -127,51 +156,98 @@ function makeGrassTexture(data: Uint8Array, size: number): THREE.DataTexture {
   return tex;
 }
 
+/** Colormap texture built from pixels already in hand, so the file decodes once. */
+function colorTextureFromRgba({ rgba, width, height }: Rgba): THREE.DataTexture {
+  // Zero-copy view over the decoded pixels; nothing else mutates them.
+  const bytes = new Uint8Array(rgba.buffer, rgba.byteOffset, rgba.byteLength);
+  const tex = new THREE.DataTexture(bytes, width, height, THREE.RGBAFormat);
+  // Row 0 is the map's north edge, like the heightmap. DataTexture already
+  // defaults to flipY false, but say so: flipping would mirror colour vs relief.
+  tex.flipY = false;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.generateMipmaps = true;
+  tex.anisotropy = 8;
+  tex.needsUpdate = true;
+  return tex;
+}
+
 export async function loadTerrain(slug: string): Promise<LoadedTerrain | null> {
+  const base = `/assets/terrain/${slug}`;
   let meta: TerrainMeta;
   try {
-    const res = await fetch(`assets/terrain/${slug}/terrain.json`);
+    const res = await fetch(`${base}/terrain.json`);
     if (!res.ok) return null;
+    // A SPA host rewrites unknown paths to index.html with status 200, so `ok` is
+    // not enough to prove the file exists — without this the fallback happened
+    // silently on any host with a catch-all rewrite.
+    const type = res.headers.get("content-type") ?? "";
+    if (!type.includes("json")) {
+      console.info(`[df2] no prepared assets for "${slug}" — using synthetic terrain.`);
+      return null;
+    }
     meta = (await res.json()) as TerrainMeta;
   } catch {
-    return null; // no prepared assets — caller falls back to synthetic
+    console.info(`[df2] no prepared assets for "${slug}" — using synthetic terrain.`);
+    return null;
   }
 
   try {
     if (!meta.assets.height) return null;
-    const { data, size } = await loadGreyscale(`assets/terrain/${slug}/${meta.assets.height.file}`);
+    const { data, size } = await loadSquare(`${base}/${meta.assets.height.file}`, {
+      width: meta.assets.height.width,
+      height: meta.assets.height.height,
+    });
 
-    let colorMap: THREE.Texture | null = null;
-    if (meta.assets.color) {
-      colorMap = await new THREE.TextureLoader().loadAsync(
-        `assets/terrain/${slug}/${meta.assets.color.file}`
-      );
-      // Image row 0 is the map's north edge, matching how the heightmap is
-      // sampled — so don't flip, or the colormap would mirror against the relief.
-      colorMap.flipY = false;
-      colorMap.colorSpace = THREE.SRGBColorSpace;
-      colorMap.anisotropy = 8;
-      // The map tiles infinitely (docs/06 §10), so UVs run past [0,1] and the
-      // colormap must repeat rather than smear its edge pixels.
-      colorMap.wrapS = THREE.RepeatWrapping;
-      colorMap.wrapT = THREE.RepeatWrapping;
-    }
-
-    // --- grass canopy field ------------------------------------------------
-    let grassMap: THREE.DataTexture | null = null;
-    let grassSource: GrassSource = "none";
+    // --- colormap and canopy field ----------------------------------------
+    // The stand-in canopy needs the colormap's PIXELS, so on that path the file
+    // is decoded once and the texture is built from the same buffer. It used to
+    // be fetched and decoded twice, once by TextureLoader and once for the bake.
     const bakedFromSubstitute =
       meta.assets.grass?.substituted ?? meta.assets.detailElev?.substituted ?? false;
+    const useRealStrip = !!meta.assets.grass && !bakedFromSubstitute;
 
-    if (meta.assets.grass && !bakedFromSubstitute) {
+    let colorMap: THREE.Texture | null = null;
+    let grassMap: THREE.DataTexture | null = null;
+    let grassSource: GrassSource = "none";
+
+    if (useRealStrip) {
+      if (meta.assets.color) {
+        colorMap = await new THREE.TextureLoader().loadAsync(`${base}/${meta.assets.color.file}`);
+        // Image row 0 is the map's north edge, matching how the heightmap is
+        // sampled — so don't flip, or the colormap would mirror against the relief.
+        colorMap.flipY = false;
+        colorMap.colorSpace = THREE.SRGBColorSpace;
+        colorMap.anisotropy = 8;
+        // The map tiles infinitely (docs/06 §10), so UVs run past [0,1] and the
+        // colormap must repeat rather than smear its edge pixels.
+        colorMap.wrapS = THREE.RepeatWrapping;
+        colorMap.wrapT = THREE.RepeatWrapping;
+      }
       // Real detail_elev strip — the authentic data path.
-      const g = await loadGreyscale(`assets/terrain/${slug}/${meta.assets.grass.file}`);
+      const g = await loadSquare(`${base}/${meta.assets.grass!.file}`, {
+        width: meta.assets.grass!.width,
+        height: meta.assets.grass!.height,
+      });
       grassMap = makeGrassTexture(g.data, g.size);
       grassSource = "real";
     } else if (meta.assets.color) {
-      // No usable strip for this terrain; derive a labelled stand-in.
-      const { rgba, width } = await loadRgba(`assets/terrain/${slug}/${meta.assets.color.file}`);
-      grassMap = makeGrassTexture(grassFromColormap(rgba, width), width);
+      // No usable strip: derive a labelled stand-in. One decode serves both the
+      // colour texture and the canopy bake.
+      const pixels = await loadRgba(`${base}/${meta.assets.color.file}`);
+      colorMap = colorTextureFromRgba(pixels);
+      if (pixels.width !== pixels.height) {
+        throw new Error(
+          `colormap must be square to derive a canopy, got ${pixels.width}x${pixels.height}`
+        );
+      }
+      grassMap = makeGrassTexture(
+        grassFromColormap(pixels.rgba, pixels.width, pixels.height),
+        pixels.width
+      );
       grassSource = "colormap-standin";
       console.info(
         `[df2] "${meta.trn.terrain_name}": real detail_elev "${meta.assets.detailElev?.referencedName ?? meta.trn.detail_elev}" ` +

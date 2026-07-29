@@ -1,7 +1,6 @@
-import { chromium } from "playwright-core";
+import { launch } from "./browser.mjs";
 const V = JSON.parse(process.argv[2]);
-const b = await chromium.launch({ executablePath:"/opt/pw-browsers/chromium-1194/chrome-linux/chrome",
-  args:["--no-sandbox","--use-gl=angle","--use-angle=swiftshader","--disable-features=WebGPU"] });
+const b = await launch();
 const page = await b.newPage({ viewport:{width:600,height:420} });
 await page.goto("http://127.0.0.1:4180/", { waitUntil:"load" });
 await page.waitForFunction(() => window.__ready === true, { timeout: 30000 });

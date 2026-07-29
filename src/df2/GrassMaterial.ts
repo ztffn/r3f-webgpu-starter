@@ -15,8 +15,12 @@
 // terrain colormap shows through.
 //
 // Two details carry the look, and both are deliberate:
-//   1. The canopy field is sampled with NEAREST, so columns are discrete blocks
-//      with hard vertical edges rather than a smooth interpolated surface.
+//   1. Discreteness comes from the shader's own grass-cell grid, not from texture
+//      filtering. The canopy field is sampled LINEARLY on purpose — it is the
+//      envelope (where grass grows, roughly how tall), and sampling it NEAREST
+//      just stamps the 2 m terrain texel onto the canopy as visible blocks. The
+//      hard vertical edges come from quantising the march position to a cell and
+//      giving that cell its own height (see loadTerrain.makeGrassTexture).
 //   2. Colour is fetched at the HIT COLUMN's quantised texel — one colour per
 //      column, smeared up its full height. Sampling colour per-step along the
 //      ray instead would read as soft modern grass, not DF2 grass (docs/07 §1.1).
@@ -47,7 +51,7 @@ import {
 } from "three/tsl";
 
 export interface GrassMaterialOptions {
-  /** Per-texel canopy height, 0-255, NEAREST-filtered. */
+  /** Per-texel canopy height, 0-255. LINEAR-filtered — this is the envelope. */
   grassMap: THREE.Texture;
   /** Terrain elevation, same grid as the canopy field. */
   heightMap: THREE.Texture;
@@ -112,20 +116,28 @@ export interface GrassMaterialOptions {
   /** Distance (m) at which columns start fading into the colormap. */
   fadeStart?: number;
   fadeEnd?: number;
+  /**
+   * Metres after which the per-column hash pattern repeats.
+   *
+   * Cell indices must be wrapped into a small range before hashing, because a
+   * sin-based hash loses all precision at large arguments. Wrapping at a fixed
+   * CELL COUNT tied the repeat distance to the column width, so making columns
+   * finer also made the tiling more obvious. Fixing it in metres decouples them.
+   */
+  hashPeriod?: number;
+  /**
+   * projection[1][1] for the unaided view, i.e. 1/tan(fovY/2) at the camera's
+   * base field of view. The zoom factor is measured against this, so it MUST
+   * match the camera actually in use or every frame reads as partly zoomed.
+   */
+  referenceP11?: number;
 }
 
 export interface GrassMaterial {
   material: THREE.MeshBasicNodeMaterial;
   /** Metres the shell is lifted above the terrain — also the tallest canopy. */
   canopyMax: number;
-  /** Live-tunable graph inputs (see setScale for the derived ones). */
-  uniforms: Record<string, ReturnType<typeof uniform>>;
-  /** Re-derive world/height scaling when the calibration dials change. */
-  setScale(metersPerTexel: number, heightScale: number, grassScale: number): void;
 }
-
-/** projection[1][1] at a 65-degree vertical FOV = 1/tan(32.5 deg). */
-const REFERENCE_P11 = 1 / Math.tan((65 * Math.PI) / 180 / 2);
 
 export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
   const {
@@ -139,13 +151,20 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     steps = 20,
     cellSize = 0.35,
     pixelsPerStep = 1.0,
-    nearClip = 0.45,
+    nearClip = 1.2,
     debugHit = false,
     debugDistance = false,
     toneVariation = 0.42,
     fadeStart = 420,
     fadeEnd = 700,
+    hashPeriod = 120,
+    // 1/tan(30 deg): a 60-degree vertical FOV, matching config.CAMERA_FOV.
+    referenceP11 = 1 / Math.tan((60 * Math.PI) / 180 / 2),
   } = opts;
+
+  // Cell indices are wrapped to this many cells before hashing. Derived from the
+  // requested metric period so the repeat distance does not move with cellSize.
+  const hashWrapCells = Math.max(64, Math.round(hashPeriod / cellSize));
 
   const canopyMax = 255 * grassScale;
 
@@ -159,7 +178,6 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
   const uNearClip = uniform(nearClip);
   const uHeightScale = uniform(heightScale * 255);
   const uGrassScale = uniform(grassScale * 255);
-  const uCanopyMax = uniform(canopyMax);
   const uTone = uniform(toneVariation);
   const uFadeStart = uniform(fadeStart);
   const uFadeEnd = uniform(fadeEnd);
@@ -205,7 +223,8 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
    * rather than more. Wrapping costs nothing and the map tiles anyway.
    */
   const cellHash = (cell: NodeArg, salt: number): NodeArg => {
-    const w = cell.sub(cell.div(512).floor().mul(512)); // -> [0,512)
+    const p = hashWrapCells;
+    const w = cell.sub(cell.div(p).floor().mul(p)); // -> [0, hashWrapCells)
     return w.x.mul(127.1).add(w.y.mul(311.7)).add(salt).sin().mul(43758.5453).fract();
   };
 
@@ -270,8 +289,20 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     // underside, so the ray must start at the camera, not at the rasterised
     // fragment. Otherwise the near field renders no grass at all.
     const camXZ = vec2(cameraPosition.x, cameraPosition.z);
-    const inside: NodeArg = cameraPosition.y.lessThan(groundAt(camXZ).add(uCanopyMax));
+    // Tested against the LOCAL canopy, not the global maximum. Against uCanopyMax
+    // this was true whenever the eye sat below the tallest canopy anywhere on the
+    // map — including lying on bare ground where nothing grows. Every fragment
+    // then marched from the eye at the finest step, so grass past the step budget
+    // was unreachable and vanished. The eye is only inside the volume when there
+    // is canopy where it actually stands. Uses the same 1.04 margin as the shell.
+    const camCanopy = canopyBase(camXZ).mul(1.04);
+    const inside: NodeArg = cameraPosition.y.lessThan(groundAt(camXZ).add(camCanopy));
     const P0: NodeArg = inside.select(cameraPosition, frag);
+    // Distance from the EYE to where this march begins: zero when starting at the
+    // eye, the fragment's own range when starting on the shell. The step size is
+    // derived from this rather than from the ray-local `t`, which is what the
+    // pixel-size argument below was always about.
+    const eyeBase: NodeArg = inside.select(float(0), frag.distance(cameraPosition));
 
     // --- adaptive march, constant angular resolution ------------------------
     // A uniform grid DDA tests every column exactly once, which is ideal near
@@ -308,7 +339,11 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
 
     Loop(steps, () => {
       // Step at the column width up close, then at whatever spans one pixel.
-      const step = cellW.max(t.mul(pixelAngle));
+      // Keyed on distance from the EYE, not on `t`. `t` restarts at zero for every
+      // fragment, so the pixel term never overtook the column-width floor and the
+      // step stayed at its finest for the whole budget — capping total ray length
+      // at steps*cellSize regardless of range.
+      const step = cellW.max(eyeBase.add(t).mul(pixelAngle));
       const tNext = t.add(step);
 
       const P = P0.add(V.mul(t));
@@ -375,11 +410,15 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     // concealment mechanic is defined, so the picture and the gameplay query
     // would disagree at the one range that matters.
     const p11: NodeArg = (cameraProjectionMatrix as NodeArg)[1].y;
-    const zoom = p11.div(float(REFERENCE_P11)).max(float(1));
-    const fade: NodeArg = (frag.distance(cameraPosition) as NodeArg).smoothstep(
-      uFadeEnd.mul(zoom) as NodeArg,
-      uFadeStart.mul(zoom) as NodeArg
-    );
+    const zoom = p11.div(float(referenceP11)).max(float(1));
+    // Edges ascending, then inverted. three maps `x.smoothstep(a, b)` onto
+    // `smoothstep(a, b, x)`, so passing (fadeEnd, fadeStart) put the edges in
+    // descending order — which both the GLSL ES and WGSL specs leave
+    // indeterminate. It happens to give the intended ramp on drivers that use the
+    // naive formula and may clamp to a constant on drivers that assume e0 < e1.
+    const fade: NodeArg = (frag.distance(cameraPosition) as NodeArg)
+      .smoothstep(uFadeStart.mul(zoom) as NodeArg, uFadeEnd.mul(zoom) as NodeArg)
+      .oneMinus();
 
     // Depth at the RAYMARCH HIT, not at the shell. The shell is the terrain
     // lifted by the tallest canopy, so its rasterised depth is up to a
@@ -396,13 +435,22 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     // it is obvious whether a suspect region is hitting nearby grass or grass
     // hundreds of metres away seen over a ridge.
     const dNorm = hitT.div(float(600)).clamp(0, 1);
+
+    // The handover to the colormap is a COLOUR blend, not an opacity ramp.
+    // opacityNode feeds an alpha TEST at 0.5 with blending off, so a binary `hit`
+    // multiplied by `fade` collapsed the entire 700->1100 m cross-fade into a hard
+    // ring at the midpoint, where grass switched off inside one pixel. Blending
+    // the column tone toward the plain colormap makes the handover invisible,
+    // which is what this fade always claimed to do — and it keeps opacity binary,
+    // which is the only thing an alpha test can express.
+    const columns: NodeArg = base.rgb.mul(shade).mul(tone);
     const rgb = debugDistance
       ? vec3(dNorm.oneMinus(), dNorm.mul(2).min(dNorm.mul(2).oneMinus().add(1)).clamp(0, 1), dNorm)
       : debugHit
         ? vec3(1, 0, 1).mul(hitFrac.clamp(0.25, 1))
-        : base.rgb.mul(shade).mul(tone);
+        : columns.mix(base.rgb, fade.oneMinus());
 
-    return GrassHit(rgb, debugHit || debugDistance ? hit : hit.mul(fade), hitDepth);
+    return GrassHit(rgb, hit, hitDepth);
   });
 
   const shaded = grassShade();
@@ -430,27 +478,5 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
   // overriding normalNode with a world normal shades every back face black.
   material.side = THREE.DoubleSide;
 
-  return {
-    material,
-    canopyMax,
-    uniforms: {
-      worldSize: uWorldSize,
-      halfWorld: uHalfWorld,
-      texel: uTexel,
-      heightScale: uHeightScale,
-      grassScale: uGrassScale,
-      canopyMax: uCanopyMax,
-      fadeStart: uFadeStart,
-      fadeEnd: uFadeEnd,
-    },
-    setScale(metersPerTexel: number, heightScaleM: number, grassScaleM: number) {
-      const world = mapSize * metersPerTexel;
-      uWorldSize.value = world;
-      uHalfWorld.value = world / 2;
-      uTexel.value = metersPerTexel;
-      uHeightScale.value = heightScaleM * 255;
-      uGrassScale.value = grassScaleM * 255;
-      uCanopyMax.value = grassScaleM * 255;
-    },
-  };
+  return { material, canopyMax };
 }

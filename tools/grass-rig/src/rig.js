@@ -95,7 +95,14 @@ export async function run(opts) {
   // fade that produced a 19 px fringe; at 2000 m it drops to the ~9 px of real
   // grass standing on the ridge.
   const SPAN = opts.span ?? 1400;
-  const N = opts.meshRes ?? 220;
+  // Mesh resolution is derived from the span so QUAD SIZE stays constant.
+  // Raising the span with a fixed vertex count silently coarsens the mesh: at
+  // span 1400 with N=220 quads become 12.7 m, too coarse to carry a ridge, so
+  // the mesh dips below the true surface and sky shows through — while the grass
+  // march, which samples exact heights, still draws. That reads as a floating
+  // grass shelf and is worse than the artifact the larger span was fixing.
+  const TARGET_QUAD = opts.quadSize ?? 4; // metres
+  const N = opts.meshRes ?? Math.min(900, Math.round((SPAN * 2) / TARGET_QUAD));
   const pos = [], nor = [], uvs = [], idx = [];
   const half = (size * MPT) / 2;
   const groundAt = (x, z) => sampleField(heights, size, (x + half) / MPT, (z + half) / MPT) * HS;
@@ -148,6 +155,7 @@ export async function run(opts) {
       steps: opts.steps ?? 48,
       cellSize: opts.cellSize ?? 0.35,
       debugHit: opts.debugHit ?? false,
+      debugDistance: opts.debugDistance ?? false,
       toneVariation: opts.toneVariation ?? 0.42,
       pixelsPerStep: opts.pixelsPerStep ?? 1.0,
       nearClip: opts.nearClip ?? 0.45,

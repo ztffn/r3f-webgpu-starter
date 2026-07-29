@@ -105,6 +105,8 @@ export interface GrassMaterialOptions {
    * puts hits where columns actually subtend a few pixels.
    */
   nearClip?: number;
+  /** Debug: encode the ray distance of each grass hit as colour (red=near, blue=far). */
+  debugDistance?: boolean;
   /** Debug: paint every grass hit flat magenta to inspect the hit mask. */
   debugHit?: boolean;
   /** Distance (m) at which columns start fading into the colormap. */
@@ -139,6 +141,7 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     pixelsPerStep = 1.0,
     nearClip = 0.45,
     debugHit = false,
+    debugDistance = false,
     toneVariation = 0.42,
     fadeStart = 420,
     fadeEnd = 700,
@@ -389,11 +392,17 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     const viewZ = cameraViewMatrix.mul(vec4(hitWorld, 1)).z;
     const hitDepth = viewZToPerspectiveDepth(viewZ, cameraNear, cameraFar);
 
-    const rgb = debugHit
-      ? vec3(1, 0, 1).mul(hitFrac.clamp(0.25, 1))
-      : base.rgb.mul(shade).mul(tone);
+    // Distance debug: red near -> green mid -> blue far, banded every 100 m so
+    // it is obvious whether a suspect region is hitting nearby grass or grass
+    // hundreds of metres away seen over a ridge.
+    const dNorm = hitT.div(float(600)).clamp(0, 1);
+    const rgb = debugDistance
+      ? vec3(dNorm.oneMinus(), dNorm.mul(2).min(dNorm.mul(2).oneMinus().add(1)).clamp(0, 1), dNorm)
+      : debugHit
+        ? vec3(1, 0, 1).mul(hitFrac.clamp(0.25, 1))
+        : base.rgb.mul(shade).mul(tone);
 
-    return GrassHit(rgb, debugHit ? hit : hit.mul(fade), hitDepth);
+    return GrassHit(rgb, debugHit || debugDistance ? hit : hit.mul(fade), hitDepth);
   });
 
   const shaded = grassShade();

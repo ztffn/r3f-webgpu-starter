@@ -256,30 +256,44 @@ concealment work must check the verdict before believing the pixel counts.
 
 ## 9. Two reported artifacts, diagnosed
 
-### "Floating grass" along ridgelines — mostly a test-harness limit
+### "Floating grass" along ridgelines — OPEN, cause not yet isolated
 
-Grass appeared detached above ridge silhouettes. Measured on the exact frame:
-3390 px of grass drawn where the terrain-only render shows sky, a fringe ~19 px
-tall, contiguous with the terrain (gap 0).
+A band of grass appears above ridge silhouettes with sky beneath it, detached
+from the hill below. Measured on the reported frame: ~3390 px of grass where the
+terrain-only render shows sky, a fringe ~18 px tall, contiguous with terrain.
 
-Cause: **the grass march samples the infinitely-wrapped heightfield, but the rig
-drew terrain only ±300 m.** Rays passing over a ridge kept marching and found
-columns on terrain that was never rendered, so grass painted over open sky.
-Widening the patch to 2000 m dropped it to 1456 px / ~9 px, and the remainder is
-real grass standing on the ridge, which *should* show above the bare-terrain
-line. The rig's default patch is now 1400 m, which must stay above
-`GRASS_FADE_END`.
+**What it is:** encoding ray distance as colour (`debugDistance`) shows the band
+hits at a **mean 428 m**, while normal grass immediately beside it hits at
+**21 m**. So it is genuinely distant grass being drawn where the near view shows
+sky — not a near-field shading error.
 
-**The invariant this exposes: terrain must be drawn at least as far as grass is
-rendered.** The app satisfies it — terrain reaches 2304 m (9 chunks x 256 m)
-against a 1100 m grass fade — but any change to `VIEW_RADIUS_CHUNKS`,
-`CHUNK_COUNT` or `GRASS_FADE_END` can silently break it, and the failure looks
-like grass floating in the sky rather than like a draw-distance bug.
+**Ruled out, each by measurement:**
 
-Ruled out along the way, each by measurement: shell overhang (fixed anyway — the
-shell now hugs the local canopy instead of the global maximum, which also cuts
-overdraw over bare ground), and coarse mesh silhouette vs the exact heightfield
-the march samples (12 m quads vs 1.5 m changed the fringe by under a pixel).
+| hypothesis | test | result |
+| --- | --- | --- |
+| shell overhangs the silhouette | lift shell by local canopy, not global max | 2390 -> 2394 px, no effect |
+| terrain patch smaller than grass reach | patch 300 m -> 2000 m | 3390 -> 1456 px, but see below |
+| coarse mesh silhouette vs exact heightfield | 12 m quads vs 1.5 m | under 1 px difference |
+
+The patch result was **misleading and produced a wrong fix**: raising `SPAN`
+while leaving the vertex count fixed silently coarsened quads from 2.7 m to
+12.7 m, and the apparent improvement was entirely that coarsening (which also
+introduced a worse artifact — the mesh dipping below the true surface so sky
+showed through). With mesh density held constant at the larger span the fringe
+returns to 3153 px / 17.6 px, i.e. unchanged. The rig now derives mesh
+resolution from span so quad size stays fixed.
+
+**Still unexplained:** 1 m of canopy at 428 m subtends about 1 px, not 18. Either
+the hit distance is bimodal and the mean misleads, or the march reports hits for
+rays that pass near a column rather than through it at long range. Next step is
+to histogram hit distance across the band rather than take its mean, and to check
+whether the far terrain that owns those columns is itself being drawn at those
+pixels.
+
+**Related invariant, worth keeping regardless:** terrain must be drawn at least
+as far as grass is rendered, or the march finds columns on terrain that was never
+drawn. The app satisfies it (terrain 2304 m vs grass fade 1100 m) but a change to
+`VIEW_RADIUS_CHUNKS`, `CHUNK_COUNT` or `GRASS_FADE_END` could break it silently.
 
 ### Dark blotches — the colormap, not the shader
 

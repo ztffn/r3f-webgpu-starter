@@ -27,7 +27,6 @@ import {
   VIEW_RADIUS_MAX_CHUNKS,
   LOD_SEGMENTS,
   LOD_DISTANCE_CHUNKS,
-  SKIRT_DEPTH,
   FOG_FAR,
   REFERENCE_P11,
 } from "./config";
@@ -41,15 +40,6 @@ import {
  * fast hardware and degrades to "slower, still responsive" on slow hardware.
  */
 const BUILD_MS = 6;
-
-/**
- * Vertical headroom above the terrain that a chunk's cull box must include, metres.
- *
- * Covers the grass shell's lift, which is the canopy height and is live-tunable up
- * to 12 m in the debug panel. Over-sizing this only makes culling slightly less
- * effective; under-sizing it drops chunks that are genuinely on screen.
- */
-const MAX_CANOPY_HEADROOM = 28;
 
 interface Slot {
   mesh: THREE.Mesh;
@@ -168,22 +158,6 @@ export function Terrain({
       return { mesh, grass, cx: NaN, cz: NaN, lod: -1, grassLod: -1, dx, dz };
     });
 
-    // Scratch for frustum-gated building, allocated once.
-    const frustum = new THREE.Frustum();
-    const viewProj = new THREE.Matrix4();
-    const box = new THREE.Box3();
-    // Vertical extent of any chunk: the skirt hangs below the lowest sample and
-    // the grass shell lifts above the highest.
-    //
-    // The headroom has to cover the tallest canopy the shell can be lifted by, and
-    // that is a live slider. An 8 m margin silently under-covered it: chunks whose
-    // grass was on screen had boxes that missed the frustum, so they were never
-    // built and left holes showing sky where near terrain should be. Sized for the
-    // slider's maximum rather than for the current value, since the material can
-    // change under us without rebuilding this.
-    const minY = heightfield.minHeight - SKIRT_DEPTH - 1;
-    const maxY = heightfield.maxHeight + MAX_CANOPY_HEADROOM;
-
     return {
       group,
       slots,
@@ -192,11 +166,6 @@ export function Terrain({
       chunkSize,
       lodDistances,
       cache,
-      frustum,
-      viewProj,
-      box,
-      minY,
-      maxY,
     };
   }, [heightfield, material, grassMaterial]);
 
@@ -217,14 +186,14 @@ export function Terrain({
     camera.getWorldPosition(p);
 
     const { slots, buildGeometry, cached, chunkSize, lodDistances } = state;
-    const { frustum, viewProj, box, minY, maxY } = state;
     const half = heightfield.halfWorld;
 
-    // Build only what the camera can actually see. Without this the budget was
-    // spent evenly in every direction — including straight behind — so the view
-    // ahead filled in at a fraction of the rate the budget suggested.
-    viewProj.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
-    frustum.setFromProjectionMatrix(viewProj);
+    // NO frustum gating on building. It was added to stop the budget being spent on
+    // chunks behind the camera, and it demonstrably dropped chunks that were on
+    // screen: with a tall canopy, large wedges of near terrain never built at all
+    // and rendered as sky. Wireframe confirmed the geometry was absent rather than
+    // mis-shaded. Slots are still visited nearest-first, so the budget still favours
+    // the near field; it just no longer refuses to build anything.
 
     // The shader stretches its distance fade by the same zoom factor, so the cull
     // has to move with it or the mesh disappears while the fade is still running.
@@ -246,10 +215,6 @@ export function Terrain({
       const ox = -half + cx * chunkSize;
       const oz = -half + cz * chunkSize;
       const dist = Math.hypot(ox + chunkSize / 2 - p.x, oz + chunkSize / 2 - p.z);
-
-      box.min.set(ox, minY, oz);
-      box.max.set(ox + chunkSize, maxY, oz + chunkSize);
-      const inView = frustum.intersectsBox(box);
 
       let lod = lodDistances.length - 1;
       for (let l = 0; l < lodDistances.length; l++) {
@@ -273,7 +238,7 @@ export function Terrain({
         if (hit) {
           slot.mesh.geometry = hit;
           slot.lod = lod;
-        } else if (mayBuild && inView) {
+        } else if (mayBuild) {
           slot.mesh.geometry = buildGeometry(cx, cz, lod, true);
           slot.lod = lod;
           mayBuild = performance.now() < deadline;
@@ -297,7 +262,7 @@ export function Terrain({
           if (hit) {
             slot.grass.geometry = hit;
             slot.grassLod = 0;
-          } else if (mayBuild && inView) {
+          } else if (mayBuild) {
             slot.grass.geometry = buildGeometry(cx, cz, 0, false);
             slot.grassLod = 0;
             mayBuild = performance.now() < deadline;

@@ -1,0 +1,495 @@
+# Implementation Spec — as-built
+
+**Audience:** anyone (human or agent) picking this codebase up cold.
+
+Docs `01`–`05` describe what we intend to build. `06` and `07` record what we learned from
+real data and real measurement. **This document describes what the code actually does today**,
+the contracts between its parts, and the traps that have already cost sessions.
+
+Where this document and `01`–`05` disagree, this one describes reality and `01`–`05` describe
+the target. Where this document and `06`/`07` disagree, **`06`/`07` win** — they are ground
+truth from extracted data and measurement, and this file is a summary that can drift.
+
+---
+
+## 1. What exists
+
+A browser reconstruction of Delta Force 2's Voxel Space 32 terrain and its concealing tall
+grass. Runs on Three.js `WebGPURenderer` with TSL shaders, auto-falling back to WebGL2.
+
+Two data paths, one code path:
+
+- **Real map.** If `public/assets/terrain/<slug>/terrain.json` exists it renders that
+  extracted DF-era terrain. Currently `gmile` = EXP2b "Green Mile".
+- **Synthetic.** Otherwise a periodic fBm heightfield. Needs no game assets, so the repo
+  clones and runs for anyone.
+
+Both tile **infinitely** — DF2 terrain has no edges (`06` §10).
+
+### Phase status
+
+| | |
+| --- | --- |
+| Phase 0 — extraction | core done: PFF3 unpack, `.trn` parse, PCX decode, canopy bake |
+| Phase 1 — terrain | done: chunked LOD, skirts, analytic normals, TSL biome material, infinite tiling |
+| Phase 1.5 — real map | done: Green Mile renders from extracted assets |
+| Phase 2 — grass | first pass in: columnar fragment march. Measurably flatter than reference (`07` §7) |
+| Phase 3 — concealment | demonstrated in the test rig (`07` §8), not yet a gameplay system |
+| Phase 4 — game | not started |
+
+---
+
+## 2. Data flow
+
+```mermaid
+flowchart TD
+  A["installer .exe<br/>(Inno / WinZip SFX)"] -->|innoextract / unzip<br/>NEVER run it| B[".pff archives"]
+  B -->|df2extract.mjs| C[".trn manifest<br/>_c.jpg _d.pcx _m.pcx<br/>_dm.pcx strip"]
+  C -->|prepare-terrain.mjs| D["public/assets/terrain/&lt;slug&gt;/<br/>terrain.json height.png color.jpg<br/>detail.png detail_elev.png grass.png"]
+  D -->|loadTerrain.ts<br/>fetch at runtime| E["LoadedTerrain"]
+  E --> F["Heightfield<br/>CPU, engine-agnostic"]
+  E --> G["DataTextures<br/>height / canopy / colour"]
+  F --> H["buildChunkGeometry<br/>grid + skirt"]
+  H --> I["Terrain.tsx<br/>infinite chunk window"]
+  G --> J["GrassMaterial<br/>TSL fragment march"]
+  F --> K["FlyControls<br/>camera clamped to surface"]
+  F -.planned.-> L["concealment query<br/>docs/04"]
+  J --> I
+  I --> M["DF2Scene"]
+```
+
+The dashed edge is the point of the whole architecture: the **same** CPU field that shapes the
+mesh will answer line-of-sight queries, so what you see and what the game thinks you can see
+cannot drift apart (`04` §2).
+
+---
+
+## 3. Module map
+
+Everything below `src/df2/` is the Phase-1 spike. The target layout is `05` §7
+(`/src/engine/{terrain,grass,concealment}`, `/src/game/`); nothing has moved yet.
+
+| File | Owns | Must NOT know about |
+| --- | --- | --- |
+| `config.ts` | every world constant | anything |
+| `noise.ts` | deterministic value noise + fBm | — |
+| `Heightfield.ts` | CPU elevation field: `sample()`, `normal()` | **Three.js** — keep it import-free of the renderer |
+| `terrainGeometry.ts` | one chunk's `BufferGeometry` (grid + skirt) | chunk placement, LOD policy |
+| `TerrainMaterial.ts` | TSL colormap / biome material | geometry |
+| `GrassMaterial.ts` | TSL columnar grass (march + depth) | geometry, chunk layout |
+| `loadTerrain.ts` | fetch + decode prepared assets, grass provenance | rendering |
+| `Terrain.tsx` | infinite chunk window, LOD selection, geometry cache | what a chunk looks like |
+| `FlyControls.tsx` | camera rig, stance eye heights | scene contents |
+| `PerfMonitor.tsx` | frame time, draw calls, backend | UI |
+| `DF2Scene.tsx` | composition: lights, fog, water, wiring | UI layout |
+| `components/GameCanvas.tsx` | async WebGPU init, camera planes | the scene |
+| `components/Hud.tsx` | all UI | rendering internals |
+
+`Heightfield.ts` being Three-free is a **rule, not a preference**. It is the seed of the
+gameplay field, which must be samplable on a server with no renderer present.
+
+---
+
+## 4. Conventions that are easy to get wrong
+
+These have each caused a real bug.
+
+**Axes.** Right-handed, Y up. `x` = east, `z` = north in the HUD's language. Image row 0 is
+the map's **north** edge.
+
+**Colormap `flipY = false`.** The heightmap is read row-major with row 0 north; if the
+colormap flips, relief and colour mirror against each other. Subtle enough to survive a
+glance, obvious once you look at a ridge shadow.
+
+**All terrain textures use `RepeatWrapping`.** UVs run past `[0,1]` because the map tiles;
+clamping smears edge pixels across the world.
+
+**UV = wrapped world position over one tile**, computed in `terrainGeometry.ts` as
+`(worldX + halfWorld) / worldSize`. This is why one cached geometry is valid at every tile
+repeat.
+
+**The heightfield stores exactly `period × period` samples.** No duplicated edge row, no
+clamping — `sample()` wraps modulo. A duplicated edge row would make the tile seam visible as
+a flat strip.
+
+**`worldSize = period × cellSize`**, i.e. 1024 × 2.0 = **2048 m** for the real map — not
+`1023 × cellSize`. The "1023" reading belongs to a clamped field with a duplicated edge; this
+field wraps.
+
+**Canopy texture is LINEAR-filtered, deliberately.** It is the canopy *envelope* (where grass
+grows, roughly how tall), not the columns. Per-column discreteness comes from the shader's
+sub-metre cell grid. Sampling the envelope NEAREST stamps the 2 m terrain texel grid onto the
+canopy as visible blocks.
+
+**Shaders are authored in TSL, never raw WGSL/GLSL.** One graph has to serve both the WebGPU
+and WebGL2 backends.
+
+**Never commit extracted assets.** `/assets/`, `/public/assets/`, `*.pff`, `*.trn` are
+git-ignored. NovaLogic owns the base game data; the expansion terrains are third-party
+community work.
+
+**Never execute an installer.** `innoextract` / `unzip` unpack them statically. No Wine, no
+Whisky, no "just run it in a VM".
+
+---
+
+## 5. Asset pipeline contract
+
+### 5.1 Producing assets
+
+```sh
+node tools/df2-extract/df2extract.mjs list    terrain.pff
+node tools/df2-extract/df2extract.mjs extract terrain.pff out/terrain
+node tools/df2-extract/df2extract.mjs trn     out/terrain/Something.trn
+
+node tools/df2-extract/prepare-terrain.mjs <extractedDir> <trnName> <outDir> \
+     [--detail-elev <strip.pcx>]
+```
+
+`prepare-terrain.mjs` writes `<outDir>/terrain.json` plus the PNG/JPEG assets. Point `<outDir>`
+at `public/assets/terrain/<slug>/`, and set `TERRAIN_SLUG` in `config.ts`.
+
+### 5.2 `terrain.json` — the contract between tool and runtime
+
+Consumed by `loadTerrain.ts`; its TypeScript shape is `TerrainMeta` there.
+
+- `trn` — the parsed manifest verbatim: `terrain_name`, `terrain_creator`, `water_height`,
+  `filter` (RGB tint, 128 = neutral), `detail_elev` (**the name it references**), etc.
+- `assets.height` — `{ file, width, height, rawMin, rawMax }`. 8-bit greyscale PNG.
+- `assets.color` — the colormap, JPEG passthrough.
+- `assets.detail` — per-texel zoning **indices** 0–255 as greyscale.
+- `assets.detailElev` — the strip. Carries `substituted`, `substitutedFrom`, `referencedName`.
+- `assets.grass` — the baked canopy field, and **`substituted`** if it was baked from a
+  strip that isn't the one the `.trn` asked for.
+
+### 5.3 The grass chain, and why provenance is tracked
+
+```
+detail_map[x,z]  ->  index 0-255
+index            ->  tile i of the detail_elev strip (64 x 16384 = 256 tiles of 64x64)
+tile greyscale   ->  grass STRETCH HEIGHT
+                 ->  baked to grassHeightField
+```
+
+The renderer **and** the concealment query both read that one baked field. That sharing is the
+entire point (`04` §2).
+
+The index numbering is **per grass set**, not per terrain. Green Mile's `.trn` names
+`detail_elev = dfdg1_dm`, a base-game set that is not in any archive we have (`06` §7 lists it
+as still-needed, along with the five marquee grass maps that reference it). Substituting a
+different terrain's strip means index 37 selects *some other set's* tile 37 — grass ends up
+tall where the map should be bare and bare where it should be chest-high. Plausible-looking and
+wrong, which is the worst failure mode for a project whose success metric is grass.
+
+So `loadTerrain.ts` implements a provenance ladder and **refuses** the substituted bake:
+
+| `GrassSource` | When | Trustworthy? |
+| --- | --- | --- |
+| `"real"` | the `.trn`'s own strip was present | yes |
+| `"substituted-strip"` | reserved; currently never selected | no |
+| `"colormap-standin"` | strip substituted or absent → canopy derived from colormap greenness + per-column jitter | **placement invented** |
+| `"none"` | no colormap either | — |
+
+The HUD renders `colormap-standin` in warn colour and names it "stand-in (not real)". Anything
+that reports grass results must state which of these it ran against.
+
+**What Green Mile's current build is honest about:** heightmap, colormap, water height and
+filter are genuinely Green Mile. Only canopy placement and height are invented. Column shape,
+density, tone variation and the *geometry* of concealment are fair to judge; whether grass
+grows in the right places is not.
+
+---
+
+## 6. Runtime contracts
+
+### 6.1 `Heightfield`
+
+```ts
+Heightfield.synthetic(seed?)                 // periodic fBm, no assets
+Heightfield.fromHeightmap({ data, size, metersPerTexel?, heightScale? })
+  .sample(x, z): number                      // bilinear, wraps
+  .normal(x, z, out?): [number, number, number]  // central differences, wraps
+  .period .cellSize .worldSize .halfWorld .minHeight .maxHeight .isReal
+```
+
+Normals come from the **field gradient**, not from triangles, so shading is identical across
+LOD levels (`03` §2.4). `normal()` writes into a caller-supplied array — it is called per
+vertex during meshing and must not allocate.
+
+### 6.2 Chunking, LOD, and the infinite window (`Terrain.tsx`)
+
+- `chunkSize = worldSize / CHUNK_COUNT` → 2048 / 8 = **256 m**.
+- A window of `(2·VIEW_RADIUS_CHUNKS + 1)²` = 19² = **361 slots** is allocated once and
+  re-pointed as the camera moves. Nothing is allocated per frame.
+- Chunk indices are **absolute and unbounded** (they go negative). Geometry is cached by the
+  **wrapped** index `(cx mod 8, cz mod 8, lod)` — chunk `(cx)` and `(cx + period)` are the same
+  shape, so every repeat on screen shares one geometry.
+- Geometry is built in **local space** (`0..size`) and placed with `mesh.position`.
+- LOD is chosen per chunk from the distance to its **centre**, against `LOD_DISTANCE_CHUNKS`
+  expressed in chunk widths so it scales with the map.
+- `LOD_SEGMENTS[0] = 128` over a 256 m chunk = 2 m vertex spacing, which matches
+  `METERS_PER_TEXEL` exactly. LOD0 is lossless.
+- Each chunk carries a perimeter **skirt** — edge vertices duplicated `SKIRT_DEPTH` (12 m)
+  lower — to plug cracks between differing-LOD neighbours. The material is `DoubleSide` so
+  skirt winding does not matter. **See §9: skirts are currently visible as a black band at eye
+  height.**
+
+### 6.3 `TerrainMaterial`
+
+`MeshStandardNodeMaterial`, so it keeps PBR response to sun, hemisphere fill and fog for free.
+Real map → colormap sample, optionally multiplied by the `.trn` `filter` tint. Synthetic →
+procedural biome blend by height and slope.
+
+**The colormap is pre-shaded** (`06` §6): lighting and shadow are baked into the source data.
+Dark blotches in a render are usually the data, not the shader — verified at IoU 0.95 with and
+without grass (`07` §9). Do not "fix" them without deciding you want to fight the baked
+lighting, which is an art decision, not a bug fix.
+
+### 6.4 `GrassMaterial` — the columnar march
+
+The most intricate part of the codebase. Read `07` §1 and §6 before changing it.
+
+**Model.** DF2's grass is not blades. Voxel Space painted, per screen column, a solid vertical
+span from the ground to `terrain + stretch`, coloured from that column's own ground texel. The
+look is hard-edged vertical striations at total coverage that never thins with distance.
+
+**Implementation.** Render a *shell* — the terrain chunk geometry lifted to the canopy top —
+and per fragment march the view ray down through the volume between shell and ground. First
+column whose span the ray crosses wins; no hit → discard, and the terrain shows through.
+
+Key decisions, each of which has a failure mode behind it:
+
+| Decision | Why |
+| --- | --- |
+| Shell lifted by **local** canopy (`× 1.04`), not global max | a globally-lifted shell overhangs ridge silhouettes and shades floating grass |
+| Ray starts at the **camera** when `inside` the canopy, else at the fragment | standing in grass the shell is above the eye; marching from the fragment renders no near grass at all |
+| `nearClip` offset when inside | at 2 cm range every pixel hits the same column and the screen goes flat |
+| Step `= max(cellSize, t · pixelAngle)` | mirrors the original's growing `deltaz`; keeps each step ≈ one pixel |
+| `pixelAngle` derived from `cameraProjectionMatrix[1][1]` and `screenSize.y` | a **scope** narrowing FOV automatically tightens the march. Sub-pixel-ness depends on FOV, not range, and ~800 m is exactly where the concealment mechanic is defined |
+| One `Fn` returning a **TSL `struct`** `{rgb, hit, depth}` | the march is expensive; separate functions would re-march per output. A TSL function returns a single node, hence the struct |
+| `material.depthNode` = depth at the **hit**, not the shell | the shell floats a canopy-height above ground; uncorrected, anything standing *in* the grass pops in front of it. This is the real integration hurdle for GPU Voxel Space ports — not raw speed |
+| Colour sampled at the hit column's **texel centre** | reproduces the original's NEAREST `map.color[mapoffset]` lookup without a second texture |
+| One colour smeared up the whole column | per-step colour reads as soft modern grass, not DF2 grass |
+| Cell indices **wrapped to [0,512)** before the sin-hash | float32 `sin(x·127.1)` degenerates past ~50 000, so finer columns produced *less* variation until this was fixed |
+| Multi-scale value noise (`clump`), not white noise | per-cell hashing gives autocorrelation ~0.3 against a reference ~0.8 — television static, not grass |
+| **Unlit** `MeshBasicNodeMaterial` | the colormap is already pre-shaded; PBR double-shades it and collapses to black at silhouettes |
+| `alphaTest = 0.5`, `transparent = false` | grass is opaque where it exists; keeps it in the opaque queue with correct depth |
+| `DoubleSide`, and **no** `normalNode` override | inside the canopy we see the shell from underneath; overriding `normalNode` shades every back face black |
+
+Debug modes: `debugHit` paints hits flat magenta (**use this to mask measurements to grass
+pixels**); `debugDistance` encodes ray distance as colour, banded every 100 m.
+
+### 6.5 Camera (`FlyControls.tsx`)
+
+Free-fly (WASD, drag look, wheel = speed) plus an on-foot mode clamped to the surface at a
+stance eye height. Orbit controls were removed: judging terrain means standing in it.
+
+```ts
+STANCE_EYE = { stand: 1.7, crouch: 0.95, prone: 0.35 }   // metres, matches docs/04 §4.2
+```
+
+- `dt` is clamped to 0.1 s/frame. **On a slow machine this throttles movement**, which makes
+  scripted camera driving unreliable — see §10.
+- Stance keys `X`/`C`/`Z` imply going to ground; stance is not a second click.
+- Reports `FlyState` on a ~0.15 s throttle, so the HUD does not re-render per frame.
+
+### 6.6 `PerfMonitor`
+
+Reports fps, mean and worst frame time, draw calls, triangles, and **which backend actually
+initialised**. That last field matters: a "it's slow" report means something completely
+different on the WebGL2 fallback.
+
+**Gotcha worth knowing.** Three's WebGPU path calls `info.reset()` at the **top of its rAF
+callback**, before R3F runs frame subscribers — so reading `gl.info.render` from `useFrame`
+always yields zeroes. `PerfMonitor` sets `info.autoReset = false` and resets after sampling.
+Anything else reading `info` per frame needs the same treatment.
+
+---
+
+## 7. Constants and their calibration status
+
+`src/df2/config.ts` is the single place world constants live. Status matters more than value:
+
+| Constant | Value | Status |
+| --- | --- | --- |
+| `METERS_PER_TEXEL` | 2.0 | **PLACEHOLDER — uncalibrated.** Sets world size to 2048 m |
+| `HEIGHT_SCALE` | 1.0 | **PLACEHOLDER — uncalibrated.** Metres per raw elevation unit |
+| `GRASS_SCALE` | 0.0047 | derived from reference screenshots (`07` §2): tallest canopy ≈ 1.2 m |
+| `GRASS_CELL` | 0.06 | measured: sub-metre cells took `|dx|` from 0.17 to 2.05 (reference 2.80) |
+| `GRASS_TONE_VARIATION` | 0.85 | measured against reference corduroy |
+| `GRASS_STEPS` | 96 | budgeted, **not** measured on real hardware |
+| `GRASS_FADE_START/END` | 700 / 1100 | scaled by zoom in-shader |
+| `CHUNK_COUNT` | 8 | → 256 m chunks |
+| `VIEW_RADIUS_CHUNKS` | 9 | terrain drawn to ~2304 m |
+| `SKIRT_DEPTH` | 12 m | never validated against real LOD error |
+| `FOG_FAR` | 2200 m | — |
+
+Until the two placeholders are calibrated, **"does this feel like DF2?" cannot be answered
+honestly.** That is the top of the roadmap, not the grass.
+
+`GrassMaterial.setScale(metersPerTexel, heightScale, grassScale)` re-derives the shader's
+uniforms, so calibration does not need a rebuild of the graph.
+
+---
+
+## 8. Invariants that break silently
+
+Nothing throws when these break. Check them after touching `config.ts`.
+
+1. **Terrain must be drawn at least as far as grass is rendered.** Otherwise the march finds
+   columns standing on terrain that was never drawn. Currently 2304 m vs a 1100 m grass fade —
+   holds, but a change to `VIEW_RADIUS_CHUNKS`, `CHUNK_COUNT` or `GRASS_FADE_END` can break it
+   without any error.
+2. **`LOD_SEGMENTS[0]` spacing should equal `METERS_PER_TEXEL`** so LOD0 is lossless. Changing
+   `CHUNK_COUNT` or `METERS_PER_TEXEL` breaks this pairing.
+3. **The canopy field the shader reads and the field a concealment query reads must be the same
+   data.** The moment they diverge, what you see and what the game thinks you can see disagree
+   — and that *is* the product.
+4. **`GRASS_SCALE × 255` should stay below standing eye height (1.7 m).** Above it the camera
+   is permanently inside the canopy while standing.
+5. **Grass results must be reported with their `GrassSource`.** A number measured against a
+   `colormap-standin` canopy says nothing about placement.
+
+---
+
+## 9. Known-open defects
+
+Full evidence in `07` §9. Summary, so nobody re-derives it:
+
+**Black skirt band at eye height — terrain, not grass. OPEN.**
+On foot with the camera pitched down, a flat dark plane cuts across the lower frame with a
+near-black band under it and sky below. Proven terrain: the frame is identical with grass off,
+and wireframe shows the band is the skirt (tall thin quads, flat bottom exactly `SKIRT_DEPTH`
+below the top edge). Likely shading cause: `DoubleSide` flips back-face normals, and the skirt
+copies the *top-edge* normal (pointing up), so flipped it points down and the sun contributes
+nothing. Unexplained: the sky visible *beyond* the skirt's bottom edge — the skirt exists to
+plug exactly that. Repro pose sat at `x = 0`, which is exactly a chunk boundary; compare
+against a pose 100 m inside a chunk to separate "seam" from "window edge".
+
+**Floating grass along ridgelines. OPEN.**
+A band of grass above ridge silhouettes with sky beneath. `debugDistance` shows it hits at mean
+428 m while neighbouring grass hits at 21 m — genuinely distant grass drawn where the near view
+shows sky. Three hypotheses ruled out by measurement. Still unexplained: 1 m of canopy at 428 m
+subtends ~1 px, not the measured 18. Next step is to histogram hit distance rather than trust
+its mean.
+
+**Grass is measurably flatter than the reference.** `|dx|` ≈ 1.6 vs 2.23; vertical
+autocorrelation 0.42 vs 0.82 (`07` §7).
+
+**No real GPU numbers exist for anything.** See §10.
+
+**Unverified reading worth checking first on real hardware.** The march runs a fixed
+`GRASS_STEPS` iterations with `step = max(cellSize, t · pixelAngle)`. While `t · pixelAngle`
+is below `cellSize` — roughly the first 30–60 m at 60° FOV — steps are a flat `GRASS_CELL`
+(0.06 m), so 96 iterations advance the ray only ≈ 5.8 m. For a fragment on a distant shell that
+is harmless: its ray starts at the canopy top and hits within a step or two. But when the
+camera is **inside** the canopy (`cameraY < ground + canopyMax`, i.e. prone and crouch), *every*
+fragment marches from the eye, and the same arithmetic caps the reach at ≈ 6 m. A pixel-diff of
+prone frames with and without grass showed differences well beyond where that predicts, so the
+reading is **not confirmed** — but it is cheap to settle and would explain flatness at prone.
+Experiment: hold a prone pose and raise `GRASS_STEPS` alone; if far-field grass appears, reach
+was the limiter.
+
+---
+
+## 10. Verification — and why eyeballing is banned here
+
+Eyeballing repeatedly passed builds that were measurably wrong. Two "matching" scores turned
+out to be measuring bare terrain. The rules that came out of that:
+
+**Measure grass pixels only.** Mask with `debugHit: true`. Whole-crop numbers are dominated by
+bare terrain and will happily agree with the reference while the grass is wrong.
+
+**The metric** (`07` §5, `tools/grass-rig/metric.py`): mean `|dx|` / mean `|dy|` plus
+directional autocorrelation. Columnar grass changes colour *across* columns far more than *up*
+them — the reference ratio is ≈ 1.6.
+
+**Reproduce the exact frame before measuring.** One artifact was diagnosed on a fixed bearing
+while the reported screenshot used the rig's auto-chosen bearing, understating a fringe as 4 px
+instead of 19.
+
+**Check the scenario before believing the numbers.** A "concealment is broken" conclusion
+(168 vs 171 px) turned out to be a target skylined on a ridge. The rig now auto-picks a
+sightline where the target is not skylined and prints a verdict; check the verdict first.
+
+**The rig** (`tools/grass-rig/`) renders a fixed vantage headlessly and scores it — ~1.5 s per
+config instead of minutes through the app. It provides the range/concealment scenario (2 m
+capsule as a player, `stand`/`prone`, scoped PiP inset), a depth probe, and `perf.mjs`. Setup
+in its README.
+
+### Environment caveat — read this before quoting any frame time
+
+CI/agent containers here have **no GPU**. WebGPU init fails and Three falls back to WebGL2 on
+SwiftShader, a software rasteriser. Consequences:
+
+- Ground-level frames run 300–1000 ms **with grass off**. Every frame time produced in such a
+  session is software-rasteriser CPU time and says nothing about real hardware.
+- Because `FlyControls` clamps `dt` to 0.1 s, slow frames throttle movement — scripted key
+  presses barely move the rig, and poses drift between runs, so two screenshots from "the same"
+  script are not necessarily the same pose. Verify pose from the HUD before comparing frames.
+- The HUD lags visibly at 1–4 fps. A stance change can take a second or two to show up. Do not
+  conclude a control is broken from one read.
+- Draw-call and triangle counts **are** exact. Frame time is not.
+
+`renderAsync` returns on submission, so even on real hardware these are CPU-side numbers unless
+timestamp queries are used.
+
+---
+
+## 11. Traps already paid for
+
+Each of these cost real time. They are here so they cost it once.
+
+- **`_d.pcx` is the HEIGHTMAP** (`elev_map`), not a detail map. `_m.pcx` is the detail map.
+- **The colormap is JPEG, not TGA.** Both colormap and heightmap are 1024².
+- **Two grass "fixes" that fixed nothing.** (a) Lifting the shell by local canopy: 2390 → 2394
+  px, no effect. (b) Enlarging the test patch appeared to help, but raising `SPAN` with a fixed
+  vertex count silently coarsened quads 2.7 m → 12.7 m; the gain was entirely the coarsening,
+  and it introduced a worse artifact. **Always check what else your parameter change moved.**
+- **A confidently wrong first hypothesis about black lines.** Attributed to lighting at
+  silhouettes; going unlit made it *worse* (594 → 1584 px). The real cause was pre-shaded
+  colormap shadows crushed by the tone multiplier — hence the asymmetric `swing` damping in
+  `GrassMaterial`.
+- **`Fn` cannot return a JS object.** Use a TSL `struct`.
+- **TSL type widening** bites on free functions; method chaining is more reliable. The graph is
+  validated by compiling and running it, not by `tsc` — hence the deliberate loose `NodeArg`
+  in `GrassMaterial.ts`.
+- **Prone showing only grass is correct, not a bug.** If you are concealed you are also blind;
+  that symmetry is the mechanic.
+
+---
+
+## 12. Build, run, deploy
+
+```sh
+npm run dev        # Vite dev server :3000
+npm run build      # tsc --noEmit && vite build -> /dist
+npm run typecheck
+npm run preview
+```
+
+`tsconfig` is strict with `noUnusedLocals`; a stray unused const fails the build, which is the
+intended behaviour.
+
+Netlify config is in `netlify.toml`. **The two deploy paths do not produce the same site:**
+
+- `npm run build && npx netlify deploy --prod --dir=dist` — Vite copies `public/assets/` into
+  `dist/`, so a machine holding prepared assets uploads the real map. Nothing extracted enters
+  git. **This is the path for anything you want to actually fly around in.**
+- A Git-connected build has no assets (they are git-ignored) and falls back to synthetic fBm.
+  Fine for the shell, useless for judging feel.
+
+Bundle is ~1.77 MB (490 kB gzip), dominated by Three. Not yet code-split.
+
+---
+
+## 13. Open questions carried forward
+
+- **Scale calibration** — `HEIGHT_SCALE`, `METERS_PER_TEXEL`. Blocks every "does it feel right"
+  judgement.
+- **`dfdg1_dm`** — the base-game grass strip the marquee maps reference. Needs a retail DF2
+  install. Until then Green Mile's canopy placement is invented (`06` §7).
+- **Stretch-height → world-units scale** — what raw 0–255 canopy actually meant (`06` §8).
+- **Multiplayer** — the intended use case is a 64+ player shooter. Deliberately **on hold**
+  until the plan is laid out; do not design for it speculatively. World rendering first.
+- **Near-field grass detail vs coverage** trade-off is unresolved.

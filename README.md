@@ -59,6 +59,8 @@ See [`docs/`](./docs) for the full design:
 | [`04`](./docs/04-concealment-system-design.md) | Concealment / line-of-sight system |
 | [`05`](./docs/05-engine-architecture-tech-stack.md) | Engine architecture & tech stack |
 | [`06`](./docs/06-asset-extraction-findings.md) | **Asset extraction findings (ground truth)** |
+| [`07`](./docs/07-grass-visual-reference.md) | Grass measurement methodology & open artifacts |
+| [`08`](./docs/08-implementation-spec.md) | **Implementation spec (as-built)** — start here to change code |
 
 ## Source layout
 

@@ -12,8 +12,10 @@ export const TERRAIN_SLUG = "gmile"; // EXP2b "Green Mile"
 // --- Real-map scale (UNCALIBRATED — see docs/01 §7) --------------------------
 // DF terrain images are 1024x1024. These two constants convert that grid into
 // world units and are the main "does it feel right" dials:
-//   METERS_PER_TEXEL — horizontal spacing => world size = 1023 * this
+//   METERS_PER_TEXEL — horizontal spacing => world size = 1024 * this
 //   HEIGHT_SCALE     — metres per raw 8-bit elevation unit (0-255)
+// (1024, not 1023: the field stores 1024 distinct samples and wraps modulo, with
+// no duplicated edge row — see Heightfield.ts.)
 // Defaults give a ~2 km map, which puts the ~800 m concealment range at roughly
 // 40% of the map width — consistent with DF2's long-range engagements.
 export const METERS_PER_TEXEL = 2.0;
@@ -58,10 +60,16 @@ export const SKIRT_DEPTH = 12; // meters
 // below standing eye height also matters mechanically: above it, the camera sits
 // inside the volume and the view fills with the column it occupies.
 export const GRASS_SCALE = 0.0047;
-// DDA cells walked per fragment. Each step crosses exactly one heightmap texel
-// (~2 m), so this is also the reach of exactly-resolved columns (~96 m). The
-// original algorithm is trivial for modern GPUs — per-pixel raycasting against a
-// 2D array is not where the cost is — so this is budgeted generously.
+// March iterations per fragment. The step is `max(GRASS_CELL, t * pixelAngle)`,
+// so while the pixel term is small the ray advances a flat GRASS_CELL and this
+// count bounds total ray length rather than reach in metres. Budgeted generously
+// because per-pixel raycasting against a 2D array is not where the cost is.
+//
+// NOTE (docs/08 §9, unconfirmed): at GRASS_CELL 0.06 that is only ~5.8 m of ray.
+// Harmless for a distant fragment, whose ray starts at the canopy top — but when
+// the camera is INSIDE the canopy every fragment marches from the eye, and the
+// same arithmetic would cap prone reach at ~6 m. Measured behaviour disagrees, so
+// this needs settling on real hardware before anyone "fixes" it.
 export const GRASS_STEPS = 96;
 // Width of one grass column in metres — the DDA grid, deliberately decoupled
 // from the 2 m terrain texel. Striations must land near screen resolution: a 2 m

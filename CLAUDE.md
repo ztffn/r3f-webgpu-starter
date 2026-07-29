@@ -6,7 +6,9 @@ Hobby/reconstruction project, not commercial.
 
 ## Where the knowledge lives
 
-`docs/` is the source of truth. Read in this order:
+`docs/` is the source of truth. Read in this order — but if you are about to **change code**,
+read `08` first: it is the as-built spec and it names the traps that have already cost
+sessions. `01`–`05` describe the target; `06`/`07` are ground truth and outrank everything.
 
 | Doc | What it settles |
 |---|---|
@@ -17,6 +19,7 @@ Hobby/reconstruction project, not commercial.
 | `05-engine-architecture-tech-stack.md` | Stack rationale, target module layout |
 | `06-asset-extraction-findings.md` | **Ground truth from real extracted data** — trumps guesses elsewhere |
 | `07-grass-visual-reference.md` | Grass measurement methodology, concealment results, **open artifacts** |
+| `08-implementation-spec.md` | **As-built: module map, contracts, invariants, traps.** Read this before touching code |
 
 ## Current state (July 2026)
 

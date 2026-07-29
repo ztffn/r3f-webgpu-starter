@@ -41,7 +41,7 @@ player instinctively recognise this?* — applies to features, not to whether a 
   flatter than the reference (`07-...md` §7).
 - **Test build:** free-fly / on-foot camera with stances, instrument HUD, `netlify.toml`.
   Deploy with `npx netlify deploy --prod --dir=dist` from a machine that has prepared assets —
-  a Git-connected Netlify build renders synthetic fBm, because assets are git-ignored.
+  or via a Git-connected build — prepared assets are committed, so both render the real map.
 - **Open:** skirt artifact at eye height (`07-...md` §9), floating grass along ridgelines
   (same §), and scale calibration.
 - **Next up (`01-...md` Phase 1.6):** human-test Green Mile, then runtime map switching.
@@ -62,8 +62,10 @@ player instinctively recognise this?* — applies to features, not to whether a 
   point — see `04-...md` §2).
 - **Extract installers statically — never run them, no Wine/Whisky needed.** `innoextract`
   for Inno Setup wrappers, `unzip` for WinZip SFX. See `tools/df2-extract/README.md`.
-- **Never commit extracted assets** (NovaLogic + community authorship). `/assets/`, `*.pff`,
-  `*.trn` are gitignored. Keep working copies outside the repo or in `/assets/`.
+- **Prepared terrain assets ARE committed** (`public/assets/terrain/<slug>/`) — community
+  EXP2b freeware in a private repo (`01-...md` §3). **Raw archives are not**: `/assets/`,
+  `*.pff`, `*.trn` stay gitignored; keep those on local disk. The distinction that still
+  holds: **retail**-extracted DF2 data is personal-use-only and never committed.
 - Scale constants (`HEIGHT_SCALE`, `METERS_PER_TEXEL`) are **not yet calibrated** — they're
   placeholders in `src/df2/config.ts`.
 

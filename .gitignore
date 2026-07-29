@@ -133,10 +133,18 @@ dist
 # Production build output (Vite)
 /dist
 
-# Extracted game assets — never commit (NovaLogic + community authorship)
+# Raw extracted game data — keep out of git.
+# Original archives and manifests stay on local disk; the repo carries only the
+# prepared, web-ready output below.
 /assets/
 *.pff
 *.trn
 
-# Prepared terrain assets (derived from extracted game data)
-/public/assets/
+# Prepared terrain assets (public/assets/terrain/<slug>/) ARE committed.
+#
+# What is committed is community-authored EXP2b expansion terrain — freeware mod
+# files built for redistribution — in a private repo. A Git-connected Netlify
+# build therefore renders the real map instead of synthetic fBm.
+#
+# The line that still matters: RETAIL-extracted DF2 data is personal-use-only and
+# does not go in here. See README § Asset policy and docs/01 §3.

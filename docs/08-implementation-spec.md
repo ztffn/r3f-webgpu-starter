@@ -130,9 +130,11 @@ canopy as visible blocks.
 **Shaders are authored in TSL, never raw WGSL/GLSL.** One graph has to serve both the WebGPU
 and WebGL2 backends.
 
-**Never commit extracted assets.** `/assets/`, `/public/assets/`, `*.pff`, `*.trn` are
-git-ignored. NovaLogic owns the base game data; the expansion terrains are third-party
-community work.
+**Prepared assets are committed; raw archives are not.** `public/assets/terrain/<slug>/` is in
+git — community-authored EXP2b freeware in a private repo — so a Git-connected build renders
+the real map. `/assets/`, `*.pff` and `*.trn` stay git-ignored; regenerate them with
+`prepare-terrain.mjs`. The distinction that still holds: **retail**-extracted DF2 data is
+personal-use-only and does not get committed or shipped (`01` §3).
 
 **Never execute an installer.** `innoextract` / `unzip` unpack them statically. No Wine, no
 Whisky, no "just run it in a VM".
@@ -489,13 +491,14 @@ npm run preview
 `tsconfig` is strict with `noUnusedLocals`; a stray unused const fails the build, which is the
 intended behaviour.
 
-Netlify config is in `netlify.toml`. **The two deploy paths do not produce the same site:**
+Netlify config is in `netlify.toml`. Since prepared assets are committed, **both deploy paths
+now produce the same site** — CLI (`npx netlify deploy --prod --dir=dist`) and Git-connected
+builds both render the real map, because Vite copies `public/assets/` into `dist/` either way.
 
-- `npm run build && npx netlify deploy --prod --dir=dist` — Vite copies `public/assets/` into
-  `dist/`, so a machine holding prepared assets uploads the real map. Nothing extracted enters
-  git. **This is the path for anything you want to actually fly around in.**
-- A Git-connected build has no assets (they are git-ignored) and falls back to synthetic fBm.
-  Fine for the shell, useless for judging feel.
+This was not always true: the paths diverged while assets were git-ignored, and they will
+diverge again if the assets are ever stripped (see §4 and the README's asset policy). The
+synthetic fBm fallback is still live and still correct — it is what any clone without prepared
+assets renders, which is what keeps the repo runnable for someone with no game data.
 
 Bundle is ~1.77 MB (490 kB gzip), dominated by Three. Not yet code-split.
 

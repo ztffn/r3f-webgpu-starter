@@ -121,29 +121,31 @@ before drawing any conclusion from the frame times next to it.
 
 ## Deploying a test build
 
-The site is configured for [Netlify](https://netlify.com) in `netlify.toml`. There are two
-paths and they do **not** produce the same build:
-
-**CLI deploy — the one that carries the real map.**
+The site is configured for [Netlify](https://netlify.com) in `netlify.toml`. Prepared terrain
+assets are committed, so **both deploy paths render the real map** — Vite copies
+`public/assets/` into `dist/` either way.
 
 ```shell
 npm run build
-npx netlify deploy --prod --dir=dist
+npx netlify deploy --prod --dir=dist    # or just push; a Git-connected build works too
 ```
 
-Vite copies `public/assets/` into `dist/`, so a machine that has prepared terrain assets
-uploads them with the build. Nothing extracted ever enters git; the upload comes off your
-disk. This is the path to use for anything you want to actually fly around in.
+### Asset policy
 
-**Git-connected build — shell only.** Netlify runs `npm run build` on its own runners, which
-have no prepared assets (they are git-ignored — see below). The site builds and runs, but
-`loadTerrain()` finds nothing and falls back to synthetic fBm terrain. Fine for checking the
-HUD and the deploy pipeline, useless for judging whether the terrain feels like DF2.
+**Prepared terrain assets are committed** (`public/assets/terrain/<slug>/`, ~2.6 MB). What is
+in the repo is community-authored expansion terrain — Green Mile is by Celtic, from TerraNova's
+EXP2b pack — 25-year-old mod files distributed as freeware and explicitly built for
+redistribution, in a private repo. That is the cleanest footing available, and it is why EXP2b
+is the *preferred* asset source rather than retail data
+([`docs/01`](./docs/01-project-overview-and-roadmap.md) §3).
 
-Extracted game assets are **not** committed and should not be. `/assets/`, `/public/assets/`,
-`*.pff` and `*.trn` are git-ignored — NovaLogic owns the base game data, and the community
-expansion terrains are third-party work. Prepare assets locally with
-`tools/df2-extract/prepare-terrain.mjs`.
+**Raw archives are still excluded.** `/assets/`, `*.pff` and `*.trn` remain git-ignored — keep
+original archives on local disk and regenerate with `tools/df2-extract/prepare-terrain.mjs`.
+
+Two operational notes, not objections: a public Netlify deploy serves these files to anyone
+with the URL, and git history is permanent, so removing them later takes a rewrite. Both are
+fine for community freeware; they are the reason **retail-extracted DF2 data should not be
+committed** — that stays personal-use-only and out of any shared build.
 
 ## Roadmap (next)
 

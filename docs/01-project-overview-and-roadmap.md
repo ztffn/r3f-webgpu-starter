@@ -66,6 +66,28 @@ This is a hobby/personal reconstruction project, not a commercial release.
 - **Fallback asset source:** retail DF2 (currently ~$5 on Steam / Instant Gaming). Extracting
   assets from a purchased copy for personal, non-distributed use is reasonable; **do not**
   redistribute extracted retail assets or ship them in any public build.
+
+> **Decided July 2026 — prepared EXP2b terrain assets are committed to this repo.**
+> `public/assets/terrain/<slug>/` is in git (~2.6 MB for Green Mile). What that covers is
+> exactly the *preferred* source above: 25-year-old community mod files, freeware, authored
+> for redistribution, by the modding teams this project's author worked with — held in a
+> **private** repo. This is the cleanest footing the project has, which is the whole reason
+> EXP2b was chosen over retail data in the first place.
+>
+> **Unchanged by this:**
+> - **Raw archives stay out.** `/assets/`, `*.pff`, `*.trn` remain git-ignored — the repo
+>   carries prepared, web-ready output, not original archives. Regenerate with
+>   `tools/df2-extract/prepare-terrain.mjs`.
+> - **Retail-extracted data is still personal-use-only** and is not committed or shipped.
+>   The community/retail distinction is the line that actually matters, not "assets" as a
+>   blanket category.
+> - The bullet below still applies to any **public** release: strip or replace original
+>   NovaLogic assets. Note that a public deploy publishes whatever is in `public/assets/`
+>   regardless of repo visibility, and that git history is permanent — both fine for
+>   community freeware, both reasons to keep retail data out.
+>
+> **Practical effect:** a Git-connected Netlify build now renders the real map rather than
+> falling back to synthetic fBm, so the two deploy paths converge (`08-...md` §12).
 - Any future public/shared release of this project must either strip original NovaLogic
   assets or replace them with originals/licensed-alternatives.
 
@@ -199,9 +221,9 @@ dialled in, because an editor that authors the wrong feel is worse than no edito
   NovaLogic-authored in it. This is also the cleanest answer to the legal posture in §3.
 - ⬜ Map + terrain editor tooling — heightfield paint, detail/canopy zoning, `.trn`-equivalent
   environment scalars.
-- ⬜ A distribution story for community maps. Note the constraint this must respect: extracted
-  assets are never committed or shipped (§3), so a sharing mechanism has to carry
-  *player-authored* data, not repackaged game data.
+- ⬜ A distribution story for community maps. The constraint it must respect (§3): a public
+  sharing mechanism carries *player-authored* data, not repackaged **retail** game data.
+  Community freeware terrain is a different case — that is what this repo already carries.
 
 ### Not a numbered phase, but shipped
 - ✅ **Test build** — free-fly / on-foot camera with stances, instrument HUD showing position,

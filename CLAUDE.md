@@ -16,17 +16,26 @@ Hobby/reconstruction project, not commercial.
 | `04-concealment-system-design.md` | `grassHeightField` line-of-sight / prone concealment |
 | `05-engine-architecture-tech-stack.md` | Stack rationale, target module layout |
 | `06-asset-extraction-findings.md` | **Ground truth from real extracted data** — trumps guesses elsewhere |
+| `07-grass-visual-reference.md` | Grass measurement methodology, concealment results, **open artifacts** |
 
 ## Current state (July 2026)
 
 - **Stack:** Vite 8 + TypeScript (strict) + React 19 + R3F v9 + drei v10 + three 0.185
   `WebGPURenderer` with TSL shaders (auto WebGL2 fallback). Not CRA — that was removed.
 - **Phase 1 done:** chunked/LOD terrain with skirts, analytic normals, TSL biome material,
-  fog/water/map-camera — running on **synthetic fBm** data (`src/df2/`).
-- **Phase 0 core done:** `tools/df2-extract` unpacks `.pff` archives and parses `.trn`
-  manifests; validated against real archives.
-- **Next milestone (Phase 1.5):** swap synthetic fBm for a **real extracted DF-era map**
-  (heightmap + colormap) to validate feel. See `01-...md` §6.
+  fog/water. Terrain **tiles infinitely** (camera-centred chunk window, geometry cached by
+  wrapped index).
+- **Phase 1.5 done:** renders the real extracted **EXP2-Green Mile** map when prepared assets
+  are present in `public/assets/terrain/<slug>/`; falls back to synthetic fBm otherwise.
+- **Phase 0 core done:** `tools/df2-extract` unpacks `.pff` archives, parses `.trn` manifests,
+  decodes PCX and bakes the canopy field; validated against real archives.
+- **Columnar grass, first pass:** per-fragment march writing its own depth. Still measurably
+  flatter than the reference (`07-...md` §7).
+- **Test build:** free-fly / on-foot camera with stances, instrument HUD, `netlify.toml`.
+  Deploy with `npx netlify deploy --prod --dir=dist` from a machine that has prepared assets —
+  a Git-connected Netlify build renders synthetic fBm, because assets are git-ignored.
+- **Open:** skirt artifact at eye height (`07-...md` §9), floating grass along ridgelines
+  (same §), and scale calibration.
 
 ## Key facts that are easy to get wrong
 

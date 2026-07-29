@@ -309,3 +309,37 @@ The first pass diagnosed the wrong frame — diagnostics were run at a fixed
 bearing while the reported screenshot used the scenario's auto-chosen bearing,
 giving a 4 px fringe instead of the real 19 px. Reproduce the exact frame before
 measuring an artifact.
+
+### Black wedge at eye height, pitched down — TERRAIN, not grass — OPEN
+
+Seen while preparing the test build: on foot at prone/stand height with the
+camera pitched down, a large flat dark-green plane cuts diagonally across the
+lower frame, a near-black band sits under it, and sky shows below that.
+
+**It is not grass.** The same frame with grass toggled off is identical in that
+region — the plane, the black band and the sky gap all remain. Wireframe on the
+same pose shows the black band is the chunk **skirt**: a run of tall thin quads
+with a jagged top edge and a flat bottom exactly `SKIRT_DEPTH` (12 m) below it.
+
+**Why it shades black:** `TerrainMaterial` is `DoubleSide` (skirt winding is not
+controlled), so the skirt's back faces get their normals flipped. The skirt
+copies the *top-edge* normal, which points up; flipped, it points down, so the
+directional light contributes nothing and only the hemisphere light's ground
+term remains. A skirt seen from inside is therefore near-black rather than the
+smeared cliff it is meant to look like.
+
+**Not yet explained:** the sky visible *beyond* the skirt's bottom edge. The
+skirt is supposed to plug exactly that gap.
+
+**Caveat on any repro numbers:** this session's browser had no GPU — WebGPU
+initialisation fails and it falls back to WebGL2 on SwiftShader, a software
+rasteriser. Ground-level frames there run 300–1000 ms *with grass off*, so the
+frame times observed while diagnosing this say nothing about real hardware and
+were not usable for driving the camera precisely (movement is `dt`-capped at
+0.1 s/frame, so key presses barely move the rig). Diagnose this on a machine
+with a real GPU.
+
+**Next step:** stand on a chunk boundary vs 100 m inside a chunk and compare —
+the repro pose (x = 0) sits exactly on one, since `chunkSize` is 256 m and
+`halfWorld` is 1024 m. If the gap is boundary-specific it is a skirt/LOD seam;
+if not, it is the chunk window's near edge.

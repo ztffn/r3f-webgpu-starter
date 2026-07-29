@@ -4,10 +4,10 @@
 // (see tools/df2-extract), otherwise falls back to synthetic fBm terrain.
 
 import { useEffect, useMemo, useState } from "react";
-import { MapControls } from "@react-three/drei";
 import * as THREE from "three/webgpu";
 import { Terrain } from "./Terrain";
 import { PerfMonitor, type PerfSample } from "./PerfMonitor";
+import { FlyControls, type FlyState, type Stance } from "./FlyControls";
 import { Heightfield } from "./Heightfield";
 import { createTerrainMaterial } from "./TerrainMaterial";
 import { createGrassMaterial } from "./GrassMaterial";
@@ -35,11 +35,26 @@ const SUN_DISTANCE = 2000;
 export interface DF2SceneProps {
   wireframe?: boolean;
   grass?: boolean;
+  grounded?: boolean;
+  stance?: Stance;
   onPerf?: (s: PerfSample) => void;
+  onFly?: (s: FlyState) => void;
+  onToggleGround?: () => void;
+  onStance?: (s: Stance) => void;
   onStatus?: (status: { loading: boolean; terrain: LoadedTerrain | null }) => void;
 }
 
-export function DF2Scene({ wireframe = false, grass = true, onStatus, onPerf }: DF2SceneProps) {
+export function DF2Scene({
+  wireframe = false,
+  grass = true,
+  grounded = false,
+  stance = "stand",
+  onStatus,
+  onPerf,
+  onFly,
+  onToggleGround,
+  onStance,
+}: DF2SceneProps) {
   // undefined = still loading, null = no assets (synthetic), object = real map
   const [loaded, setLoaded] = useState<LoadedTerrain | null | undefined>(undefined);
 
@@ -135,9 +150,6 @@ export function DF2Scene({ wireframe = false, grass = true, onStatus, onPerf }: 
   // to exceed the fog distance from anywhere the camera can be.
   const waterSpan = Math.max(worldSize * 4, FOG_FAR * 4);
 
-  // Frame the camera to the map: high enough to see the whole terrain.
-  const camTarget = heightfield ? (heightfield.minHeight + heightfield.maxHeight) / 2 : 30;
-
   return (
     <>
       {onPerf && <PerfMonitor onSample={onPerf} />}
@@ -175,15 +187,16 @@ export function DF2Scene({ wireframe = false, grass = true, onStatus, onPerf }: 
         </mesh>
       )}
 
-      <MapControls
-        makeDefault
-        target={[0, camTarget, 0]}
-        enableDamping
-        dampingFactor={0.08}
-        minDistance={3}
-        maxDistance={worldSize * 1.6}
-        maxPolarAngle={1.45}
-      />
+      {heightfield && (
+        <FlyControls
+          heightfield={heightfield}
+          grounded={grounded}
+          stance={stance}
+          onState={onFly}
+          onToggleGround={onToggleGround}
+          onStance={onStance}
+        />
+      )}
     </>
   );
 }

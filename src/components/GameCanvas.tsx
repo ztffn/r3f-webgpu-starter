@@ -21,7 +21,8 @@ interface CameraConfig {
 }
 
 const DEFAULT_CAMERA: CameraConfig = {
-  // Framed for a ~2 km extracted map; MapControls lets you drop to ground level.
+  // Only the first frame: FlyControls takes the position over immediately and
+  // places the rig above the terrain (see FlyControls, `rig.initialised`).
   position: [0, 520, 900],
   near: CAMERA_NEAR,
   far: CAMERA_FAR,

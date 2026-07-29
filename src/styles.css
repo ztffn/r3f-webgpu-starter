@@ -1,11 +1,23 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap");
+/* Delta Force 2 — instrument-panel HUD over a live scene.
+ *
+ * One deliberate dark theme. The HUD sits on top of terrain and sky, so a
+ * light-ground variant would wash out; this commits to the tactical-display
+ * world rather than shipping a weak second theme. No webfont: the panels are
+ * monospace telemetry, and a CDN font would be one more thing to fail on a cold
+ * deploy for no gain. */
 
 :root {
-  --bg-background: #111827;
-  --clr-card: #1f2937;
-  --clr-1: #6420aa;
-  --clr-2: #ff3ea5;
-  --clr-3: #ff7ed4;
+  --ground: #0b1013;
+  --panel: rgba(11, 17, 21, 0.82);
+  --line: rgba(154, 184, 194, 0.18);
+  --line-strong: rgba(154, 184, 194, 0.34);
+  --ink: #d9e3e6;
+  --ink-dim: #8798a0;
+  --ink-faint: #5d6d75;
+  --accent: #e8a33d;
+  --olive: #9db06f;
+  --warn: #e0714a;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
 
 * {
@@ -14,295 +26,265 @@
 
 html,
 body,
-#root,
-canvas {
+#root {
   width: 100%;
   height: 100%;
   margin: 0;
   padding: 0;
-  font-family: "Inter", sans-serif;
   overflow: hidden;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--mono);
+  -webkit-font-smoothing: antialiased;
+}
+
+canvas {
+  display: block;
   touch-action: none;
+  cursor: grab;
+}
+canvas:active {
+  cursor: grabbing;
 }
 
-body {
-  background: #020202;
-}
-
-.overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  z-index: 1000;
+/* HUD is click-through except on the panels themselves. */
+.hud-root {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
   pointer-events: none;
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
+  /* A look-drag that starts on a panel would otherwise select its text and
+     leave the HUD highlighted; nothing here is worth copying. */
+  user-select: none;
+  -webkit-user-select: none;
 }
 
-header {
-  background-image: linear-gradient(
-    to bottom,
-    #020202,
-    rgba(0, 0, 0, 0.775),
-    #02020200
-  );
-  width: 100%;
-  height: 170px;
+.panel {
+  position: fixed;
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  align-items: center;
-}
-
-header h1 {
-  margin: 0;
-  padding: 0;
-  color: white;
-  font-size: 3rem;
-  font-weight: 300;
-  letter-spacing: -0.04em;
-  text-transform: uppercase;
-  text-align: center;
-}
-
-header h1 span {
-  font-weight: 900;
-}
-
-header p {
-  color: white;
-  font-size: 0.8rem;
-  font-weight: 200;
-  letter-spacing: -0.04em;
-  text-align: center;
-  margin-top: 0.5rem;
-  padding: 0;
-  max-width: 500px;
-}
-
-footer {
-  width: 100%;
-  height: 110px;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  position: absolute;
-  bottom: 0;
-}
-
-.footer-buttons {
-  display: flex;
-  gap: 2rem;
-}
-
-@property --gradient-angle {
-  syntax: "<angle>";
-  initial-value: 90deg;
-  inherits: false;
-}
-
-footer button {
-  color: white;
-  padding: 1rem 1.3rem;
-  border-radius: 0.5rem;
-  box-shadow: 0 0 5px rgba(0, 0, 0, 0.1);
-  font-size: 0.45rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  font-weight: 300;
-  pointer-events: all;
-  cursor: pointer;
-  position: relative;
-  cursor: pointer;
-  border: none;
-  border-radius: 50px;
-  background-color: var(--clr-card);
-  transition: all 0.3s ease;
-}
-
-footer button:hover {
-  background: rgb(65, 60, 79);
-  color: white;
-}
-
-footer button:hover:after {
-  transform: scale(1.5);
-  filter: blur(2rem);
-  transition: all 0.3s ease;
-}
-
-footer button::after,
-footer button::before {
-  content: " ";
-  position: absolute;
-  z-index: -1;
-  inset: -0.06rem;
-  background: conic-gradient(
-    from var(--gradient-angle),
-    var(--clr-card),
-    var(--clr-1),
-    var(--clr-2),
-    var(--clr-3),
-    var(--clr-2),
-    var(--clr-1),
-    var(--clr-card)
-  );
-  border-radius: inherit;
-  animation: rotate 2.5s ease-in-out infinite;
-  transition: all 0.3s ease;
-}
-
-footer button.toggle::before {
-  content: " ";
-  position: absolute;
-  z-index: -1;
-  inset: -0.06rem;
-  background: conic-gradient(
-    from var(--gradient-angle),
-    var(--clr-card),
-    var(--clr-1),
-    var(--clr-2),
-    var(--clr-3),
-    var(--clr-2),
-    var(--clr-1),
-    var(--clr-card)
-  );
-  border-radius: inherit;
-  animation: rotate2 3.5s ease-in-out infinite;
-  transition: all 0.3s ease;
-}
-
-footer button::after {
-  filter: blur(3rem);
-}
-
-@keyframes rotate {
-  0% {
-    --gradient-angle: 0deg;
-  }
-  100% {
-    --gradient-angle: 360deg;
-  }
-}
-
-@keyframes rotate2 {
-  0% {
-    --gradient-angle: 0deg;
-  }
-  50% {
-    --gradient-angle: 120deg;
-  }
-  100% {
-    --gradient-angle: 360deg;
-  }
-}
-
-.footer-text {
-  color: white;
-  font-size: 0.8rem;
-  font-weight: 200;
-  letter-spacing: -0.04em;
-  text-align: center;
-  padding: 0;
-  position: absolute;
-  bottom: 20px;
-  left: 20px;
-  width: max-content;
-  opacity: 0.3;
-}
-
-.footer-text a {
-  color: white;
-  font-weight: 400;
-  text-decoration: none;
-  pointer-events: all;
-}
-
-.download-button {
-  position: fixed;
-  bottom: 20px;
-  right: 20px;
-  background-color: transparent;
-  border: 1px solid white;
-  border-radius: 50px;
-  padding: 10px 10px;
-  text-align: center;
-  cursor: pointer;
-  z-index: 1000;
-  pointer-events: all;
-  display: flex;
-  opacity: 0.3;
-}
-
-.download-button img {
-  width: 20px;
-  height: 20px;
-  vertical-align: middle;
-}
-
-.download-button:hover {
-  background-color: #ffffff7b;
-}
-
-/* Mobile */
-@media (max-width: 768px) {
-  header h1 {
-    font-size: 2.5rem;
-  }
-
-  header p {
-    font-size: 0.9rem;
-    max-width: 300px;
-  }
-  .download-button {
-    display: none;
-  }
-
-  .footer-buttons {
-    gap: 0.5rem;
-  }
-  footer {
-    height: 150px;
-  }
-
-  footer button {
-    padding: 0.9rem 1.3rem;
-    font-size: 0.5rem;
-  }
-
-  footer button.toggle-quality {
-    display: none;
-  }
-
-  .footer-text {
-    font-size: 0.6rem;
-    bottom: 10px;
-    left: 50%;
-    transform: translateX(-50%);
-  }
-}
-
-/* Perf readout — fixed top-right, tabular so digits don't jitter. */
-.perf {
-  position: fixed;
-  top: 12px;
-  right: 12px;
-  z-index: 1200;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 8px 10px;
-  border: 1px solid rgba(150, 180, 190, 0.25);
+  pointer-events: auto;
+  background: var(--panel);
+  backdrop-filter: blur(14px) saturate(120%);
+  -webkit-backdrop-filter: blur(14px) saturate(120%);
+  border: 1px solid var(--line);
   border-radius: 3px;
-  background: rgba(10, 16, 20, 0.72);
-  color: #8fa3ab;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 10px;
-  line-height: 1.45;
-  font-variant-numeric: tabular-nums;
-  pointer-events: none;
+  padding: 13px 15px;
+  font-size: 11px;
+  line-height: 1.5;
 }
-.perf-fps { color: #e8a33d; font-size: 12px; }
+
+.eyebrow {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--ink-faint);
+  margin-bottom: 7px;
+}
+
+.rows {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 14px;
+  margin: 0;
+}
+.rows dt {
+  color: var(--ink-faint);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+.rows dd {
+  margin: 0;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+.rows dd.warn {
+  color: var(--warn);
+}
+
+/* --- identity (top left) --- */
+#ident {
+  top: 14px;
+  left: 14px;
+  max-width: 290px;
+}
+#ident h1 {
+  margin: 0 0 2px;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-wrap: balance;
+}
+#ident .by {
+  color: var(--accent);
+  font-size: 11px;
+  margin-bottom: 10px;
+}
+
+/* --- telemetry (top right) --- */
+#telem {
+  top: 14px;
+  right: 14px;
+  min-width: 176px;
+}
+#telem .rows dd {
+  color: var(--olive);
+}
+.perf {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid var(--line);
+  color: var(--ink-faint);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.perf .fps {
+  color: var(--accent);
+  font-size: 13px;
+}
+
+/* --- controls (bottom left) --- */
+#ctl {
+  bottom: 14px;
+  left: 14px;
+  width: 258px;
+}
+.btns {
+  display: flex;
+  gap: 6px;
+}
+button {
+  flex: 1;
+  font-family: var(--mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--ink-dim);
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  padding: 7px 5px;
+  cursor: pointer;
+  transition:
+    color 120ms,
+    border-color 120ms,
+    background 120ms;
+}
+button:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--ink-faint);
+}
+button:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+button[aria-pressed="true"] {
+  color: var(--ground);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.note {
+  margin: 11px 0 0;
+  padding-top: 9px;
+  border-top: 1px solid var(--line);
+  color: var(--ink-faint);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+/* --- legend (bottom right) --- */
+#legend {
+  bottom: 14px;
+  right: 14px;
+}
+#legend .rows {
+  gap: 3px 12px;
+}
+#legend dt {
+  color: var(--accent);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: none;
+}
+#legend dd {
+  color: var(--ink-faint);
+  font-size: 10px;
+}
+
+/* --- boot --- */
+.boot {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  background: var(--ground);
+  color: var(--ink-dim);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.boot .bar {
+  width: 190px;
+  height: 1px;
+  background: var(--line-strong);
+  overflow: hidden;
+}
+.boot .bar i {
+  display: block;
+  width: 40%;
+  height: 100%;
+  background: var(--accent);
+  animation: sweep 1.2s ease-in-out infinite;
+}
+@keyframes sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(350%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .boot .bar i {
+    animation: none;
+    width: 100%;
+  }
+}
+
+.touch-note {
+  display: none;
+}
+
+/* Small screens: keep the scene readable, drop the non-essential panels. */
+@media (max-width: 760px) {
+  .touch-note {
+    display: block;
+  }
+  #telem,
+  #legend {
+    display: none;
+  }
+  #ident {
+    top: 10px;
+    left: 10px;
+    right: 10px;
+    max-width: none;
+  }
+  #ctl {
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+    width: auto;
+  }
+}

@@ -8,7 +8,7 @@
 // the second 8 ms too — ms is the number to optimise against.
 
 import { useFrame, useThree } from "@react-three/fiber";
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 
 export interface PerfSample {
   fps: number;
@@ -18,6 +18,12 @@ export interface PerfSample {
   worstMs: number;
   drawCalls: number;
   triangles: number;
+  /**
+   * Which backend actually initialised. Worth surfacing on a test build: a
+   * tester reporting "it's slow" means something very different on the WebGL2
+   * fallback than on WebGPU, and there's no way to tell from a screenshot.
+   */
+  backend: "WebGPU" | "WebGL2";
 }
 
 export interface PerfMonitorProps {
@@ -28,15 +34,46 @@ export interface PerfMonitorProps {
 
 export function PerfMonitor({ onSample, interval = 500 }: PerfMonitorProps) {
   const gl = useThree((s) => s.gl) as unknown as {
-    info?: { render?: { drawCalls?: number; triangles?: number } };
+    info?: {
+      autoReset?: boolean;
+      reset?: () => void;
+      render?: { drawCalls?: number; triangles?: number };
+    };
+    backend?: { isWebGPUBackend?: boolean };
   };
-  const acc = useRef({ frames: 0, total: 0, worst: 0, last: performance.now(), since: performance.now() });
+  const acc = useRef({
+    frames: 0,
+    total: 0,
+    worst: 0,
+    calls: 0,
+    tris: 0,
+    last: performance.now(),
+    since: performance.now(),
+  });
+
+  // three's WebGPU path zeroes info at the TOP of its rAF callback, before R3F
+  // runs frame subscribers — so reading it from useFrame always yields 0. Take
+  // ownership of the reset instead: read last frame's totals here, then clear
+  // them so this frame's render accumulates cleanly.
+  useEffect(() => {
+    const info = gl.info;
+    if (!info) return;
+    const prev = info.autoReset;
+    info.autoReset = false;
+    return () => {
+      info.autoReset = prev;
+    };
+  }, [gl]);
 
   useFrame(() => {
     const a = acc.current;
     const now = performance.now();
     const dt = now - a.last;
     a.last = now;
+
+    a.calls = gl.info?.render?.drawCalls ?? 0;
+    a.tris = gl.info?.render?.triangles ?? 0;
+    gl.info?.reset?.();
 
     // Ignore the first frame after a stall (tab switch, shader compile), which
     // would otherwise dominate the worst-frame figure.
@@ -52,8 +89,9 @@ export function PerfMonitor({ onSample, interval = 500 }: PerfMonitorProps) {
         fps: 1000 / mean,
         ms: mean,
         worstMs: a.worst,
-        drawCalls: gl.info?.render?.drawCalls ?? 0,
-        triangles: gl.info?.render?.triangles ?? 0,
+        drawCalls: a.calls,
+        triangles: a.tris,
+        backend: gl.backend?.isWebGPUBackend ? "WebGPU" : "WebGL2",
       });
       a.frames = 0;
       a.total = 0;

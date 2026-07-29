@@ -10,6 +10,7 @@ import { useThree, useFrame } from "@react-three/fiber";
 import { useEffect, useMemo } from "react";
 import * as THREE from "three/webgpu";
 import type { Heightfield } from "./Heightfield";
+import { BENCH } from "./bench";
 
 /** Eye height above ground, metres. Matches docs/04 §4.2. */
 export const STANCE_EYE = { stand: 1.7, crouch: 0.95, prone: 0.35 } as const;
@@ -48,8 +49,8 @@ export function FlyControls({
 
   const rig = useMemo(
     () => ({
-      yaw: Math.PI,
-      pitch: -0.15,
+      yaw: BENCH.yaw ?? Math.PI,
+      pitch: BENCH.pitch ?? -0.15,
       speed: 60,
       keys: new Set<string>(),
       dragging: false,
@@ -138,9 +139,16 @@ export function FlyControls({
     const dt = Math.min(delta, 0.1);
 
     if (!rig.initialised) {
-      // Start above the terrain looking across it.
-      const h = heightfield.sample(0, 0);
-      rig.pos.set(0, h + 180, 320);
+      if (BENCH.enabled && (BENCH.x !== undefined || BENCH.z !== undefined)) {
+        // Fixed benchmark vantage; grounded mode puts the eye at stance height.
+        const bx = BENCH.x ?? 0;
+        const bz = BENCH.z ?? 0;
+        rig.pos.set(bx, heightfield.sample(bx, bz) + 2, bz);
+      } else {
+        // Start above the terrain looking across it.
+        const h = heightfield.sample(0, 0);
+        rig.pos.set(0, h + 180, 320);
+      }
       rig.initialised = true;
     }
 

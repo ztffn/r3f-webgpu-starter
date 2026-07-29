@@ -18,6 +18,7 @@ import { createTerrainMaterial } from "./TerrainMaterial";
 import { createGrassMaterial } from "./GrassMaterial";
 import { bakeSyntheticMaps } from "./syntheticMaps";
 import { loadTerrain, type LoadedTerrain } from "./loadTerrain";
+import { BENCH } from "./bench";
 import {
   TERRAIN_SLUG,
   HEIGHT_SCALE,
@@ -185,7 +186,7 @@ export function DF2Scene({
       mapSize: world.size,
       heightScale: world.heightfield.heightScale,
       grassScale: GRASS_SCALE,
-      steps: GRASS_STEPS,
+      steps: BENCH.steps ?? GRASS_STEPS,
       cellSize: GRASS_CELL,
       nearClip: GRASS_NEAR_CLIP,
       pixelsPerStep: GRASS_PIXELS_PER_STEP,

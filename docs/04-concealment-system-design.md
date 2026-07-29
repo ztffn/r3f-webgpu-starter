@@ -144,3 +144,13 @@ beyond that shared data source:
 - Whether to expose concealment as a continuous "concealment %" (e.g. partial cover at
   grass edges, softer than a hard boolean) rather than a strict boolean, for a slightly
   more forgiving/realistic feel than the original.
+
+  > **Sharpened by `00`, and still open.** Both phrasings above — boolean *and* percentage —
+  > quietly assume the result is **shown to the player**. `00` Pillar 5 (*discovery over
+  > readability, preserve uncertainty*) and Pillar 10 (*no excessive feedback*) argue against
+  > any readout at all: if the game tells you "you are concealed", that is readability, and
+  > the tension the mechanic runs on collapses. The likely answer is that this is a purely
+  > **internal** visibility computation — consumed by AI targeting and hit determination —
+  > and the player learns their state by not being shot. That still leaves the boolean vs.
+  > continuous question open, but it is now a question about **AI input fidelity**, not
+  > about UI. Decide the consumer before deciding the return type.

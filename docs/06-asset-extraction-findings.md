@@ -149,8 +149,25 @@ base-game files.**
 
 **Still needed for the marquee grass maps specifically:** `dfdg1_dm` / `dfdg1_cm` (and
 `dfg1_cm`) — the standard DF2 grass detail set, which lives in a **base-game `.pff`** (not in
-either modding installer). Until a base DF2 install is available, reproduce those maps'
-grass using `ct1_dm`/`ct2_dm` as a stand-in stretch set.
+either modding installer).
+
+> ⚠️ **Correction (July 2026).** This section previously advised reproducing those maps' grass
+> "using `ct1_dm`/`ct2_dm` as a stand-in stretch set". **Do not.** Strip tile *indices* are
+> per-grass-set, so a terrain's `detail_map` indices mean nothing against another set's strip:
+> grass comes out tall where the map should be bare and bare where it should be chest-high.
+> Plausible-looking and wrong. `loadTerrain.ts` refuses a bake tagged `substituted` and uses a
+> labelled colormap-derived stand-in instead (`08-...md` §5.3).
+>
+> **The right move is the opposite one: test real grass on a map that actually has its strip.**
+> Per the table above, **egypt** (`ct1_dm`) and **R66 / blizzard / vul001** (`ct2_dm`) are
+> self-contained — preparing any of those yields `grassSource: "real"`, the authentic
+> `detail_map` → strip → stretch-height path, end to end. That is the only way to exercise
+> the real data path at all right now, and it is the strongest argument for the multi-map
+> loader in `01` Phase 1.6. It also unblocks acceptance criterion 3 in `07-...md` §3 ("hard
+> zone edges"), which is untestable on Green Mile by construction.
+>
+> Note what this does **not** get you: the *classic DF2 grass look*. `ct1`/`ct2` are the
+> correct strips for their own terrains, not a substitute for `dfdg1`'s profile.
 
 ---
 

@@ -8,9 +8,22 @@ the original's two defining technical/design traits:
 1. **Terrain and grass system** — NovaLogic's Voxel Space 32 engine, specifically its
    "stretched voxel" tall-grass feature, which allowed a prone player to be effectively
    invisible in grass at up to ~800m while remaining fully traversable terrain.
-2. **Asset fidelity** — where legally and technically possible, use real DF2-era terrain
-   and model data (colormap/heightmap/detail-map triples, `.3DI` character/vehicle models)
-   rather than recreated-from-scratch art.
+2. **Asset fidelity — as a means, not an end.** Where legally and technically possible, use
+   real DF2-era terrain and model data (colormap/heightmap/detail-map triples, `.3DI`
+   character/vehicle models) rather than recreated-from-scratch art.
+
+   > **Decided July 2026.** Real assets are the **dial-in instrument**: they are how we tell
+   > whether the terrain, scale and concealment feel right, because they are the thing
+   > players actually remember. They are not the deliverable. As the project matures the
+   > trajectory is **custom assets and player-created terrains**, and eventually **map +
+   > terrain editor tooling** to feed the community aspect (`00` Pillar 12).
+   >
+   > This resolves the tension with `00`'s "Preserve Behavior, Not Assets": behaviour is the
+   > goal, real assets are the fastest and most honest way to calibrate toward it. Practical
+   > consequence — **a missing original asset is never a project blocker.** Where authentic
+   > data is unavailable (e.g. the `dfdg1_dm` grass strip, §7), authoring a plausible
+   > substitute that delivers the *behaviour* is a legitimate path, provided it is labelled
+   > as such and never reported as authentic (`08-...md` §5.3).
 
 This is a hobby/personal reconstruction project, not a commercial release.
 
@@ -123,6 +136,25 @@ and immediately answers "does this feel like DF2?".
 - ✅ **Shipped map:** EXP2-Green Mile (`TERRAIN_SLUG = "gmile"`). Others still available:
   Balnakiel / 1stLook / River, or any of the 27 TerrainPack maps.
 
+### ▶ Phase 1.6 — Multi-map loader (**next after the first map is human-tested**)
+> **Sequenced deliberately.** Green Mile gets flown, judged and dialled in by a human first —
+> a second map before the first one feels right just doubles the unknowns. Once it does:
+
+- ⬜ Replace the hardcoded `TERRAIN_SLUG` with runtime map selection (the loader already takes
+  a slug; the constant is the only thing pinning it — `08-...md` §6).
+- ⬜ Prepare several more real DF-era maps and switch between them **to further validate
+  look/feel** — the point is cross-checking that the renderer is right in general, not just
+  tuned to one heightmap. 9 EXP2b + 27 TerrainPack terrains are already extracted (`06` §3).
+- ⬜ **Prepare one of the self-contained grass maps — this is the sleeper item.** egypt
+  (`ct1_dm`) and R66 / blizzard / vul001 (`ct2_dm`) ship their own `detail_elev` strips, so
+  they load as `grassSource: "real"` and exercise the authentic `detail_map` → strip →
+  stretch-height path end to end. **Green Mile structurally cannot do this**, so today the
+  real grass data path has never actually been run. It also closes acceptance criterion 3 in
+  `07` §3, which is untestable on a stand-in canopy by construction.
+- ⬜ Per-map environment scalars already parse; verify they actually differ map to map.
+- This is also the first step toward `00` Pillar 12: the same runtime path that loads a
+  second official map is the one that later loads a player-made one.
+
 ### Phase 2 — Grass renderer
 > **The built approach diverges from the plan below.** What shipped is a *columnar
 > per-fragment march* — closer to what the original actually did — not the relief-mapped
@@ -158,6 +190,18 @@ and immediately answers "does this feel like DF2?".
 
 ### Phase 5 — Polish (⬜ not started)
 - ⬜ Wind animation tuning, LOD blend tuning, color-matching at draw distance, audio.
+
+### Phase 6 — Authoring & community (⬜ not started, but it is the direction)
+`00` Pillar 12 makes this identity-critical rather than a nice-to-have: longevity comes from
+player-created content. The sequencing is deliberate — tools come *after* the look/feel is
+dialled in, because an editor that authors the wrong feel is worse than no editor.
+- ⬜ Custom (non-extracted) terrain and grass assets, so a build can ship with nothing
+  NovaLogic-authored in it. This is also the cleanest answer to the legal posture in §3.
+- ⬜ Map + terrain editor tooling — heightfield paint, detail/canopy zoning, `.trn`-equivalent
+  environment scalars.
+- ⬜ A distribution story for community maps. Note the constraint this must respect: extracted
+  assets are never committed or shipped (§3), so a sharing mechanism has to carry
+  *player-authored* data, not repackaged game data.
 
 ### Not a numbered phase, but shipped
 - ✅ **Test build** — free-fly / on-foot camera with stances, instrument HUD showing position,

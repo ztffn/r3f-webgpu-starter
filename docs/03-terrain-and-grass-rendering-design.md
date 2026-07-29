@@ -182,6 +182,11 @@ own internal LOD boundaries.
   index. This is why the CPU heightfield stores exactly `period × period` samples with no
   duplicated edge row, and why every terrain texture uses `RepeatWrapping`. Details and the
   invariants it imposes: `08-...md` §§4, 6.2.
+- **On repetition (decided, July 2026):** a 2048 m tile recurring forever could read as
+  pattern rather than landscape, which would work against `00` Pillar 2. Accepted as
+  low-risk. If it ever becomes visible, **fog is the lever** — tighten `FOG_FAR` so a player
+  cannot see far enough to catch a repeat. Do not build machinery to defeat tiling
+  pre-emptively.
 - An optional literal Voxel Space raycast renderer, implemented as a full-screen
   fragment-shader raymarch against the heightmap texture, retained as a toggleable
   "authentic mode" for period-accurate horizon-warp/draw-distance behavior — not the

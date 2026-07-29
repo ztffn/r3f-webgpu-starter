@@ -44,6 +44,13 @@ player instinctively recognise this?* — applies to features, not to whether a 
   a Git-connected Netlify build renders synthetic fBm, because assets are git-ignored.
 - **Open:** skirt artifact at eye height (`07-...md` §9), floating grass along ridgelines
   (same §), and scale calibration.
+- **Next up (`01-...md` Phase 1.6):** human-test Green Mile, then runtime map switching.
+  Note that **the real grass data path has never been run** — Green Mile's strip is missing so
+  it renders a stand-in canopy, but egypt / R66 / blizzard / vul001 ship their own strips and
+  load as `grassSource: "real"` (`06-...md` §7). Preparing one of those is the cheapest way to
+  exercise it.
+- **Direction:** custom assets → player-created terrain → map/terrain editor tooling
+  (`01-...md` Phase 6). Real assets are the dial-in instrument, not the deliverable.
 
 ## Key facts that are easy to get wrong
 

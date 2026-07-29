@@ -159,6 +159,31 @@ zoom rather than staying fixed: a fixed fade would dissolve grass into flat colo
 where a sniper is looking, handing the observer clarity the design says they should have to
 earn (`08` §6.4).
 
+### Design questions the thesis raised, and how they were settled
+
+Adding this document surfaced three tensions between the pillars and the build. All three
+were decided in July 2026; recorded here so they are not relitigated.
+
+**Asset fidelity is a means, not an end — RESOLVED.** "Preserve Behavior, Not Assets" appeared
+to contradict `01` §1's goal of using real DF2-era data. It does not: **real assets are the
+dial-in instrument.** They are how we tell whether scale, terrain and concealment feel right,
+because they are what players actually remember. The trajectory is toward custom assets,
+player-created terrain and editor tooling (`01` §1, Phase 6). The load-bearing consequence:
+**a missing original asset is never a project blocker** — authoring a plausible substitute
+that delivers the behaviour is legitimate, provided it is labelled and never reported as
+authentic.
+
+**One hardcoded map — RESOLVED as sequencing, not architecture.** Pillar 12 wants custom maps;
+the build pins `TERRAIN_SLUG` at compile time. Deliberate: Green Mile gets human-tested and
+dialled in *first*, then a runtime loader for other real DF maps to cross-validate look/feel
+(`01` Phase 1.6). That same path is what later loads player-made maps.
+
+**Infinite tiling vs. "geographical, not arena-like" — RESOLVED as not a problem.** A 2048 m
+tile repeating forever could in principle read as pattern rather than landscape. Accepted as
+low-risk: if repetition ever becomes visible, **fog is the negotiating lever** — `FOG_NEAR` /
+`FOG_FAR` (`08-...md` §7) bound how far a player can see a repeat, and modern fog is a far
+better tool for this than 1999's. Do not spend effort pre-emptively defeating tiling.
+
 ### Two apparent contradictions, and why they are not
 
 **Pillar 10 (Minimal UI) vs. the instrument HUD in the test build.** The HUD showing position,

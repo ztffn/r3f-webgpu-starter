@@ -328,10 +328,22 @@ Anything else reading `info` per frame needs the same treatment.
 | `CHUNK_COUNT` | 8 | → 256 m chunks |
 | `VIEW_RADIUS_CHUNKS` | 9 | terrain drawn to ~2304 m |
 | `SKIRT_DEPTH` | 12 m | never validated against real LOD error |
-| `FOG_FAR` | 2200 m | — |
+| `FOG_NEAR` / `FOG_FAR` | 300 / 2200 m | linear `THREE.Fog`. **Also the tiling-repetition lever** — see below |
 
 Until the two placeholders are calibrated, **"does this feel like DF2?" cannot be answered
 honestly.** That is the top of the roadmap, not the grass.
+
+**Every metre-valued constant here is coupled to that calibration and must be re-derived
+together, not one at a time.** `METERS_PER_TEXEL` sets world size, which sets `chunkSize`,
+which is what `LOD_DISTANCE_CHUNKS` is expressed in; fog, grass fade and the view radius are
+all absolute metres and will land in different places relative to the terrain once the scale
+moves. Changing one in isolation will look like an improvement and be a regression somewhere
+else. Sanity anchors when you do it: the ~800 m concealment range (`00` Pillars 1 and 6), and
+grass fade staying inside terrain draw distance (§8 invariant 1).
+
+**Fog is also the accepted answer to tiling repetition** (`00` appendix, decided). The terrain
+repeats every 2048 m; if that ever reads as pattern rather than landscape, tighten `FOG_FAR`
+rather than trying to defeat the tiling. Do not spend effort on it pre-emptively.
 
 `GrassMaterial.setScale(metersPerTexel, heightScale, grassScale)` re-derives the shader's
 uniforms, so calibration does not need a rebuild of the graph.
@@ -492,10 +504,32 @@ Bundle is ~1.77 MB (490 kB gzip), dominated by Three. Not yet code-split.
 ## 13. Open questions carried forward
 
 - **Scale calibration** — `HEIGHT_SCALE`, `METERS_PER_TEXEL`. Blocks every "does it feel right"
-  judgement.
+  judgement. Re-derive the other metre-valued constants with it, not after (§7).
 - **`dfdg1_dm`** — the base-game grass strip the marquee maps reference. Needs a retail DF2
   install. Until then Green Mile's canopy placement is invented (`06` §7).
+  **No longer framed as a blocker:** `01` §1 settles that a missing original asset never
+  blocks the project — authoring a plausible canopy that delivers the behaviour is a
+  legitimate path, provided it stays labelled (§5.3).
 - **Stretch-height → world-units scale** — what raw 0–255 canopy actually meant (`06` §8).
-- **Multiplayer** — the intended use case is a 64+ player shooter. Deliberately **on hold**
-  until the plan is laid out; do not design for it speculatively. World rendering first.
 - **Near-field grass detail vs coverage** trade-off is unresolved.
+- **Concealment's consumer** — `04` §7: Pillars 5 and 10 suggest concealment should have no
+  player-facing readout at all, which turns "boolean vs. percentage" into a question about AI
+  input fidelity rather than UI. Decide the consumer first.
+
+### Sequenced, not open
+
+- **Multi-map loading** — `TERRAIN_SLUG` is deliberately a compile-time constant until Green
+  Mile has been human-tested and dialled in. Then it becomes runtime selection, to
+  cross-validate look/feel against other real DF maps (`01` Phase 1.6). The loader already
+  takes a slug; the constant is the only thing pinning it.
+- **Multiplayer** — the intended use case is a 64+ player shooter, and `00` Pillar 12 makes it
+  identity-critical. Deliberately **on hold** until the plan is laid out; do not design for it
+  speculatively, and do not foreclose it (§3).
+- **Authoring / editor tooling** — the eventual direction (`01` Phase 6), sequenced after
+  look/feel is dialled in: an editor that authors the wrong feel is worse than no editor.
+
+### Closed
+
+- **Tiling repetition** — accepted as low-risk; fog is the lever if it ever shows (§7).
+- **Asset fidelity vs. behaviour** — real assets are the dial-in instrument, not the
+  deliverable (`01` §1, `00` appendix).

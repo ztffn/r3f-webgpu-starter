@@ -208,6 +208,11 @@ export function DF2Scene({
       fadeStart: GRASS_FADE_START,
       fadeEnd: GRASS_FADE_END,
       referenceP11: REFERENCE_P11,
+      // Fog is applied by the material from the hit distance, not by three from the
+      // shell depth, so it needs the scene's fog values.
+      fogColor: FOG_COLOR,
+      fogNear: FOG_NEAR,
+      fogFar: FOG_FAR,
     });
     return { ...kit, heightTex, jitterTex: jitter.texture };
   }, [world]);

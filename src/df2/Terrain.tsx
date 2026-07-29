@@ -42,6 +42,15 @@ import {
  */
 const BUILD_MS = 6;
 
+/**
+ * Vertical headroom above the terrain that a chunk's cull box must include, metres.
+ *
+ * Covers the grass shell's lift, which is the canopy height and is live-tunable up
+ * to 12 m in the debug panel. Over-sizing this only makes culling slightly less
+ * effective; under-sizing it drops chunks that are genuinely on screen.
+ */
+const MAX_CANOPY_HEADROOM = 28;
+
 interface Slot {
   mesh: THREE.Mesh;
   grass: THREE.Mesh | null;
@@ -165,8 +174,15 @@ export function Terrain({
     const box = new THREE.Box3();
     // Vertical extent of any chunk: the skirt hangs below the lowest sample and
     // the grass shell lifts above the highest.
+    //
+    // The headroom has to cover the tallest canopy the shell can be lifted by, and
+    // that is a live slider. An 8 m margin silently under-covered it: chunks whose
+    // grass was on screen had boxes that missed the frustum, so they were never
+    // built and left holes showing sky where near terrain should be. Sized for the
+    // slider's maximum rather than for the current value, since the material can
+    // change under us without rebuilding this.
     const minY = heightfield.minHeight - SKIRT_DEPTH - 1;
-    const maxY = heightfield.maxHeight + 8;
+    const maxY = heightfield.maxHeight + MAX_CANOPY_HEADROOM;
 
     return {
       group,

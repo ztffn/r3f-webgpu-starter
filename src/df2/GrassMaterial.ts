@@ -92,6 +92,18 @@ export interface GrassMaterialOptions {
   /** 0 = tone keyed on the world cell (shipped), 1 = keyed on ray bearing. */
   toneMode?: number;
   /**
+   * Scene fog, applied by this material rather than by three.
+   *
+   * three fogs a fragment by its RASTERISED depth, which for this material is the
+   * shell — and the shell is nowhere near where the ray actually hit. Standing
+   * inside the canopy the hit is metres away while the shell fragment can be
+   * hundreds of metres out, so near grass came out washed pale with fog it should
+   * not have had. Same class of error as depthNode exists to fix.
+   */
+  fogColor?: THREE.ColorRepresentation;
+  fogNear?: number;
+  fogFar?: number;
+  /**
    * Width of one grass column in metres — the DDA grid, decoupled from the
    * heightmap texel. DF2's striations are far finer than its 1024² heightmap:
    * the detail texture tiled at a much smaller scale, so canopy height varied
@@ -190,6 +202,9 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     maxSpan = 48,
     stripePixels = 3,
     toneMode = 0,
+    fogColor = "#aac2d6",
+    fogNear = 300,
+    fogFar = 2200,
     cellSize = 0.35,
     nearClip = 1.2,
     debugHit = false,
@@ -216,6 +231,9 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
   const uMaxSpan = uniform(maxSpan);
   const uStripePixels = uniform(stripePixels);
   const uHashPeriod = uniform(hashPeriod);
+  const uFogColor = uniform(new THREE.Color(fogColor));
+  const uFogNear = uniform(fogNear);
+  const uFogFar = uniform(fogFar);
   /** 0 = tone keyed on the world cell, 1 = keyed on ray bearing. */
   const uToneMode = uniform(toneMode);
   /** 0 = normal, 1 = hit mask, 2 = hit distance, 3 = height up the column. */
@@ -541,7 +559,12 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     // descending order — which both the GLSL ES and WGSL specs leave
     // indeterminate. It happens to give the intended ramp on drivers that use the
     // naive formula and may clamp to a constant on drivers that assume e0 < e1.
-    const fade: NodeArg = (frag.distance(cameraPosition) as NodeArg)
+    // Keyed on the distance to the HIT, not to the shell fragment. The shell is a
+    // rasterisation proxy that can sit hundreds of metres from where the ray
+    // actually struck — standing inside the canopy it always does — so fading on
+    // shell distance dissolved grass a couple of metres away into flat colormap as
+    // if it were at 800 m. Every distance-dependent term here has to use the hit.
+    const fade: NodeArg = (hitS as NodeArg)
       .smoothstep(uFadeStart.mul(zoom) as NodeArg, uFadeEnd.mul(zoom) as NodeArg)
       .oneMinus();
 
@@ -569,7 +592,15 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     // which is what this fade always claimed to do — and it keeps opacity binary,
     // which is the only thing an alpha test can express.
     const columns: NodeArg = base.rgb.mul(shade).mul(tone);
-    const shaded: NodeArg = columns.mix(base.rgb, fade.oneMinus());
+    const faded: NodeArg = columns.mix(base.rgb, fade.oneMinus());
+
+    // Fog, applied here from the HIT's view depth. three's automatic fog is
+    // switched off on this material (see material.fog below) because it uses the
+    // rasterised shell depth. Matches three's linear fog exactly —
+    // smoothstep(near, far, viewZ) then mix toward the fog colour — so grass and
+    // terrain agree at the same distance instead of showing a seam.
+    const fogFactor: NodeArg = viewZ.negate().smoothstep(uFogNear, uFogFar);
+    const shaded: NodeArg = faded.mix(uFogColor, fogFactor);
 
     // Debug views are selected by a uniform rather than baked in, so they can be
     // switched without rebuilding the material — which would also throw away the
@@ -617,6 +648,10 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
   material.depthNode = shaded.get('depth') as NodeArg;
   material.transparent = false;
   material.alphaTest = 0.5;
+  // Fog is applied inside colorNode from the raymarch hit's view depth. three's
+  // automatic fog would use the rasterised shell depth, which is the wrong
+  // distance by up to the whole draw range.
+  material.fog = false;
   // Double-sided: standing inside the canopy we see the shell from underneath.
   // Lighting is left to the material so three flips normals for back faces —
   // overriding normalNode with a world normal shades every back face black.

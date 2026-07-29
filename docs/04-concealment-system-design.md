@@ -1,5 +1,15 @@
 # Concealment System Design
 
+> **Build status: ⬜ nothing in this document is implemented.** There is no query API, no
+> `isConcealed()`, no stance-driven gameplay state. What exists is **evidence the approach
+> works**: `tools/grass-rig` counts target pixels through the real renderer and measures
+> prone at **0 px visible even scoped, at 50 m and 300 m**, against 525 px standing
+> (`07-...md` §8). That validates the mechanic; it is not this system.
+>
+> Two preconditions are already in place, and both are worth protecting: `Heightfield.ts`
+> imports nothing from Three.js, and the canopy field is baked offline — so this module can
+> be written without touching the render path (`08-...md` §3).
+
 ## 1. Design intent
 
 Reproduce DF2's signature gameplay property: a prone player in tall grass can be

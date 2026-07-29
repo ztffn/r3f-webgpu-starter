@@ -50,6 +50,11 @@ dependencies required.
 
 ## 2. TGA loader
 
+> **⬜ Not implemented.** Nothing on the terrain/grass path needs it — the colormap is JPEG,
+> and the heightmap, detail map and `detail_elev` strip are all PCX. TGA is only the
+> `detail_color` (`_cm`) strip, which the columnar shader does not use (it takes colour from
+> the colormap — rendering design doc §4.1, AS BUILT). Implement when `.3DI` textures land.
+
 Handles NovaLogic's TGA usage specifically: uncompressed truecolor images at 24-bit or
 32-bit pixel depth (`ImageType == UNCOMP_TRUECOLOR`). Does not need to handle
 color-mapped, RLE-compressed, or grayscale TGA variants for this project's known data
@@ -71,15 +76,23 @@ Output: standard RGB/RGBA bitmap, directly convertible to PNG.
 
 ## 3. PCX loader
 
+> **✅ Implemented** in `tools/df2-extract/imageio.mjs` (8-bit RLE + the appended 256-colour
+> VGA palette), validated against real archives. Terrain files **do** use this format: the
+> heightmap, detail map and `detail_elev` strip are all PCX (§5).
+
 Standard PCX with an embedded palette (`Colormap`, 48-byte field found via
 `[FieldOffset(16)]` in the reference header struct — i.e. a 16-color EGA-style palette
 embedded in the header, distinct from PCX's separate 256-color VGA palette appended at
-end-of-file for 8-bit PCX variants). Used for some texture/UI assets; terrain files may or
-may not use this format (see §5).
+end-of-file for 8-bit PCX variants). Used for some texture/UI assets, and — **confirmed
+against real data** — for the terrain heightmap, detail map and `detail_elev` strip (§5).
 
 ---
 
 ## 4. `.3DI` model format (character/vehicle/object geometry)
+
+> **⬜ Not implemented.** Structurally reverse-engineered and specified below, but no decoder
+> exists. Off the terrain/grass critical path — the range/concealment tests use a capsule
+> stand-in for a player, not a real model (`07-...md` §8).
 
 Confirmed structure for `FileVersion.V8` (only version this project needs to support,
 per the reference tool — other versions throw `NotSupportedException`).

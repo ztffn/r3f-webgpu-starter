@@ -45,12 +45,13 @@
 
 ## 3. Runtime architecture
 
-- **ECS**: a lightweight library (e.g. `bitECS`) to keep entity/component logic
+- ⬜ **ECS**: a lightweight library (e.g. `bitECS`) to keep entity/component logic
   (player, AI, projectiles, vehicles) manageable as the project grows past the initial
-  terrain/grass prototype.
-- **Physics**: `rapier` or `cannon-es` for player collision, prone/crouch stance
+  terrain/grass prototype. Not started — the project is still the prototype.
+- ⬜ **Physics**: `rapier` or `cannon-es` for player collision, prone/crouch stance
   (feeds directly into the concealment system's stance-to-height mapping — see
   `04-concealment-system-design.md` §4.2), and basic vehicle/projectile physics.
+  Not started; stance heights currently exist only as `STANCE_EYE` in the camera rig.
 - **First-person controller**: custom, built against the physics engine's character
   controller primitives. ⬜ Not started. What exists today is a camera rig only —
   `FlyControls.tsx`, free-fly plus an on-foot mode that clamps to the surface at a stance
@@ -61,10 +62,11 @@
 
 ## 4. Terrain rendering module
 
-- Chunked/LOD heightmap mesh (geomipmapping or clipmap), streamed by camera distance.
-- Textured with extracted colormap; heightmap drives both visual mesh geometry and
-  physics collision.
-- Optional literal Voxel Space raycast "authentic mode": a full-screen fragment shader
+- ✅ Chunked/LOD heightmap mesh (geomipmapping or clipmap), streamed by camera distance.
+  Built as a camera-centred **infinite** window — see rendering design doc §5, AS BUILT.
+- ✅ Textured with extracted colormap. ⬜ Heightmap does not yet drive physics collision
+  (no physics engine); it drives mesh geometry and the camera's ground clamp.
+- ⬜ Optional literal Voxel Space raycast "authentic mode": a full-screen fragment shader
   raymarching the heightmap texture directly, toggleable, not the default renderer.
 
 ## 5. Grass rendering module
@@ -83,10 +85,14 @@ color/density textures) from the asset pipeline:
 
 ## 6. Concealment module
 
-- Independent system, not part of the rendering pipeline, consuming the same
-  `grassHeightField` texture (see `04-concealment-system-design.md`).
-- Exposed as a query API (`isConcealed(observer, target): boolean`) usable by both player-
+- ⬜ Independent system, not part of the rendering pipeline, consuming the same
+  `grassHeightField` texture (see `04-concealment-system-design.md`). **Not built.**
+  The mechanic is demonstrated by pixel-counting in `tools/grass-rig` (`07-...md` §8), which
+  is evidence the approach works — not an implementation of it.
+- ⬜ Exposed as a query API (`isConcealed(observer, target): boolean`) usable by both player-
   facing feedback (if any) and AI visibility checks.
+- ✅ The precondition is in place: `Heightfield.ts` is renderer-free and the canopy field is
+  baked offline, so this module can be written without touching the render path.
 
 ## 7. Directory/module layout (proposed)
 

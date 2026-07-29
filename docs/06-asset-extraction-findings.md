@@ -170,9 +170,17 @@ grass using `ct1_dm`/`ct2_dm` as a stand-in stretch set.
 
 ## 9. Tooling status
 
-`tools/df2-extract/` currently implements the **validated** parts: PFF3 unpack + `.trn`
-parse + inventory. Image decoders (PCX 8-bit RLE, TGA, JPEG passthrough) and the
-`grassHeightField` bake are the remaining Phase 0 work — see `01-...md` roadmap.
+`tools/df2-extract/`, all validated against real archives:
+
+- ✅ PFF3/PFF2 unpack + `.trn` parse + inventory (`df2extract.mjs`)
+- ✅ PCX 8-bit RLE decode, PNG encode via `node:zlib`, JPEG passthrough (`imageio.mjs`)
+- ✅ `grassHeightField` bake, with provenance tagging so a substituted strip is refused at
+  load time (`prepare-terrain.mjs`, `--detail-elev` override)
+- ⬜ TGA decode — not needed by the terrain path yet (`detail_color` strips only)
+- ⬜ `.3DI` → glTF — not started
+
+**Phase 0's core is done.** Remaining Phase 0 work is model conversion only, which is off
+the terrain/grass critical path — see `01-...md` roadmap.
 
 ---
 

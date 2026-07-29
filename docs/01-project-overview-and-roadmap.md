@@ -133,8 +133,8 @@ and immediately answers "does this feel like DF2?".
   stand-in is fine; validating grass *placement* is not.
 - Full design rationale in `03-terrain-and-grass-rendering-design.md`.
 
-### Phase 3 — Concealment system
-- Decoupled gameplay heightfield sampled independently of the render path, for
+### Phase 3 — Concealment system (⬜ demonstrated, not built)
+- ⬜ Decoupled gameplay heightfield sampled independently of the render path, for
   line-of-sight / prone-concealment logic at any range. Reads the *same*
   `grassHeightField` as Phase 2. Full design in `04-concealment-system-design.md`.
 - **Demonstrated, not yet built.** The mechanic is verified end-to-end in the test rig
@@ -142,12 +142,21 @@ and immediately answers "does this feel like DF2?".
   standing reads 525 px. That is a rendered-pixel measurement, not the analytic query this
   phase specifies — the query API itself does not exist yet.
 
-### Phase 4 — Integration
-- First-person controller, physics (rapier or cannon-es), basic AI/objectives.
-- ECS (bitECS) as entity count grows (`05-...md` §3).
+### Phase 4 — Integration (⬜ not started)
+- ⬜ First-person controller, physics (rapier or cannon-es), basic AI/objectives.
+  *(What exists today is a camera rig only — `FlyControls.tsx` clamps to the surface at a
+  stance eye height. No physics, no collision.)*
+- ⬜ ECS (bitECS) as entity count grows (`05-...md` §3).
 
-### Phase 5 — Polish
-- Wind animation tuning, LOD blend tuning, color-matching at draw distance, audio.
+### Phase 5 — Polish (⬜ not started)
+- ⬜ Wind animation tuning, LOD blend tuning, color-matching at draw distance, audio.
+
+### Not a numbered phase, but shipped
+- ✅ **Test build** — free-fly / on-foot camera with stances, instrument HUD showing position,
+  AGL, frame time and active backend, plus `netlify.toml`. Deploy notes in the README; the
+  CLI path carries prepared assets, a Git-connected build falls back to synthetic fBm.
+- ✅ **`tools/grass-rig`** — headless measurement harness. Exists because eyeballing repeatedly
+  passed builds that were measurably wrong (`07-...md` §5, `08-...md` §10).
 
 ## 7. Open questions — status
 

@@ -135,6 +135,11 @@ Use both, each doing the job it's actually good at:
 
 ### 4.2 Secondary layer — GPU-compute blade instancing (near field, ~0–15m)
 
+> **⬜ Not started.** Nothing below exists in code. Note also `07-...md` §4's finding: the
+> original look has *no* blade silhouettes at all, so this layer is a deliberate
+> **modernisation, not a fidelity requirement** — it should be optional and toggleable so it
+> can be A/B'd against the authentic look. Do not treat it as blocking Phase 2.
+
 Adopt the *Ghost of Tsushima* production pipeline as reference, adapted to Three.js
 WebGPURenderer + TSL compute:
 
@@ -153,9 +158,14 @@ WebGPURenderer + TSL compute:
   position as a compute-shader uniform, apply local displacement falloff).
 - **WebGL2 fallback:** reduce instance count substantially and/or fall back toward
   shell-texturing (concentric offset mesh layers with alpha-masked height cutoff) for this
-  near-field band only — the far-field relief-mapped layer is unaffected either way.
+  near-field band only — the far-field columnar-march layer is unaffected either way, and
+  is confirmed to run on the WebGL2 fallback.
 
 ### 4.3 Crossfade
+
+> **⬜ Not started** — there is only one grass layer today, so there is nothing to cross-fade
+> between. The shipped shader does fade *columns into the colormap* with distance, which is a
+> different mechanism (`08-...md` §6.4).
 
 Blend the two layers over a distance band (e.g. 10–20m) so the transition is not visible —
 either a simple alpha crossfade or, more robustly, thinning §4.2's blade density to zero

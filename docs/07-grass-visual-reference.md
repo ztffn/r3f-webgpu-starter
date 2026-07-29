@@ -81,14 +81,18 @@ the ranges above.
 
 ## 3. Acceptance criteria for Phase 2
 
-A grass implementation honours the original when all of these hold:
+A grass implementation honours the original when all of these hold. **Status as of July 2026
+— 3 of 6 met, 1 not met, 2 unverifiable on current data/hardware.** Evidence in §7 and §8; do
+not tick anything here without a measurement behind it.
 
-1. **Vertical coherence** — grass reads as vertical columns, one colour per column base.
-2. **No thinning** — coverage is visually identical at 10 m and at 800 m.
-3. **Hard zone edges** — grass stops abruptly where the detail map says it stops.
-4. **Ragged canopy top** — per-column height variation is visible in silhouette.
-5. **Occludes a standing figure to roughly the waist** at default scale.
-6. **Cost independent of distance/coverage** — no per-blade budget.
+| | Criterion | Status |
+|---|---|---|
+| 1 | **Vertical coherence** — grass reads as vertical columns, one colour per column base | ❌ **not met.** Vertical autocorrelation **0.42 vs 0.82** reference; reads as isotropic speckle, not streaks. Cause understood and geometric — see §7 |
+| 2 | **No thinning** — coverage visually identical at 10 m and at 800 m | ✅ met by construction. Per-fragment march + colormap handover; it structurally cannot thin. Caveat: the prone/inside-canopy path is separately broken (§7 next-step 1, `08-...md` §9) |
+| 3 | **Hard zone edges** — grass stops abruptly where the detail map says it stops | ⬜ **not verifiable on the shipped map.** Green Mile's canopy is a colormap-greenness stand-in, so its edges are not the detail map's edges. Needs `dfdg1_dm` (`06-...md` §7) |
+| 4 | **Ragged canopy top** — per-column height variation visible in silhouette | ✅ met — clumped multi-scale jitter (§1.3). Arguably *over*-met: tops speckle where the original's are smoother (§7 next-step 2) |
+| 5 | **Occludes a standing figure to roughly the waist** at default scale | ✅ measured — a 2 m capsule at 50 m in 0.97 m canopy loses its lower half; standing 525 px scoped vs prone 0 px (§8). Caveat: "default scale" is still uncalibrated (`08-...md` §7) |
+| 6 | **Cost independent of distance/coverage** — no per-blade budget | ✅ met by construction — per-fragment, no primitives. ⚠️ **unverified on real hardware**: no trustworthy GPU numbers exist (`08-...md` §10) |
 
 ## 4. Where this modifies the Phase 2 plan
 
@@ -180,13 +184,19 @@ which is isotropic by construction. The reference views that show striations are
 all cases where faces are presented — prone inside the canopy, or a grass slope
 tilted toward the camera.
 
-Next steps, in order:
-1. Fix the prone/inside-canopy path. Suppressing the eye's own column currently
+Next steps, in order — **all three still open:**
+
+1. ⬜ **Fix the prone/inside-canopy path.** Suppressing the eye's own column currently
    also kills near, steeply-downward rays, so the prone foreground renders bare
    terrain — exactly the view that should be most striated.
-2. Reduce canopy-top roughness. Per-cell height noise makes tops speckle;
+   **Likely the same bug as the reach reading in `08-...md` §9**, which derives from the
+   step arithmetic that the march may only reach ~6 m when the camera is inside the canopy.
+   Two independent routes to the same symptom; settle them together, on real hardware.
+   This is the highest-value grass fix available: criterion 1 in §3 is the one unmet
+   criterion, and §7's own diagnosis says the striations only appear from inside the canopy.
+2. ⬜ Reduce canopy-top roughness. Per-cell height noise makes tops speckle;
    the original's tops come from a detail texture and are far smoother.
-3. Investigate black speckle artifacts appearing along shell silhouettes
+3. ⬜ Investigate black speckle artifacts appearing along shell silhouettes
    (visible as dotted lines) — likely alpha-test edges on the lifted shell.
 
 ---

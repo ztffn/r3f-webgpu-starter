@@ -1,0 +1,23 @@
+terrain_name     "Desert3"
+terrain_creator  "Nova Logic"
+
+color_map         Desert3_c
+elev_map          Desert3_d
+detail_map        dfd2_m
+detail_color      dfd2_cm
+detail_elev       dfd2_dm
+char_data         dfd2_cm
+sky_map           clouds01
+sky_palette       skygrd01
+sky_height        1236
+horizon           1
+
+water_map         ripple1
+water_height      0
+
+filter            128, 128, 128
+gamma             128
+saturation        128
+sun_slope         70
+
+

@@ -1,34 +1,37 @@
 {
-  "name": "basic-demo",
-  "version": "1.0.0",
-  "description": "Shows how to form self-contained components with their own state and user interaction.",
+  "name": "df2-web-port",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Browser reconstruction of Delta Force 2 (NovaLogic, 1999) — Phase 1 chunked LOD terrain on Three.js WebGPU + TSL.",
   "keywords": [
-    "interaction",
-    "pointer-events"
+    "delta-force-2",
+    "voxel-space",
+    "terrain",
+    "webgpu",
+    "tsl",
+    "three-fiber"
   ],
-  "main": "src/index.js",
-  "dependencies": {
-    "@react-three/drei": "^9.99.0",
-    "@react-three/fiber": "^8.15.0",
-    "@types/three": "^0.177.0",
-    "maath": "0.10.8",
-    "react": "18.2.0",
-    "react-dom": "18.2.0",
-    "react-scripts": "5.0.1",
-    "three": "^0.177.0",
-    "three-mesh-bvh": "^0.8.0"
-  },
   "scripts": {
-    "start": "set HOST=0.0.0.0 && react-scripts start",
-    "build": "GENERATE_SOURCEMAP=false react-scripts build",
-    "test": "react-scripts test --env=jsdom",
-    "eject": "react-scripts eject",
-    "deploy": "vercel --prod"
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host",
+    "typecheck": "tsc --noEmit"
   },
-  "browserslist": [
-    ">1%",
-    "not dead",
-    "not ie <= 11",
-    "not op_mini all"
-  ]
+  "dependencies": {
+    "@react-three/drei": "^10.7.7",
+    "@react-three/fiber": "^9.6.1",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "three": "^0.185.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@types/three": "^0.185.1",
+    "@vitejs/plugin-react": "^6.0.4",
+    "@webgpu/types": "^0.1.60",
+    "typescript": "^5.9.0",
+    "vite": "^8.1.5"
+  }
 }

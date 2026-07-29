@@ -1,0 +1,23 @@
+terrain_name     "snow1"
+terrain_creator  "Nova Logic"
+
+color_map         snow1_c
+elev_map          snow1_d
+detail_map        dms2_m
+detail_color      dms2_cm
+detail_elev       dms2_dm
+char_data         dms2_cm
+sky_map           clouds01
+sky_palette       skygrd01
+sky_height        1236
+horizon           1
+
+water_map         ripple1
+water_height      0
+
+filter            128, 128, 128
+gamma             128
+saturation        128
+sun_slope         70
+
+

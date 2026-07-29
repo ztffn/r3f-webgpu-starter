@@ -1,0 +1,66 @@
+{
+  "source": "gmile",
+  "trn": {
+    "terrain_name": "EXP2-Green Mile",
+    "terrain_creator": "Celtic",
+    "color_map": "ct502_c",
+    "elev_map": "ct502_d",
+    "detail_map": "ct502_m",
+    "detail_color": "dfdg1_cm",
+    "detail_elev": "dfdg1_dm",
+    "char_data": "dfdg1_cm",
+    "sky_map": "clouds01",
+    "sky_palette": "skygrd01",
+    "sky_height": 1236,
+    "horizon": 1,
+    "water_map": "ripple1",
+    "water_height": 0,
+    "filter": [
+      128,
+      128,
+      128
+    ],
+    "gamma": 128,
+    "saturation": 128,
+    "sun_slope": 70
+  },
+  "assets": {
+    "height": {
+      "file": "height.png",
+      "width": 1024,
+      "height": 1024,
+      "rawMin": 5,
+      "rawMax": 174
+    },
+    "color": {
+      "file": "color.jpg"
+    },
+    "detail": {
+      "file": "detail.png",
+      "width": 1024,
+      "height": 1024,
+      "distinctIndices": 62
+    },
+    "detailElev": {
+      "file": "detail_elev.png",
+      "width": 64,
+      "height": 16384,
+      "tileSize": 64,
+      "tiles": 256,
+      "substituted": true,
+      "substitutedFrom": "ct1_dm.pcx",
+      "referencedName": "dfdg1_dm"
+    },
+    "grass": {
+      "file": "grass.png",
+      "width": 1024,
+      "height": 1024,
+      "rawMin": 0,
+      "rawMax": 255,
+      "rawMean": 30.7,
+      "detailIndicesUsed": 62,
+      "substituted": true
+    }
+  },
+  "missing": []
+}

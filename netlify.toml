@@ -1,0 +1,46 @@
+# Netlify config for the DF2 terrain test build.
+#
+# Both deploy paths now render the real map. Prepared terrain assets live in
+# public/assets/terrain/<slug>/ and ARE committed (README § Asset policy), and Vite
+# copies public/ into dist/, so a Git-connected build carries the map just as a
+# local `netlify deploy --prod --dir=dist` does.
+#
+# This block used to say a Git-connected build fell back to synthetic terrain,
+# which stopped being true when the assets were committed.
+#
+# The fallback still exists in the code for the case where the assets are absent,
+# and it renders synthetic terrain WITH grass (src/df2/syntheticMaps.ts).
+#
+# See README.md § Deploying a test build.
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  # Vite 8 requires Node 20.19+ / 22.12+.
+  NODE_VERSION = "22"
+
+# Vite fingerprints its own bundles, so they are immutable.
+[[headers]]
+  for = "/assets/*.js"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/assets/*.css"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# Terrain assets are NOT fingerprinted — they keep stable names so the loader
+# can find them. Revalidate rather than cache hard, or a re-prepared map would
+# be invisible to anyone who already loaded the site.
+[[headers]]
+  for = "/assets/terrain/*"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

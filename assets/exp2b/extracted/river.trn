@@ -1,0 +1,21 @@
+terrain_name     "EXP2-River"
+terrain_creator  "BBß/Celtic"
+
+color_map         river_c
+elev_map          river_d
+detail_map        river_m
+detail_color      dfdg1_cm
+detail_elev       dfdg1_dm
+char_data         dfdg1_cm
+sky_map           clouds01
+sky_palette       skygrd01
+sky_height        1236
+horizon           1
+
+water_map         ripple1
+water_height      0
+
+filter            128, 128, 128
+gamma             128
+saturation        128
+sun_slope         70

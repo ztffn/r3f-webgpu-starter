@@ -497,7 +497,23 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     // produces vertical striations rather than soft volumetric grass
     // (docs/07 §1.1). The colormap supplies the local ground tone; the
     // per-column hash supplies the horizontal variation between neighbours.
-    const base = texture(colorMap, toUv(texelCentre(hitXZ)));
+    // EXPLICIT mip level 0. This is not an optimisation, it is the fix for grass
+    // rendering as a pale wash.
+    //
+    // The uv here is derived from the raymarch HIT and quantised to the terrain
+    // texel, so two neighbouring pixels can resolve to columns metres apart at
+    // very different ranges. Implicit derivatives therefore see an enormous uv
+    // gradient and select a mip near the TOP of the pyramid — effectively the
+    // average colour of the entire colormap, which for this map is a pale
+    // grey-beige. It showed as washed-out grass speckled with correct colour
+    // wherever neighbouring pixels happened to land in the same cell, got worse
+    // with a taller canopy and at grazing angles, and was unaffected by fog.
+    //
+    // Level 0 is right rather than merely expedient: the colour is meant to be a
+    // NEAREST lookup at the texel the column stands on (docs/07 §1.1), so mip
+    // filtering was never wanted. The other in-loop fetches are unaffected because
+    // their textures carry no mip chain.
+    const base = texture(colorMap, toUv(texelCentre(hitXZ))).level(float(0));
 
     // Only a slight base-to-tip gradient. Measured against the references, real
     // columns are near flat-shaded: colour persists UP a column while changing

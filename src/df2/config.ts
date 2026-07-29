@@ -127,7 +127,7 @@ export const SKY_COLOR = "#9fb8cf";
 export const FOG_COLOR = "#aac2d6";
 export const WATER_COLOR = "#2a4a63";
 export const FOG_NEAR = 300; // meters
-export const FOG_FAR = 2200; // meters
+export const FOG_FAR = 2200;
 
 // Sun direction (points from the scene toward the light) and camera planes.
 export const SUN_DIRECTION: [number, number, number] = [-0.5, 0.72, 0.48];

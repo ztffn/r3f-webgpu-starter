@@ -17,6 +17,12 @@ This is a hobby/personal reconstruction project, not a commercial release.
 > **Status pointer (July 2026).** For what the code actually does today — module map,
 > contracts, invariants and the traps that have already cost sessions — read
 > `08-implementation-spec.md`. This document is the plan; `08` is the as-built.
+>
+> **`00-core-design-thesis.md` is the *why*, and it sits above this document.** This one
+> scopes and sequences the work; `00` states what the work is for — 12 gameplay pillars and
+> the test every feature has to pass. Where a roadmap decision looks arbitrary, `00` is
+> usually the reason. Note especially that `00`'s Pillar 12 names multiplayer as
+> identity-critical while §2 below keeps it out of v1 — both hold, see §2.
 
 ## 2. Non-goals (for v1)
 
@@ -27,9 +33,11 @@ This is a hobby/personal reconstruction project, not a commercial release.
   `03-terrain-and-grass-rendering-design.md`)
 
 > **Multiplayer is the eventual use case, and is deliberately on hold.** The intended end
-> state is a multiplayer shooter, ideally 64+ players. It stays out of v1 scope and **must
-> not be designed for speculatively** — world rendering has to be good first, and the plan
-> has not been laid out yet. Two practical consequences for anyone working now:
+> state is a multiplayer shooter, ideally 64+ players — `00` Pillar 12 names it as
+> identity-critical, so this is a **scheduling** decision, not a judgement that multiplayer
+> is optional. It stays out of v1 scope and **must not be designed for speculatively** —
+> world rendering has to be good first, and the plan has not been laid out yet. Two
+> practical consequences for anyone working now:
 > **(a)** don't build networking, prediction or authority models; **(b)** don't make choices
 > that foreclose it either — in particular `Heightfield.ts` and the concealment field must
 > stay renderer-free so they can be sampled server-side (`08` §3).

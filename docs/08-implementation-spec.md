@@ -10,6 +10,12 @@ Where this document and `01`–`05` disagree, this one describes reality and `01
 the target. Where this document and `06`/`07` disagree, **`06`/`07` win** — they are ground
 truth from extracted data and measurement, and this file is a summary that can drift.
 
+`00-core-design-thesis.md` is a different kind of document from all of these: it is the *why*.
+Nothing here overrides it. When a decision is a judgement call rather than a fact — and most
+of the interesting ones are — the pillars decide, and the test is **"would a veteran DF2
+player instinctively recognise this?"** The appendix to `00` maps the pillars onto the
+decisions in this file that already depend on them.
+
 ---
 
 ## 1. What exists

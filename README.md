@@ -53,6 +53,7 @@ See [`docs/`](./docs) for the full design:
 
 | Doc | Topic |
 | --- | --- |
+| [`00`](./docs/00-core-design-thesis.md) | **Core design thesis** — the 12 gameplay pillars this is all in service of |
 | [`01`](./docs/01-project-overview-and-roadmap.md) | Project overview & phased roadmap |
 | [`02`](./docs/02-asset-format-specification.md) | PFF/TGA/PCX/`.3DI` + terrain formats |
 | [`03`](./docs/03-terrain-and-grass-rendering-design.md) | Terrain & grass rendering design |

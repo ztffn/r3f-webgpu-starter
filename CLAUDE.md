@@ -10,8 +10,13 @@ Hobby/reconstruction project, not commercial.
 read `08` first: it is the as-built spec and it names the traps that have already cost
 sessions. `01`–`05` describe the target; `06`/`07` are ground truth and outrank everything.
 
+`00` is the **why**, and it settles arguments the other docs cannot: when a decision is a
+judgement call rather than a fact, the pillars decide it. Its test — *would a veteran DF2
+player instinctively recognise this?* — applies to features, not to whether a shader compiles.
+
 | Doc | What it settles |
 |---|---|
+| `00-core-design-thesis.md` | **Gameplay identity: 12 pillars + the "is this 1999 limitation or great design?" test.** The why behind everything below |
 | `01-project-overview-and-roadmap.md` | Goals, non-goals, legal posture, **phased roadmap + current status** |
 | `02-asset-format-specification.md` | PFF3, TGA, PCX, `.3DI` V8 byte layouts; **terrain format (confirmed)** |
 | `03-terrain-and-grass-rendering-design.md` | Why grass is relief-mapped (dense-by-construction) + compute blades |

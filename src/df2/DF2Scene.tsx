@@ -17,6 +17,7 @@ import { Heightfield } from "./Heightfield";
 import { createTerrainMaterial } from "./TerrainMaterial";
 import { createGrassMaterial, type GrassUniforms } from "./GrassMaterial";
 import { bakeSyntheticMaps } from "./syntheticMaps";
+import { bakeGrassJitter } from "./grassJitter";
 import { loadTerrain, type LoadedTerrain } from "./loadTerrain";
 import { BENCH } from "./bench";
 import {
@@ -183,8 +184,13 @@ export function DF2Scene({
     heightTex.wrapT = THREE.RepeatWrapping;
     heightTex.needsUpdate = true;
 
+    // Baked once per terrain and shared by every chunk. See grassJitter.ts for why
+    // this is a texture rather than a hash evaluated in the march.
+    const jitter = bakeGrassJitter(GRASS_HASH_PERIOD);
+
     const kit = createGrassMaterial({
       grassMap: world.grassMap,
+      jitterMap: jitter.texture,
       heightMap: heightTex,
       colorMap: world.colorMap,
       worldSize: world.heightfield.worldSize,
@@ -203,13 +209,14 @@ export function DF2Scene({
       fadeEnd: GRASS_FADE_END,
       referenceP11: REFERENCE_P11,
     });
-    return { ...kit, heightTex };
+    return { ...kit, heightTex, jitterTex: jitter.texture };
   }, [world]);
 
   useEffect(
     () => () => {
       grassKit?.material.dispose();
       grassKit?.heightTex.dispose();
+      grassKit?.jitterTex.dispose();
     },
     [grassKit]
   );

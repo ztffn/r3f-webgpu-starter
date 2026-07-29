@@ -53,6 +53,14 @@ import {
 export interface GrassMaterialOptions {
   /** Per-texel canopy height, 0-255. LINEAR-filtered — this is the envelope. */
   grassMap: THREE.Texture;
+  /**
+   * Baked per-column jitter (R) and tone (G), tiling over `hashPeriod` metres.
+   *
+   * The march evaluates the jittered column height at every sample, so this has to
+   * be one fetch. Computing it from a sin hash instead cost ~87% of the whole grass
+   * pass (99.8 ms against 12.57 ms for the same sample count). See grassJitter.ts.
+   */
+  jitterMap: THREE.Texture;
   /** Terrain elevation, same grid as the canopy field. */
   heightMap: THREE.Texture;
   /** Colormap — the source of each column's colour. */
@@ -170,6 +178,7 @@ export interface GrassMaterial {
 export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
   const {
     grassMap,
+    jitterMap,
     heightMap,
     colorMap,
     worldSize,
@@ -206,6 +215,7 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
   const uNearClip = uniform(nearClip);
   const uMaxSpan = uniform(maxSpan);
   const uStripePixels = uniform(stripePixels);
+  const uHashPeriod = uniform(hashPeriod);
   /** 0 = tone keyed on the world cell, 1 = keyed on ray bearing. */
   const uToneMode = uniform(toneMode);
   /** 0 = normal, 1 = hit mask, 2 = hit distance, 3 = height up the column. */
@@ -287,12 +297,11 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     return a.mix(b, w.x).mix(c.mix(d, w.x), w.y);
   };
 
-  /** Clumped field: broad tufts, medium variation, a little per-column grain. */
-  const clump = (cell: NodeArg, salt: number): NodeArg =>
-    cellNoise(cell, 14, salt)
-      .mul(0.55)
-      .add(cellNoise(cell, 5, salt + 3.1).mul(0.3))
-      .add(cellHash(cell, salt + 7.7).mul(0.15));
+  // The clumped field this used to build — two octaves of cellNoise plus a grain
+  // term — is now baked into jitterMap (grassJitter.ts). It cost nine sin() calls,
+  // and because the march evaluates the column height at every sample that came to
+  // ~87% of the whole grass pass. cellNoise and cellHash survive only for the
+  // bearing-keyed tone, which is evaluated once per fragment rather than per sample.
 
   // --- vertex: lift the shell to the LOCAL canopy top -----------------------
   // Lifting by the global maximum put the shell above the terrain everywhere,
@@ -388,15 +397,27 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     // over a tall column and bracket a later one. Both are acceptable; a hit at the
     // wrong column still has a correct height, whereas the alternative had every
     // hit at the wrong height.
+    // Per-column jitter and tone come from ONE fetch of the baked field. The hash
+    // this replaces was nine sin() calls, and the march has to evaluate the column
+    // height at every sample, so it dominated everything: 99.8 ms against 12.57 ms
+    // for the same sample count with the jitter stubbed to a constant.
+    //
+    // NEAREST-sampled at the cell centre, so the value stays constant across a
+    // column and the columns remain discrete blocks with hard edges.
+    const jitterAt = (centre: NodeArg): NodeArg =>
+      texture(jitterMap, centre.div(uHashPeriod));
+
     const columnTopAt = (P: NodeArg) => {
       const cell = vec2(P.x, P.z).div(cellW).floor();
       const centre = cell.add(0.5).mul(cellW);
       const ground = groundAt(centre);
+      const j = jitterAt(centre);
       return {
         cell,
         centre,
         ground,
-        top: ground.add(canopyBase(centre).mul(clump(cell, 0).mul(0.62).add(0.38))),
+        jitter: j,
+        top: ground.add(canopyBase(centre).mul(j.r.mul(0.62).add(0.38))),
       };
     };
 
@@ -484,7 +505,8 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     //     tone; quantising it to a few pixels of angle holds stripe width constant
     //     at every distance. Colour still comes from the world colormap, so only
     //     the brightness modulation is view-keyed.
-    const cellSwing = clump(hitCell, 17.3);
+    // Tone comes from the baked field's G channel, at the struck column's centre.
+    const cellSwing = jitterAt(hitXZ).g;
 
     const pixelAngle = float(2).div(
       (cameraProjectionMatrix as NodeArg)[1].y.mul(screenSize.y)

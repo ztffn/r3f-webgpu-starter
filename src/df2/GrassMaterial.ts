@@ -370,12 +370,36 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     const hitCell = vec2(0, 0).toVar();
     const hitS = float(0).toVar(); // eye distance to the hit, for depth output
 
-    // Coarse pass tests the SMOOTH ENVELOPE — ground plus canopy, no per-cell
-    // jitter. That is deliberate and it is what makes wide sampling sound: the
-    // envelope varies on the 2 m terrain texel, so it is still well sampled at
-    // metres of spacing, whereas an individual 0.03 m column at 3 m spacing would
-    // be a coin toss. Jitter enters at the refinement stage below, where the
-    // spacing is fine enough for it to mean something.
+    // Coarse pass tests the SAME predicate the refinement will bisect against: the
+    // JITTERED per-column top.
+    //
+    // It used to test the smooth envelope instead, on the reasoning that a 2 m
+    // envelope is well sampled at metres of spacing while a 0.03 m column is not.
+    // That reasoning is fine and the consequence was fatal: bisection requires the
+    // predicate to differ at the two ends of the bracket. Bracketing on the
+    // envelope and refining on the jittered top gave a bracket where the fine
+    // predicate could be true at BOTH ends, so the bisection collapsed onto the
+    // entry point — and the entry point is the shell, which sits at the canopy top
+    // by construction. Every hit came out at the very tip of its column, so the
+    // grass rendered as a zero-thickness skin floating at canopy height, with
+    // holes wherever the predicate was false at both ends instead.
+    //
+    // Same predicate throughout costs a clump() per coarse step, and it can step
+    // over a tall column and bracket a later one. Both are acceptable; a hit at the
+    // wrong column still has a correct height, whereas the alternative had every
+    // hit at the wrong height.
+    const columnTopAt = (P: NodeArg) => {
+      const cell = vec2(P.x, P.z).div(cellW).floor();
+      const centre = cell.add(0.5).mul(cellW);
+      const ground = groundAt(centre);
+      return {
+        cell,
+        centre,
+        ground,
+        top: ground.add(canopyBase(centre).mul(clump(cell, 0).mul(0.62).add(0.38))),
+      };
+    };
+
     const bracketLo = sEnter.toVar();
     const bracketHi = float(0).toVar();
     const bracketed = float(0).toVar();
@@ -383,11 +407,9 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
 
     Loop(coarseSteps, () => {
       const P = cameraPosition.add(V.mul(s));
-      const xz = vec2(P.x, P.z);
-      const ground = groundAt(xz);
-      const env = ground.add(canopyBase(xz));
+      const { ground, top } = columnTopAt(P);
 
-      If(P.y.lessThan(env), () => {
+      If(P.y.lessThan(top), () => {
         bracketHi.assign(s);
         bracketed.assign(1);
         Break();
@@ -400,10 +422,13 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
       s.addAssign(ds);
     });
 
-    // Refinement: bisect the bracket against the JITTERED per-column height. The
-    // silhouette's raggedness comes from here — a ray that entered the envelope
-    // but sits above the actual column it lands on resolves to a miss, which is
-    // what makes the canopy top broken rather than a smooth surface.
+    // Refinement: bisect the bracket, now a valid one — the predicate is false at
+    // bracketLo and true at bracketHi by the coarse loop's own test.
+    //
+    // This is what gives the grass thickness. The bisection walks BACK toward the
+    // ray's entry, so the hit lands where the ray actually enters the column
+    // rather than at the shell, and hitFrac spreads across the column's height
+    // instead of pinning to 1.
     If(bracketed.equal(1), () => {
       const lo = bracketLo.toVar();
       const hi = bracketHi.toVar();
@@ -411,33 +436,22 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
       Loop(refineSteps, () => {
         const mid = lo.add(hi).mul(0.5);
         const P = cameraPosition.add(V.mul(mid));
-        const cell = vec2(P.x, P.z).div(cellW).floor();
-        const centre = cell.add(0.5).mul(cellW);
-        const top = groundAt(centre).add(
-          canopyBase(centre).mul(clump(cell, 0).mul(0.62).add(0.38))
-        );
+        const { top } = columnTopAt(P);
         // Branchless: keeps every lane on the same instruction path.
         const below = P.y.lessThan(top);
         hi.assign(below.select(mid, hi));
         lo.assign(below.select(lo, mid));
       });
 
-      // Confirm at the resolved distance, and capture the column that was struck.
+      // Resolve at the first distance known to be inside a column.
       const P = cameraPosition.add(V.mul(hi));
-      const cell = vec2(P.x, P.z).div(cellW).floor();
-      const centre = cell.add(0.5).mul(cellW);
-      const ground = groundAt(centre);
-      const top = ground.add(
-        canopyBase(centre).mul(clump(cell, 0).mul(0.62).add(0.38))
-      );
+      const { cell, centre, ground, top } = columnTopAt(P);
 
-      If(P.y.lessThanEqual(top).and(P.y.greaterThanEqual(ground)), () => {
-        hit.assign(1);
-        hitFrac.assign(P.y.sub(ground).div(top.sub(ground).max(float(0.001))));
-        hitXZ.assign(centre);
-        hitCell.assign(cell);
-        hitS.assign(hi);
-      });
+      hit.assign(1);
+      hitFrac.assign(P.y.sub(ground).div(top.sub(ground).max(float(0.001))).clamp(0, 1));
+      hitXZ.assign(centre);
+      hitCell.assign(cell);
+      hitS.assign(hi);
     });
 
     // Colour: ONE value per column, smeared up its whole height — this is what

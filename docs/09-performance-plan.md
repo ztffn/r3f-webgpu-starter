@@ -68,6 +68,37 @@ Naively coarsening steps is therefore not a lever; bounding iterations is.
 
 ## 3. Plan, reordered by what was measured
 
+### 3.0 Attempt 1 and what it cost — read before trying again
+
+Bracket-and-bisect was implemented and measured **13.69 ms, 73.5 fps**, and it was
+**visually wrong**. It bracketed the crossing using the smooth envelope and then
+bisected against the jittered per-column top. Bisection requires the predicate to
+differ at the two ends of the bracket; with two different predicates the bracket was
+not valid, so the bisection collapsed onto the ray's entry point — which is the
+shell, sitting at the canopy top by construction.
+
+Every hit therefore resolved at the very tip of its column. The `hitFrac` debug view
+was uniformly white. On screen the grass became a zero-thickness skin floating at
+canopy height, with holes wherever the fine predicate happened to be false at both
+ends. It looked like a speckled shell over the terrain, which is exactly what it was.
+
+Making the coarse pass test the SAME jittered predicate fixes the picture — `hitFrac`
+spreads properly across column heights — and costs **99.8 ms, worse than the 72.10 ms
+baseline.** The predicate is nine `sin()` calls, and the coarse pass now pays it 12
+times instead of the envelope's two texture fetches.
+
+**The lesson for the ordering below:** the coarse pass cannot avoid the jittered
+height, because the jitter IS the geometry being intersected. So §3.3, baking the
+jitter into a texture, is not an optional per-step optimisation to do later. It is a
+prerequisite for any scheme that samples coarsely. Do it first.
+
+A second thing this exposed, independent of the march: at `GRASS_SCALE` the canopy
+maxes at 1.2 m, which at any real viewing distance genuinely is a thin skin — about
+9 px at 100 m, under 2 px at 500 m. Sliding it to 6 m gives obvious vertical extent
+at no measurable cost, which suggests the world scale is wrong rather than the
+shader. `HEIGHT_SCALE` and `METERS_PER_TEXEL` are still the uncalibrated placeholders
+docs/01 §7 flags.
+
 ### 3.1 Fixed-interval sampling (the whole target sits here)
 
 Replace "small adaptive step until hit, capped at 96" with: compute the ray's entry

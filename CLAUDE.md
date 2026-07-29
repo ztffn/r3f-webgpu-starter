@@ -62,10 +62,11 @@ player instinctively recognise this?* — applies to features, not to whether a 
   point — see `04-...md` §2).
 - **Extract installers statically — never run them, no Wine/Whisky needed.** `innoextract`
   for Inno Setup wrappers, `unzip` for WinZip SFX. See `tools/df2-extract/README.md`.
-- **Prepared terrain assets ARE committed** (`public/assets/terrain/<slug>/`) — community
-  EXP2b freeware in a private repo (`01-...md` §3). **Raw archives are not**: `/assets/`,
-  `*.pff`, `*.trn` stay gitignored; keep those on local disk. The distinction that still
-  holds: **retail**-extracted DF2 data is personal-use-only and never committed.
+- **Game assets ARE committed** — raw archives in `/assets/` (`EXP2.PFF`, 36 `.trn`, all
+  extracted PCX/JPEG/TGA; see `assets/README.md`) and prepared output in
+  `public/assets/terrain/<slug>/`. Community mod freeware in a private repo (`01-...md` §3),
+  so the pipeline reproduces from source. The distinction that still holds: **retail**-extracted
+  DF2 data is personal-use-only and never committed.
 - Scale constants (`HEIGHT_SCALE`, `METERS_PER_TEXEL`) are **not yet calibrated** — they're
   placeholders in `src/df2/config.ts`.
 

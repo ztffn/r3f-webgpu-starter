@@ -74,17 +74,20 @@ This is a hobby/personal reconstruction project, not a commercial release.
 > **private** repo. This is the cleanest footing the project has, which is the whole reason
 > EXP2b was chosen over retail data in the first place.
 >
+> **The raw archives are committed too** (`/assets/`, ~93 MB): `EXP2.PFF` itself, 36 `.trn`
+> manifests and every extracted PCX/JPEG/TGA, across EXP2b and the community TerrainPack.
+> The reason is reproducibility — with only prepared output in git, regenerating anything
+> depends on a working copy sitting on one machine, and that copy is exactly what gets lost.
+> Inventory, naming convention and grass-strip availability: `assets/README.md`.
+>
 > **Unchanged by this:**
-> - **Raw archives stay out.** `/assets/`, `*.pff`, `*.trn` remain git-ignored — the repo
->   carries prepared, web-ready output, not original archives. Regenerate with
->   `tools/df2-extract/prepare-terrain.mjs`.
 > - **Retail-extracted data is still personal-use-only** and is not committed or shipped.
 >   The community/retail distinction is the line that actually matters, not "assets" as a
 >   blanket category.
 > - The bullet below still applies to any **public** release: strip or replace original
 >   NovaLogic assets. Note that a public deploy publishes whatever is in `public/assets/`
 >   regardless of repo visibility, and that git history is permanent — both fine for
->   community freeware, both reasons to keep retail data out.
+>   community mod freeware, both reasons to keep retail data out.
 >
 > **Practical effect:** a Git-connected Netlify build now renders the real map rather than
 > falling back to synthetic fBm, so the two deploy paths converge (`08-...md` §12).

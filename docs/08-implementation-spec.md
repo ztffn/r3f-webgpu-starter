@@ -130,11 +130,12 @@ canopy as visible blocks.
 **Shaders are authored in TSL, never raw WGSL/GLSL.** One graph has to serve both the WebGPU
 and WebGL2 backends.
 
-**Prepared assets are committed; raw archives are not.** `public/assets/terrain/<slug>/` is in
-git — community-authored EXP2b freeware in a private repo — so a Git-connected build renders
-the real map. `/assets/`, `*.pff` and `*.trn` stay git-ignored; regenerate them with
-`prepare-terrain.mjs`. The distinction that still holds: **retail**-extracted DF2 data is
-personal-use-only and does not get committed or shipped (`01` §3).
+**Assets are committed — raw and prepared both.** `/assets/` holds the source archives
+(`EXP2.PFF`, `.trn` manifests, PCX/JPEG/TGA — see `assets/README.md`) and
+`public/assets/terrain/<slug>/` the prepared output, so the pipeline reproduces from source and
+a Git-connected build renders the real map. Community mod freeware in a private repo. The
+distinction that still holds: **retail**-extracted DF2 data is personal-use-only and does not
+get committed or shipped (`01` §3).
 
 **Never execute an installer.** `innoextract` / `unzip` unpack them statically. No Wine, no
 Whisky, no "just run it in a VM".

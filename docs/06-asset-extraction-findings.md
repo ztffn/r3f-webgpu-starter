@@ -5,10 +5,12 @@ installers), July 2026. Where the earlier specs (`02-...md` §5, `01-...md` §7)
 *hypotheses*, this document records what the actual bytes say. Treat this as the source of
 truth over any guess in the other docs; those have been updated to match.
 
-> **Legal / posture:** none of these extracted assets are committed to the repo (mix of
-> NovaLogic + community authorship — see `01-...md` §3). They live only in a local,
-> git-ignored `assets/` working area. To reproduce, re-run the extractor (below) on the
-> original installers.
+> **Legal / posture (updated July 2026):** the extracted assets **are** committed, to
+> `assets/` (raw archives and unpacked source) and `public/assets/terrain/<slug>/` (prepared
+> output). They are community mod freeware — EXP2b and a community TerrainPack — in a private
+> repo; see `01-...md` §3 and `assets/README.md`. **Retail**-extracted DF2 data remains
+> personal-use-only and is not committed. Everything below is reproducible directly from
+> `assets/` rather than from a working copy you have to rebuild first.
 
 ---
 

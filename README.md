@@ -139,13 +139,15 @@ redistribution, in a private repo. That is the cleanest footing available, and i
 is the *preferred* asset source rather than retail data
 ([`docs/01`](./docs/01-project-overview-and-roadmap.md) §3).
 
-**Raw archives are still excluded.** `/assets/`, `*.pff` and `*.trn` remain git-ignored — keep
-original archives on local disk and regenerate with `tools/df2-extract/prepare-terrain.mjs`.
+**The raw archives are committed too** (`/assets/`, ~93 MB): `EXP2.PFF` itself, 36 `.trn`
+manifests and every extracted PCX/JPEG/TGA, across the EXP2b expansion and the community
+TerrainPack. That means the pipeline is reproducible from source instead of depending on a
+working copy on one machine — see [`assets/README.md`](./assets/README.md) for the layout,
+naming convention and which terrains carry usable grass strips.
 
-Two operational notes, not objections: a public Netlify deploy serves these files to anyone
-with the URL, and git history is permanent, so removing them later takes a rewrite. Both are
-fine for community freeware; they are the reason **retail-extracted DF2 data should not be
-committed** — that stays personal-use-only and out of any shared build.
+The one line that still holds: **retail-extracted DF2 data stays personal-use-only** and does
+not get committed or shipped. Community mod data and retail game data are different cases;
+that distinction, not "assets" as a blanket category, is what the policy turns on.
 
 ## Roadmap (next)
 

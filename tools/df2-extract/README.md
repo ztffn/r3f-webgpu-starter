@@ -38,5 +38,7 @@ may be shared base-game sets referenced by the `.trn`. Full detail in
 
 ## Legal
 
-Do **not** commit extracted assets (mixed NovaLogic + community authorship). Output belongs in
-a git-ignored `assets/` working area.
+Extracted community mod assets **are** committed to `assets/` (see `assets/README.md`) — EXP2b
+and the community TerrainPack are freeware built for redistribution, and the repo is private,
+so the pipeline reproduces from source. **Retail**-extracted DF2 data is different: keep it
+personal-use-only, out of the repo and out of any shared build (`docs/01` §3).

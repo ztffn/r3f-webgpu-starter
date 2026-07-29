@@ -1,0 +1,21 @@
+terrain_name     "G9"
+terrain_creator  "Chris Tamburrino"
+
+color_map         G9_c
+elev_map          G9_d
+detail_map        dfg4_m
+detail_color      dfg4_cm
+detail_elev       dfg4_dm
+char_data         dfg4_cm
+sky_map           clouds01
+sky_palette       skygrd01
+sky_height        1236
+horizon           1
+
+water_map         ripple1
+water_height      0
+
+filter            128, 128, 128
+gamma             128
+saturation        128
+sun_slope         70

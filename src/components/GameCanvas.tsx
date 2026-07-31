@@ -9,6 +9,7 @@ import { Canvas, extend } from "@react-three/fiber";
 import type { ReactNode } from "react";
 import * as THREE from "three/webgpu";
 import { CAMERA_NEAR, CAMERA_FAR, CAMERA_FOV } from "../df2/config";
+import { BENCH } from "../df2/bench";
 
 // Make the full three (incl. WebGPU node) namespace available as JSX elements.
 extend(THREE as never);
@@ -42,9 +43,12 @@ export function GameCanvas({
   dpr = [1, 1.5],
   children,
 }: GameCanvasProps) {
+  // A fixed dpr under ?bench=1: the ray-count axis has to be settable, and an
+  // adaptive range would make two runs incomparable.
+  const effectiveDpr = BENCH.dpr ?? dpr;
   return (
     <Canvas
-      dpr={dpr}
+      dpr={effectiveDpr}
       camera={camera}
       gl={async (props) => {
         const renderer = new THREE.WebGPURenderer(

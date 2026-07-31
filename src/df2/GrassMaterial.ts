@@ -50,23 +50,70 @@ import {
   struct,
 } from "three/tsl";
 
+/**
+ * Margin the shell is lifted above the smooth canopy envelope.
+ *
+ * Load-bearing in TWO places that must agree: the vertex lift here, and Terrain.tsx's
+ * test for whether the eye is inside the canopy (which decides if the floor proxy is
+ * drawn). Drifting them apart silently drops the floor pass where it is needed.
+ */
+export const CANOPY_MARGIN = 1.04;
+
 export interface GrassMaterialOptions {
   /** Per-texel canopy height, 0-255. LINEAR-filtered — this is the envelope. */
   grassMap: THREE.Texture;
+  /**
+   * Baked per-column jitter (R) and tone (G), tiling over `hashPeriod` metres.
+   *
+   * The march evaluates the jittered column height at every sample, so this has to
+   * be one fetch. Computing it from a sin hash instead cost ~87% of the whole grass
+   * pass (99.8 ms against 12.57 ms for the same sample count). See grassJitter.ts.
+   */
+  jitterMap: THREE.Texture;
   /** Terrain elevation, same grid as the canopy field. */
   heightMap: THREE.Texture;
   /** Colormap — the source of each column's colour. */
   colorMap: THREE.Texture;
   /** Metres spanned by one tile of the maps. */
   worldSize: number;
-  /** Samples per side of the maps (1024 for DF terrain). */
-  mapSize: number;
-  /** Metres per raw elevation unit. */
-  heightScale: number;
   /** Metres per raw canopy unit — how tall "255" grass stands. */
   grassScale: number;
-  /** Raymarch steps. Cost is per-fragment, not per-blade. */
+  /**
+   * Coarse bracket samples per fragment. Cost is very close to linear in this
+   * (docs/09), so it is the single dial that sets frame time.
+   */
   steps?: number;
+  /**
+   * Coarse samples actually taken, defaulting to `steps`. `steps` is the COMPILED
+   * ceiling; this is what runs, and it is live on a uniform so the debug slider can
+   * sweep without rebuilding the material.
+   */
+  stepsRun?: number;
+  /** Bisections inside the bracket. Each one halves the residual error. */
+  refineSteps?: number;
+  /**
+   * Longest span a ray will search, metres. The span is normally set by the view
+   * angle — canopy height over the ray's vertical rate — which is what determines
+   * how far a ray must travel to cross the canopy. A near-horizontal ray would
+   * want an unbounded span, so it is clamped here and gives up beyond it.
+   */
+  maxSpan?: number;
+  /** Width of one tone stripe in pixels, when toneMode is 1. */
+  stripePixels?: number;
+  /** 0 = tone keyed on the world cell (shipped), 1 = keyed on ray bearing. */
+  toneMode?: number;
+  /**
+   * Scene fog, applied by this material rather than by three.
+   *
+   * three fogs a fragment by its RASTERISED depth, which for this material is the
+   * shell — and the shell is nowhere near where the ray actually hit. Standing
+   * inside the canopy the hit is metres away while the shell fragment can be
+   * hundreds of metres out, so near grass came out washed pale with fog it should
+   * not have had. Same class of error as depthNode exists to fix.
+   */
+  fogColor?: THREE.ColorRepresentation;
+  fogNear?: number;
+  fogFar?: number;
   /**
    * Width of one grass column in metres — the DDA grid, decoupled from the
    * heightmap texel. DF2's striations are far finer than its 1024² heightmap:
@@ -84,19 +131,27 @@ export interface GrassMaterialOptions {
    */
   toneVariation?: number;
   /**
-   * Steps per screen pixel. The march step is derived from the camera's actual
-   * angular resolution, so it is NOT a fixed fraction of distance.
+   * Brightness at a column's BASE, relative to its colormap colour. The tip gets
+   * `2 - shadeBase`, so the ramp stays centred on 1.0 and grass keeps the average
+   * brightness of the terrain it stands on.
    *
-   * Whether a column is sub-pixel depends on FIELD OF VIEW, not range. Through a
-   * 10x scope a 65 deg view becomes ~6.5 deg and angular resolution rises 10x,
-   * so grass at 400 m that was sub-pixel unaided now covers ~10 px. A constant
-   * distance-proportional step would be 10x too coarse exactly when a sniper is
-   * looking hardest — and this is the range the concealment mechanic is defined
-   * at, so the render and the gameplay query must not disagree there.
-   *
-   * 1.0 = one march step per pixel of angular size. Lower is finer and costlier.
+   * This exists because the vertical ramp was previously produced by accident. The
+   * `.mix()` argument rotation (§11 of docs/08) turned an intended 0.88-1.05 into an
+   * effective 0.13-1.00, and that strong ramp was supplying nearly all the visible
+   * column structure. Correcting the rotation removed it, and the intended near-flat
+   * ramp had nothing to replace it with. The references do want vertical variation,
+   * just less than horizontal — measured h/v derivative ratio ≈ 1.6 (docs/07 §1.4) —
+   * so the two have to be dialled against each other rather than one assumed away.
    */
-  pixelsPerStep?: number;
+  shadeBase?: number;
+  /**
+   * Debug: ignore the canopy field and grow full-height grass EVERYWHERE.
+   *
+   * Green Mile's canopy is a colormap-derived stand-in, so it is patchy and a frame can
+   * legitimately be mostly bare. That makes shader problems and missing canopy look the
+   * same. Live-togglable; never measure with it on.
+   */
+  canopyForce?: boolean;
   /**
    * Metres ahead of the eye at which the march begins when standing INSIDE the
    * canopy.
@@ -109,10 +164,6 @@ export interface GrassMaterialOptions {
    * puts hits where columns actually subtend a few pixels.
    */
   nearClip?: number;
-  /** Debug: encode the ray distance of each grass hit as colour (red=near, blue=far). */
-  debugDistance?: boolean;
-  /** Debug: paint every grass hit flat magenta to inspect the hit mask. */
-  debugHit?: boolean;
   /** Distance (m) at which columns start fading into the colormap. */
   fadeStart?: number;
   fadeEnd?: number;
@@ -126,6 +177,16 @@ export interface GrassMaterialOptions {
    */
   hashPeriod?: number;
   /**
+   * Share of column HEIGHT taken from the per-cell arithmetic hash rather than the
+   * metre-mapped texture, 0-1.
+   *
+   * Height is evaluated at every march sample, so this is the only visual dial with a
+   * real frame-time cost; 0 lets the compiler fold it away entirely. Per-column TONE
+   * always uses the hash regardless, because it is evaluated once at the hit and is
+   * therefore free — and tone is what makes thin columns read as thin.
+   */
+  strandMix?: number;
+  /**
    * projection[1][1] for the unaided view, i.e. 1/tan(fovY/2) at the camera's
    * base field of view. The zoom factor is measured against this, so it MUST
    * match the camera actually in use or every frame reads as partly zoomed.
@@ -133,31 +194,81 @@ export interface GrassMaterialOptions {
   referenceP11?: number;
 }
 
+/**
+ * Live-tunable graph inputs.
+ *
+ * Exposed so a debug panel can drive them by assigning `.value`, which costs no
+ * material rebuild — and rebuilding the material would discard the terrain
+ * geometry cache along with it (Terrain.tsx). Anything NOT here is baked into the
+ * graph at construction: the two loop counts, and the hash wrap period derived
+ * from cellSize. Those need a reload, so they come from the URL instead.
+ */
+export interface GrassUniforms {
+  /** Metres per raw canopy unit, i.e. how tall a 255 canopy stands. */
+  grassScale: ReturnType<typeof uniform>;
+  /** Tallest possible canopy, metres. Keep in step with grassScale. */
+  canopyMax: ReturnType<typeof uniform>;
+  cell: ReturnType<typeof uniform>;
+  tone: ReturnType<typeof uniform>;
+  /** Column-base brightness; the tip gets 2 - this, so the ramp centres on 1.0. */
+  shadeBase: ReturnType<typeof uniform>;
+  /** Live coarse sample count, capped by the compiled `steps`. The frame-time dial. */
+  steps: ReturnType<typeof uniform>;
+  /** Per-strand detail from the ALU hash vs the metre-mapped texture, 0-1. */
+  strandMix: ReturnType<typeof uniform>;
+  /** Debug: 1 grows full-height grass everywhere, ignoring the canopy field. */
+  canopyForce: ReturnType<typeof uniform>;
+  toneMode: ReturnType<typeof uniform>;
+  stripePixels: ReturnType<typeof uniform>;
+  nearClip: ReturnType<typeof uniform>;
+  maxSpan: ReturnType<typeof uniform>;
+  fadeStart: ReturnType<typeof uniform>;
+  fadeEnd: ReturnType<typeof uniform>;
+  debugMode: ReturnType<typeof uniform>;
+}
+
 export interface GrassMaterial {
+  /** Ceiling proxy: the terrain surface lifted to the local canopy top. */
   material: THREE.MeshBasicNodeMaterial;
+  /**
+   * Floor proxy: the same march against the un-lifted terrain surface.
+   *
+   * Needed only while the eye is INSIDE the canopy, where downward rays never cross
+   * the ceiling and would otherwise get no fragment at all. See the note beside
+   * `floorPositionNode`.
+   */
+  floorMaterial: THREE.MeshBasicNodeMaterial;
   /** Metres the shell is lifted above the terrain — also the tallest canopy. */
   canopyMax: number;
+  uniforms: GrassUniforms;
 }
 
 export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
   const {
     grassMap,
+    jitterMap,
     heightMap,
     colorMap,
     worldSize,
-    mapSize,
-    heightScale,
     grassScale,
-    steps = 20,
+    steps: coarseSteps = 12,
+    stepsRun,
+    refineSteps = 4,
+    maxSpan = 48,
+    stripePixels = 3,
+    toneMode = 0,
+    fogColor = "#aac2d6",
+    fogNear = 300,
+    fogFar = 2200,
     cellSize = 0.35,
-    pixelsPerStep = 1.0,
     nearClip = 1.2,
-    debugHit = false,
-    debugDistance = false,
     toneVariation = 0.42,
+    shadeBase = 0.78,
+    canopyForce = false,
     fadeStart = 420,
     fadeEnd = 700,
     hashPeriod = 120,
+    strandMix = 0.5,
     // 1/tan(30 deg): a 60-degree vertical FOV, matching config.CAMERA_FOV.
     referenceP11 = 1 / Math.tan((60 * Math.PI) / 180 / 2),
   } = opts;
@@ -170,15 +281,29 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
 
   const uWorldSize = uniform(worldSize);
   const uHalfWorld = uniform(worldSize / 2);
-  const uTexel = uniform(worldSize / mapSize); // metres per map texel
   const uCell = uniform(cellSize); // metres per grass column
-  // Step growth per unit distance — keeps each step near one pixel wide, the
-  // same trade the original made with its increasing deltaz.
-  const uPixelsPerStep = uniform(pixelsPerStep);
   const uNearClip = uniform(nearClip);
-  const uHeightScale = uniform(heightScale * 255);
+  const uMaxSpan = uniform(maxSpan);
+  const uStripePixels = uniform(stripePixels);
+  const uHashPeriod = uniform(hashPeriod);
+  /** Per-strand HEIGHT from the hash vs the texture. The one dial that costs. */
+  const uStrandMix = uniform(strandMix);
+  const uFogColor = uniform(new THREE.Color(fogColor));
+  const uFogNear = uniform(fogNear);
+  const uFogFar = uniform(fogFar);
+  /** 0 = tone keyed on the world cell, 1 = keyed on ray bearing. */
+  const uToneMode = uniform(toneMode);
+  /** 0 = normal, 1 = hit mask, 2 = hit distance, 3 = height up the column. */
+  const uDebugMode = uniform(0);
   const uGrassScale = uniform(grassScale * 255);
+  // Tallest possible canopy: sets how far a ray must travel to cross the volume.
+  const uCanopyMax = uniform(canopyMax);
   const uTone = uniform(toneVariation);
+  const uShadeBase = uniform(shadeBase);
+  /** LIVE coarse sample count. Cannot exceed the compiled `steps`, which is the cap. */
+  const uSteps = uniform(Math.min(stepsRun ?? coarseSteps, coarseSteps));
+  /** Debug: 1 replaces the canopy field with full height everywhere. */
+  const uCanopyForce = uniform(canopyForce ? 1 : 0);
   const uFadeStart = uniform(fadeStart);
   const uFadeEnd = uniform(fadeEnd);
 
@@ -190,27 +315,28 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
   // World xz -> tile uv. Maps repeat, so values outside [0,1] are fine.
   const toUv = (xz: NodeArg): NodeArg => xz.add(uHalfWorld).div(uWorldSize);
 
+  // The height texture carries METRES directly (half-float), already reconstructed to
+  // remove 8-bit terracing, so there is nothing to scale. It used to be raw bytes scaled
+  // by heightScale*255; that path marched a quantised surface the terrain mesh no longer
+  // drew, which floats the grass.
+  const groundAt = (xz: NodeArg): NodeArg => texture(heightMap, toUv(xz)).r;
+
   /**
-   * Snap a world xz to its TERRAIN TEXEL centre.
+   * Smooth canopy envelope: WHERE grass grows and roughly how tall.
    *
-   * s-macke/VoxelSpace shows the original took colour as
-   * `map.color[mapoffset]` — a NEAREST lookup at texel granularity — and then
-   * DrawVerticalLine painted the whole vertical span in that ONE colour. So the
-   * horizontal variation between columns comes from the colormap itself, and
-   * the vertical coherence comes from a texel's colour covering a tall run of
-   * pixels. Sampling the colormap smoothly (and synthesising variation with
-   * noise instead) gets both wrong. Sampling at the texel centre reproduces the
-   * nearest-neighbour lookup without needing a second texture.
+   * `uCanopyForce` at 1 replaces the field with full height EVERYWHERE. A debug dial,
+   * and a necessary one: on Green Mile the canopy is a colormap-derived stand-in
+   * (`grassSource: "colormap-standin"`, docs/06 §7), so it is patchy and much of a
+   * frame legitimately has little or no grass. That makes it impossible to tell a
+   * shader problem from an absence of canopy — an A/B on strand height variation came
+   * out indistinguishable partly for this reason. Forcing full canopy isolates the
+   * column renderer from the field feeding it.
+   *
+   * Never leave this on for a measurement: full canopy everywhere is both the worst
+   * case for the march and not what the map says.
    */
-  const texelCentre = (xz: NodeArg): NodeArg =>
-    xz.div(uTexel).floor().add(0.5).mul(uTexel);
-
-  const groundAt = (xz: NodeArg): NodeArg =>
-    texture(heightMap, toUv(xz)).r.mul(uHeightScale);
-
-  /** Smooth canopy envelope: WHERE grass grows and roughly how tall. */
   const canopyBase = (xz: NodeArg): NodeArg =>
-    texture(grassMap, toUv(xz)).r.mul(uGrassScale);
+    uCanopyForce.mix(texture(grassMap, toUv(xz)).r, float(1)).mul(uGrassScale);
 
   /**
    * Stable per-column hash, keyed on the grass cell.
@@ -248,15 +374,16 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     const b = cellHash(i.add(vec2(1, 0)), salt);
     const c = cellHash(i.add(vec2(0, 1)), salt);
     const d = cellHash(i.add(vec2(1, 1)), salt);
-    return a.mix(b, w.x).mix(c.mix(d, w.x), w.y);
+    // Bilinear: interpolate along x on both rows, then between rows along y.
+    // The RECEIVER of .mix() is the interpolant — see the note at `shade` below.
+    return w.y.mix(w.x.mix(a, b), w.x.mix(c, d));
   };
 
-  /** Clumped field: broad tufts, medium variation, a little per-column grain. */
-  const clump = (cell: NodeArg, salt: number): NodeArg =>
-    cellNoise(cell, 14, salt)
-      .mul(0.55)
-      .add(cellNoise(cell, 5, salt + 3.1).mul(0.3))
-      .add(cellHash(cell, salt + 7.7).mul(0.15));
+  // The clumped field this used to build — two octaves of cellNoise plus a grain
+  // term — is now baked into jitterMap (grassJitter.ts). It cost nine sin() calls,
+  // and because the march evaluates the column height at every sample that came to
+  // ~87% of the whole grass pass. cellNoise and cellHash survive only for the
+  // bearing-keyed tone, which is evaluated once per fragment rather than per sample.
 
   // --- vertex: lift the shell to the LOCAL canopy top -----------------------
   // Lifting by the global maximum put the shell above the terrain everywhere,
@@ -271,7 +398,33 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
   const vtxWorld = modelWorldMatrix.mul(vec4(positionLocal, 1));
   const vtxCanopy = canopyBase(vec2(vtxWorld.x, vtxWorld.z));
   // Small margin: a column's height is canopyBase * jitter, jitter <= 1.
-  const positionNode = positionLocal.add(vec3(0, vtxCanopy.mul(1.04), 0));
+  const positionNode = positionLocal.add(vec3(0, vtxCanopy.mul(CANOPY_MARGIN), 0));
+
+  // --- and the FLOOR of the same volume -------------------------------------
+  // The lifted shell is a CEILING. Standing inside the canopy, a ray that leaves
+  // the eye going downward and meets the ground never crosses the shell at all —
+  // the shell is above the whole ray — so no fragment is rasterised for that pixel
+  // and no march runs. Every pixel below the shell's horizon therefore drew bare
+  // terrain: measured at canopy 11.3 m with the eye 1.7 m above ground, a band
+  // across the bottom of the frame had zero grass in the hit mask, plus a hole
+  // wherever the terrain dropped away from under the shell.
+  //
+  // A single surface cannot cover both cases. Rays entering from above need the
+  // top; rays going down from inside need the bottom; and the silhouette against
+  // sky — the edge this whole system exists to render — needs the top, so the
+  // bottom cannot simply replace it. So the volume is closed with a second
+  // surface at ground level, and the two are drawn as separate passes.
+  //
+  // The two surfaces PARTITION the screen rather than overlapping — on level ground
+  // the ceiling projects above the eye's horizon and the floor below it — so this is
+  // not double-shading. It is still a real cost, and it has to be: the pixels the
+  // floor covers are exactly the ones that were being skipped, and marching them is
+  // the fix. Measured prone on Green Mile at the docs/09 §1 vantage: 54.9 ms with the
+  // floor against 41.2 ms without — 13.7 ms, for grass that was simply absent before.
+  //
+  // Terrain.tsx draws the floor only while the eye is inside the canopy, so standing
+  // at the default 1.2 m canopy pays nothing.
+  const floorPositionNode = positionLocal;
 
   // --- fragment: march down through the volume ------------------------------
   // The march is expensive, so it runs ONCE and returns a struct: colour,
@@ -280,124 +433,440 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
   // separate functions, which would re-march per output.)
   const GrassHit = struct({ rgb: "vec3", hit: "float", depth: "float" }, "GrassHit");
 
-  const grassShade = Fn(() => {
+  const makeGrassShade = (isFloor: boolean) => Fn(() => {
     const frag = positionWorld;
     const V = frag.sub(cameraPosition).normalize();
 
-    // When the camera stands INSIDE the canopy — which is the whole point of
-    // this system — the shell is above the eye and we're looking at its
-    // underside, so the ray must start at the camera, not at the rasterised
-    // fragment. Otherwise the near field renders no grass at all.
-    const camXZ = vec2(cameraPosition.x, cameraPosition.z);
-    // Tested against the LOCAL canopy, not the global maximum. Against uCanopyMax
-    // this was true whenever the eye sat below the tallest canopy anywhere on the
-    // map — including lying on bare ground where nothing grows. Every fragment
-    // then marched from the eye at the finest step, so grass past the step budget
-    // was unreachable and vanished. The eye is only inside the volume when there
-    // is canopy where it actually stands. Uses the same 1.04 margin as the shell.
-    const camCanopy = canopyBase(camXZ).mul(1.04);
-    const inside: NodeArg = cameraPosition.y.lessThan(groundAt(camXZ).add(camCanopy));
-    const P0: NodeArg = inside.select(cameraPosition, frag);
-    // Distance from the EYE to where this march begins: zero when starting at the
-    // eye, the fragment's own range when starting on the shell. The step size is
-    // derived from this rather than from the ray-local `t`, which is what the
-    // pixel-size argument below was always about.
-    const eyeBase: NodeArg = inside.select(float(0), frag.distance(cameraPosition));
-
-    // --- adaptive march, constant angular resolution ------------------------
-    // A uniform grid DDA tests every column exactly once, which is ideal near
-    // the camera but caps reach at steps*cellSize — at 0.06 m cells that is
-    // under 6 m, so everything beyond simply had no grass.
+    // --- bracket, then bisect -------------------------------------------------
+    // Everything is measured as distance from the EYE along V, so there is one
+    // parameterisation for both the inside-canopy and outside-canopy cases.
     //
-    // The original solved this by growing its step with distance (`deltaz`
-    // starts at one texel and increments +0.005 per iteration). Same idea here:
-    // step at the column width up close, then grow proportionally to distance so
-    // each step stays roughly one pixel wide. Columns stay exactly resolved
-    // where they are resolvable, and beyond that they are sub-pixel anyway, so
-    // sampling them individually buys nothing.
+    // The previous scheme took small adaptive steps until it hit something or ran
+    // out of budget, with the step derived from the pixel angle. Two problems,
+    // both measured (docs/09):
+    //
+    //   1. Cost was linear in the step budget and the budget had to be generous,
+    //      because a ray that misses runs every iteration and one long lane holds
+    //      its whole warp. 96 steps cost 72 ms; 16 cost 17 ms.
+    //   2. The step scaled with distance from the eye, but the traversal length a
+    //      ray NEEDS scales with 1/sin(angle), and those are independent. A near
+    //      grazing ray got a small step because it was near and needed tens of
+    //      metres because it was shallow, so it ran out and dropped grass.
+    //
+    // So: size the span by the VIEW ANGLE, which is what actually determines how
+    // far the ray must travel, and spend a fixed number of samples on it. A steep
+    // ray crosses the canopy in barely more than the canopy's height and gets very
+    // fine sampling; a grazing ray gets a long span sampled coarsely.
+    // Vertical rate along the ray, floored so a horizontal ray gets a finite span.
+    const vy = V.y.abs().max(float(0.02));
+    const span = uCanopyMax.add(1.0).div(vy).min(uMaxSpan).toVar();
+    // Divided by the LIVE count, not the compiled one — see uSteps.
+    const ds = span.div(uSteps.max(float(1)));
+
+    // --- where the ray enters the slab: ONE rule, PER FRAGMENT ----------------
+    // The entry is where this pixel's ray first crosses into the grass slab. That is
+    // a property of the ray and the proxy, and of NOTHING ELSE — in particular not of
+    // where the camera is standing.
+    //
+    //   ceiling proxy — the fragment IS the canopy top, so the ray enters there.
+    //   floor proxy   — the fragment is the ground, so the ray crossed the canopy top
+    //                   `span` earlier along its path; clamped to nearClip, which also
+    //                   makes near ground march from the eye without a special case.
+    //
+    // `isFloor` is a JS constant baked per material, not a uniform: the two proxies
+    // compile separate shaders anyway (see `build`), so this costs nothing at runtime.
+    //
+    // TWO EARLIER SHAPES, BOTH WRONG, BOTH WORTH NOT REPEATING.
+    //
+    // 1. `inside ? nearClip : fragDistance`, one choice for the whole frame. `inside`
+    //    describes the CAMERA, so with `hitS <= sEnter + span` and `span <= maxSpan`
+    //    (48 m) it put a hard arithmetic ceiling on hit distance: the instant the eye
+    //    entered the canopy, NO fragment anywhere on screen could resolve a hit beyond
+    //    about 49 m, and everything past that was a forced miss showing bare colormap.
+    //    Going prone switched off all distant grass at once. That is a fairness bug,
+    //    not a cosmetic one — concealment is queried analytically against
+    //    grassHeightField (docs/04 §2), so a target prone in distant grass counts as
+    //    concealed whatever the screen shows. See docs/08 §8 invariant 6.
+    //
+    // 2. Searching a near interval and then, on a miss, a far one. It fixed the
+    //    ceiling but inlined the whole march TWICE, and it kept the camera in the
+    //    entry rule — so the texture of DISTANT grass changed as you went prone, which
+    //    it must not: a column 800 m away does not care about your stance.
+    //
+    // One rule, one march, no branch on the camera. The near-field occlusion that
+    // makes lying in grass blinding is not a special case any more; it falls out,
+    // because a floor fragment a metre away has its entry clamped to nearClip.
+    const fragDist = frag.distance(cameraPosition) as NodeArg;
+    const sEnter = (
+      isFloor ? fragDist.sub(span).max(uNearClip) : fragDist
+    ) as NodeArg;
+
+    // --- and the floor yields to the ceiling, PER PIXEL ------------------------
+    // One rule was not enough on its own. Both proxies are drawn while the eye is in
+    // the canopy, and over the SAME pixel they search different intervals — the
+    // ceiling from its canopy-top crossing, the floor from `span` before the ground.
+    // Different intervals put the coarse samples in different places, so they bracket
+    // different columns, and whichever resolves nearer wins the depth test. That is
+    // why the texture of distant grass still shifted when you went prone: at distance
+    // the ceiling alone was answering while standing, and the floor started competing
+    // once prone.
+    //
+    // The floor is only ever NEEDED where the ceiling has no fragment: where the ray
+    // reaches ground without crossing the canopy top. That crossing is at
+    // `fragDist - span`, so if that is comfortably ahead of the eye the ceiling owns
+    // the pixel and the floor must stay out of it. Below `nearClip` the crossing is at
+    // or behind the eye — the eye is inside the slab along this ray — and the floor is
+    // the only proxy there is.
+    //
+    // Per pixel, so the two proxies partition the screen exactly rather than competing
+    // over it. Distant pixels are ceiling-only in every stance, which is what makes a
+    // column 800 m away look the same standing and prone. It also removes most of the
+    // floor's fragments, which were the whole of its cost.
+    const cedeToCeiling: NodeArg | null = isFloor
+      ? (fragDist.sub(span).greaterThan(uNearClip) as NodeArg)
+      : null;
+
     const cellW = uCell;
-    const t = float(0).toVar();
     const hit = float(0).toVar();
     const hitFrac = float(0).toVar(); // 0 at the column base, 1 at its tip
     const hitXZ = vec2(0, 0).toVar();
     const hitCell = vec2(0, 0).toVar();
-    const hitT = float(0).toVar(); // ray distance to the hit, for depth output
+    const hitS = float(0).toVar(); // eye distance to the hit, for depth output
 
-    // Start just clear of the column the eye occupies. Standing inside the
-    // canopy, that column trivially contains the ray origin, so testing it would
-    // make every fragment hit at t~0 in the SAME cell and fill the screen with
-    // one flat colour instead of the silhouette you should see lying in it.
-    t.assign(inside.select(uNearClip, float(0)));
+    // Coarse pass tests the SAME predicate the refinement will bisect against: the
+    // JITTERED per-column top.
+    //
+    // It used to test the smooth envelope instead, on the reasoning that a 2 m
+    // envelope is well sampled at metres of spacing while a 0.03 m column is not.
+    // That reasoning is fine and the consequence was fatal: bisection requires the
+    // predicate to differ at the two ends of the bracket. Bracketing on the
+    // envelope and refining on the jittered top gave a bracket where the fine
+    // predicate could be true at BOTH ends, so the bisection collapsed onto the
+    // entry point — and the entry point is the shell, which sits at the canopy top
+    // by construction. Every hit came out at the very tip of its column, so the
+    // grass rendered as a zero-thickness skin floating at canopy height, with
+    // holes wherever the predicate was false at both ends instead.
+    //
+    // Same predicate throughout costs a clump() per coarse step, and it can step
+    // over a tall column and bracket a later one. Both are acceptable; a hit at the
+    // wrong column still has a correct height, whereas the alternative had every
+    // hit at the wrong height.
+    // Per-column jitter and tone come from ONE fetch of the baked field. The hash
+    // this replaces was nine sin() calls, and the march has to evaluate the column
+    // height at every sample, so it dominated everything: 99.8 ms against 12.57 ms
+    // for the same sample count with the jitter stubbed to a constant.
+    //
+    // NEAREST-sampled at the cell centre, so the value stays constant across a
+    // column and the columns remain discrete blocks with hard edges.
+    // TWO SCALES, and the split is a cache decision as much as a visual one.
+    //
+    // COARSE, from the texture, mapped across `hashPeriod` METRES. One texel is 0.117 m,
+    // so consecutive march samples along a ray — steps of order metres/steps — land in
+    // the same texel or its neighbour, and neighbouring screen pixels do too. That
+    // locality is why one fetch per sample is affordable at all.
+    //
+    // Sampling this per CELL instead was tried, to get per-strand height at any column
+    // width. It works visually and it HALVES THE FRAME RATE: the march evaluates column
+    // height at `steps + refineSteps` samples per fragment, and at 0.002 m columns a
+    // single 0.1 m march step spans ~50 texels, so every one of those fetches misses the
+    // texture cache instead of hitting it. Do not reintroduce it.
+    const jitterAt = (centre: NodeArg): NodeArg =>
+      texture(jitterMap, centre.div(uHashPeriod));
 
-    // Vertical angular size of one pixel: projection[1][1] = 1/tan(fovY/2), so
-    // the half-height in radians is 1/P11 and one pixel spans 2/(P11 * height).
-    // Deriving it this way means a scope narrowing the FOV automatically
-    // tightens the march instead of needing a separate LOD path.
-    const pixelAngle = float(2)
-      .div((cameraProjectionMatrix as NodeArg)[1].y.mul(screenSize.y))
-      .mul(uPixelsPerStep);
+    /**
+     * FINE, per column, from arithmetic — no memory traffic.
+     *
+     * This is what makes thin columns worth having: the texture cannot resolve a strand
+     * without thrashing, so the per-strand term has to cost ALU rather than bandwidth.
+     * A sin-free hash, ~6 operations, against a cache miss that costs hundreds of cycles.
+     *
+     * NOT the nine-`sin()` fbm this file used to carry — that was 87% of the whole pass
+     * (99.8 ms against 12.57 ms). One cheap hash is a different order of thing.
+     *
+     * Cell indices are wrapped first. They are world-metres/cell-width, so at 0.002 m
+     * columns they reach the hundreds of thousands, and `fract()` on values that large
+     * has no bits left to vary — the hash would degenerate to a constant and finer
+     * columns would again produce LESS variation, which is the exact trap `cellHash`
+     * already documents. The wrap repeats every 4096 columns: 8.2 m at 0.002 m. Short,
+     * but this term is white noise at strand frequency, where a repeat is far harder to
+     * see than in the coarse structure the texture still supplies.
+     */
+    const strandHash = (cell: NodeArg): NodeArg => {
+      // mul by 1/4096 rather than div: same wrap, one cheaper instruction.
+      const w = cell.sub(cell.mul(1 / 4096).floor().mul(4096));
+      const p = w.mul(vec2(0.1031, 0.1030)).fract().toVar();
+      p.addAssign(p.dot(vec2(p.y, p.x).add(33.33)));
+      return p.x.add(p.y).mul(p.x).fract();
+    };
 
-    Loop(steps, () => {
-      // Step at the column width up close, then at whatever spans one pixel.
-      // Keyed on distance from the EYE, not on `t`. `t` restarts at zero for every
-      // fragment, so the pixel term never overtook the column-width floor and the
-      // step stayed at its finest for the whole budget — capping total ray length
-      // at steps*cellSize regardless of range.
-      const step = cellW.max(eyeBase.add(t).mul(pixelAngle));
-      const tNext = t.add(step);
-
-      const P = P0.add(V.mul(t));
+    const columnTopAt = (P: NodeArg) => {
       const cell = vec2(P.x, P.z).div(cellW).floor();
       const centre = cell.add(0.5).mul(cellW);
-
       const ground = groundAt(centre);
-      // Per-column height: the smooth envelope says where grass grows; clumped
-      // noise gives each column its own height, which is what makes the canopy
-      // top ragged and the striations legible in silhouette (docs/07 §1.3).
-      const jitter = clump(cell, 0).mul(0.62).add(0.38);
-      const top = ground.add(canopyBase(centre).mul(jitter));
+      const j = jitterAt(centre);
+      return {
+        cell,
+        centre,
+        ground,
+        jitter: j,
+        // Coarse clumping from the texture, per-strand raggedness from the hash.
+        //
+        // THIS is the term that costs, because it is evaluated at every march sample
+        // rather than once at the hit. At `uStrandMix = 0` the hash folds away to a
+        // constant factor the compiler can hoist, so 0 is genuinely the cheap setting
+        // and the slider is a real performance dial — the only one in the panel that is.
+        top: ground.add(
+          canopyBase(centre).mul(
+            uStrandMix.mix(j.r, strandHash(cell)).mul(0.62).add(0.38)
+          )
+        ),
+      };
+    };
 
-      const yIn = P0.y.add(V.y.mul(t));
-      const yOut = P0.y.add(V.y.mul(tNext));
+    // Bracket then bisect over the one interval `[sEnter, sEnter + span]`.
+    //
+    // ONE instantiation. An earlier version made this a closure and called it twice,
+    // near interval then far, which inlined both loops into the shader. Keep it single
+    // — the entry rule above makes a second interval unnecessary.
+    //
+    // Skipped entirely on floor fragments the ceiling owns, so the saving is the whole
+    // march and not just the shading. `hit` stays 0 there and the alpha test drops the
+    // fragment, leaving the ceiling's answer standing.
+    const marchOnce = () => {
+      // --- world-anchored sample phase -------------------------------------
+      // The coarse samples sit at sEnter + k*ds, and sEnter is the distance from the
+      // CAMERA. So every sample plane slides along the ray as the camera moves. A thin
+      // column bracketed at sample k one frame is stepped over the next and a different
+      // column is hit instead — the resolved hit jumps by up to a full ds, and the grass
+      // appears to swim. At 96 coarse steps ds was ~0.5 m and this was invisible; at the
+      // designed 12 it is up to 4 m for a grazing ray, which is exactly the
+      // walking-toward-a-crest case where it was reported.
+      //
+      // Anchoring the phase to WORLD HEIGHT fixes it: pin the samples to fixed multiples
+      // of the per-step vertical drop, so they stay on the same world planes no matter
+      // where the camera stands.
+      //
+      //   dy = ds * vy                      vertical drop per coarse step
+      //   the offset to the next plane is fract(yEnter / dy) * dy in height,
+      //   which along the ray is that over vy — so simply fract(yEnter / dy) * ds.
+      //
+      // This does not make the march finer and is not meant to: it makes it STABLE.
+      // Coarse but steady reads as slightly blocky grass; coarse and sliding reads as the
+      // whole field crawling, which is far more objectionable.
+      //
+      // Cost: nil. It was once suspected of a 4x regression and measured innocent —
+      // removing it changed nothing, and the real cause was the laptop throttling on a
+      // low battery. Confirm the power state before blaming a shader change for a frame
+      // time that moved without an edit.
+      const dy = ds.mul(vy);
+      const yEnter = cameraPosition.y.add(V.y.mul(sEnter));
+      const phase = yEnter.div(dy).fract().mul(ds);
 
-      // Segment-vs-column overlap across this step.
-      If(yIn.min(yOut).lessThanEqual(top).and(yIn.max(yOut).greaterThanEqual(ground)), () => {
+      const bracketLo = sEnter.toVar();
+      const bracketHi = float(0).toVar();
+      const bracketed = float(0).toVar();
+      const s = sEnter.add(phase).toVar();
+
+      // The loop is COMPILED at `coarseSteps` but RUNS to `uSteps`, so the sample count
+      // is a live slider instead of a rebuild. `Loop()` bakes its count into the graph,
+      // and rebuilding the material to change it throws away the terrain geometry cache
+      // and stalls for about a second — which makes A/B comparison useless, and the
+      // sample count is the single dial that sets frame time (docs/09 §2), so it is the
+      // one most worth being able to sweep by hand.
+      //
+      // Costs one compare per iteration. Lanes already break early on a hit, so the
+      // divergence this adds is not new. Set `?steps=` high enough at load to leave
+      // headroom above whatever the slider might be pushed to; the slider cannot exceed
+      // the compiled count.
+      const k = float(0).toVar();
+
+      Loop(coarseSteps, () => {
+        If(k.greaterThanEqual(uSteps), () => {
+          Break();
+        });
+        k.addAssign(1);
+        const P = cameraPosition.add(V.mul(s));
+        const { ground, top } = columnTopAt(P);
+
+        If(P.y.lessThan(top), () => {
+          bracketHi.assign(s);
+          bracketed.assign(1);
+          Break();
+        });
+        // Below the terrain surface: nothing ahead can occlude.
+        If(P.y.lessThan(ground), () => {
+          Break();
+        });
+        bracketLo.assign(s);
+        s.addAssign(ds);
+      });
+
+      // Refinement: bisect the bracket, now a valid one — the predicate is false at
+      // bracketLo and true at bracketHi by the coarse loop's own test.
+      //
+      // This is what gives the grass thickness. The bisection walks BACK toward the
+      // ray's entry, so the hit lands where the ray actually enters the column
+      // rather than at the shell, and hitFrac spreads across the column's height
+      // instead of pinning to 1.
+      If(bracketed.equal(1), () => {
+        const lo = bracketLo.toVar();
+        const hi = bracketHi.toVar();
+
+        Loop(refineSteps, () => {
+          const mid = lo.add(hi).mul(0.5);
+          const P = cameraPosition.add(V.mul(mid));
+          const { top } = columnTopAt(P);
+          // Branchless: keeps every lane on the same instruction path.
+          const below = P.y.lessThan(top);
+          hi.assign(below.select(mid, hi));
+          lo.assign(below.select(lo, mid));
+        });
+
+        // Resolve at the first distance known to be inside a column.
+        const P = cameraPosition.add(V.mul(hi));
+        const { cell, centre, ground, top } = columnTopAt(P);
+
         hit.assign(1);
-        const yFirst = yIn.min(top).max(ground);
-        hitFrac.assign(yFirst.sub(ground).div(top.sub(ground).max(float(0.001))));
+        hitFrac.assign(P.y.sub(ground).div(top.sub(ground).max(float(0.001))).clamp(0, 1));
         hitXZ.assign(centre);
         hitCell.assign(cell);
-        hitT.assign(
-          V.y.abs().greaterThan(float(1e-5)).select(yFirst.sub(P0.y).div(V.y), t)
-        );
-        Break();
+        hitS.assign(hi);
       });
+    };
 
-      // Ray has dropped below the ground: nothing further can occlude.
-      If(yOut.lessThan(ground), () => {
-        Break();
-      });
-
-      t.assign(tNext);
-    });
+    if (cedeToCeiling) {
+      If(cedeToCeiling.not(), marchOnce);
+    } else {
+      marchOnce();
+    }
 
     // Colour: ONE value per column, smeared up its whole height — this is what
     // produces vertical striations rather than soft volumetric grass
     // (docs/07 §1.1). The colormap supplies the local ground tone; the
     // per-column hash supplies the horizontal variation between neighbours.
-    const base = texture(colorMap, toUv(texelCentre(hitXZ)));
+    // EXPLICIT mip level 0. This is not an optimisation, it is the fix for grass
+    // rendering as a pale wash.
+    //
+    // The uv here is derived from the raymarch HIT and quantised to the terrain
+    // texel, so two neighbouring pixels can resolve to columns metres apart at
+    // very different ranges. Implicit derivatives therefore see an enormous uv
+    // gradient and select a mip near the TOP of the pyramid — effectively the
+    // average colour of the entire colormap, which for this map is a pale
+    // grey-beige. It showed as washed-out grass speckled with correct colour
+    // wherever neighbouring pixels happened to land in the same cell, got worse
+    // with a taller canopy and at grazing angles, and was unaffected by fog.
+    //
+    // Level 0 is right rather than merely expedient: the colour is meant to be a
+    // NEAREST lookup at the texel the column stands on (docs/07 §1.1), so mip
+    // filtering was never wanted. The other in-loop fetches are unaffected because
+    // their textures carry no mip chain.
+    // Sampled at the struck COLUMN's centre, with the texture's own linear filtering.
+    //
+    // This used to snap to the TERRAIN TEXEL centre, on the reasoning that DF2 did
+    // `map.color[mapoffset]` — a nearest lookup — and painted a whole vertical span in
+    // that one colour. The reasoning is right about the original and wrong here, because
+    // the two engines' texel and column sizes do not correspond: DF2's colour texel WAS
+    // its column, whereas ours is 2 m while a column is 0.03 m. Snapping therefore made
+    // ~67 adjacent columns share one colour, and a 2 m block at 10 m subtends roughly
+    // 170 px — the hard-edged colour blocks in the near field, over a colormap that is
+    // itself perfectly smooth (the terrain material samples it linearly and shows none).
+    //
+    // Sampling per column keeps what actually matters — ONE colour per column, smeared up
+    // its full height, which is what gives vertical striations rather than soft
+    // volumetric grass (docs/07 §1.1) — while letting neighbouring columns differ. The
+    // horizontal variation DF2 got from its colormap now comes from the per-column tone
+    // hash instead, which is where it has to come from at this texel-to-column ratio.
+    //
+    // EXPLICIT level 0 still. The uv derives from the raymarch hit, so two neighbouring
+    // pixels can resolve to columns metres apart at very different ranges; implicit
+    // derivatives see an enormous gradient and pick a mip near the top of the pyramid,
+    // which is the whole colormap averaged to a pale grey-beige. That was the original
+    // pale-grass artifact.
+    const base = texture(colorMap, toUv(hitXZ)).level(float(0));
 
-    // Only a slight base-to-tip gradient. Measured against the references, real
-    // columns are near flat-shaded: colour persists UP a column while changing
-    // sharply ACROSS columns. A strong vertical ramp destroys that coherence.
-    const shade = float(0.88).mix(float(1.05), hitFrac.clamp(0, 1));
+    // Base-to-tip gradient, centred on 1.0 so grass keeps the average brightness of
+    // the terrain it stands on. Vertical variation should be SMALLER than horizontal
+    // — colour persists up a column and changes across columns, h/v ≈ 1.6 in the
+    // references — but it must not be zero, or the columns have no form at all.
+    //
+    // TSL TRAP — the RECEIVER of `.mix()` is the INTERPOLANT, not the first
+    // operand. `t.mix(a, b)` is `mix(a, b, t)`; three registers the method as
+    // `mixElement = (t, e1, e2) => mix(e1, e2, t)` (MathNode.js). Written the
+    // GLSL way, `a.mix(b, t)` silently compiles to `mix(b, t, a)` — a valid
+    // expression with the operands rotated, so there is no error to see, only a
+    // wrong picture. All four mixes in this file had it. It is the same class of
+    // trap as `smoothstep`, which reorders the same way; `clamp`, `min`, `max`
+    // and `step` do NOT, so the rule cannot be applied by habit — check
+    // `addMethodChaining` in MathNode.js. Here the intent is
+    // mix(base, tip, hitFrac), so hitFrac is the receiver.
+    // Radians per pixel. Also decides where a column stops being resolvable.
+    const pixelAngle = float(2).div(
+      (cameraProjectionMatrix as NodeArg)[1].y.mul(screenSize.y)
+    );
+
+    // FADED OUT ONCE A COLUMN IS SUB-PIXEL. This is what removes the hard blocky facets.
+    //
+    // hitFrac is only as precise as the march resolves. `span` is canopy height over the
+    // ray's vertical rate, so a grazing ray gets the full 48 m clamp: ds = 48/12 = 4 m,
+    // and four bisections narrow that to 4/16 = 0.25 m. Against a 1.2 m canopy that
+    // quantises hitFrac into about five levels, and the 0.78-1.22 ramp turns those five
+    // levels into five flat brightness steps. They read as hard-edged polygonal blocks
+    // because the quantisation is driven by the ray's vertical rate and its entry point,
+    // both of which change across every triangle of the faceted shell — so the banding
+    // lands on mesh facets and looks like geometry rather than like error.
+    //
+    // Beyond `cellSize / pixelAngle` a column is under one pixel wide, so a base-to-tip
+    // gradient across it cannot be seen and the term carries nothing but that error.
+    // Fading it to neutral over the following octave costs two instructions and leaves
+    // the near field — where the ramp is genuinely visible — untouched.
+    const subPixel = uCell.div(pixelAngle);
+    const rampVisible = (hitS as NodeArg)
+      .smoothstep(subPixel, subPixel.mul(4) as NodeArg)
+      .oneMinus();
+    const shadeNear = hitFrac.clamp(0, 1).mix(uShadeBase, uShadeBase.oneMinus().add(1));
+    const shade = rampVisible.mix(float(1), shadeNear);
     // Per-column tone — the "corduroy" carrying the horizontal variation the
     // references show (h/v derivative ratio ~1.6).
     // Per-column tone. Applied around 1.0 but with the downward swing damped:
     // the colormap is pre-shaded, so its ravine shadows are already near-black,
     // and a raw multiply crushed them to true black along the baked shadow
     // lines. Vary brightness without eating the existing shadow detail.
-    const swing = clump(hitCell, 17.3).sub(0.5).mul(uTone);
+    // Two candidate keys for that horizontal variation, switchable live so the
+    // question can be settled by looking rather than by argument (uToneMode).
+    //
+    // 0 — WORLD CELL. What shipped. Each 0.03 m column gets its own tone. Adjacent
+    //     pixels stacked up a screen column cross the surface in DIFFERENT cells,
+    //     so the tone is white noise vertically and reads as stipple.
+    //
+    // 1 — RAY BEARING. DF2's striations were not the sides of tall geometry — the
+    //     canopy is barely a metre, so at range it is genuinely a thin skin. They
+    //     came from DrawVerticalLine filling a vertical RUN of pixels from one
+    //     sample. Bearing is constant along a ray, so a screen column shares one
+    //     tone; quantising it to a few pixels of angle holds stripe width constant
+    //     at every distance. Colour still comes from the world colormap, so only
+    //     the brightness modulation is view-keyed.
+    // Tone comes from the baked field's G channel, at the struck column's centre.
+    // Tone is evaluated ONCE, at the hit — not per march sample — so the per-cell hash
+    // costs nothing measurable here and is applied unconditionally at a fixed ratio.
+    //
+    // This is the important half of the look and the free half. The "corduroy" of
+    // docs/07 §1.4 is adjacent columns differing in BRIGHTNESS, and that is what makes
+    // thin columns read as thin at any width. Height raggedness (§1.3) shows only on the
+    // silhouette, and it is the expensive half — see uStrandMix below.
+    const cellSwing = float(0.5).mix(jitterAt(hitXZ).g, strandHash(hitCell));
+
+    const stripe = (V.x.atan(V.z) as NodeArg).div(pixelAngle.mul(uStripePixels)).floor();
+    const stripeKey = vec2(stripe, 0);
+    // Grouped in threes plus per-stripe grain, so stripes read as tufts not a comb.
+    const bearingSwing = cellNoise(stripeKey, 3, 17.3)
+      .mul(0.62)
+      .add(cellHash(stripeKey, 29.1).mul(0.38));
+
+    const swingRaw = uToneMode.lessThan(0.5).select(cellSwing, bearingSwing);
+    // Applied around 1.0 with the downward swing damped: the colormap is
+    // pre-shaded, so its ravine shadows are already near-black and a raw multiply
+    // crushed them to true black along the baked shadow lines.
+    const swing = swingRaw.sub(0.5).mul(uTone);
     const tone = swing.max(swing.mul(0.35)).add(1.0);
 
     // Fade columns into the colormap with distance; the colormap is already
@@ -416,7 +885,12 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     // descending order — which both the GLSL ES and WGSL specs leave
     // indeterminate. It happens to give the intended ramp on drivers that use the
     // naive formula and may clamp to a constant on drivers that assume e0 < e1.
-    const fade: NodeArg = (frag.distance(cameraPosition) as NodeArg)
+    // Keyed on the distance to the HIT, not to the shell fragment. The shell is a
+    // rasterisation proxy that can sit hundreds of metres from where the ray
+    // actually struck — standing inside the canopy it always does — so fading on
+    // shell distance dissolved grass a couple of metres away into flat colormap as
+    // if it were at 800 m. Every distance-dependent term here has to use the hit.
+    const fade: NodeArg = (hitS as NodeArg)
       .smoothstep(uFadeStart.mul(zoom) as NodeArg, uFadeEnd.mul(zoom) as NodeArg)
       .oneMinus();
 
@@ -427,14 +901,14 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     // grass and pops in front of it, which breaks the one thing this system
     // exists for. (This is the integration hurdle for GPU Voxel Space ports:
     // mixing polygonal objects, not raw speed.)
-    const hitWorld = P0.add(V.mul(hitT.max(float(0))));
+    const hitWorld = cameraPosition.add(V.mul(hitS.max(float(0))));
     const viewZ = cameraViewMatrix.mul(vec4(hitWorld, 1)).z;
     const hitDepth = viewZToPerspectiveDepth(viewZ, cameraNear, cameraFar);
 
     // Distance debug: red near -> green mid -> blue far, banded every 100 m so
     // it is obvious whether a suspect region is hitting nearby grass or grass
     // hundreds of metres away seen over a ridge.
-    const dNorm = hitT.div(float(600)).clamp(0, 1);
+    const dNorm = hitS.div(float(600)).clamp(0, 1);
 
     // The handover to the colormap is a COLOUR blend, not an opacity ramp.
     // opacityNode feeds an alpha TEST at 0.5 with blending off, so a binary `hit`
@@ -444,39 +918,164 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     // which is what this fade always claimed to do — and it keeps opacity binary,
     // which is the only thing an alpha test can express.
     const columns: NodeArg = base.rgb.mul(shade).mul(tone);
-    const rgb = debugDistance
-      ? vec3(dNorm.oneMinus(), dNorm.mul(2).min(dNorm.mul(2).oneMinus().add(1)).clamp(0, 1), dNorm)
-      : debugHit
-        ? vec3(1, 0, 1).mul(hitFrac.clamp(0.25, 1))
-        : columns.mix(base.rgb, fade.oneMinus());
+    // Interpolant first: 0 near, so near grass is pure columns; 1 far, so far
+    // grass is the plain colormap.
+    const faded: NodeArg = fade.oneMinus().mix(columns, base.rgb);
 
-    return GrassHit(rgb, hit, hitDepth);
+    // Fog, applied here from the HIT's view depth. three's automatic fog is
+    // switched off on this material (see material.fog below) because it uses the
+    // rasterised shell depth. Matches three's linear fog exactly —
+    // smoothstep(near, far, viewZ) then mix toward the fog colour — so grass and
+    // terrain agree at the same distance instead of showing a seam.
+    const fogFactor: NodeArg = viewZ.negate().smoothstep(uFogNear, uFogFar);
+    // THIS was the pale wash. Written as `faded.mix(uFogColor, fogFactor)` it
+    // compiled to mix(uFogColor, fogFactor, faded) — the fog colour became the
+    // BASE of the blend and the grass colour became the interpolant, so every
+    // fragment came out near the fog colour no matter how near it was. It also
+    // explains why pushing the fog range to 1e6 changed nothing: that only drives
+    // fogFactor, which in the rotated form is the far end of the blend, weighted
+    // by `faded` — a dark grass colour — so it barely contributes.
+    const shaded: NodeArg = fogFactor.mix(faded, uFogColor);
+
+    // Debug views are selected by a uniform rather than baked in, so they can be
+    // switched without rebuilding the material — which would also throw away the
+    // terrain geometry cache.
+    //
+    // Modes 4-7 bisect the colour expression itself. The pale-wash artifact was
+    // chased through four wrong hypotheses by patching first; the only thing that
+    // narrowed it was replacing the colour with less of itself and looking. Doing
+    // that from a uniform instead of from an edit makes it one build rather than
+    // one per term, and 6/7 read out the suspect quantity directly instead of
+    // inferring it from what the picture looks like.
+    const dbgHit: NodeArg = vec3(1, 0, 1).mul(hitFrac.clamp(0.25, 1));
+    const dbgDist: NodeArg = vec3(
+      dNorm.oneMinus(),
+      dNorm.mul(2).min(dNorm.mul(2).oneMinus().add(1)).clamp(0, 1),
+      dNorm
+    );
+    const dbgFrac: NodeArg = vec3(hitFrac.clamp(0, 1));
+
+    /**
+     * Quantise a 0-1 scalar to five flat primaries.
+     *
+     * Greyscale readouts are not legible through a JPEG screenshot: a mid grey and
+     * a dark grey were mistaken for each other, and two views that must agree
+     * appeared to contradict. Flat primaries survive compression, so a value can be
+     * READ rather than guessed at.
+     *
+     *   black < 0.125 | blue < 0.375 | green < 0.625 | yellow < 0.875 | red
+     */
+    const band = (v: NodeArg): NodeArg => {
+      const t = v.clamp(0, 1);
+      return t
+        .lessThan(0.125)
+        .select(
+          vec3(0, 0, 0),
+          t
+            .lessThan(0.375)
+            .select(
+              vec3(0, 0, 1),
+              t
+                .lessThan(0.625)
+                .select(vec3(0, 1, 0), t.lessThan(0.875).select(vec3(1, 1, 0), vec3(1, 0, 0)))
+            )
+        );
+    };
+
+    //   0 normal            5 faded    (columns crossfaded to the colormap)
+    //   1 hit mask          6 fog factor, banded
+    //   2 hit distance      7 fog input: -viewZ / fogFar, banded
+    //   3 height in column  8 fade: grass presence, 1 near to 0 far, banded
+    //   4 columns           9 the fog colour uniform, flat
+    const views: NodeArg[] = [
+      shaded,
+      dbgHit,
+      dbgDist,
+      dbgFrac,
+      columns,
+      faded,
+      band(fogFactor),
+      band(viewZ.negate().div(uFogFar)),
+      band(fade),
+      uFogColor,
+    ];
+    let rgb: NodeArg = views[views.length - 1];
+    for (let i = views.length - 2; i >= 0; i--) {
+      rgb = uDebugMode.lessThan(i + 0.5).select(views[i], rgb);
+    }
+
+    // Debug views force the shell OPAQUE. Otherwise a miss is alpha-tested away and
+    // the terrain colormap shows through the gaps, which in a false-colour readout
+    // is indistinguishable from a real value — the terrain's greens and tans read as
+    // bands. Opaque means every pixel of the shell reports the shader's own answer.
+    const opacity = uDebugMode.greaterThan(3.5).select(float(1), hit);
+
+    return GrassHit(rgb, opacity, hitDepth);
   });
 
-  const shaded = grassShade();
+  // ONE march graph, two proxy surfaces. The Fn is instantiated per material —
+  // the ceiling and the floor compile separate shaders — but they share every
+  // uniform node, so the debug sliders drive both without extra plumbing.
+  const build = (position: NodeArg, isFloor: boolean): THREE.MeshBasicNodeMaterial => {
+    const shaded = makeGrassShade(isFloor)();
 
-  // UNLIT. The colormap is pre-shaded — it already bakes lighting and shadow
-  // (docs/06 §6) — and the original renderer applied no lighting at all, it just
-  // painted map.color. Running PBR on top double-shades it, and at shell
-  // silhouettes the interpolated normal goes edge-on and diffuse collapses to
-  // zero, leaving black rim artifacts along the canopy edges.
-  const material = new THREE.MeshBasicNodeMaterial();
-  material.positionNode = positionNode;
-  // struct field accessors are loosely typed; the graph is validated by running it.
-  material.colorNode = shaded.get('rgb') as NodeArg;
-  // Alpha-tested rather than blended: grass is opaque where it exists, and this
-  // keeps it in the opaque queue with correct depth against the terrain.
-  material.opacityNode = shaded.get('hit') as NodeArg;
-  // Correct depth so polygonal objects intersect the grass properly. This does
-  // disable early-Z for the grass pass — a real cost, accepted because without
-  // it nothing can stand in the grass convincingly.
-  material.depthNode = shaded.get('depth') as NodeArg;
-  material.transparent = false;
-  material.alphaTest = 0.5;
-  // Double-sided: standing inside the canopy we see the shell from underneath.
-  // Lighting is left to the material so three flips normals for back faces —
-  // overriding normalNode with a world normal shades every back face black.
-  material.side = THREE.DoubleSide;
+    // UNLIT. The colormap is pre-shaded — it already bakes lighting and shadow
+    // (docs/06 §6) — and the original renderer applied no lighting at all, it just
+    // painted map.color. Running PBR on top double-shades it, and at shell
+    // silhouettes the interpolated normal goes edge-on and diffuse collapses to
+    // zero, leaving black rim artifacts along the canopy edges.
+    const m = new THREE.MeshBasicNodeMaterial();
+    m.positionNode = position;
+    // struct field accessors are loosely typed; the graph is validated by running it.
+    m.colorNode = shaded.get('rgb') as NodeArg;
+    // Alpha-tested rather than blended: grass is opaque where it exists, and this
+    // keeps it in the opaque queue with correct depth against the terrain.
+    m.opacityNode = shaded.get('hit') as NodeArg;
+    // Correct depth so polygonal objects intersect the grass properly. This does
+    // disable early-Z for the grass pass — a real cost, accepted because without
+    // it nothing can stand in the grass convincingly.
+    //
+    // It is also what makes the two passes agree: both march from the eye and write
+    // the hit's depth, not the proxy's, so wherever ceiling and floor both cover a
+    // pixel they resolve to the same surface at the same depth. Without this they
+    // would z-fight along the horizon.
+    m.depthNode = shaded.get('depth') as NodeArg;
+    m.transparent = false;
+    m.alphaTest = 0.5;
+    // Fog is applied inside colorNode from the raymarch hit's view depth. three's
+    // automatic fog would use the rasterised shell depth, which is the wrong
+    // distance by up to the whole draw range.
+    m.fog = false;
+    // Double-sided: standing inside the canopy we see both proxies from underneath.
+    // Lighting is left to the material so three flips normals for back faces —
+    // overriding normalNode with a world normal shades every back face black.
+    m.side = THREE.DoubleSide;
+    return m;
+  };
 
-  return { material, canopyMax };
+  const material = build(positionNode, false);
+  const floorMaterial = build(floorPositionNode, true);
+
+  return {
+    material,
+    floorMaterial,
+    canopyMax,
+    uniforms: {
+      grassScale: uGrassScale,
+      canopyMax: uCanopyMax,
+      cell: uCell,
+      tone: uTone,
+      shadeBase: uShadeBase,
+      steps: uSteps,
+      strandMix: uStrandMix,
+      canopyForce: uCanopyForce,
+      toneMode: uToneMode,
+      stripePixels: uStripePixels,
+      nearClip: uNearClip,
+      maxSpan: uMaxSpan,
+      fadeStart: uFadeStart,
+      fadeEnd: uFadeEnd,
+      debugMode: uDebugMode,
+    },
+  };
 }

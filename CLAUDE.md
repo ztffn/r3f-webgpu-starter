@@ -88,3 +88,26 @@ node tools/df2-extract/df2extract.mjs list|extract|trn ...
   render geometry; it is the seed of the gameplay/concealment field.
 - `src/df2/` is the Phase-1 spike; the target layout is `05-...md` §7
   (`/src/engine/{terrain,grass,concealment}`, `/src/game/`).
+
+## Committing
+
+Commit after each meaningful phase or task is complete — do not let a session accumulate a
+large uncommitted working tree. Keep commits **atomic**: one logical concern per commit, and
+split unrelated changes into separate commits.
+
+Types:
+
+- **New feature:** a new feature
+- **Fix issue:** a bug fix
+- **Other:** documentation, configuration, anything else
+
+```
+New feature: (#123) Add user authentication - implement JWT-based login system.
+Fix issue: (#456) Fix memory leak in data processor - optimize buffer management.
+Other: Update documentation for API endpoints.
+```
+
+**NEVER** add trailers: no "Generated with Claude Code", no author or co-author lines.
+
+Note this does not override the global rule that git commands need explicit permission —
+ask, then commit.

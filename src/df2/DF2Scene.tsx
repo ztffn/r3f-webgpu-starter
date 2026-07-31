@@ -7,7 +7,7 @@
 // elevation grid and a canopy field — so terrain and grass need no mode switch and
 // the grass system is visible with no game data present.
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three/webgpu";
 import { Terrain } from "./Terrain";
@@ -15,20 +15,34 @@ import { PerfMonitor, type PerfSample } from "./PerfMonitor";
 import { FlyControls, type FlyState, type Stance } from "./FlyControls";
 import { Heightfield } from "./Heightfield";
 import { createTerrainMaterial } from "./TerrainMaterial";
-import { createGrassMaterial } from "./GrassMaterial";
+import { createGrassMaterial, type GrassUniforms } from "./GrassMaterial";
 import { bakeSyntheticMaps } from "./syntheticMaps";
+import { bakeGrassJitter } from "./grassJitter";
 import { loadTerrain, type LoadedTerrain } from "./loadTerrain";
+import { WeaponPrototype } from "../fps/WeaponPrototype";
+// Lazily imported so the three multi-megabyte debug models are code-split out of the
+// main bundle and only fetched when ?targets=1 actually asks for them.
+const TestTargets = lazy(() =>
+  import("../fps/TestTargets").then((m) => ({ default: m.TestTargets }))
+);
+import { BENCH } from "./bench";
 import {
   TERRAIN_SLUG,
   HEIGHT_SCALE,
   METERS_PER_TEXEL,
   GRASS_SCALE,
   GRASS_STEPS,
+  GRASS_STEPS_RUN,
   GRASS_CELL,
   GRASS_NEAR_CLIP,
-  GRASS_PIXELS_PER_STEP,
+  GRASS_REFINE_STEPS,
+  GRASS_MAX_SPAN,
+  GRASS_STRIPE_PIXELS,
   GRASS_HASH_PERIOD,
   GRASS_TONE_VARIATION,
+  GRASS_SHADE_BASE,
+  GRASS_STRAND_JITTER,
+  GRASS_STRAND_MIX,
   GRASS_FADE_START,
   GRASS_FADE_END,
   WATER_COLOR,
@@ -52,6 +66,12 @@ export interface DF2SceneProps {
   onToggleGround?: () => void;
   onStance?: (s: Stance) => void;
   onStatus?: (status: { loading: boolean; terrain: LoadedTerrain | null }) => void;
+  /** Hands the grass shader's live uniforms out so a debug panel can drive them. */
+  onGrassReady?: (u: GrassUniforms | null) => void;
+  /** Renders the integrated first-person optic prototype on top of this world. */
+  scopeDemo?: boolean;
+  /** Isolated animated rifle-and-hands test scene. */
+  weaponDemo?: boolean;
 }
 
 /**
@@ -95,6 +115,9 @@ export function DF2Scene({
   onFly,
   onToggleGround,
   onStance,
+  onGrassReady,
+  scopeDemo = false,
+  weaponDemo = false,
 }: DF2SceneProps) {
   // undefined = still loading, null = no assets (synthetic), object = real map
   const [loaded, setLoaded] = useState<LoadedTerrain | null | undefined>(undefined);
@@ -164,12 +187,27 @@ export function DF2Scene({
     if (!world?.grassMap || !world.colorMap) return null;
     // Elevation as a texture for the fragment march. Built from the same raw
     // samples as the CPU heightfield, so shader and gameplay agree exactly.
+    // HALF-FLOAT, carrying METRES, and built from the heightfield's own grid — not from
+    // the raw bytes.
+    //
+    // The grid has been reconstructed to remove 8-bit terracing (Heightfield.
+    // smoothTerracing), so uploading the raw bytes here would leave the grass marching a
+    // quantised surface while the terrain mesh drew a smoothed one. They would disagree
+    // by up to half a metre and grass would float or sink — docs/08 §8 invariant 3.
+    //
+    // Half rather than float32: WebGPU does not guarantee float32 textures are
+    // filterable, and this needs LINEAR. Half gives ~0.1 m precision over this map's
+    // 169 m of relief, which is well under the 1 m step being removed.
+    const heightData = new Uint16Array(world.heightfield.grid.length);
+    for (let i = 0; i < heightData.length; i++) {
+      heightData[i] = THREE.DataUtils.toHalfFloat(world.heightfield.grid[i]);
+    }
     const heightTex = new THREE.DataTexture(
-      world.heights,
-      world.heightSize,
-      world.heightSize,
+      heightData,
+      world.heightfield.period,
+      world.heightfield.period,
       THREE.RedFormat,
-      THREE.UnsignedByteType
+      THREE.HalfFloatType
     );
     heightTex.magFilter = THREE.LinearFilter;
     heightTex.minFilter = THREE.LinearFilter;
@@ -177,32 +215,65 @@ export function DF2Scene({
     heightTex.wrapT = THREE.RepeatWrapping;
     heightTex.needsUpdate = true;
 
+    // Baked once per terrain and shared by every chunk. See grassJitter.ts for why
+    // this is a texture rather than a hash evaluated in the march.
+    const jitter = bakeGrassJitter(
+      GRASS_HASH_PERIOD,
+      BENCH.strand ?? GRASS_STRAND_JITTER
+    );
+
     const kit = createGrassMaterial({
       grassMap: world.grassMap,
+      jitterMap: jitter,
       heightMap: heightTex,
       colorMap: world.colorMap,
       worldSize: world.heightfield.worldSize,
-      mapSize: world.size,
-      heightScale: world.heightfield.heightScale,
       grassScale: GRASS_SCALE,
-      steps: GRASS_STEPS,
+      // ?steps= raises the compiled CEILING as well as the running value, so asking for
+      // more samples than the shipped ceiling just works instead of being silently
+      // clamped to it.
+      steps: Math.max(GRASS_STEPS, BENCH.steps ?? 0),
+      stepsRun: BENCH.steps ?? GRASS_STEPS_RUN,
       cellSize: GRASS_CELL,
       nearClip: GRASS_NEAR_CLIP,
-      pixelsPerStep: GRASS_PIXELS_PER_STEP,
+      refineSteps: BENCH.refine ?? GRASS_REFINE_STEPS,
+      maxSpan: BENCH.maxspan ?? GRASS_MAX_SPAN,
+      stripePixels: GRASS_STRIPE_PIXELS,
       hashPeriod: GRASS_HASH_PERIOD,
       toneVariation: GRASS_TONE_VARIATION,
+      shadeBase: GRASS_SHADE_BASE,
+      strandMix: GRASS_STRAND_MIX,
+      canopyForce: BENCH.canopyAll ?? false,
       fadeStart: GRASS_FADE_START,
       fadeEnd: GRASS_FADE_END,
       referenceP11: REFERENCE_P11,
+      // Fog is applied by the material from the hit distance, not by three from the
+      // shell depth, so it needs the scene's fog values.
+      fogColor: FOG_COLOR,
+      fogNear: FOG_NEAR,
+      fogFar: FOG_FAR,
     });
-    return { ...kit, heightTex };
+    return { ...kit, heightTex, jitterTex: jitter };
   }, [world]);
 
   useEffect(
     () => () => {
       grassKit?.material.dispose();
+      grassKit?.floorMaterial.dispose();
       grassKit?.heightTex.dispose();
+      grassKit?.jitterTex.dispose();
     },
+    [grassKit]
+  );
+
+  useEffect(() => {
+    onGrassReady?.(grassKit?.uniforms ?? null);
+  }, [grassKit, onGrassReady]);
+
+  // Stable identity so Terrain's slot memo does not rebuild; reads the uniform at
+  // call time so the canopy slider takes effect without a React render.
+  const grassCanopyMax = useCallback(
+    () => Number(grassKit?.uniforms.canopyMax.value ?? 0),
     [grassKit]
   );
 
@@ -249,10 +320,26 @@ export function DF2Scene({
           heightfield={heightfield}
           material={material}
           grassMaterial={grassKit?.material ?? null}
+          grassFloorMaterial={
+            BENCH.grassFloor === false ? null : grassKit?.floorMaterial ?? null
+          }
           grassEnabled={grass}
           grassDistance={GRASS_FADE_END}
+          // Read live: the debug panel writes this uniform without a React render.
+          grassCanopyMax={grassCanopyMax}
           wireframe={wireframe}
         />
+      )}
+
+      {/* Human-scale contrast reference for judging grass. Debug-only: ?targets=1. */}
+      {BENCH.targets && heightfield && (
+        <Suspense fallback={null}>
+          <TestTargets
+            heightfield={heightfield}
+            originX={BENCH.x ?? 5}
+            originZ={BENCH.z ?? 375}
+          />
+        </Suspense>
       )}
 
       {showWater && <Water level={waterLevel} span={waterSpan} material={waterMaterial} />}
@@ -267,6 +354,9 @@ export function DF2Scene({
           onStance={onStance}
         />
       )}
+
+      {/* Kept opt-in while the existing terrain visual work remains the default. */}
+      {(scopeDemo || weaponDemo) && <WeaponPrototype scopeDemo={scopeDemo} />}
     </>
   );
 }

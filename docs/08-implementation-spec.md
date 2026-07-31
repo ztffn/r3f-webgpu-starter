@@ -39,7 +39,7 @@ Both tile **infinitely** — DF2 terrain has no edges (`06` §10).
 | Phase 0 — extraction | core done: PFF3 unpack, `.trn` parse, PCX decode, canopy bake |
 | Phase 1 — terrain | done: chunked LOD, skirts, analytic normals, TSL biome material, infinite tiling |
 | Phase 1.5 — real map | done: Green Mile renders from extracted assets |
-| Phase 2 — grass | first pass in: columnar fragment march. Measurably flatter than reference (`07` §7) |
+| Phase 2 — grass | columnar fragment march, bracket-and-bisect. **60 fps target met** (8.3 ms standing and prone at Green Mile, vsync-capped). Seven defects closed this session (`07` §9); crest layering and crouch/prone quality remain |
 | Phase 3 — concealment | demonstrated in the test rig (`07` §8), not yet a gameplay system |
 | Phase 4 — game | not started |
 
@@ -90,6 +90,12 @@ Everything below `src/df2/` is the Phase-1 spike. The target layout is `05` §7
 | `DF2Scene.tsx` | composition: lights, fog, water, wiring | UI layout |
 | `components/GameCanvas.tsx` | async WebGPU init, camera planes | the scene |
 | `components/Hud.tsx` | all UI | rendering internals |
+| `grassJitter.ts` | CPU bake of the per-column jitter/tone field | rendering |
+| `bench.ts` | `?bench=1` URL overrides, `window.__perf` | anything gameplay |
+| `components/GrassDebug.tsx` | live grass sliders; writes `uniform.value` directly | material internals |
+| `fps/WeaponPrototype.tsx` | first-person rig, weapon animation | terrain, grass |
+| `fps/ScopeRig.tsx` | picture-in-picture optic, reticles | terrain, grass |
+| `fps/TestTargets.tsx` | human-scale contrast ladder, `?targets=1` | anything but the heightfield |
 
 `Heightfield.ts` being Three-free is a **rule, not a preference**. It is the seed of the
 gameplay field, which must be samplable on a server with no renderer present.
@@ -322,16 +328,22 @@ Anything else reading `info` per frame needs the same treatment.
 | Constant | Value | Status |
 | --- | --- | --- |
 | `METERS_PER_TEXEL` | 2.0 | **PLACEHOLDER — uncalibrated.** Sets world size to 2048 m |
-| `HEIGHT_SCALE` | 1.0 | **PLACEHOLDER — uncalibrated.** Metres per raw elevation unit |
+| `HEIGHT_SCALE` | 1.0 | **PLACEHOLDER — uncalibrated.** Metres per raw elevation unit. Now doubly load-bearing: it is what makes one raw unit a 26.6° facet, which is why `HEIGHT_SMOOTH_PASSES` exists |
+| `HEIGHT_SMOOTH_PASSES` | 2 | reconstructs relief lost to 8-bit quantisation (`07` §9). **Coupled to `HEIGHT_SCALE`** — re-derive when that is calibrated; 0 restores the raw surface |
 | `GRASS_SCALE` | 0.0047 | derived from reference screenshots (`07` §2): tallest canopy ≈ 1.2 m |
-| `GRASS_CELL` | 0.06 | measured: sub-metre cells took `|dx|` from 0.17 to 2.05 (reference 2.80) |
-| `GRASS_TONE_VARIATION` | 0.85 | measured against reference corduroy |
-| `GRASS_STEPS` | 96 | budgeted, **not** measured on real hardware |
+| `GRASS_CELL` | 0.03 | measured against the references; slider floor is now 0.002 |
+| `GRASS_TONE_VARIATION` | 1.5 | set by eye after the field gained real contrast (`07` §9) |
+| `GRASS_SHADE_BASE` | 0.78 | base-to-tip ramp, centred on 1.0. h/v ≈ 1.9 against the references' ~1.6 |
+| `GRASS_STRAND_MIX` | 0.35 | per-strand height from the ALU hash vs the texture. **The only visual dial with real frame cost** — height is evaluated per march sample, tone once at the hit |
+| `GRASS_STRAND_JITTER` | 0.18 | bake-time share of the height field carried by per-texel noise |
+| `GRASS_STEPS` | 32 | **compiled ceiling only.** `?steps=` raises it; the slider sweeps up to it |
+| `GRASS_STEPS_RUN` | 12 | what actually runs. Was 96 — a stale unit from the pre-bracket march, costing 8x (`09` §3.1.0) |
+| `GRASS_MAX_SPAN` | 28 | lowered from 48 for the crest layering. **Trades reach, and touches invariant 6** — see `09` §3.1 and the DDA addendum |
 | `GRASS_FADE_START/END` | 700 / 1100 | scaled by zoom in-shader |
 | `CHUNK_COUNT` | 8 | → 256 m chunks |
-| `VIEW_RADIUS_CHUNKS` | 9 | terrain drawn to ~2304 m |
+| `VIEW_RADIUS_MAX_CHUNKS` | 12 | derived per-frame from `FOG_FAR`, capped here |
 | `SKIRT_DEPTH` | 12 m | never validated against real LOD error |
-| `FOG_NEAR` / `FOG_FAR` | 300 / 2200 m | linear `THREE.Fog`. **Also the tiling-repetition lever** — see below |
+| `FOG_NEAR` / `FOG_FAR` | 300 / 2200 m | linear fog. Applied **inside `GrassMaterial`** from the hit distance, not by three from the shell — `material.fog = false`. **Also the tiling-repetition lever** |
 
 Until the two placeholders are calibrated, **"does this feel like DF2?" cannot be answered
 honestly.** That is the top of the roadmap, not the grass.
@@ -348,8 +360,13 @@ grass fade staying inside terrain draw distance (§8 invariant 1).
 repeats every 2048 m; if that ever reads as pattern rather than landscape, tighten `FOG_FAR`
 rather than trying to defeat the tiling. Do not spend effort on it pre-emptively.
 
-`GrassMaterial.setScale(metersPerTexel, heightScale, grassScale)` re-derives the shader's
-uniforms, so calibration does not need a rebuild of the graph.
+The grass material's uniforms are exposed on the returned `uniforms` object and written
+live by the `?debug=1` panel, so most calibration needs no graph rebuild. Two things still
+do: the compiled step ceiling (`?steps=`) and the bisection count (`?refine=`).
+
+`CANOPY_MARGIN` (exported from `GrassMaterial.ts`) is the 1.04 shell lift. It is read in two
+places that must agree — the vertex lift, and `Terrain.tsx`'s inside-canopy test that decides
+whether the grass floor proxy is drawn. Do not re-inline it as a literal.
 
 ---
 
@@ -370,12 +387,59 @@ Nothing throws when these break. Check them after touching `config.ts`.
    is permanently inside the canopy while standing.
 5. **Grass results must be reported with their `GrassSource`.** A number measured against a
    `colormap-standin` canopy says nothing about placement.
+6. **The renderer must never conceal LESS than `grassHeightField` says it does.** This is the
+   one invariant with a competitive-fairness edge, so it outranks frame time. Concealment is
+   queried analytically against the field (`04` §2), so a target prone in distant grass counts
+   as concealed no matter what the screen draws. Any rendering limit that silently drops distant
+   grass therefore hands the player who triggers it free vision of concealed targets — and the
+   cheapest way to trigger it is to go prone, which is also the strongest position. Two limits
+   have already done exactly this:
+   - `sEnter = inside ? nearClip : fragDistance` with `hitS <= sEnter + span` and
+     `span <= GRASS_MAX_SPAN` put a hard 49 m ceiling on every hit on screen the moment the eye
+     entered the canopy. Fixed by computing the entry per fragment and searching a near interval
+     then a far one (`07` §9).
+   - The lifted shell had no floor, so nothing below the horizon was marched at all (`07` §9).
+
+   **`GRASS_FADE_END` is the remaining one and it is a live design question, not a bug.** Beyond
+   it no shell is drawn, so a target prone in grass at 1200 m stands on bare colormap while the
+   field still counts them concealed. Concealment is specified at 800 m (`00`, `04`), so the
+   current 1100 m covers the spec with room to spare — but the gap is real above that and the
+   honest options are to extend the draw distance or to bound the query by it. Do not "fix" this
+   by shortening the fade: that widens the gap.
+
+   **Test it, do not assume it.** Any change to the march bounds, the proxy geometry, or the fade
+   needs the hit-distance view (`?debug=1`, view 2) checked prone as well as standing. A ceiling
+   on hit distance is invisible in a normal render — it looks like ordinary bare ground.
 
 ---
 
 ## 9. Known-open defects
 
-Full evidence in `07` §9. Summary, so nobody re-derives it:
+Full evidence in `07` §9. Summary, so nobody re-derives it.
+
+**Horizontal layering / crest rolling — OPEN, cause understood.**
+Grass reads as stacked horizontal slabs rather than stretched vertical columns, worst walking
+toward a crest. The geometry IS vertical; the artifact is which surface the ray lands on. With
+coarse stepping the ray passes over the near column's vertical FACE and first registers
+"below top" above a further column, so the hit resolves on a horizontal TOP face. Bisection
+cannot recover it — it refines inside an already-wrong interval. Only more coarse samples or a
+shorter span help, and both have been traded against. **The structural fix is DDA cell
+traversal** (Amanatides-Woo) bounded by an analytic exit: it cannot step over a column, so it
+always finds the true nearest vertical face — which is also how Voxel Space did it. `09` §3.1
+already specifies the analytic exit half; only the entry was ever built.
+
+**Crouch and prone quality — OPEN.**
+Structurally the raymarch's weakest case: eye inside the volume, grazing rays, longest spans,
+coarsest sampling, and columns largest on screen. Frame time is fine (matches standing). The
+agreed direction is the `03` §4 hybrid — real instanced geometry in a small radius around the
+player, visual only, with the march still authoritative for concealment so the gameplay field
+does not fork. Separate PR.
+
+**Uphill floor-proxy gap — OPEN, unverified.**
+Standing and looking at a slope that rises above eye level, the ceiling proxy may have no
+fragment while the `insideCanopy` gate suppresses the floor. Whether it shows as missing grass
+has not been tested. Missing grass is a fairness bug (§8 invariant 6), not a cosmetic one.
+Note the two CPU gates' justification is now stale — see the DDA addendum.
 
 **Black skirt band at eye height — terrain, not grass. OPEN.**
 On foot with the camera pitched down, a flat dark plane cuts across the lower frame with a
@@ -475,6 +539,16 @@ Each of these cost real time. They are here so they cost it once.
 - **TSL type widening** bites on free functions; method chaining is more reliable. The graph is
   validated by compiling and running it, not by `tsc` — hence the deliberate loose `NodeArg`
   in `GrassMaterial.ts`.
+- **`.mix()`, `.smoothstep()` and `.step()` put the RECEIVER in a different argument slot than
+  the GLSL call does.** `t.mix(a, b)` is `mix(a, b, t)` — the receiver is the **interpolant**.
+  `x.smoothstep(lo, hi)` is `smoothstep(lo, hi, x)`. `x.step(edge)` is `step(edge, x)`. Three
+  registers these three through reordering wrappers (`mixElement`, `smoothstepElement`,
+  `stepElement` in `nodes/math/MathNode.js`); every other chained method — `clamp`, `min`,
+  `max`, `pow`, `distance` — keeps GLSL order, so the rule cannot be applied by habit. Check
+  `addMethodChaining` before writing a chained call with more than one argument.
+  Written the GLSL way, `a.mix(b, t)` compiles to `mix(b, t, a)`: a **valid expression with the
+  operands rotated**, so there is no error and no warning, only a wrong picture. This cost
+  several sessions as the "pale grass" artifact — see §9 and `docs/07` §9.
 - **Prone showing only grass is correct, not a bug.** If you are concealed you are also blind;
   that symmetry is the mechanic.
 

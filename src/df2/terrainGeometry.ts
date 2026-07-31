@@ -53,6 +53,9 @@ export function buildChunkGeometry({
   const indices: number[] = [];
 
   const nrm: Vec3Out = [0, 1, 0];
+  // Vertical extent, tracked here so the bounding box costs nothing — see Assemble.
+  let minY = Infinity;
+  let maxY = -Infinity;
   const { halfWorld, worldSize } = heightfield;
 
   // --- Grid vertices (local space) -----------------------------------------
@@ -63,7 +66,10 @@ export function buildChunkGeometry({
       const lx = (i / N) * size;
       const wx = ox + lx;
       // sample()/normal() wrap, so world coords outside the base tile are fine.
-      positions.push(lx, heightfield.sample(wx, wz), lz);
+      const y = heightfield.sample(wx, wz);
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+      positions.push(lx, y, lz);
       heightfield.normal(wx, wz, nrm);
       normals.push(nrm[0], nrm[1], nrm[2]);
       uvs.push((wx + halfWorld) / worldSize, (wz + halfWorld) / worldSize);
@@ -130,5 +136,14 @@ export function buildChunkGeometry({
   geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
   geometry.setIndex(indices);
   geometry.computeBoundingSphere();
+  // The box is load-bearing beyond culling: Terrain.tsx compares this chunk's maximum
+  // elevation against the eye to decide whether the grass volume needs its floor proxy.
+  // Set directly from the extent tracked in the vertex loop rather than by
+  // computeBoundingBox(), which would be a third full pass over positions inside the
+  // per-frame build budget. y is absolute; chunks are offset in x/z only.
+  geometry.boundingBox = new THREE.Box3(
+    new THREE.Vector3(0, skirt ? minY - SKIRT_DEPTH : minY, 0),
+    new THREE.Vector3(size, maxY, size)
+  );
   return geometry;
 }

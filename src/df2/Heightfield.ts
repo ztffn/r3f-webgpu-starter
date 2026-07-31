@@ -30,6 +30,7 @@ import {
   TERRAIN_HEIGHT,
   METERS_PER_TEXEL,
   HEIGHT_SCALE,
+  HEIGHT_SMOOTH_PASSES,
 } from "./config";
 
 // Lattice units the synthetic tile spans at the base octave. Integer, so the
@@ -44,6 +45,61 @@ export interface HeightmapSource {
   size: number;
   metersPerTexel?: number;
   heightScale?: number;
+  /** Overrides HEIGHT_SMOOTH_PASSES. 0 keeps the raw quantised surface. */
+  smoothPasses?: number;
+}
+
+/**
+ * Reconstruct sub-unit relief that 8-bit storage quantised away.
+ *
+ * The source heightmap has 256 levels, so the smallest representable change is one raw
+ * unit — 1 m at HEIGHT_SCALE 1.0, across a 2 m texel, which is a **26.6 degree facet**.
+ * Measured on Green Mile: the MEDIAN facet angle is exactly that 26.6 degrees, and 48% of
+ * adjacent samples are identical. The surface is step-flat-step-flat, and that terracing
+ * is what reads as jagged and noisy. It is a storage artifact, not authored relief.
+ *
+ * DF2 itself never showed it: Voxel Space drew one column per screen column straight from
+ * the samples and never built triangles out of the steps, so quantisation appeared as
+ * vertical banding rather than as angular facets. Reconstructing here is what buys back
+ * the soft rolling look, and doing it as a filter over the field is closer to the original
+ * than raising the mesh resolution would be — more triangles only interpolate the terraces
+ * more precisely.
+ *
+ * A separable binomial [1,2,1] kernel, wrapped (the map tiles). Each pass halves relief at
+ * the 2-texel scale where the terracing lives while leaving the tens-of-metres features
+ * that carry the terrain's shape essentially untouched.
+ *
+ * MUST run before anything reads the field. The renderer's ground, the grass march and the
+ * concealment query all derive from this one grid, and docs/08 §8 invariant 3 requires
+ * they agree — smoothing one consumer and not the others would float the grass off the
+ * ground and desync what you see from what the game thinks you can see.
+ */
+function smoothTerracing(grid: Float32Array, size: number, passes: number): void {
+  if (passes <= 0) return;
+  const tmp = new Float32Array(grid.length);
+  const wrap = (v: number) => (v < 0 ? v + size : v >= size ? v - size : v);
+  for (let p = 0; p < passes; p++) {
+    for (let z = 0; z < size; z++) {
+      const row = z * size;
+      // Only the two end columns can wrap, so they are peeled out and the interior runs
+      // without a call or a branch. The vertical sub-pass below already hoists its wraps;
+      // this keeps the two symmetric.
+      tmp[row] = (grid[row + size - 1] + 2 * grid[row] + grid[row + 1]) * 0.25;
+      for (let x = 1; x < size - 1; x++) {
+        tmp[row + x] = (grid[row + x - 1] + 2 * grid[row + x] + grid[row + x + 1]) * 0.25;
+      }
+      const e = row + size - 1;
+      tmp[e] = (grid[e - 1] + 2 * grid[e] + grid[row]) * 0.25;
+    }
+    for (let z = 0; z < size; z++) {
+      const up = wrap(z - 1) * size;
+      const dn = wrap(z + 1) * size;
+      const row = z * size;
+      for (let x = 0; x < size; x++) {
+        grid[row + x] = (tmp[up + x] + 2 * tmp[row + x] + tmp[dn + x]) * 0.25;
+      }
+    }
+  }
 }
 
 export class Heightfield {
@@ -105,6 +161,9 @@ export class Heightfield {
       size,
       metersPerTexel: WORLD_SIZE / size,
       heightScale: TERRAIN_HEIGHT / 255,
+      // The synthetic field is continuous fBm quantised to bytes on the way out, so it
+      // terraces for the same reason the extracted map does.
+      smoothPasses: HEIGHT_SMOOTH_PASSES,
     };
   }
 
@@ -113,7 +172,11 @@ export class Heightfield {
     return Heightfield.fromHeightmap(Heightfield.syntheticBytes(seed));
   }
 
-  /** Build from a real extracted DF heightmap (8-bit greyscale, size x size). */
+  /**
+   * Build from a real extracted DF heightmap (8-bit greyscale, size x size).
+   *
+   * The raw grid is TERRACED and has to be reconstructed — see `smoothTerracing`.
+   */
   static fromHeightmap(src: HeightmapSource): Heightfield {
     const { data, size } = src;
     const cellSize = src.metersPerTexel ?? METERS_PER_TEXEL;
@@ -123,6 +186,7 @@ export class Heightfield {
     }
     const grid = new Float32Array(size * size);
     for (let i = 0; i < size * size; i++) grid[i] = data[i] * scale;
+    smoothTerracing(grid, size, src.smoothPasses ?? HEIGHT_SMOOTH_PASSES);
     return new Heightfield(size, cellSize, grid, scale);
   }
 

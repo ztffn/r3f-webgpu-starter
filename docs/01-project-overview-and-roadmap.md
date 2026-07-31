@@ -188,7 +188,20 @@ and immediately answers "does this feel like DF2?".
 > blade layer has not been started and the plan for it still stands.
 
 - ✅ Columnar mid/far-field grass driven by the baked canopy field, writing its own depth.
+- ✅ **Performance target met** (July 2026). 8.3 ms standing *and* prone at Green Mile,
+  dpr 1 — the 120 Hz vsync cap, so true cost is lower and unknown. Was 72.10 ms. The
+  largest single win was a stale constant running the march at 8x its designed sample
+  count, not an algorithm change (`09-...md` §3.1.0). Horizon culling was never needed
+  and stays in reserve for the scoped case, which is still unmeasured.
+- ⚠️ **Open: horizontal layering.** Grass reads as stacked slabs rather than stretched
+  columns, worst approaching a crest. Cause understood — coarse stepping lands the hit on a
+  column's horizontal TOP face instead of its vertical near face. **Next structural work is
+  DDA cell traversal bounded by an analytic exit** (`09-...md` §3.1, `08-...md` §9), which
+  cannot step over a column and is how Voxel Space did it.
 - ⬜ Compute-shader near-field 3D blade instancing (~0–15m) for tactile/interactive detail.
+  Now also the agreed answer to **crouch/prone quality**, which is the raymarch's
+  structurally weakest case. Visual only — the march stays authoritative for concealment so
+  the gameplay field does not fork. Separate PR.
 - ⬜ Distance crossfade between the two.
 - ⚠️ **Data note — corrected.** An earlier version of this doc said to substitute the bundled
   `ct1_dm`/`ct2_dm` strips for the missing `dfdg1_dm`. **Do not.** Strip tile *indices* are

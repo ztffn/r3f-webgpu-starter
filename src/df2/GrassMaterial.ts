@@ -162,6 +162,11 @@ export interface GrassMaterialOptions {
    * adjacent pixels diverge by ~0.1 mm, so no column width can separate them and
    * the screen resolves to one flat colour. Beginning the march a little way out
    * puts hits where columns actually subtend a few pixels.
+   *
+   * A REQUEST, not a hard floor — capped at the midpoint of the ray's slab crossing
+   * where the two would conflict. Applied flat it starts the march past the ground
+   * the ray is heading for, which blanks the near field prone; see the entry rule
+   * below and docs/08 §8 invariant 6.
    */
   nearClip?: number;
   /** Distance (m) at which columns start fading into the colormap. */
@@ -497,8 +502,36 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     // makes lying in grass blinding is not a special case any more; it falls out,
     // because a floor fragment a metre away has its entry clamped to nearClip.
     const fragDist = frag.distance(cameraPosition) as NodeArg;
+    // The near clip is a floor on where the march STARTS, and it may never be
+    // allowed to start past the ground the ray is heading for.
+    //
+    // A FOURTH INSTANCE OF THE INVARIANT 6 FAMILY (docs/08 §8), found the way that
+    // section says to look for them: the hit mask, prone, with the canopy forced on.
+    // A floor fragment's own ground point is `fragDist` away, so the ray is inside
+    // the grass slab over `[fragDist - span, fragDist]` and nowhere else. Clamping
+    // the start up to a flat 1.2 m puts the WHOLE searched interval underground
+    // whenever the ground is nearer than that — the first sample tests below-terrain
+    // and breaks, so the fragment misses no matter what grass is standing there.
+    //
+    // Prone at 0.35 m AGL that is not an edge case, it is most of the lower screen:
+    // every ray steeper than about 16 degrees crosses the ground inside 1.2 m. It
+    // measured as a solid bare band across the near field that survived
+    // `?canopyall=1` unchanged, while standing at 1.7 m showed none of it.
+    //
+    // Fairness-inverted, which is why it outranks frame time: prone in grass you
+    // could see bare ground where the concealment field says a target is hidden —
+    // the exact opposite of "concealed means blind" (docs/08 §11), and again reached
+    // by going prone, which is again the strongest position.
+    //
+    // So cap the clip at the MIDPOINT of the slab crossing. Half the interval is
+    // always left to search, the clip still does its real job at any normal range
+    // (a fragment 3 m out keeps the full 1.2 m), and it degrades smoothly into the
+    // near field instead of switching the march off. `slabEntry` is floored at zero
+    // so a ray that entered the slab behind the eye starts at the eye, not before it.
+    const slabEntry = fragDist.sub(span).max(float(0)) as NodeArg;
+    const clipCap = slabEntry.add(fragDist).mul(0.5) as NodeArg;
     const sEnter = (
-      isFloor ? fragDist.sub(span).max(uNearClip) : fragDist
+      isFloor ? slabEntry.max(uNearClip.min(clipCap)) : fragDist
     ) as NodeArg;
 
     // --- and the floor yields to the ceiling, PER PIXEL ------------------------

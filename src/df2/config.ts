@@ -120,6 +120,12 @@ export const GRASS_CELL = 0.03;
 // canopy. Also the rig-measured value; the app previously passed nothing and
 // silently took the material's own 0.45 default, which the material's own
 // documentation says is too close to separate adjacent columns.
+//
+// This is a REQUEST, not a hard floor. The shader caps it at the midpoint of the
+// ray's slab crossing, because a flat floor here starts the march past the ground
+// the ray is heading for and blanks the near field prone — docs/08 §8 invariant 6.
+// Raising it past about 2 m therefore stops buying anything in the near field; it
+// only moves the point at which the cap takes over.
 export const GRASS_NEAR_CLIP = 1.2;
 // Bisections inside the coarse bracket. Each halves the residual error, so four
 // takes a 4 m bracket to 0.25 m and a steep ray's 0.18 m bracket to 11 mm.

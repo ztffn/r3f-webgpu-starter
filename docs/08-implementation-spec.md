@@ -392,13 +392,29 @@ Nothing throws when these break. Check them after touching `config.ts`.
    queried analytically against the field (`04` §2), so a target prone in distant grass counts
    as concealed no matter what the screen draws. Any rendering limit that silently drops distant
    grass therefore hands the player who triggers it free vision of concealed targets — and the
-   cheapest way to trigger it is to go prone, which is also the strongest position. Two limits
+   cheapest way to trigger it is to go prone, which is also the strongest position. Three limits
    have already done exactly this:
    - `sEnter = inside ? nearClip : fragDistance` with `hitS <= sEnter + span` and
      `span <= GRASS_MAX_SPAN` put a hard 49 m ceiling on every hit on screen the moment the eye
      entered the canopy. Fixed by computing the entry per fragment and searching a near interval
      then a far one (`07` §9).
    - The lifted shell had no floor, so nothing below the horizon was marched at all (`07` §9).
+   - **`GRASS_NEAR_CLIP` as a flat floor on the march start.** A floor-proxy fragment's own
+     ground point is `fragDist` away, so its ray is inside the slab over
+     `[fragDist - span, fragDist]` and nowhere else. Clamping the start up to a flat 1.2 m put
+     the WHOLE interval underground whenever the ground was nearer than that: the first sample
+     tested below-terrain and broke, so the fragment missed regardless of the grass standing
+     there. Prone at 0.35 m AGL every ray steeper than ~16 degrees crosses the ground inside
+     1.2 m, so this was a solid bare band across the near field — fairness-INVERTED, since prone
+     in grass you could see bare ground where the field counts a target concealed, the exact
+     opposite of "concealed means blind" (§11). Fixed by capping the clip at the midpoint of the
+     slab crossing, so half the interval is always searched and the clip still applies in full at
+     any normal range.
+
+     Found exactly the way this section prescribes, and worth noting as method: the hit mask
+     prone, with `?canopyall=1` forcing the canopy on. The band survived full canopy unchanged,
+     which is what separated "the march is broken here" from "no grass grows here" — on Green
+     Mile's patchy stand-in canopy those two look identical in a normal render.
 
    **`GRASS_FADE_END` is the remaining one and it is a live design question, not a bug.** Beyond
    it no shell is drawn, so a target prone in grass at 1200 m stands on bare colormap while the

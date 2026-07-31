@@ -126,7 +126,17 @@ export const GRASS_NEAR_CLIP = 1.2;
 export const GRASS_REFINE_STEPS = 4;
 // Longest span a single ray will search, metres. Only near-horizontal rays reach
 // it; everything else is bounded by canopy height over the ray's vertical rate.
-export const GRASS_MAX_SPAN = 48;
+// Lowered 48 -> 28 from a visual sweep: span/steps is the step size for grazing rays, so
+// this governs the horizontal layering, and 25-32 was where the crest artifact was least
+// objectionable. Free in frame time — 8.3 ms at 24 and at 48, the vsync cap either way.
+//
+// The trade is REACH, and it touches a fairness invariant rather than just looks. Span is
+// canopy height over the ray's vertical rate, so a ray at vy = 0.02 needs ~60 m to cross a
+// 1.2 m canopy; at 28 anything shallower than about vy = 0.043 gives up before crossing
+// and renders no grass. Watch for bald patches along near-horizontal sightlines — that is
+// the renderer concealing LESS than grassHeightField says (docs/08 §8 invariant 6).
+// ?maxspan= overrides it; the debug panel has it as a live slider.
+export const GRASS_MAX_SPAN = 28;
 // Width of one tone stripe in pixels, used when the tone is keyed on ray bearing
 // rather than on the world cell. Live-switchable in the ?debug=1 panel.
 export const GRASS_STRIPE_PIXELS = 3;

@@ -231,7 +231,10 @@ export function DF2Scene({
       mapSize: world.size,
       heightScale: world.heightfield.heightScale,
       grassScale: GRASS_SCALE,
-      steps: GRASS_STEPS,
+      // ?steps= raises the compiled CEILING as well as the running value, so asking for
+      // more samples than the shipped ceiling just works instead of being silently
+      // clamped to it.
+      steps: Math.max(GRASS_STEPS, BENCH.steps ?? 0),
       stepsRun: BENCH.steps ?? GRASS_STEPS_RUN,
       cellSize: GRASS_CELL,
       nearClip: GRASS_NEAR_CLIP,

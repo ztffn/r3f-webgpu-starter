@@ -54,11 +54,11 @@ const DIALS: Dial[] = [
     key: "steps",
     label: "March steps",
     min: 1,
-    max: 32,
+    max: 64,
     step: 1,
     // Capped by the COMPILED count — ?steps=N at load sets the ceiling, and this cannot
     // go above it. Load with ?steps=32 to sweep the whole range.
-    hint: "coarse samples/fragment. Sets frame time. Ceiling = ?steps= at load",
+    hint: "coarse samples/fragment. Fewer = more horizontal layering. Ceiling = ?steps=",
   },
   { key: "tone", label: "Tone variation", min: 0, max: 1.5, step: 0.01, hint: "0 disables it" },
   {

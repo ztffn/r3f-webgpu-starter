@@ -328,7 +328,11 @@ export function WeaponPrototype({
       event.stopImmediatePropagation();
     };
     const togglePointer = (event: PointerEvent) => {
-      if (event.button === 0) player.pressTrigger();
+      // The browser requires a user gesture before pointer lock. Do not also
+      // turn that first capture click into an accidental shot.
+      if (event.button === 0 && document.pointerLockElement === gl.domElement) {
+        player.pressTrigger();
+      }
       if (event.button === 2) {
         event.preventDefault();
         player.toggleAds();

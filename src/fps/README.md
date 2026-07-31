@@ -77,9 +77,11 @@ request. It is never applied to gameplay aim by the rig.
 
 ## Current playable slice
 
-`?scene=scope` mounts one primary semi-auto sniper. Left click fires, right
-click toggles ADS, Shift holds breath while ADS is active, R reloads, and T
-resets targets. The numbered keys remain direct authored-animation inspection.
+`?scene=scope` mounts one primary semi-auto sniper. Click the canvas once to
+capture the pointer; mouse movement then aims without holding a button, Escape
+releases it, left click fires, and right click toggles ADS. Shift holds breath
+while ADS is active, R reloads, and T resets targets. The numbered keys remain
+direct authored-animation inspection.
 
 Add `&shotdebug=1` to draw the latest resolved shot in world space. The cyan
 line is the shot path, the white segment is initial authoritative aim, and red
@@ -89,7 +91,8 @@ Press L to clear the current debug trace.
 This slice remains hitscan. Rapier is reserved for world/player physics. Future
 rifle drop, wind, and drag will be integrated by a fixed-step solver using swept
 `WorldQuery` segments and emitting the same `ShotTrace`/`TargetHitReport`
-contracts.
+contracts. Until then the trajectory is correctly straight, with zero flight
+time, drop, and drift; the debug view never invents cosmetic curvature.
 
 Out of scope here: projectiles, spread, decals, physics movement, stamina,
 attachments, networking, bot presentation, and the 32/64-character browser

@@ -364,6 +364,7 @@ export function DF2Scene({
           heightfield={heightfield}
           grounded={grounded}
           stance={stance}
+          pointerLock={scopeDemo}
           onState={onFly}
           onToggleGround={onToggleGround}
           onStance={onStance}

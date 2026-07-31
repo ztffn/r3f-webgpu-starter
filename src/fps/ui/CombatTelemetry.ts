@@ -1,4 +1,5 @@
 import type { HitscanResult } from "../combat/HitscanResolver";
+import type { ShotTraceMode } from "../combat/ShotTrace";
 import type { WeaponSnapshot } from "../weapons/WeaponSystem";
 
 export type CombatRangeKind = "terrain" | "target" | "world";
@@ -11,6 +12,7 @@ export interface CombatRangeSample {
 export interface ShotTelemetry {
   readonly sequence: number;
   readonly sourceId: string;
+  readonly mode: ShotTraceMode;
   readonly hit: boolean;
   readonly kind: CombatRangeKind | null;
   readonly targetId: string | null;
@@ -85,6 +87,7 @@ export class CombatTelemetry {
     const lastShot: ShotTelemetry = {
       sequence: result.shot.sequence,
       sourceId: result.shot.sourceId,
+      mode: result.trace.mode,
       hit: result.hit !== null,
       kind: result.hit?.kind ?? null,
       targetId: report?.targetId ?? null,

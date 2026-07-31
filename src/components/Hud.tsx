@@ -24,6 +24,7 @@ export interface HudProps {
   setGrass: (v: boolean) => void;
   wireframe: boolean;
   setWireframe: (v: boolean) => void;
+  fpsMode?: boolean;
 }
 
 const fmt = (n: number, d = 0) =>
@@ -42,6 +43,7 @@ export function Hud({
   setGrass,
   wireframe,
   setWireframe,
+  fpsMode = false,
 }: HudProps) {
   const combat = useSyncExternalStore(
     combatTelemetry.subscribe,
@@ -71,7 +73,7 @@ export function Hud({
       )}
       {combat.recentShots.length > 0 && (
         <section className="panel" id="combat-log">
-          <span className="eyebrow">Recent shots</span>
+          <span className="eyebrow">Recent shots · {combat.lastShot?.mode}</span>
           <ol className="shot-log">
             {combat.recentShots.map((shot) => {
               const subject = shot.targetId ?? shot.kind ?? "miss";
@@ -225,8 +227,8 @@ export function Hud({
       <section className="panel" id="legend">
         <span className="eyebrow">Controls</span>
         <dl className="rows">
-          <dt>Drag</dt>
-          <dd>look</dd>
+          <dt>{fpsMode ? "Mouse" : "Drag"}</dt>
+          <dd>{fpsMode ? "click once, then look" : "look"}</dd>
           <dt>W A S D</dt>
           <dd>move</dd>
           <dt>Q / E</dt>

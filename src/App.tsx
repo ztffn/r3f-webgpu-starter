@@ -81,6 +81,7 @@ export default function App() {
         setGrass={setGrass}
         wireframe={wireframe}
         setWireframe={setWireframe}
+        fpsMode={scopeDemo}
       />
 
       {BENCH.debug && !status.loading && <GrassDebug uniforms={grassUniforms} />}

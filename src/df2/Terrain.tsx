@@ -44,6 +44,8 @@ const BUILD_MS = 6;
 interface Slot {
   mesh: THREE.Mesh;
   grass: THREE.Mesh | null;
+  /** Floor proxy for the grass volume; only drawn while the eye is in the canopy. */
+  grassFloor: THREE.Mesh | null;
   /** Absolute chunk indices currently displayed (can be negative / unbounded). */
   cx: number;
   cz: number;
@@ -65,10 +67,23 @@ export interface TerrainProps {
    * rebuilds the whole geometry cache, because the slot list depends on it.
    */
   grassMaterial?: THREE.Material | null;
+  /**
+   * Floor proxy for the grass volume — the same march against the un-lifted
+   * terrain surface. Drawn only while the eye is inside the canopy, because the
+   * lifted shell is a ceiling that downward rays never cross (see GrassMaterial's
+   * `floorPositionNode`). Must be as stable as `grassMaterial`.
+   */
+  grassFloorMaterial?: THREE.Material | null;
   /** Draw the grass shell at all. Free to toggle; affects visibility only. */
   grassEnabled?: boolean;
   /** Distance (m) beyond which the grass shell is not drawn, at the base FOV. */
   grassDistance?: number;
+  /**
+   * Live tallest-canopy height, metres. Read every frame rather than passed as a
+   * value because the debug panel writes the canopy uniform directly without a
+   * React render — the floor pass has to switch on the height actually in effect.
+   */
+  grassCanopyMax?: () => number;
   wireframe?: boolean;
 }
 
@@ -76,8 +91,10 @@ export function Terrain({
   heightfield,
   material,
   grassMaterial = null,
+  grassFloorMaterial = null,
   grassEnabled = true,
   grassDistance = 1100,
+  grassCanopyMax,
   wireframe = false,
 }: TerrainProps) {
   const { camera } = useThree();
@@ -155,7 +172,18 @@ export function Terrain({
         grass.visible = false;
         group.add(grass);
       }
-      return { mesh, grass, cx: NaN, cz: NaN, lod: -1, grassLod: -1, dx, dz };
+
+      // Shares the ceiling's geometry — same chunk, same LOD 0, same cache entry.
+      // Only the material differs, and only in whether the vertex is lifted.
+      let grassFloor: THREE.Mesh | null = null;
+      if (grassMaterial && grassFloorMaterial) {
+        grassFloor = new THREE.Mesh(undefined, grassFloorMaterial);
+        grassFloor.frustumCulled = true;
+        grassFloor.renderOrder = 1;
+        grassFloor.visible = false;
+        group.add(grassFloor);
+      }
+      return { mesh, grass, grassFloor, cx: NaN, cz: NaN, lod: -1, grassLod: -1, dx, dz };
     });
 
     return {
@@ -167,7 +195,7 @@ export function Terrain({
       lodDistances,
       cache,
     };
-  }, [heightfield, material, grassMaterial]);
+  }, [heightfield, material, grassMaterial, grassFloorMaterial]);
 
   useEffect(() => {
     (material as THREE.MeshStandardMaterial).wireframe = wireframe;
@@ -200,6 +228,14 @@ export function Terrain({
     const p11 = (camera as THREE.PerspectiveCamera).projectionMatrix.elements[5];
     const grassCull = grassDistance * Math.max(1, p11 / REFERENCE_P11);
 
+    // Height of the grass volume's ceiling, for the floor tests below.
+    const canopyMax = grassCanopyMax ? grassCanopyMax() * 1.04 : 0;
+    // Is the eye inside the grass volume where it stands? Conservative — uses the
+    // tallest canopy on the map rather than the local one, because the canopy field
+    // lives in a texture and this side only has the terrain heightfield. Erring
+    // towards drawing costs frame time; erring the other way leaves a hole.
+    const insideCanopy = canopyMax > 0 && p.y < heightfield.sample(p.x, p.z) + canopyMax;
+
     // Chunk the camera currently occupies, in absolute (unwrapped) indices.
     const camCx = Math.floor((p.x + half) / chunkSize);
     const camCz = Math.floor((p.z + half) / chunkSize);
@@ -227,6 +263,7 @@ export function Terrain({
       if (slot.cx !== cx || slot.cz !== cz) {
         slot.mesh.position.set(ox, 0, oz);
         slot.grass?.position.set(ox, 0, oz);
+        slot.grassFloor?.position.set(ox, 0, oz);
         slot.cx = cx;
         slot.cz = cz;
         slot.lod = -1; // force geometry refresh for the new location
@@ -269,6 +306,42 @@ export function Terrain({
           }
         }
         slot.grass.visible = want && slot.grassLod === 0;
+
+        // The floor rides on the ceiling's geometry and its readiness — same chunk,
+        // same LOD 0 cache entry — so it needs no build budget of its own.
+        //
+        // WHERE the floor is needed. The ceiling proxy fails a pixel only when the ray
+        // reaches the ground without ever crossing the canopy top — which happens
+        // exactly where the terrain plus its canopy stands ABOVE the eye. Look
+        // downhill or across a valley and the ray descends through the canopy top on
+        // the way in, so the ceiling covers it and the floor is pure overdraw.
+        //
+        // Two conditions, both measured, and both needed:
+        //
+        //   insideCanopy   — the eye is in the grass. Without this the floor is drawn
+        //                    while standing for every chunk that has a peak above eye
+        //                    level, which measured 29.0 ms against 16.0 ms at the
+        //                    docs/09 §1 vantage. Nearly doubling the standing frame is
+        //                    not worth it for a case that has not been shown to fail.
+        //   chunk max > eye — drops the downhill half of the world when prone. Worth
+        //                    31.5 ms against 37.5 ms on its own.
+        //
+        // KNOWN GAP, unverified: standing and looking at an uphill slope that rises
+        // above eye level, the ray can reach ground without crossing the canopy top, so
+        // the ceiling has no fragment and `insideCanopy` suppresses the floor. Whether
+        // that actually shows as missing grass has NOT been tested — check the hit mask
+        // on a steep uphill before assuming either way, and read docs/08 §8 invariant 6
+        // first, because missing grass is a fairness bug and not a cosmetic one.
+        //
+        // The real answer is to stop needing a second pass at all: extend the ceiling
+        // proxy downward at its silhouette so it is a closed surface, and every ray has
+        // an entry fragment from any viewpoint. That is one march, no gate, no cases.
+        if (slot.grassFloor) {
+          const top = slot.grass.geometry.boundingBox?.max.y;
+          const chunkAboveEye = top === undefined || top + canopyMax > p.y;
+          slot.grassFloor.geometry = slot.grass.geometry;
+          slot.grassFloor.visible = slot.grass.visible && insideCanopy && chunkAboveEye;
+        }
       }
     }
   });

@@ -130,5 +130,9 @@ export function buildChunkGeometry({
   geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
   geometry.setIndex(indices);
   geometry.computeBoundingSphere();
+  // The box is load-bearing, not just for culling: Terrain.tsx compares this chunk's
+  // maximum elevation against the eye to decide whether the grass volume needs its
+  // floor proxy here. y is absolute (chunks are offset in x/z only).
+  geometry.computeBoundingBox();
   return geometry;
 }

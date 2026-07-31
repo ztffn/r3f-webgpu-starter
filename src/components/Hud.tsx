@@ -5,9 +5,11 @@
 // the content is survey/telemetry readouts, and tabular numerals so digits stop
 // jittering as they update.
 
+import { useEffect, useState } from "react";
 import type { LoadedTerrain } from "../df2/loadTerrain";
 import type { PerfSample } from "../df2/PerfMonitor";
 import type { FlyState, Stance } from "../df2/FlyControls";
+import { RANGE_EVENT, type RangeSample } from "../fps/rangeTelemetry";
 
 export interface HudProps {
   loading: boolean;
@@ -41,6 +43,14 @@ export function Hud({
   wireframe,
   setWireframe,
 }: HudProps) {
+  const [scopeRange, setScopeRange] = useState<RangeSample | null>(null);
+
+  useEffect(() => {
+    const receiveRange = (event: Event) => setScopeRange((event as CustomEvent<RangeSample | null>).detail);
+    addEventListener(RANGE_EVENT, receiveRange);
+    return () => removeEventListener(RANGE_EVENT, receiveRange);
+  }, []);
+
   if (loading) {
     return (
       <div className="boot">
@@ -104,6 +114,10 @@ export function Hud({
           <dd>{fly ? fmt(fly.position.y) : "—"} m</dd>
           <dt>AGL</dt>
           <dd>{fly ? fmt(Math.max(0, fly.agl), 1) : "—"} m</dd>
+          <dt>Scope</dt>
+          <dd>{scopeRange ? fmt(scopeRange.metres, 1) : "—"} m</dd>
+          <dt>Hit</dt>
+          <dd>{scopeRange ? scopeRange.kind : "—"}</dd>
         </dl>
         {perf && (
           <div className="perf">
@@ -185,6 +199,10 @@ export function Hud({
           <dd>foot / fly</dd>
           <dt>X C Z</dt>
           <dd>stand / crouch / prone</dd>
+          <dt>Right click / R</dt>
+          <dd>scope aim (scope demo)</dd>
+          <dt>1–8</dt>
+          <dd>play weapon action</dd>
         </dl>
       </section>
     </div>

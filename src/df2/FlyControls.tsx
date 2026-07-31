@@ -89,6 +89,8 @@ export function FlyControls({
     const blur = () => rig.keys.clear();
 
     const pdown = (e: PointerEvent) => {
+      // ScopeRig owns right click for ADS. It must not also start a look-drag.
+      if (e.button !== 0) return;
       rig.dragging = true;
       rig.lastX = e.clientX;
       rig.lastY = e.clientY;

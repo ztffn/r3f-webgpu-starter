@@ -70,8 +70,21 @@ export interface GrassMaterialOptions {
    * pass (99.8 ms against 12.57 ms for the same sample count). See grassJitter.ts.
    */
   jitterMap: THREE.Texture;
-  /** Terrain elevation, same grid as the canopy field. */
+  /**
+   * Terrain elevation, mip chain point-decimated to the terrain MESH's LOD lattice
+   * (heightTexture.ts). The march picks its level with `chunkSize`/`lodDistances`.
+   */
   heightMap: THREE.Texture;
+  /** Chunk width in metres — the unit LOD switch distances are expressed in. */
+  chunkSize: number;
+  /**
+   * LOD switch distances in METRES, in the order Terrain.tsx applies them.
+   *
+   * Both sides derive these from `LOD_DISTANCE_CHUNKS`; that shared origin is what
+   * stops the mesh and the march landing on different surfaces. The CPU's trailing
+   * Infinity is ignored here — it only exists to catch everything beyond the last.
+   */
+  lodDistances: number[];
   /** Colormap — the source of each column's colour. */
   colorMap: THREE.Texture;
   /** Metres spanned by one tile of the maps. */
@@ -253,6 +266,8 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     grassMap,
     jitterMap,
     heightMap,
+    chunkSize,
+    lodDistances,
     colorMap,
     worldSize,
     grassScale,
@@ -320,11 +335,59 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
   // World xz -> tile uv. Maps repeat, so values outside [0,1] are fine.
   const toUv = (xz: NodeArg): NodeArg => xz.add(uHalfWorld).div(uWorldSize);
 
+  const uChunkSize = uniform(chunkSize);
+  // Finite switch distances only; the CPU's trailing Infinity catches the rest.
+  const lodEdges = lodDistances.filter((d) => Number.isFinite(d));
+
+  /**
+   * Which mip level the terrain MESH is drawing at this world position.
+   *
+   * Reproduces Terrain.tsx's rule exactly: LOD is chosen per CHUNK, from the
+   * horizontal distance between the camera and that chunk's CENTRE, against the same
+   * thresholds. Per chunk rather than per sample is the point — using the sample's own
+   * radial distance would be cheaper and smoother, but it would disagree with the mesh
+   * on both sides of every chunk boundary, which is the exact defect being fixed.
+   *
+   * `LOD_SEGMENTS` halves per level, so mesh LOD k lands on every 2^k-th grid sample
+   * and mip level k IS LOD k. Break that pairing and this mapping fails silently, with
+   * grass sinking into hillsides again.
+   */
+  const meshMipAt = (xz: NodeArg): NodeArg => {
+    const chunk = xz.add(uHalfWorld).div(uChunkSize).floor();
+    const centre = chunk.add(0.5).mul(uChunkSize).sub(uHalfWorld);
+    const d = centre.distance(vec2(cameraPosition.x, cameraPosition.z));
+    // Count thresholds passed. `x.step(edge)` is step(edge, x) — one of the argument
+    // reorderings catalogued in docs/08 §11.
+    let lod: NodeArg = float(0);
+    for (const edge of lodEdges) lod = lod.add(d.step(float(edge)));
+    return lod;
+  };
+
   // The height texture carries METRES directly (half-float), already reconstructed to
-  // remove 8-bit terracing, so there is nothing to scale. It used to be raw bytes scaled
-  // by heightScale*255; that path marched a quantised surface the terrain mesh no longer
-  // drew, which floats the grass.
-  const groundAt = (xz: NodeArg): NodeArg => texture(heightMap, toUv(xz)).r;
+  // remove 8-bit terracing, so there is nothing to scale.
+  //
+  // SAMPLED AT THE MESH'S OWN LOD, not at full resolution. Reading the full-resolution
+  // field made the march write hit depths on a surface the mesh was not drawing: at
+  // 16 m vertex spacing the mesh's facets sit of order a metre off it, more than the
+  // canopy is tall, so terrain won the depth test and swallowed whole hillsides of
+  // grass. Matching the mesh is what makes the two agree; see heightTexture.ts for why
+  // this cannot instead be fixed by drawing more vertices.
+  //
+  // EXPLICIT level, never derivative-selected. The uv comes from a raymarch hit, so
+  // neighbouring pixels can land metres apart and implicit derivatives would pick a mip
+  // near the top of the pyramid — the same trap that produced the pale-wash artifact.
+  //
+  // The level is passed in, computed ONCE PER FRAGMENT rather than per sample. Evaluated
+  // inside the march it cost 21.9 ms against 10 ms: the march evaluates ground at every
+  // one of `steps + refineSteps` samples, so a dozen extra ALU ops there is a dozen times
+  // over, and lanes landing on different levels break texture cache coherence too.
+  //
+  // The approximation that buys it back: a ray uses its ENTRY chunk's level for the whole
+  // traversal, so a ray crossing a chunk boundary mid-slab is off by one level on the far
+  // side. That is a fraction of the canopy height, against the metre-scale error this
+  // whole change exists to remove.
+  const groundAt = (xz: NodeArg, mip: NodeArg): NodeArg =>
+    texture(heightMap, toUv(xz)).level(mip).r;
 
   /**
    * Smooth canopy envelope: WHERE grass grows and roughly how tall.
@@ -441,6 +504,10 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
   const makeGrassShade = (isFloor: boolean) => Fn(() => {
     const frag = positionWorld;
     const V = frag.sub(cameraPosition).normalize();
+
+    // The mesh LOD this fragment's chunk is drawn at — evaluated ONCE and reused for
+    // every ground lookup in the march. See the note beside `groundAt`.
+    const fragMip = meshMipAt(vec2(frag.x, frag.z)).toVar();
 
     // --- bracket, then bisect -------------------------------------------------
     // Everything is measured as distance from the EYE along V, so there is one
@@ -635,7 +702,7 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     const columnTopAt = (P: NodeArg) => {
       const cell = vec2(P.x, P.z).div(cellW).floor();
       const centre = cell.add(0.5).mul(cellW);
-      const ground = groundAt(centre);
+      const ground = groundAt(centre, fragMip);
       const j = jitterAt(centre);
       return {
         cell,

@@ -18,6 +18,7 @@ import { createTerrainMaterial } from "./TerrainMaterial";
 import { createGrassMaterial, type GrassUniforms } from "./GrassMaterial";
 import { bakeSyntheticMaps } from "./syntheticMaps";
 import { bakeGrassJitter } from "./grassJitter";
+import { buildHeightTexture } from "./heightTexture";
 import { loadTerrain, type LoadedTerrain } from "./loadTerrain";
 import { WeaponPrototype } from "../fps/WeaponPrototype";
 // Lazily imported so the three multi-megabyte debug models are code-split out of the
@@ -30,6 +31,8 @@ import {
   TERRAIN_SLUG,
   HEIGHT_SCALE,
   METERS_PER_TEXEL,
+  CHUNK_COUNT,
+  LOD_DISTANCE_CHUNKS,
   GRASS_SCALE,
   GRASS_STEPS,
   GRASS_STEPS_RUN,
@@ -185,35 +188,10 @@ export function DF2Scene({
   // --- columnar grass (docs/07) ---------------------------------------------
   const grassKit = useMemo(() => {
     if (!world?.grassMap || !world.colorMap) return null;
-    // Elevation as a texture for the fragment march. Built from the same raw
-    // samples as the CPU heightfield, so shader and gameplay agree exactly.
-    // HALF-FLOAT, carrying METRES, and built from the heightfield's own grid — not from
-    // the raw bytes.
-    //
-    // The grid has been reconstructed to remove 8-bit terracing (Heightfield.
-    // smoothTerracing), so uploading the raw bytes here would leave the grass marching a
-    // quantised surface while the terrain mesh drew a smoothed one. They would disagree
-    // by up to half a metre and grass would float or sink — docs/08 §8 invariant 3.
-    //
-    // Half rather than float32: WebGPU does not guarantee float32 textures are
-    // filterable, and this needs LINEAR. Half gives ~0.1 m precision over this map's
-    // 169 m of relief, which is well under the 1 m step being removed.
-    const heightData = new Uint16Array(world.heightfield.grid.length);
-    for (let i = 0; i < heightData.length; i++) {
-      heightData[i] = THREE.DataUtils.toHalfFloat(world.heightfield.grid[i]);
-    }
-    const heightTex = new THREE.DataTexture(
-      heightData,
-      world.heightfield.period,
-      world.heightfield.period,
-      THREE.RedFormat,
-      THREE.HalfFloatType
-    );
-    heightTex.magFilter = THREE.LinearFilter;
-    heightTex.minFilter = THREE.LinearFilter;
-    heightTex.wrapS = THREE.RepeatWrapping;
-    heightTex.wrapT = THREE.RepeatWrapping;
-    heightTex.needsUpdate = true;
+    // Elevation for the fragment march, carrying a mip chain decimated to the terrain
+    // mesh's own LOD lattice so the two reconstruct the same surface — see
+    // heightTexture.ts for why that matters and what it cost to get wrong.
+    const heightTex = buildHeightTexture(world.heightfield);
 
     // Baked once per terrain and shared by every chunk. See grassJitter.ts for why
     // this is a texture rather than a hash evaluated in the march.
@@ -226,6 +204,13 @@ export function DF2Scene({
       grassMap: world.grassMap,
       jitterMap: jitter,
       heightMap: heightTex,
+      // The march selects its mip with the SAME rule Terrain.tsx picks chunk LOD with,
+      // from the same constants. Passing them rather than re-deriving them is what keeps
+      // the mesh and the march on one surface.
+      chunkSize: world.heightfield.worldSize / CHUNK_COUNT,
+      lodDistances: LOD_DISTANCE_CHUNKS.map(
+        (c) => c * (world.heightfield.worldSize / CHUNK_COUNT)
+      ),
       colorMap: world.colorMap,
       worldSize: world.heightfield.worldSize,
       grassScale: GRASS_SCALE,

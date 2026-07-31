@@ -220,10 +220,15 @@ and immediately answers "does this feel like DF2?".
   standing reads 525 px. That is a rendered-pixel measurement, not the analytic query this
   phase specifies — the query API itself does not exist yet.
 
-### Phase 4 — Integration (⬜ not started)
-- ⬜ First-person controller, physics (rapier or cannon-es), basic AI/objectives.
+### Phase 4 — Integration (🟡 local FPS slice started)
+- 🟡 Local-first controller/weapon/loadout/hitscan contracts and resettable test targets
+  are built. Structured shot reporting and trajectory diagnostics are the next validation
+  slice before projectile ballistics.
+- ⬜ First-person collision and stance motor using Rapier; basic AI/objectives.
   *(What exists today is a camera rig only — `FlyControls.tsx` clamps to the surface at a
   stance eye height. No physics, no collision.)*
+- ⬜ Fixed-step rifle ballistics (gravity, wind and drag) using swept world-query segments;
+  do not model fast rounds as Rapier dynamic rigid bodies.
 - ⬜ ECS (bitECS) as entity count grows (`05-...md` §3).
 
 ### Phase 5 — Polish (⬜ not started)

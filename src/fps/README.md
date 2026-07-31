@@ -13,7 +13,8 @@ DOM input
   -> accepted shot event
   -> HitscanResolver
   -> WorldQuery
-  -> Damageable + CombatTelemetry
+  -> Damageable + TargetHitReport + ShotTrace
+  -> CombatTelemetry + shot debug presentation
   -> weapon presentation / target presentation / HUD
 ```
 
@@ -24,6 +25,11 @@ the weapon mesh, optic, or character bones.
 `ThreeWorldQuery` raycasts only explicitly registered roots. Terrain is an
 optional registration, so targets continue to work while the world renderer is
 being changed. The scope rangefinder and hitscan resolver share this query.
+
+Every accepted shot produces a `ShotTrace`. Damageable hits additionally produce
+a `TargetHitReport` containing target identity, world-space impact data, range,
+damage, and health before/after. Presentation reads these records and never
+repeats the gameplay query.
 
 ## Aim coordinate contract
 
@@ -74,6 +80,15 @@ request. It is never applied to gameplay aim by the rig.
 `?scene=scope` mounts one primary semi-auto sniper. Left click fires, right
 click toggles ADS, Shift holds breath while ADS is active, R reloads, and T
 resets targets. The numbered keys remain direct authored-animation inspection.
+
+Add `&shotdebug=1` to draw the latest resolved shot in world space. The cyan
+line is the shot path, the white segment is initial authoritative aim, and red
+marks the impact and surface normal. The HUD retains a short recent-shot log.
+
+This slice remains hitscan. Rapier is reserved for world/player physics. Future
+rifle drop, wind, and drag will be integrated by a fixed-step solver using swept
+`WorldQuery` segments and emitting the same `ShotTrace`/`TargetHitReport`
+contracts.
 
 Out of scope here: projectiles, spread, decals, physics movement, stamina,
 attachments, networking, bot presentation, and the 32/64-character browser

@@ -48,10 +48,12 @@
 - ⬜ **ECS**: a lightweight library (e.g. `bitECS`) to keep entity/component logic
   (player, AI, projectiles, vehicles) manageable as the project grows past the initial
   terrain/grass prototype. Not started — the project is still the prototype.
-- ⬜ **Physics**: `rapier` or `cannon-es` for player collision, prone/crouch stance
+- ⬜ **Physics**: **Rapier** for player collision, prone/crouch stance
   (feeds directly into the concealment system's stance-to-height mapping — see
-  `04-concealment-system-design.md` §4.2), and basic vehicle/projectile physics.
+  `04-concealment-system-design.md` §4.2), vehicles, rigid bodies, and scene queries.
   Not started; stance heights currently exist only as `STANCE_EYE` in the camera rig.
+  Fast rifle rounds will use a fixed-step ballistic solver with swept world-query
+  segments rather than one dynamic rigid body per bullet; see the shot-reporting design.
 - **First-person controller**: custom, built against the physics engine's character
   controller primitives. ⬜ Not started. What exists today is a camera rig only —
   `FlyControls.tsx`, free-fly plus an on-foot mode that clamps to the surface at a stance

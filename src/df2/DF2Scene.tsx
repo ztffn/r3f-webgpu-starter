@@ -239,7 +239,7 @@ export function DF2Scene({
       cellSize: GRASS_CELL,
       nearClip: GRASS_NEAR_CLIP,
       refineSteps: BENCH.refine ?? GRASS_REFINE_STEPS,
-      maxSpan: GRASS_MAX_SPAN,
+      maxSpan: BENCH.maxspan ?? GRASS_MAX_SPAN,
       stripePixels: GRASS_STRIPE_PIXELS,
       hashPeriod: GRASS_HASH_PERIOD,
       toneVariation: GRASS_TONE_VARIATION,

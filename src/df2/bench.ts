@@ -32,6 +32,8 @@ export interface BenchConfig {
   grassFloor?: boolean;
   /** Per-texel share of the baked height field. Baked, so reload to change. */
   strand?: number;
+  /** Longest span a ray searches, metres. Sets step size for grazing rays. */
+  maxspan?: number;
   /** Debug: grow full-height grass everywhere, ignoring the canopy field. */
   canopyAll?: boolean;
   /**
@@ -73,6 +75,7 @@ function parse(): BenchConfig {
     grass: q.get("grass") === null ? undefined : q.get("grass") !== "0",
     grassFloor: q.get("grassfloor") === null ? undefined : q.get("grassfloor") !== "0",
     strand: num("strand"),
+    maxspan: num("maxspan"),
     canopyAll: q.get("canopyall") === "1",
     targets: q.get("targets") === "1",
     stance:

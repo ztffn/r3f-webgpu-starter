@@ -221,9 +221,9 @@ and immediately answers "does this feel like DF2?".
   phase specifies — the query API itself does not exist yet.
 
 ### Phase 4 — Integration (🟡 local FPS slice started)
-- 🟡 Local-first controller/weapon/loadout/hitscan contracts and resettable test targets
-  are built. Structured shot reporting and trajectory diagnostics are the next validation
-  slice before projectile ballistics.
+- 🟡 Local-first controller/weapon/loadout/hitscan contracts, resettable test targets,
+  structured hit reports, and opt-in latest-shot trajectory diagnostics are built for
+  human validation before projectile ballistics.
 - ⬜ First-person collision and stance motor using Rapier; basic AI/objectives.
   *(What exists today is a camera rig only — `FlyControls.tsx` clamps to the surface at a
   stance eye height. No physics, no collision.)*

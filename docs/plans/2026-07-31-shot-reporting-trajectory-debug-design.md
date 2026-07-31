@@ -41,7 +41,7 @@ and misses remain distinguishable.
 
 The view consumes `ShotTrace`; it does not recompute a trajectory. This prevents
 the diagnostic from disagreeing with gameplay. The latest trace persists until
-the next accepted shot or an explicit clear.
+the next accepted shot or L explicitly clears it.
 
 ## Physics and later ballistics
 

@@ -167,6 +167,51 @@ canvas:active {
   font-size: 13px;
 }
 
+/* --- structured shot reports (bottom centre) --- */
+#combat-log {
+  left: 50%;
+  bottom: 14px;
+  width: min(430px, calc(100vw - 580px));
+  min-width: 330px;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+.shot-log {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-variant-numeric: tabular-nums;
+}
+.shot-log li {
+  display: grid;
+  grid-template-columns: 30px minmax(92px, 1fr) auto;
+  gap: 8px;
+  color: var(--ink-faint);
+}
+.shot-log strong,
+.shot-log em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.shot-log strong {
+  color: var(--ink-dim);
+  font-weight: 500;
+}
+.shot-log em {
+  font-style: normal;
+  text-align: right;
+}
+.shot-log li.hit em {
+  color: var(--accent);
+}
+.shot-log li.down em {
+  color: var(--warn);
+}
+
 /* --- controls (bottom left) --- */
 #ctl {
   bottom: 14px;
@@ -292,7 +337,8 @@ button:disabled {
     display: block;
   }
   #telem,
-  #legend {
+  #legend,
+  #combat-log {
     display: none;
   }
   #ident {

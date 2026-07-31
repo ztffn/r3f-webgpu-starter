@@ -84,6 +84,7 @@ resets targets. The numbered keys remain direct authored-animation inspection.
 Add `&shotdebug=1` to draw the latest resolved shot in world space. The cyan
 line is the shot path, the white segment is initial authoritative aim, and red
 marks the impact and surface normal. The HUD retains a short recent-shot log.
+Press L to clear the current debug trace.
 
 This slice remains hitscan. Rapier is reserved for world/player physics. Future
 rifle drop, wind, and drag will be integrated by a fixed-step solver using swept

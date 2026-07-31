@@ -10,17 +10,24 @@ export interface CombatRangeSample {
 
 export interface ShotTelemetry {
   readonly sequence: number;
+  readonly sourceId: string;
   readonly hit: boolean;
   readonly kind: CombatRangeKind | null;
+  readonly targetId: string | null;
+  readonly objectName: string | null;
   readonly damage: number;
+  readonly healthBefore: number | null;
+  readonly healthAfter: number | null;
   readonly destroyed: boolean;
   readonly metres: number | null;
+  readonly point: readonly [number, number, number] | null;
 }
 
 export interface CombatSnapshot {
   readonly weapon: WeaponSnapshot | null;
   readonly range: CombatRangeSample | null;
   readonly lastShot: ShotTelemetry | null;
+  readonly recentShots: readonly ShotTelemetry[];
   readonly dryFireSequence: number;
 }
 
@@ -30,6 +37,7 @@ const EMPTY: CombatSnapshot = {
   weapon: null,
   range: null,
   lastShot: null,
+  recentShots: [],
   dryFireSequence: 0,
 };
 
@@ -72,16 +80,26 @@ export class CombatTelemetry {
   }
 
   publishShot(result: HitscanResult): void {
+    const report = result.report;
+    const impact = result.trace.impact;
+    const lastShot: ShotTelemetry = {
+      sequence: result.shot.sequence,
+      sourceId: result.shot.sourceId,
+      hit: result.hit !== null,
+      kind: result.hit?.kind ?? null,
+      targetId: report?.targetId ?? null,
+      objectName: impact?.objectName || null,
+      damage: result.damageApplied,
+      healthBefore: report?.healthBefore ?? null,
+      healthAfter: report?.healthAfter ?? null,
+      destroyed: result.destroyed,
+      metres: result.hit?.distance ?? null,
+      point: impact ? [impact.point.x, impact.point.y, impact.point.z] : null,
+    };
     this.replace({
       ...this.snapshot,
-      lastShot: {
-        sequence: result.shot.sequence,
-        hit: result.hit !== null,
-        kind: result.hit?.kind ?? null,
-        damage: result.damageApplied,
-        destroyed: result.destroyed,
-        metres: result.hit?.distance ?? null,
-      },
+      lastShot,
+      recentShots: [lastShot, ...this.snapshot.recentShots].slice(0, 5),
     });
   }
 

@@ -17,6 +17,7 @@ import { LoadoutSystem } from "./weapons/LoadoutSystem";
 import { WeaponSystem, type WeaponEvent } from "./weapons/WeaponSystem";
 import { SNIPER_DEFINITION } from "./weapons/weaponDefinitions";
 import { combatTelemetry } from "./ui/CombatTelemetry";
+import { shotDebugStore } from "./debug/ShotDebugStore";
 
 const WORLD_LAYER = 0;
 const WEAPON_LAYER = 1;
@@ -257,6 +258,7 @@ export function WeaponPrototype({
           damage: event.damage,
         });
         combatTelemetry.publishShot(result);
+        shotDebugStore.publish(result.trace);
         recoilPitch.current += event.recoilPitch;
         recoilYaw.current += event.sequence % 2 === 0 ? -event.recoilYaw : event.recoilYaw;
         if (event.animationSegment !== undefined) playSegment(event.animationSegment);
@@ -278,6 +280,7 @@ export function WeaponPrototype({
     () => () => {
       publishRange(null);
       combatTelemetry.clear();
+      shotDebugStore.clear();
       unregisterTerrain.current?.();
       unregisterTerrain.current = null;
     },

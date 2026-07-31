@@ -69,6 +69,31 @@ export function Hud({
           {combat.lastShot.destroyed ? "TARGET DOWN" : "HIT"}
         </div>
       )}
+      {combat.recentShots.length > 0 && (
+        <section className="panel" id="combat-log">
+          <span className="eyebrow">Recent shots</span>
+          <ol className="shot-log">
+            {combat.recentShots.map((shot) => {
+              const subject = shot.targetId ?? shot.kind ?? "miss";
+              const detail = shot.targetId
+                ? `${shot.metres === null ? "—" : fmt(shot.metres, 1)} m · ${fmt(shot.damage)} dmg · ${
+                    shot.destroyed ? "down" : `${fmt(shot.healthAfter ?? 0)} hp`
+                  }`
+                : shot.hit
+                  ? `${shot.metres === null ? "—" : fmt(shot.metres, 1)} m`
+                  : "no impact";
+              const status = shot.destroyed ? "down" : shot.damage > 0 ? "hit" : undefined;
+              return (
+                <li key={shot.sequence} className={status}>
+                  <span>#{shot.sequence}</span>
+                  <strong title={shot.objectName ?? undefined}>{subject}</strong>
+                  <em>{detail}</em>
+                </li>
+              );
+            })}
+          </ol>
+        </section>
+      )}
       {/* Terrain identity */}
       <section className="panel" id="ident">
         <span className="eyebrow">Terrain</span>

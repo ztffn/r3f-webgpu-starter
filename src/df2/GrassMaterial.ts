@@ -50,6 +50,15 @@ import {
   struct,
 } from "three/tsl";
 
+/**
+ * Margin the shell is lifted above the smooth canopy envelope.
+ *
+ * Load-bearing in TWO places that must agree: the vertex lift here, and Terrain.tsx's
+ * test for whether the eye is inside the canopy (which decides if the floor proxy is
+ * drawn). Drifting them apart silently drops the floor pass where it is needed.
+ */
+export const CANOPY_MARGIN = 1.04;
+
 export interface GrassMaterialOptions {
   /** Per-texel canopy height, 0-255. LINEAR-filtered — this is the envelope. */
   grassMap: THREE.Texture;
@@ -67,21 +76,6 @@ export interface GrassMaterialOptions {
   colorMap: THREE.Texture;
   /** Metres spanned by one tile of the maps. */
   worldSize: number;
-  /**
-   * Samples per side of the maps (1024 for DF terrain).
-   *
-   * Unused by the shader since colour became a per-column lookup rather than a snap to
-   * the terrain texel — kept in the contract because callers pass it and it documents
-   * the map the other fields describe.
-   */
-  mapSize?: number;
-  /**
-   * Metres per raw elevation unit.
-   *
-   * Unused by the shader since `heightMap` began carrying metres directly; kept in the
-   * contract because it documents the map and callers already pass it.
-   */
-  heightScale?: number;
   /** Metres per raw canopy unit — how tall "255" grass stands. */
   grassScale: number;
   /**
@@ -170,10 +164,6 @@ export interface GrassMaterialOptions {
    * puts hits where columns actually subtend a few pixels.
    */
   nearClip?: number;
-  /** Debug: encode the ray distance of each grass hit as colour (red=near, blue=far). */
-  debugDistance?: boolean;
-  /** Debug: paint every grass hit flat magenta to inspect the hit mask. */
-  debugHit?: boolean;
   /** Distance (m) at which columns start fading into the colormap. */
   fadeStart?: number;
   fadeEnd?: number;
@@ -272,8 +262,6 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     fogFar = 2200,
     cellSize = 0.35,
     nearClip = 1.2,
-    debugHit = false,
-    debugDistance = false,
     toneVariation = 0.42,
     shadeBase = 0.78,
     canopyForce = false,
@@ -306,7 +294,7 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
   /** 0 = tone keyed on the world cell, 1 = keyed on ray bearing. */
   const uToneMode = uniform(toneMode);
   /** 0 = normal, 1 = hit mask, 2 = hit distance, 3 = height up the column. */
-  const uDebugMode = uniform(debugHit ? 1 : debugDistance ? 2 : 0);
+  const uDebugMode = uniform(0);
   const uGrassScale = uniform(grassScale * 255);
   // Tallest possible canopy: sets how far a ray must travel to cross the volume.
   const uCanopyMax = uniform(canopyMax);
@@ -410,7 +398,7 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
   const vtxWorld = modelWorldMatrix.mul(vec4(positionLocal, 1));
   const vtxCanopy = canopyBase(vec2(vtxWorld.x, vtxWorld.z));
   // Small margin: a column's height is canopyBase * jitter, jitter <= 1.
-  const positionNode = positionLocal.add(vec3(0, vtxCanopy.mul(1.04), 0));
+  const positionNode = positionLocal.add(vec3(0, vtxCanopy.mul(CANOPY_MARGIN), 0));
 
   // --- and the FLOOR of the same volume -------------------------------------
   // The lifted shell is a CEILING. Standing inside the canopy, a ray that leaves
@@ -645,26 +633,6 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     // march and not just the shading. `hit` stays 0 there and the alpha test drops the
     // fragment, leaving the ceiling's answer standing.
     const marchOnce = () => {
-      // --- world-anchored sample phase -------------------------------------
-      // The coarse samples sit at sEnter + k*ds, and sEnter is the distance from the
-      // CAMERA. So every sample plane slides along the ray as the camera moves. A thin
-      // column bracketed at sample k one frame is stepped over the next, and a different
-      // column is hit instead — the hit jumps by up to a full ds, and the grass appears
-      // to swim. At 96 coarse steps ds was ~0.5 m and this was invisible; at the designed
-      // 12 it is up to 4 m for a grazing ray, which is exactly the walking-toward-a-crest
-      // case where it was reported.
-      //
-      // Anchoring the phase to WORLD HEIGHT fixes it: pin the samples to fixed multiples
-      // of the per-step vertical drop, so they stay on the same world planes no matter
-      // where the camera stands. Four instructions.
-      //
-      //   dy = ds * vy                      vertical drop per coarse step
-      //   offset to the next plane, in metres of height, is fract(yEnter / dy) * dy
-      //   which along the ray is that over vy — so simply fract(yEnter / dy) * ds.
-      //
-      // This does not make the march finer, and it is not meant to: it makes it STABLE.
-      // Coarse-but-steady reads as slightly blocky grass; coarse-and-sliding reads as
-      // the whole field crawling, which is far more objectionable.
       // --- world-anchored sample phase -------------------------------------
       // The coarse samples sit at sEnter + k*ds, and sEnter is the distance from the
       // CAMERA. So every sample plane slides along the ray as the camera moves. A thin

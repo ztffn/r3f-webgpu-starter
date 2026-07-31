@@ -80,7 +80,7 @@ function disposeObject(root: THREE.Object3D) {
 
 // TSL's uniform node generic is erased when passed across a helper boundary.
 // Keep it loose here; the graph is validated by the WebGPU shader compilation.
-function createLensMaterial(target: THREE.RenderTarget, eyeOffset: any, reticleMap: THREE.Texture) {
+function createLensMaterial(target: THREE.RenderTarget, eyeOffset: any, scopeActive: any, reticleMap: THREE.Texture) {
   const material = new THREE.MeshBasicNodeMaterial();
   // `SCOPE_Lens` uses a rotated atlas UV island. Its raw geometry coordinates
   // describe the actual circular glass, so they keep the capture and reticle
@@ -101,7 +101,20 @@ function createLensMaterial(target: THREE.RenderTarget, eyeOffset: any, reticleM
   // the magnified render target coordinates, so Z/X changes only the world.
   const reticle = texture(reticleMap, lensUv);
   const withReticle = mix(world, reticle.rgb, reticle.a);
-  material.colorNode = mix(withReticle, vec3(0), opticEdge.max(shadow));
+  const activeDisplay = mix(withReticle, vec3(0), opticEdge.max(shadow));
+
+  // Hip-fire never updates the PiP target, so do not show its old frame on the
+  // visible glass. This is deliberately a coated-glass approximation rather
+  // than a dynamic reflection capture: it costs a few ALU ops on one small
+  // lens and stays plausible across different terrain colours.
+  const glassTint = mix(vec3(0.008, 0.018, 0.019), vec3(0.028, 0.075, 0.078), lensUv.y);
+  const sheenDirection = centred.x.mul(-0.65).add(centred.y.mul(0.45));
+  const sheen = smoothstep(float(-0.5), float(0.72), sheenDirection);
+  const rim = smoothstep(float(0.34), float(0.96), centred.length());
+  const hipGlass = mix(glassTint, vec3(0.15, 0.28, 0.3), sheen.mul(0.24).add(rim.mul(0.13)));
+  const hipDisplay = mix(hipGlass, vec3(0), opticEdge);
+
+  material.colorNode = mix(hipDisplay, activeDisplay, scopeActive);
   material.side = THREE.DoubleSide;
   // `SCOPE_Lens` is a dedicated mesh in fps_rig.glb, so this material can take
   // part in normal depth testing against the scope body.
@@ -175,6 +188,7 @@ export function WeaponPrototype({ scopeDemo = false }: WeaponPrototypeProps) {
     return result;
   }, []);
   const eyeOffset = useMemo(() => uniform(new THREE.Vector2()), []);
+  const scopeActive = useMemo(() => uniform(0), []);
   const reticleMap = useMemo(() => {
     const map = new THREE.TextureLoader().load(RETICLE_URL);
     map.colorSpace = THREE.SRGBColorSpace;
@@ -184,8 +198,8 @@ export function WeaponPrototype({ scopeDemo = false }: WeaponPrototypeProps) {
     return map;
   }, []);
   const lensMaterial = useMemo(
-    () => createLensMaterial(target, eyeOffset, reticleMap),
-    [eyeOffset, reticleMap, target]
+    () => createLensMaterial(target, eyeOffset, scopeActive, reticleMap),
+    [eyeOffset, reticleMap, scopeActive, target]
   );
 
   useEffect(() => () => publishRange(null), []);
@@ -380,6 +394,7 @@ export function WeaponPrototype({ scopeDemo = false }: WeaponPrototypeProps) {
     swayTime.current += delta;
     const aimTarget = scopeDemo && aiming.current && hasOptic.current ? 1 : 0;
     aim.current = THREE.MathUtils.damp(aim.current, aimTarget, AIM_RESPONSE, delta);
+    scopeActive.value = scopeDemo ? aim.current : 0;
     const holdingScopeBreath = scopeDemo && aiming.current && holdingBreath.current;
     // Blend the transition so holding Shift never snaps the weapon or sight
     // picture to a different point in its breathing cycle.

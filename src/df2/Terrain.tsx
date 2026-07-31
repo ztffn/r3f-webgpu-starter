@@ -22,6 +22,7 @@ import { useMemo, useRef, useEffect } from "react";
 import * as THREE from "three/webgpu";
 import type { Heightfield } from "./Heightfield";
 import { buildChunkGeometry } from "./terrainGeometry";
+import { CANOPY_MARGIN } from "./GrassMaterial";
 import {
   CHUNK_COUNT,
   VIEW_RADIUS_MAX_CHUNKS,
@@ -229,7 +230,7 @@ export function Terrain({
     const grassCull = grassDistance * Math.max(1, p11 / REFERENCE_P11);
 
     // Height of the grass volume's ceiling, for the floor tests below.
-    const canopyMax = grassCanopyMax ? grassCanopyMax() * 1.04 : 0;
+    const canopyMax = grassCanopyMax ? grassCanopyMax() * CANOPY_MARGIN : 0;
     // Is the eye inside the grass volume where it stands? Conservative — uses the
     // tallest canopy on the map rather than the local one, because the canopy field
     // lives in a texture and this side only has the terrain heightfield. Erring

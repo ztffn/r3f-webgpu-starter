@@ -15,7 +15,7 @@
 // across runs, which the concealment field depends on.
 
 import * as THREE from "three/webgpu";
-import { fbm } from "./noise";
+import { fbm, hash2 } from "./noise";
 
 /**
  * Texels per side. The shader samples ONE TEXEL PER GRASS CELL.
@@ -32,14 +32,7 @@ import { fbm } from "./noise";
  * elevation varying underneath, not solved. Raising this trades memory for repeat
  * distance directly: 2048² is 8 MB and doubles it.
  */
-export const JITTER_RESOLUTION = 1024;
-const RESOLUTION = JITTER_RESOLUTION;
-
-export interface GrassJitter {
-  texture: THREE.DataTexture;
-  /** Metres the pattern repeats over. Must match what the shader divides by. */
-  period: number;
-}
+const RESOLUTION = 1024;
 
 /**
  * Bake the jitter/tone fields over a `period`-metre tile.
@@ -51,19 +44,17 @@ export interface GrassJitter {
 /**
  * Per-texel white noise that tiles over `size`.
  *
- * The tone field's finest fbm lattice is 0.35 m, which at 0.03 m columns is about
- * twelve columns wide — so NEIGHBOURING columns shared a tone and there was no
- * corduroy at all, only broad patches. Corduroy is by definition variation between
- * adjacent columns, so it has to come from a term at texel resolution.
+ * The tone field's finest fbm lattice is 0.35 m, which at 0.03 m columns is about twelve
+ * columns wide — so NEIGHBOURING columns shared a tone and there was no corduroy at all,
+ * only broad patches. Corduroy is by definition variation between adjacent columns, so it
+ * has to come from a term at texel resolution.
+ *
+ * Uses the project's own `hash2` rather than a private copy: it is the hash `fbm` is built
+ * on, and noise.ts records that its determinism is load-bearing for the concealment field.
+ * Two copies could drift.
  */
-function texelNoise(i: number, j: number, seed: number, size: number): number {
-  const x = ((i % size) + size) % size;
-  const y = ((j % size) + size) % size;
-  let h = x * 374761393 + y * 668265263 + seed * 2246822519;
-  h = (h ^ (h >>> 13)) * 1274126177;
-  h = h ^ (h >>> 16);
-  return (h >>> 0) / 4294967296;
-}
+const texelNoise = (i: number, j: number, seed: number, size: number): number =>
+  hash2(i, j, seed, size);
 
 /**
  * Map a field onto the full 0-1 range by standardising it, mean ± 2σ -> 0..1.
@@ -106,7 +97,7 @@ function standardise(field: Float32Array): void {
  *   spike is exactly what a 12-sample coarse pass can step over, so raising this can buy
  *   shimmer under motion instead of detail. `?strand=` overrides it for A/B.
  */
-export function bakeGrassJitter(period: number, strandJitter = 0): GrassJitter {
+export function bakeGrassJitter(period: number, strandJitter = 0): THREE.DataTexture {
   const size = RESOLUTION;
   // Trade against the fbm terms rather than adding on top, so the field keeps its
   // overall scale and `strandJitter = 0` reproduces the previous bake exactly.
@@ -171,5 +162,5 @@ export function bakeGrassJitter(period: number, strandJitter = 0): GrassJitter {
   texture.wrapT = THREE.RepeatWrapping;
   texture.needsUpdate = true;
 
-  return { texture, period };
+  return texture;
 }

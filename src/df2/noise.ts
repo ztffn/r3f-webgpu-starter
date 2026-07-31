@@ -9,7 +9,7 @@
 // Integer hash -> pseudo-random float in [0,1). 2D lattice point hash.
 // `period` wraps the lattice so the field tiles seamlessly — DF terrain tiles
 // infinitely (docs/06 §10), so the synthetic fallback must too.
-function hash2(ix: number, iz: number, seed: number, period: number): number {
+export function hash2(ix: number, iz: number, seed: number, period: number): number {
   if (period > 0) {
     ix = ((ix % period) + period) % period;
     iz = ((iz % period) + period) % period;

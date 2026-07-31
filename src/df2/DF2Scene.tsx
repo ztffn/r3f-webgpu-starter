@@ -224,12 +224,10 @@ export function DF2Scene({
 
     const kit = createGrassMaterial({
       grassMap: world.grassMap,
-      jitterMap: jitter.texture,
+      jitterMap: jitter,
       heightMap: heightTex,
       colorMap: world.colorMap,
       worldSize: world.heightfield.worldSize,
-      mapSize: world.size,
-      heightScale: world.heightfield.heightScale,
       grassScale: GRASS_SCALE,
       // ?steps= raises the compiled CEILING as well as the running value, so asking for
       // more samples than the shipped ceiling just works instead of being silently
@@ -255,7 +253,7 @@ export function DF2Scene({
       fogNear: FOG_NEAR,
       fogFar: FOG_FAR,
     });
-    return { ...kit, heightTex, jitterTex: jitter.texture };
+    return { ...kit, heightTex, jitterTex: jitter };
   }, [world]);
 
   useEffect(

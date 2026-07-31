@@ -81,10 +81,15 @@ function smoothTerracing(grid: Float32Array, size: number, passes: number): void
   for (let p = 0; p < passes; p++) {
     for (let z = 0; z < size; z++) {
       const row = z * size;
-      for (let x = 0; x < size; x++) {
-        tmp[row + x] =
-          (grid[row + wrap(x - 1)] + 2 * grid[row + x] + grid[row + wrap(x + 1)]) * 0.25;
+      // Only the two end columns can wrap, so they are peeled out and the interior runs
+      // without a call or a branch. The vertical sub-pass below already hoists its wraps;
+      // this keeps the two symmetric.
+      tmp[row] = (grid[row + size - 1] + 2 * grid[row] + grid[row + 1]) * 0.25;
+      for (let x = 1; x < size - 1; x++) {
+        tmp[row + x] = (grid[row + x - 1] + 2 * grid[row + x] + grid[row + x + 1]) * 0.25;
       }
+      const e = row + size - 1;
+      tmp[e] = (grid[e - 1] + 2 * grid[e] + grid[row]) * 0.25;
     }
     for (let z = 0; z < size; z++) {
       const up = wrap(z - 1) * size;

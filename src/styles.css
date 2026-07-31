@@ -59,6 +59,26 @@ canvas:active {
   -webkit-user-select: none;
 }
 
+.hit-marker {
+  position: fixed;
+  top: calc(50% + 22px);
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+  animation: hit-marker 520ms ease-out forwards;
+}
+
+@keyframes hit-marker {
+  0% { opacity: 0; transform: translate(-50%, 3px) scale(0.92); }
+  18% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+  68% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -3px) scale(1); }
+}
+
 .panel {
   position: fixed;
   display: flex;

@@ -20,6 +20,7 @@ import { bakeSyntheticMaps } from "./syntheticMaps";
 import { bakeGrassJitter } from "./grassJitter";
 import { loadTerrain, type LoadedTerrain } from "./loadTerrain";
 import { WeaponPrototype } from "../fps/WeaponPrototype";
+import { ThreeWorldQuery } from "../fps/core/WorldQuery";
 // Lazily imported so the three multi-megabyte debug models are code-split out of the
 // main bundle and only fetched when ?targets=1 actually asks for them.
 const TestTargets = lazy(() =>
@@ -119,6 +120,7 @@ export function DF2Scene({
   scopeDemo = false,
   weaponDemo = false,
 }: DF2SceneProps) {
+  const worldQuery = useMemo(() => new ThreeWorldQuery(0), []);
   // undefined = still loading, null = no assets (synthetic), object = real map
   const [loaded, setLoaded] = useState<LoadedTerrain | null | undefined>(undefined);
 
@@ -331,13 +333,14 @@ export function DF2Scene({
         />
       )}
 
-      {/* Human-scale contrast reference for judging grass. Debug-only: ?targets=1. */}
-      {BENCH.targets && heightfield && (
+      {/* Scope mode promotes the contrast ladder into resettable shootable targets. */}
+      {(BENCH.targets || scopeDemo) && heightfield && (
         <Suspense fallback={null}>
           <TestTargets
             heightfield={heightfield}
-            originX={BENCH.x ?? 5}
-            originZ={BENCH.z ?? 375}
+            originX={BENCH.targets ? (BENCH.x ?? 5) : 0}
+            originZ={BENCH.targets ? (BENCH.z ?? 375) : 320}
+            worldQuery={worldQuery}
           />
         </Suspense>
       )}
@@ -356,7 +359,14 @@ export function DF2Scene({
       )}
 
       {/* Kept opt-in while the existing terrain visual work remains the default. */}
-      {(scopeDemo || weaponDemo) && <WeaponPrototype scopeDemo={scopeDemo} />}
+      {(scopeDemo || weaponDemo) && (
+        <WeaponPrototype
+          scopeDemo={scopeDemo}
+          worldQuery={worldQuery}
+          stance={stance}
+          grounded={grounded}
+        />
+      )}
     </>
   );
 }

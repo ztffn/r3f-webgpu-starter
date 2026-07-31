@@ -3,12 +3,20 @@
 // interpolates, so terrain controls and the main view remain stable.
 
 import { useFrame, useThree } from "@react-three/fiber";
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import * as THREE from "three/webgpu";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { float, mix, positionGeometry, smoothstep, texture, uniform, vec2, vec3 } from "three/tsl";
 import { CAMERA_FAR, CAMERA_NEAR } from "../df2/config";
 import { publishRange, type RangeSample } from "./rangeTelemetry";
+import { LocalPlayerController, type LocalPlayerCommands } from "./core/LocalPlayerController";
+import type { PlayerStance } from "./core/PlayerMotor";
+import type { ThreeWorldQuery } from "./core/WorldQuery";
+import { HitscanResolver } from "./combat/HitscanResolver";
+import { LoadoutSystem } from "./weapons/LoadoutSystem";
+import { WeaponSystem, type WeaponEvent } from "./weapons/WeaponSystem";
+import { SNIPER_DEFINITION } from "./weapons/weaponDefinitions";
+import { combatTelemetry } from "./ui/CombatTelemetry";
 
 const WORLD_LAYER = 0;
 const WEAPON_LAYER = 1;
@@ -66,6 +74,9 @@ const ANIMATION_SEGMENTS = [
 export interface WeaponPrototypeProps {
   /** Mount PiP display to the animated rifle's actual scope mesh. */
   scopeDemo?: boolean;
+  worldQuery: ThreeWorldQuery;
+  stance?: PlayerStance;
+  grounded?: boolean;
 }
 
 function disposeObject(root: THREE.Object3D) {
@@ -129,8 +140,24 @@ function createLensMaterial(target: THREE.RenderTarget, eyeOffset: any, scopeAct
  * `?scene=scope`: smoothly move that same rig into ADS and capture the world
  * from its mounted optic. The supplied 27-second clip keeps playing in both.
  */
-export function WeaponPrototype({ scopeDemo = false }: WeaponPrototypeProps) {
+export function WeaponPrototype({
+  scopeDemo = false,
+  worldQuery,
+  stance = "stand",
+  grounded = false,
+}: WeaponPrototypeProps) {
   const { camera, gl, scene, size } = useThree();
+  const player = useMemo(() => new LocalPlayerController(), []);
+  const weapon = useMemo(() => new WeaponSystem(SNIPER_DEFINITION), []);
+  const loadout = useMemo(
+    () => new LoadoutSystem([{ id: "primary", weapon }], "primary"),
+    [weapon]
+  );
+  const hitscan = useMemo(() => new HitscanResolver(worldQuery), [worldQuery]);
+  const commands = useMemo<LocalPlayerCommands>(
+    () => ({ triggerPresses: 0, reloadRequested: false, adsWanted: false, holdingBreath: false }),
+    []
+  );
   const rig = useMemo(() => {
     const group = new THREE.Group();
     group.name = "animated-weapon-rig";
@@ -148,8 +175,6 @@ export function WeaponPrototype({ scopeDemo = false }: WeaponPrototypeProps) {
   const mixer = useRef<THREE.AnimationMixer | null>(null);
   const segmentActions = useRef<THREE.AnimationAction[]>([]);
   const activeAction = useRef<THREE.AnimationAction | null>(null);
-  const aiming = useRef(false);
-  const holdingBreath = useRef(false);
   const breathHold = useRef(0);
   const aim = useRef(0);
   const swayTime = useRef(0);
@@ -164,13 +189,17 @@ export function WeaponPrototype({ scopeDemo = false }: WeaponPrototypeProps) {
   const lookLag = useMemo(() => new THREE.Vector2(), []);
   const previousCameraQuaternion = useMemo(() => new THREE.Quaternion(), []);
   const cameraDeltaQuaternion = useMemo(() => new THREE.Quaternion(), []);
-  const rangeRaycaster = useMemo(() => {
-    const raycaster = new THREE.Raycaster();
-    raycaster.layers.set(WORLD_LAYER);
-    return raycaster;
-  }, []);
   const rangeOrigin = useMemo(() => new THREE.Vector3(), []);
   const rangeDirection = useMemo(() => new THREE.Vector3(), []);
+  const authoritativeDirection = useMemo(() => new THREE.Vector3(), []);
+  const playerPose = useMemo(
+    () => ({ position: camera.position, stance, grounded }),
+    [camera]
+  );
+  const recoilPitch = useRef(0);
+  const recoilYaw = useRef(0);
+  const terrainRoot = useRef<THREE.Object3D | null>(null);
+  const unregisterTerrain = useRef<(() => void) | null>(null);
   const nextRangeSampleAt = useRef(0);
   const target = useMemo(
     () => new THREE.RenderTarget(SCOPE_TARGET_SIZE, SCOPE_TARGET_SIZE, { depthBuffer: true }),
@@ -202,39 +231,79 @@ export function WeaponPrototype({ scopeDemo = false }: WeaponPrototypeProps) {
     [eyeOffset, reticleMap, scopeActive, target]
   );
 
-  useEffect(() => () => publishRange(null), []);
+  const playSegment = useCallback((segmentNumber: number) => {
+    const next = segmentActions.current[segmentNumber - 1];
+    if (!next) return;
+    // A clamped action must be stopped before another authored action takes over.
+    if (activeAction.current?.paused) activeAction.current.stop();
+    else activeAction.current?.fadeOut(0.1);
+    next.reset();
+    next.paused = false;
+    next.setLoop(THREE.LoopOnce, 1);
+    next.clampWhenFinished = true;
+    next.fadeIn(0.1).play();
+    activeAction.current = next;
+  }, []);
+
+  const handleWeaponEvent = useCallback(
+    (event: WeaponEvent) => {
+      if (event.type === "shot") {
+        const result = hitscan.resolve({
+          sourceId: SNIPER_DEFINITION.id,
+          sequence: event.sequence,
+          origin: player.aim.origin,
+          direction: player.aim.direction,
+          maxDistance: event.range,
+          damage: event.damage,
+        });
+        combatTelemetry.publishShot(result);
+        recoilPitch.current += event.recoilPitch;
+        recoilYaw.current += event.sequence % 2 === 0 ? -event.recoilYaw : event.recoilYaw;
+        if (event.animationSegment !== undefined) playSegment(event.animationSegment);
+        return;
+      }
+      if (event.type === "dry-fire") {
+        combatTelemetry.publishDryFire();
+        if (event.animationSegment !== undefined) playSegment(event.animationSegment);
+        return;
+      }
+      if (event.type === "reload-started" && event.animationSegment !== undefined) {
+        playSegment(event.animationSegment);
+      }
+    },
+    [hitscan, playSegment, player]
+  );
+
+  useEffect(
+    () => () => {
+      publishRange(null);
+      combatTelemetry.clear();
+      unregisterTerrain.current?.();
+      unregisterTerrain.current = null;
+    },
+    []
+  );
 
   useEffect(() => {
-    const playSegment = (event: KeyboardEvent) => {
+    const playDebugSegment = (event: KeyboardEvent) => {
       const match = /^Digit([1-8])$/.exec(event.code);
       if (!match || event.repeat) return;
-      const next = segmentActions.current[Number(match[1]) - 1];
-      if (!next) return;
-      // The entry action can be clamped after finishing; a clamped action must
-      // be removed before an authored action takes over.
-      if (activeAction.current?.paused) activeAction.current.stop();
-      else activeAction.current?.fadeOut(0.1);
-      next.reset();
-      next.paused = false;
-      next.setLoop(THREE.LoopOnce, 1);
-      next.clampWhenFinished = true;
-      next.fadeIn(0.1).play();
-      activeAction.current = next;
+      playSegment(Number(match[1]));
     };
-    addEventListener("keydown", playSegment);
-    return () => removeEventListener("keydown", playSegment);
-  }, []);
+    addEventListener("keydown", playDebugSegment);
+    return () => removeEventListener("keydown", playDebugSegment);
+  }, [playSegment]);
 
   useEffect(() => {
     if (!scopeDemo) return;
-    const toggleKeyboard = (event: KeyboardEvent) => {
+    const requestReload = (event: KeyboardEvent) => {
       if (event.code !== "KeyR" || event.repeat) return;
-      aiming.current = !aiming.current;
-      if (!aiming.current) holdingBreath.current = false;
+      player.setAdsWanted(false);
+      player.requestReload();
     };
     const holdBreath = (event: KeyboardEvent) => {
-      if ((event.code !== "ShiftLeft" && event.code !== "ShiftRight") || !aiming.current) return;
-      holdingBreath.current = event.type === "keydown";
+      if ((event.code !== "ShiftLeft" && event.code !== "ShiftRight") || !player.wantsAds) return;
+      player.setHoldingBreath(event.type === "keydown");
       // While scoped, Shift belongs to breath hold rather than the fly/sprint
       // modifier. Outside ADS it remains entirely under FlyControls.
       event.preventDefault();
@@ -243,7 +312,7 @@ export function WeaponPrototype({ scopeDemo = false }: WeaponPrototypeProps) {
     const adjustMagnification = (event: KeyboardEvent) => {
       // Z/X retain their normal stance bindings except while looking through
       // the optic, where they are dedicated to variable magnification.
-      if (!aiming.current || (event.code !== "KeyZ" && event.code !== "KeyX") || event.repeat) return;
+      if (!player.wantsAds || (event.code !== "KeyZ" && event.code !== "KeyX") || event.repeat) return;
       const direction = event.code === "KeyZ" ? -1 : 1;
       scopeFov.current = THREE.MathUtils.clamp(
         scopeFov.current + direction * SCOPE_FOV_STEP,
@@ -256,27 +325,31 @@ export function WeaponPrototype({ scopeDemo = false }: WeaponPrototypeProps) {
       event.stopImmediatePropagation();
     };
     const togglePointer = (event: PointerEvent) => {
-      if (event.button !== 2) return;
-      event.preventDefault();
-      aiming.current = !aiming.current;
-      if (!aiming.current) holdingBreath.current = false;
+      if (event.button === 0) player.pressTrigger();
+      if (event.button === 2) {
+        event.preventDefault();
+        player.toggleAds();
+      }
     };
+    const clearInput = () => player.resetInput();
     const preventMenu = (event: MouseEvent) => event.preventDefault();
-    addEventListener("keydown", toggleKeyboard);
+    addEventListener("keydown", requestReload);
     addEventListener("keydown", adjustMagnification, true);
     addEventListener("keydown", holdBreath, true);
     addEventListener("keyup", holdBreath, true);
+    addEventListener("blur", clearInput);
     gl.domElement.addEventListener("pointerdown", togglePointer);
     gl.domElement.addEventListener("contextmenu", preventMenu);
     return () => {
-      removeEventListener("keydown", toggleKeyboard);
+      removeEventListener("keydown", requestReload);
       removeEventListener("keydown", adjustMagnification, true);
       removeEventListener("keydown", holdBreath, true);
       removeEventListener("keyup", holdBreath, true);
+      removeEventListener("blur", clearInput);
       gl.domElement.removeEventListener("pointerdown", togglePointer);
       gl.domElement.removeEventListener("contextmenu", preventMenu);
     };
-  }, [gl, scopeCamera, scopeDemo]);
+  }, [gl, player, scopeCamera, scopeDemo]);
 
   useEffect(() => {
     let alive = true;
@@ -390,12 +463,34 @@ export function WeaponPrototype({ scopeDemo = false }: WeaponPrototypeProps) {
   // before the near-plane weapon overlay, preserving a future single final
   // composite/grade stage instead of grading every camera independently.
   useFrame((_, delta) => {
+    const nextTerrain = scene.getObjectByName("terrain") ?? null;
+    if (terrainRoot.current !== nextTerrain) {
+      unregisterTerrain.current?.();
+      terrainRoot.current = nextTerrain;
+      unregisterTerrain.current = nextTerrain
+        ? worldQuery.register({ root: nextTerrain, kind: "terrain" })
+        : null;
+    }
+
+    camera.updateMatrixWorld();
+    camera.getWorldDirection(authoritativeDirection);
+    playerPose.stance = stance;
+    playerPose.grounded = grounded;
+    player.syncPresentationPose(playerPose, authoritativeDirection);
+    player.consumeCommands(commands);
+    weapon.setAdsWanted(commands.adsWanted);
+    if (commands.reloadRequested) weapon.requestReload();
+    for (let i = 0; i < commands.triggerPresses; i += 1) weapon.pressTrigger();
+    loadout.update(delta);
+    loadout.drainEvents(handleWeaponEvent);
+    combatTelemetry.publishWeapon(weapon.getSnapshot());
+
     mixer.current?.update(delta);
     swayTime.current += delta;
-    const aimTarget = scopeDemo && aiming.current && hasOptic.current ? 1 : 0;
+    const aimTarget = scopeDemo && hasOptic.current ? weapon.adsProgress : 0;
     aim.current = THREE.MathUtils.damp(aim.current, aimTarget, AIM_RESPONSE, delta);
     scopeActive.value = scopeDemo ? aim.current : 0;
-    const holdingScopeBreath = scopeDemo && aiming.current && holdingBreath.current;
+    const holdingScopeBreath = scopeDemo && commands.holdingBreath;
     // Blend the transition so holding Shift never snaps the weapon or sight
     // picture to a different point in its breathing cycle.
     breathHold.current = THREE.MathUtils.damp(
@@ -414,7 +509,6 @@ export function WeaponPrototype({ scopeDemo = false }: WeaponPrototypeProps) {
     const swayX = Math.sin(swayTime.current * 1.15) * swayMetres;
     const swayY = Math.cos(swayTime.current * 1.43) * swayMetres * 0.55;
 
-    camera.updateMatrixWorld();
     // Mouse-look rotates the camera immediately, but a held rifle has a small
     // positional lag. Feed that physical lag into the eyebox rather than
     // magnifying the constant breathing motion.
@@ -460,8 +554,10 @@ export function WeaponPrototype({ scopeDemo = false }: WeaponPrototypeProps) {
     rig.translateX(offset.x + swayX + lookLag.x);
     rig.translateY(offset.y + swayY + lookLag.y);
     rig.translateZ(offset.z);
-    rig.rotateY(swayYaw);
-    rig.rotateX(swayPitch);
+    recoilPitch.current = THREE.MathUtils.damp(recoilPitch.current, 0, 8, delta);
+    recoilYaw.current = THREE.MathUtils.damp(recoilYaw.current, 0, 10, delta);
+    rig.rotateY(swayYaw + recoilYaw.current);
+    rig.rotateX(swayPitch + recoilPitch.current);
     rig.updateMatrixWorld(true);
 
     weaponCamera.position.copy(camera.position);
@@ -504,17 +600,11 @@ export function WeaponPrototype({ scopeDemo = false }: WeaponPrototypeProps) {
         // aiming at, including the small optical lag/parallax currently shown.
         camera.getWorldPosition(rangeOrigin);
         scopeCamera.getWorldDirection(rangeDirection);
-        rangeRaycaster.set(rangeOrigin, rangeDirection);
-
-        const terrain = scene.getObjectByName("terrain");
-        const targets = scene.getObjectByName("test-targets");
-        const terrainHit = terrain ? rangeRaycaster.intersectObject(terrain, true)[0] : undefined;
-        const targetHit = targets ? rangeRaycaster.intersectObject(targets, true)[0] : undefined;
-        const hit = !terrainHit || (targetHit && targetHit.distance < terrainHit.distance) ? targetHit : terrainHit;
+        const hit = worldQuery.raycast(rangeOrigin, rangeDirection, CAMERA_FAR);
         if (hit) {
           range = {
             metres: hit.distance,
-            kind: hit === targetHit ? "target" : "terrain",
+            kind: hit.kind,
           };
         }
       }

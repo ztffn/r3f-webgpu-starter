@@ -3,12 +3,15 @@
 // Grass cannot be judged against itself. The DF2 screenshots that define the target
 // look all contain a soldier — that is what makes strand thickness, canopy height and
 // concealment readable at a glance (docs/07 §1.5). This places a range ladder of
-// figures so the same comparison is available here, and is debug-only: `?targets=1`.
+// figures so the same comparison is available here. It is debug-only under
+// `?targets=1`, and becomes resettable gameplay targets under `?scene=scope`.
 
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three/webgpu";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import type { Heightfield } from "../df2/Heightfield";
+import { HealthDamageable } from "./combat/Damageable";
+import type { ThreeWorldQuery } from "./core/WorldQuery";
 
 /**
  * Third-party models, loaded from the untracked `testmodels/` directory by the same
@@ -60,6 +63,18 @@ export interface TestTargetsProps {
    * whole ladder is placed directly BEHIND the default view and nothing appears.
    */
   heading?: number;
+  /** Optional gameplay query registry; rendering remains useful without one. */
+  worldQuery?: Pick<ThreeWorldQuery, "register">;
+}
+
+interface TargetRuntime {
+  readonly root: THREE.Object3D;
+  readonly helper: THREE.Box3Helper;
+  readonly damageable: HealthDamageable;
+  unregister?: () => void;
+  flashTimer?: ReturnType<typeof setTimeout>;
+  hideTimer?: ReturnType<typeof setTimeout>;
+  resetTimer?: ReturnType<typeof setTimeout>;
 }
 
 function disposeObject(root: THREE.Object3D) {
@@ -72,17 +87,69 @@ function disposeObject(root: THREE.Object3D) {
   });
 }
 
-export function TestTargets({ heightfield, originX, originZ, heading = Math.PI }: TestTargetsProps) {
+export function TestTargets({
+  heightfield,
+  originX,
+  originZ,
+  heading = Math.PI,
+  worldQuery,
+}: TestTargetsProps) {
   const group = useMemo(() => {
     const g = new THREE.Group();
     g.name = "test-targets";
     return g;
   }, []);
   const loaded = useRef<THREE.Object3D[]>([]);
+  const targetRuntimes = useRef<TargetRuntime[]>([]);
 
   useEffect(() => {
     let alive = true;
     const loader = new GLTFLoader();
+
+    const registerRuntime = (runtime: TargetRuntime) => {
+      if (!runtime.unregister && worldQuery) {
+        runtime.unregister = worldQuery.register({
+          root: runtime.root,
+          kind: "target",
+          damageable: runtime.damageable,
+        });
+      }
+    };
+
+    const armTarget = (root: THREE.Object3D, id: string) => {
+      const helper = new THREE.Box3Helper(new THREE.Box3().setFromObject(root), 0xff3b1f);
+      helper.visible = false;
+      group.add(helper);
+
+      let runtime!: TargetRuntime;
+      const damageable = new HealthDamageable(id, 100, (result, info) => {
+        if (!info) {
+          root.visible = true;
+          helper.visible = false;
+          registerRuntime(runtime);
+          return;
+        }
+
+        helper.visible = true;
+        if (runtime.flashTimer) clearTimeout(runtime.flashTimer);
+        runtime.flashTimer = setTimeout(() => {
+          helper.visible = false;
+        }, 160);
+
+        if (result.destroyed) {
+          runtime.unregister?.();
+          runtime.unregister = undefined;
+          if (runtime.resetTimer) clearTimeout(runtime.resetTimer);
+          runtime.resetTimer = setTimeout(() => damageable.reset(), 1_200);
+          runtime.hideTimer = setTimeout(() => {
+            if (damageable.health === 0) root.visible = false;
+          }, 170);
+        }
+      });
+      runtime = { root, helper, damageable };
+      targetRuntimes.current.push(runtime);
+      registerRuntime(runtime);
+    };
 
     // A plain 1.8 m box 4 m ahead, needing NO asset. It separates three failure modes
     // that all look identical from the camera — "no targets":
@@ -100,6 +167,7 @@ export function TestTargets({ heightfield, originX, originZ, heading = Math.PI }
     marker.position.set(mx, heightfield.sample(mx, mz) + FIGURE_HEIGHT / 2, mz);
     group.add(marker);
     loaded.current.push(marker);
+    armTarget(marker, "range-marker");
     console.log(
       `[df2] targets: origin ${originX},${originZ} heading ${heading.toFixed(2)}; ` +
         `marker at ${mx.toFixed(1)},${marker.position.y.toFixed(1)},${mz.toFixed(1)}`
@@ -129,6 +197,7 @@ export function TestTargets({ heightfield, originX, originZ, heading = Math.PI }
 
       group.add(figure);
       loaded.current.push(figure);
+      armTarget(figure, `range-target-${index + 1}`);
       console.log(
         `[df2] target ${index}: raw height ${size.y.toFixed(3)}m -> scale ` +
           `${figure.scale.x.toFixed(3)} at ${x.toFixed(1)},${figure.position.y.toFixed(1)},${z.toFixed(1)}`
@@ -162,8 +231,27 @@ export function TestTargets({ heightfield, originX, originZ, heading = Math.PI }
       );
     }
 
+    const resetTargets = (event: KeyboardEvent) => {
+      if (event.code !== "KeyT" || event.repeat) return;
+      for (const runtime of targetRuntimes.current) runtime.damageable.reset();
+    };
+    addEventListener("keydown", resetTargets);
+
     return () => {
       alive = false;
+      removeEventListener("keydown", resetTargets);
+      for (const runtime of targetRuntimes.current) {
+        runtime.unregister?.();
+        if (runtime.flashTimer) clearTimeout(runtime.flashTimer);
+        if (runtime.hideTimer) clearTimeout(runtime.hideTimer);
+        if (runtime.resetTimer) clearTimeout(runtime.resetTimer);
+        group.remove(runtime.helper);
+        runtime.helper.geometry.dispose();
+        const helperMaterial = runtime.helper.material;
+        if (Array.isArray(helperMaterial)) helperMaterial.forEach((material) => material.dispose());
+        else helperMaterial.dispose();
+      }
+      targetRuntimes.current = [];
       // Detach only. `clone(true)` SHARES geometry and materials with the loaded source,
       // so disposing a clone frees buffers the other clones — and any later clone of the
       // same source — are still using, leaving invisible or corrupt meshes behind.
@@ -173,7 +261,7 @@ export function TestTargets({ heightfield, originX, originZ, heading = Math.PI }
       (marker.material as THREE.Material).dispose();
       loaded.current = [];
     };
-  }, [group, heightfield, originX, originZ, heading]);
+  }, [group, heightfield, originX, originZ, heading, worldQuery]);
 
   return <primitive object={group} />;
 }

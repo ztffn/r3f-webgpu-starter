@@ -5,11 +5,11 @@
 // the content is survey/telemetry readouts, and tabular numerals so digits stop
 // jittering as they update.
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import type { LoadedTerrain } from "../df2/loadTerrain";
 import type { PerfSample } from "../df2/PerfMonitor";
 import type { FlyState, Stance } from "../df2/FlyControls";
-import { RANGE_EVENT, type RangeSample } from "../fps/rangeTelemetry";
+import { combatTelemetry } from "../fps/ui/CombatTelemetry";
 
 export interface HudProps {
   loading: boolean;
@@ -43,13 +43,11 @@ export function Hud({
   wireframe,
   setWireframe,
 }: HudProps) {
-  const [scopeRange, setScopeRange] = useState<RangeSample | null>(null);
-
-  useEffect(() => {
-    const receiveRange = (event: Event) => setScopeRange((event as CustomEvent<RangeSample | null>).detail);
-    addEventListener(RANGE_EVENT, receiveRange);
-    return () => removeEventListener(RANGE_EVENT, receiveRange);
-  }, []);
+  const combat = useSyncExternalStore(
+    combatTelemetry.subscribe,
+    combatTelemetry.getSnapshot,
+    combatTelemetry.getSnapshot
+  );
 
   if (loading) {
     return (
@@ -66,6 +64,11 @@ export function Hud({
 
   return (
     <div className="hud-root">
+      {combat.lastShot?.hit && combat.lastShot.damage > 0 && (
+        <div className="hit-marker" key={combat.lastShot.sequence}>
+          {combat.lastShot.destroyed ? "TARGET DOWN" : "HIT"}
+        </div>
+      )}
       {/* Terrain identity */}
       <section className="panel" id="ident">
         <span className="eyebrow">Terrain</span>
@@ -115,9 +118,21 @@ export function Hud({
           <dt>AGL</dt>
           <dd>{fly ? fmt(Math.max(0, fly.agl), 1) : "—"} m</dd>
           <dt>Scope</dt>
-          <dd>{scopeRange ? fmt(scopeRange.metres, 1) : "—"} m</dd>
+          <dd>{combat.range ? fmt(combat.range.metres, 1) : "—"} m</dd>
           <dt>Hit</dt>
-          <dd>{scopeRange ? scopeRange.kind : "—"}</dd>
+          <dd>{combat.range ? combat.range.kind : "—"}</dd>
+          {combat.weapon && (
+            <>
+              <dt>Weapon</dt>
+              <dd>{combat.weapon.displayName}</dd>
+              <dt>Ammo</dt>
+              <dd>
+                {combat.weapon.magazine} / {combat.weapon.reserve}
+              </dd>
+              <dt>State</dt>
+              <dd>{combat.weapon.phase}</dd>
+            </>
+          )}
         </dl>
         {perf && (
           <div className="perf">
@@ -199,8 +214,12 @@ export function Hud({
           <dd>foot / fly</dd>
           <dt>X C Z</dt>
           <dd>stand / crouch / prone</dd>
-          <dt>Right click / R</dt>
-          <dd>scope aim (scope demo)</dd>
+          <dt>Left click</dt>
+          <dd>fire (scope demo)</dd>
+          <dt>Right click</dt>
+          <dd>scope aim</dd>
+          <dt>R / T</dt>
+          <dd>reload / reset targets</dd>
           <dt>1–8</dt>
           <dd>play weapon action</dd>
         </dl>

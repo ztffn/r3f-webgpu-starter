@@ -1,8 +1,9 @@
-// Scope rangefinder telemetry deliberately crosses the R3F/DOM boundary as a
-// small browser event. The HUD stays independent of the scene tree, while the
-// raycaster remains next to the scope camera that defines its centre line.
+// Compatibility facade for the original optic prototypes. New FPS presentation
+// publishes through CombatTelemetry so the HUD reads one coherent snapshot.
 
-export type RangeHitKind = "terrain" | "target";
+import { combatTelemetry } from "./ui/CombatTelemetry";
+
+export type RangeHitKind = "terrain" | "target" | "world";
 
 export interface RangeSample {
   metres: number;
@@ -12,5 +13,6 @@ export interface RangeSample {
 export const RANGE_EVENT = "fps-range";
 
 export function publishRange(range: RangeSample | null) {
+  combatTelemetry.publishRange(range);
   window.dispatchEvent(new CustomEvent<RangeSample | null>(RANGE_EVENT, { detail: range }));
 }

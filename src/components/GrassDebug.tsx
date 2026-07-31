@@ -39,8 +39,44 @@ const DIALS: Dial[] = [
     also: "canopyMax",
     hint: "metres for the tallest canopy — the 'length' dial",
   },
-  { key: "cell", label: "Column width", min: 0.01, max: 2, step: 0.01, hint: "metres" },
+  {
+    key: "cell",
+    label: "Column width",
+    min: 0.002,
+    max: 2,
+    step: 0.001,
+    // Floor is the march, not the field: 12 coarse samples spread over metres already
+    // make which column a ray hits partly arbitrary, and thinner columns turn that into
+    // shimmer rather than detail. The jitter now resolves per column at any width.
+    hint: "metres — below ~0.005 expect shimmer, not detail",
+  },
+  {
+    key: "steps",
+    label: "March steps",
+    min: 1,
+    max: 32,
+    step: 1,
+    // Capped by the COMPILED count — ?steps=N at load sets the ceiling, and this cannot
+    // go above it. Load with ?steps=32 to sweep the whole range.
+    hint: "coarse samples/fragment. Sets frame time. Ceiling = ?steps= at load",
+  },
   { key: "tone", label: "Tone variation", min: 0, max: 1.5, step: 0.01, hint: "0 disables it" },
+  {
+    key: "strandMix",
+    label: "Per-strand height",
+    min: 0,
+    max: 1,
+    step: 0.01,
+    hint: "ragged canopy top. THE ONE DIAL THAT COSTS FPS — 0 is free",
+  },
+  {
+    key: "shadeBase",
+    label: "Base shading",
+    min: 0.3,
+    max: 1,
+    step: 0.01,
+    hint: "column base brightness; tip gets 2 minus this. 1 = flat",
+  },
   {
     key: "stripePixels",
     label: "Stripe width",
@@ -56,7 +92,25 @@ const DIALS: Dial[] = [
 ];
 
 const TONE_MODES = ["World cell", "Ray bearing"];
-const DEBUG_MODES = ["Normal", "Hit mask", "Hit distance", "Height in column"];
+// Green Mile's canopy is a colormap-derived stand-in, so it is patchy and a frame can
+// legitimately be mostly bare — which looks identical to the shader failing. Forcing
+// full canopy separates the column renderer from the field feeding it.
+const CANOPY_MODES = ["Field", "Everywhere"];
+// 4-9 bisect the colour expression live, so isolating a bad term costs one build
+// instead of one per term. 6-8 are banded false colour, not greyscale:
+// black < 0.125, blue < 0.375, green < 0.625, yellow < 0.875, red above.
+const DEBUG_MODES = [
+  "Normal",
+  "Hit mask",
+  "Hit distance",
+  "Height in column",
+  "Columns",
+  "Faded",
+  "Fog factor",
+  "Fog input",
+  "Fade",
+  "Fog colour",
+];
 
 export function GrassDebug({ uniforms }: GrassDebugProps) {
   // Mirror of uniform values, so the sliders have positions to show. Seeded once
@@ -71,6 +125,7 @@ export function GrassDebug({ uniforms }: GrassDebugProps) {
     // Shown in metres; the uniform holds metres x 255.
     next.grassScale = Number(uniforms.canopyMax.value);
     next.toneMode = Number(uniforms.toneMode.value);
+    next.canopyForce = Number(uniforms.canopyForce.value);
     next.debugMode = Number(uniforms.debugMode.value);
     setVals(next);
     seeded.current = true;
@@ -98,7 +153,7 @@ export function GrassDebug({ uniforms }: GrassDebugProps) {
         <label key={d.key} className="dial">
           <span className="dial-row">
             <span>{d.label}</span>
-            <b>{(vals[d.key] ?? 0).toFixed(2)}</b>
+            <b>{(vals[d.key] ?? 0).toFixed(d.step < 0.01 ? 3 : 2)}</b>
           </span>
           <input
             type="range"
@@ -123,6 +178,24 @@ export function GrassDebug({ uniforms }: GrassDebugProps) {
             onClick={() => {
               uniforms.toneMode.value = i;
               setVals((p) => ({ ...p, toneMode: i }));
+            }}
+          >
+            {m}
+          </button>
+        ))}
+      </div>
+
+      <span className="eyebrow" style={{ marginTop: 10 }}>
+        Canopy from
+      </span>
+      <div className="btns">
+        {CANOPY_MODES.map((m, i) => (
+          <button
+            key={m}
+            aria-pressed={(vals.canopyForce ?? 0) === i}
+            onClick={() => {
+              uniforms.canopyForce.value = i;
+              setVals((p) => ({ ...p, canopyForce: i }));
             }}
           >
             {m}

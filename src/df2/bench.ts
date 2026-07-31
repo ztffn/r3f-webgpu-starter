@@ -22,6 +22,23 @@ export interface BenchConfig {
   /** Show the live grass slider panel. Independent of `bench`. */
   debug?: boolean;
   grass?: boolean;
+  /**
+   * Draw the grass volume's FLOOR proxy. Defaults on; `?grassfloor=0` disables it.
+   *
+   * Exists so the floor pass can be measured against its own absence at the same
+   * pose. Without it the only comparison available was prone-with-floor against
+   * standing-without, which differs in the march too and says nothing.
+   */
+  grassFloor?: boolean;
+  /** Per-texel share of the baked height field. Baked, so reload to change. */
+  strand?: number;
+  /** Debug: grow full-height grass everywhere, ignoring the canopy field. */
+  canopyAll?: boolean;
+  /**
+   * Debug: place human-scale figures as a contrast reference for the grass.
+   * Loads third-party models from the untracked testmodels/ directory.
+   */
+  targets?: boolean;
   stance?: Stance;
   /** Fixed camera position, world metres. */
   x?: number;
@@ -54,6 +71,10 @@ function parse(): BenchConfig {
     steps: num("steps"),
     refine: num("refine"),
     grass: q.get("grass") === null ? undefined : q.get("grass") !== "0",
+    grassFloor: q.get("grassfloor") === null ? undefined : q.get("grassfloor") !== "0",
+    strand: num("strand"),
+    canopyAll: q.get("canopyall") === "1",
+    targets: q.get("targets") === "1",
     stance:
       stance === "stand" || stance === "crouch" || stance === "prone" ? stance : undefined,
     x: num("x"),

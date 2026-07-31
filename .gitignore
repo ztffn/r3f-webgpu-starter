@@ -148,14 +148,3 @@ dist
 
 # macOS Finder metadata
 .DS_Store
-
-# Third-party test models (57 MB of commercial game assets).
-#
-# NOT ours to redistribute — unlike the DF2 mod data above, which this project's own mod
-# team authored and released as freeware. This repo is public, so these stay local. The
-# scope/weapon prototypes and the ?targets=1 grass contrast rig read from here and simply
-# do not appear without them.
-/testmodels
-
-# Working scratch: raw source art and exports, not build inputs.
-/SourceFiles

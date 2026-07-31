@@ -29,9 +29,9 @@ const MODELS = [
 ];
 
 /**
- * A range ladder, metres from the origin, matching the sweep docs/07 §8 uses for
- * concealment: close enough to read strand detail against, far enough to show where a
- * standing figure stops being separable from the canopy.
+ * Near figures preserve the concealment sweep from docs/07 §8. Long-range figures extend
+ * the same harness to the 1,300 m sniper acceptance range; grass visibility is not the
+ * limiting gameplay distance.
  */
 const PLACEMENTS: Array<{ range: number; bearing: number; model: number }> = [
   { range: 8, bearing: -0.18, model: 0 },
@@ -39,6 +39,10 @@ const PLACEMENTS: Array<{ range: number; bearing: number; model: number }> = [
   { range: 35, bearing: -0.1, model: 2 },
   { range: 70, bearing: 0.12, model: 0 },
   { range: 140, bearing: -0.06, model: 1 },
+  { range: 300, bearing: 0.025, model: 2 },
+  { range: 600, bearing: -0.015, model: 0 },
+  { range: 1_000, bearing: 0.008, model: 1 },
+  { range: 1_300, bearing: 0, model: 2 },
 ];
 
 /** Metres tall each figure is normalised to, so mismatched export scales cannot lie. */
@@ -162,8 +166,11 @@ export function TestTargets({
       new THREE.BoxGeometry(0.5, FIGURE_HEIGHT, 0.5),
       new THREE.MeshBasicMaterial({ color: 0xff00ff })
     );
-    const mx = originX + Math.sin(heading) * 4;
-    const mz = originZ + Math.cos(heading) * 4;
+    // Keep the diagnostic marker near the initial view without placing it on
+    // the centre ray, where it would occlude every long-range target behind it.
+    const markerBearing = -0.32;
+    const mx = originX + Math.sin(heading + markerBearing) * 4;
+    const mz = originZ + Math.cos(heading + markerBearing) * 4;
     marker.position.set(mx, heightfield.sample(mx, mz) + FIGURE_HEIGHT / 2, mz);
     group.add(marker);
     loaded.current.push(marker);

@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import * as THREE from "three/webgpu";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { float, mix, positionGeometry, smoothstep, texture, uniform, vec2, vec3 } from "three/tsl";
-import { CAMERA_FAR, CAMERA_NEAR } from "../df2/config";
+import { CAMERA_FAR, CAMERA_FOV, CAMERA_NEAR } from "../df2/config";
 import { publishRange, type RangeSample } from "./rangeTelemetry";
 import { LocalPlayerController, type LocalPlayerCommands } from "./core/LocalPlayerController";
 import type { PlayerStance } from "./core/PlayerMotor";
@@ -18,6 +18,10 @@ import { WeaponSystem, type WeaponEvent } from "./weapons/WeaponSystem";
 import { SNIPER_DEFINITION } from "./weapons/weaponDefinitions";
 import { combatTelemetry } from "./ui/CombatTelemetry";
 import { shotDebugStore } from "./debug/ShotDebugStore";
+import {
+  AIM_DIAGNOSTIC_RANGE_METRES,
+  type LookSensitivityController,
+} from "./core/LookSensitivityController";
 
 const WORLD_LAYER = 0;
 const WEAPON_LAYER = 1;
@@ -78,6 +82,7 @@ export interface WeaponPrototypeProps {
   worldQuery: ThreeWorldQuery;
   stance?: PlayerStance;
   grounded?: boolean;
+  lookSensitivity: LookSensitivityController;
 }
 
 function disposeObject(root: THREE.Object3D) {
@@ -146,6 +151,7 @@ export function WeaponPrototype({
   worldQuery,
   stance = "stand",
   grounded = false,
+  lookSensitivity,
 }: WeaponPrototypeProps) {
   const { camera, gl, scene, size } = useThree();
   const player = useMemo(() => new LocalPlayerController(), []);
@@ -281,10 +287,11 @@ export function WeaponPrototype({
       publishRange(null);
       combatTelemetry.clear();
       shotDebugStore.clear();
+      lookSensitivity.reset();
       unregisterTerrain.current?.();
       unregisterTerrain.current = null;
     },
-    []
+    [lookSensitivity]
   );
 
   useEffect(() => {
@@ -496,6 +503,12 @@ export function WeaponPrototype({
     swayTime.current += delta;
     const aimTarget = scopeDemo && hasOptic.current ? weapon.adsProgress : 0;
     aim.current = THREE.MathUtils.damp(aim.current, aimTarget, AIM_RESPONSE, delta);
+    if (scopeDemo) lookSensitivity.setOpticState(aim.current, CAMERA_FOV, scopeFov.current);
+    else lookSensitivity.reset();
+    combatTelemetry.publishAimResolution(
+      lookSensitivity.centimetresPerCountAt(AIM_DIAGNOSTIC_RANGE_METRES),
+      AIM_DIAGNOSTIC_RANGE_METRES
+    );
     scopeActive.value = scopeDemo ? aim.current : 0;
     const holdingScopeBreath = scopeDemo && commands.holdingBreath;
     // Blend the transition so holding Shift never snaps the weapon or sight
@@ -584,11 +597,11 @@ export function WeaponPrototype({
         THREE.MathUtils.clamp(-opticInEyeSpace.y / EYEBOX_RADIUS_METRES, -EYEBOX_MAX_OFFSET, EYEBOX_MAX_OFFSET)
       );
       scopeCamera.position.copy(opticWorld);
-      // ScopeCam_Target's local rotation is an authoring-space correction, but
-      // the camera-space rig rotation includes our controlled breathing sway.
-      // Copy it so both the physical scope and its captured sight picture move
-      // together, without inheriting the target's backwards local rotation.
-      scopeCamera.quaternion.copy(rig.quaternion);
+      // The reticle, rangefinder and shot must describe one authoritative ray.
+      // Weapon sway can move the physical housing/eyebox, but rotating this
+      // capture by cosmetic sway would move the apparent impact by metres at
+      // 1,300 m while gameplay still fired along the player-camera direction.
+      scopeCamera.quaternion.copy(camera.quaternion);
       scopeCamera.updateMatrixWorld();
       renderer.setRenderTarget(target);
       renderer.clear();
@@ -603,8 +616,8 @@ export function WeaponPrototype({
       let range: RangeSample | null = null;
       if (scopeDemo && aim.current > 0.02) {
         // The ray starts at the player eye, but uses the scope capture camera's
-        // centre direction. This reports the range the player is actually
-        // aiming at, including the small optical lag/parallax currently shown.
+        // centre direction. Its orientation is the same authoritative direction
+        // used by hitscan; only its origin retains the tiny physical optic offset.
         camera.getWorldPosition(rangeOrigin);
         scopeCamera.getWorldDirection(rangeDirection);
         const hit = worldQuery.raycast(rangeOrigin, rangeDirection, CAMERA_FAR);

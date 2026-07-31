@@ -9,6 +9,11 @@ export interface CombatRangeSample {
   readonly kind: CombatRangeKind;
 }
 
+export interface AimResolutionSample {
+  readonly centimetresPerCount: number;
+  readonly rangeMetres: number;
+}
+
 export interface ShotTelemetry {
   readonly sequence: number;
   readonly sourceId: string;
@@ -30,6 +35,7 @@ export interface CombatSnapshot {
   readonly range: CombatRangeSample | null;
   readonly lastShot: ShotTelemetry | null;
   readonly recentShots: readonly ShotTelemetry[];
+  readonly aimResolution: AimResolutionSample | null;
   readonly dryFireSequence: number;
 }
 
@@ -40,6 +46,7 @@ const EMPTY: CombatSnapshot = {
   range: null,
   lastShot: null,
   recentShots: [],
+  aimResolution: null,
   dryFireSequence: 0,
 };
 
@@ -103,6 +110,21 @@ export class CombatTelemetry {
       ...this.snapshot,
       lastShot,
       recentShots: [lastShot, ...this.snapshot.recentShots].slice(0, 5),
+    });
+  }
+
+  publishAimResolution(centimetresPerCount: number, rangeMetres: number): void {
+    const previous = this.snapshot.aimResolution;
+    if (
+      previous &&
+      previous.rangeMetres === rangeMetres &&
+      Math.abs(previous.centimetresPerCount - centimetresPerCount) < 0.05
+    ) {
+      return;
+    }
+    this.replace({
+      ...this.snapshot,
+      aimResolution: { centimetresPerCount, rangeMetres },
     });
   }
 

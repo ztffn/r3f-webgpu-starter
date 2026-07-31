@@ -11,6 +11,7 @@ import { useEffect, useMemo } from "react";
 import * as THREE from "three/webgpu";
 import type { Heightfield } from "./Heightfield";
 import { BENCH } from "./bench";
+import type { LookSensitivityController } from "../fps/core/LookSensitivityController";
 
 /** Eye height above ground, metres. Matches docs/04 §4.2. */
 export const STANCE_EYE = { stand: 1.7, crouch: 0.95, prone: 0.35 } as const;
@@ -30,6 +31,7 @@ export interface FlyControlsProps {
   stance: Stance;
   /** Use FPS-style captured mouse deltas instead of hold-to-drag look. */
   pointerLock?: boolean;
+  lookSensitivity: LookSensitivityController;
   /** Called at most a few times a second with the current rig state. */
   onState?: (s: FlyState) => void;
   onToggleGround?: () => void;
@@ -44,6 +46,7 @@ export function FlyControls({
   grounded,
   stance,
   pointerLock = false,
+  lookSensitivity,
   onState,
   onToggleGround,
   onStance,
@@ -74,6 +77,7 @@ export function FlyControls({
 
   useEffect(() => {
     const el = gl.domElement;
+    let alive = true;
 
     const down = (e: KeyboardEvent) => {
       // Don't fight the browser over scroll/zoom keys while flying.
@@ -95,9 +99,33 @@ export function FlyControls({
     };
 
     const rotate = (movementX: number, movementY: number) => {
-      rig.yaw -= movementX * 0.0032;
-      rig.pitch -= movementY * 0.0032;
+      const radiansPerCount = pointerLock ? lookSensitivity.radiansPerCount : 0.0032;
+      rig.yaw -= movementX * radiansPerCount;
+      rig.pitch -= movementY * radiansPerCount;
       rig.pitch = Math.max(-1.5, Math.min(1.5, rig.pitch));
+    };
+
+    const requestLock = () => {
+      try {
+        const request = el.requestPointerLock({ unadjustedMovement: true });
+        if (request) {
+          void request.catch(() => {
+            if (!alive) return;
+            if (document.pointerLockElement === el) return;
+            try {
+              void el.requestPointerLock();
+            } catch {
+              /* normal pointer lock was also unavailable */
+            }
+          });
+        }
+      } catch {
+        try {
+          void el.requestPointerLock();
+        } catch {
+          /* unsupported or denied; the next user gesture can retry */
+        }
+      }
     };
 
     const pdown = (e: PointerEvent) => {
@@ -107,12 +135,7 @@ export function FlyControls({
           (e.button === 0 || e.button === 2) &&
           document.pointerLockElement !== el
         ) {
-          try {
-            const request = el.requestPointerLock();
-            if (request) void request.catch(() => undefined);
-          } catch {
-            /* unsupported or denied; the next user gesture can retry */
-          }
+          requestLock();
         }
         return;
       }
@@ -158,6 +181,7 @@ export function FlyControls({
     el.addEventListener("wheel", wheel, { passive: false });
     document.addEventListener("mousemove", lockedMove);
     return () => {
+      alive = false;
       removeEventListener("keydown", down);
       removeEventListener("keyup", up);
       removeEventListener("blur", blur);
@@ -168,7 +192,7 @@ export function FlyControls({
       document.removeEventListener("mousemove", lockedMove);
       if (pointerLock && document.pointerLockElement === el) document.exitPointerLock();
     };
-  }, [gl, rig, onToggleGround, onStance, pointerLock]);
+  }, [gl, rig, lookSensitivity, onToggleGround, onStance, pointerLock]);
 
   useFrame((_, delta) => {
     const dt = Math.min(delta, 0.1);

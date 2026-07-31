@@ -6,7 +6,7 @@ export const SNIPER_DEFINITION: WeaponDefinition = {
   shot: {
     type: "hitscan",
     damage: 100,
-    range: 1_200,
+    range: 2_000,
     roundsPerMinute: 48,
   },
   ammo: {

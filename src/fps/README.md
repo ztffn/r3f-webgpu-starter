@@ -83,6 +83,13 @@ releases it, left click fires, and right click toggles ADS. Shift holds breath
 while ADS is active, R reloads, and T resets targets. The numbered keys remain
 direct authored-animation inspection.
 
+Pointer-lock sensitivity is FOV-scaled through the live ADS transition and
+variable optic zoom. The default optic resolves to roughly 1.6 cm per mouse
+count at 1,300 m; the HUD publishes the live value. Use `mousesens` to override
+base radians per count and `scopesens` to override the additional sniper
+precision scale (defaults: `0.0006` and `0.25`). The target harness extends to
+1,300 m and the prototype sniper query range is 2,000 m.
+
 Add `&shotdebug=1` to draw the latest resolved shot in world space. The cyan
 line is the shot path, the white segment is initial authoritative aim, and red
 marks the impact and surface normal. The HUD retains a short recent-shot log.

@@ -148,6 +148,15 @@ export function Hud({
           <dd>{combat.range ? fmt(combat.range.metres, 1) : "—"} m</dd>
           <dt>Hit</dt>
           <dd>{combat.range ? combat.range.kind : "—"}</dd>
+          {combat.aimResolution && (
+            <>
+              <dt>Aim step</dt>
+              <dd>
+                {fmt(combat.aimResolution.centimetresPerCount, 1)} cm /{" "}
+                {fmt(combat.aimResolution.rangeMetres)} m
+              </dd>
+            </>
+          )}
           {combat.weapon && (
             <>
               <dt>Weapon</dt>

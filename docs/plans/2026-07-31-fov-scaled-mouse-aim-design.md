@@ -28,20 +28,21 @@ scopedSensitivity = baseSensitivity * opticRatio * precisionScale
 effectiveSensitivity = lerp(baseSensitivity, scopedSensitivity, adsBlend)
 ```
 
-Defaults are `0.0016` radians/count for hip input and `0.25` for the sniper
-precision scale. Query parameters `mousesens` and `scopesens` allow human tuning
+Defaults are `0.0006` radians/count for hip input (roughly 33 cm/360° at 800 DPI
+with raw input) and `0.25` for the sniper precision scale. Query parameters
+`mousesens` and `scopesens` allow human tuning
 without a rebuild. The existing damped optic presentation value supplies
 `adsBlend`, so sensitivity changes continuously through ADS. Variable optic FOV
 is read live, making Z/X zoom affect control resolution as well as magnification.
 
 At 1,300 m the expected one-count lateral steps are approximately:
 
-- default optic, 5.5° FOV: 4.3 cm;
-- narrow optic, 2.5° FOV: 2.0 cm;
-- wide optic, 9° FOV: 7.1 cm.
+- default optic, 5.5° FOV: 1.6 cm;
+- narrow optic, 2.5° FOV: 0.7 cm;
+- wide optic, 9° FOV: 2.7 cm.
 
-This gives roughly 12 mouse counts across a 0.5 m torso at the default optic and
-25 at maximum magnification. The HUD reports the live centimetres-per-count value
+This gives roughly 31 mouse counts across a 0.5 m torso at the default optic and
+68 at maximum magnification. The HUD reports the live centimetres-per-count value
 at 1,300 m so the precision contract is directly observable.
 
 ## Ownership and data flow
@@ -54,6 +55,11 @@ count when consuming pointer-lock deltas. No React render occurs on mouse move.
 `CombatTelemetry` publishes the derived 1,300 m diagnostic at low frequency.
 The current sniper hitscan range is extended beyond the acceptance range, and
 the test-target harness gains long-range figures through 1,300 m.
+
+The scope capture, rangefinder, and shot resolver must share the authoritative
+camera direction. Cosmetic weapon sway may move the physical housing and eyebox,
+but must not rotate the scope picture away from the ray used to shoot; the prior
+rotation produced metre-scale reticle/impact disagreement at 1,300 m.
 
 ## Verification
 

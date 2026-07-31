@@ -22,6 +22,7 @@ import { loadTerrain, type LoadedTerrain } from "./loadTerrain";
 import { WeaponPrototype } from "../fps/WeaponPrototype";
 import { ThreeWorldQuery } from "../fps/core/WorldQuery";
 import { FPS_DEBUG } from "../fps/debug/debugConfig";
+import { LookSensitivityController } from "../fps/core/LookSensitivityController";
 // Lazily imported so the three multi-megabyte debug models are code-split out of the
 // main bundle and only fetched when ?targets=1 actually asks for them.
 const TestTargets = lazy(() =>
@@ -127,6 +128,7 @@ export function DF2Scene({
   weaponDemo = false,
 }: DF2SceneProps) {
   const worldQuery = useMemo(() => new ThreeWorldQuery(0), []);
+  const lookSensitivity = useMemo(() => new LookSensitivityController(), []);
   // undefined = still loading, null = no assets (synthetic), object = real map
   const [loaded, setLoaded] = useState<LoadedTerrain | null | undefined>(undefined);
 
@@ -365,6 +367,7 @@ export function DF2Scene({
           grounded={grounded}
           stance={stance}
           pointerLock={scopeDemo}
+          lookSensitivity={lookSensitivity}
           onState={onFly}
           onToggleGround={onToggleGround}
           onStance={onStance}
@@ -378,6 +381,7 @@ export function DF2Scene({
           worldQuery={worldQuery}
           stance={stance}
           grounded={grounded}
+          lookSensitivity={lookSensitivity}
         />
       )}
     </>

@@ -15,7 +15,9 @@ test("semi-auto accepts one click, consumes ammo, and enforces cadence", () => {
   weapon.pressTrigger();
   weapon.update(1 / 60);
   assert.equal(weapon.magazine, 4);
-  assert.equal(drain(weapon)[0]?.type, "shot");
+  const firstShot = drain(weapon)[0];
+  assert.equal(firstShot?.type, "shot");
+  if (firstShot?.type === "shot") assert.equal(firstShot.range, 2_000);
 
   weapon.pressTrigger();
   weapon.update(1 / 60);

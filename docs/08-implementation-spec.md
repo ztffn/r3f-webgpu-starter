@@ -370,6 +370,29 @@ Nothing throws when these break. Check them after touching `config.ts`.
    is permanently inside the canopy while standing.
 5. **Grass results must be reported with their `GrassSource`.** A number measured against a
    `colormap-standin` canopy says nothing about placement.
+6. **The renderer must never conceal LESS than `grassHeightField` says it does.** This is the
+   one invariant with a competitive-fairness edge, so it outranks frame time. Concealment is
+   queried analytically against the field (`04` §2), so a target prone in distant grass counts
+   as concealed no matter what the screen draws. Any rendering limit that silently drops distant
+   grass therefore hands the player who triggers it free vision of concealed targets — and the
+   cheapest way to trigger it is to go prone, which is also the strongest position. Two limits
+   have already done exactly this:
+   - `sEnter = inside ? nearClip : fragDistance` with `hitS <= sEnter + span` and
+     `span <= GRASS_MAX_SPAN` put a hard 49 m ceiling on every hit on screen the moment the eye
+     entered the canopy. Fixed by computing the entry per fragment and searching a near interval
+     then a far one (`07` §9).
+   - The lifted shell had no floor, so nothing below the horizon was marched at all (`07` §9).
+
+   **`GRASS_FADE_END` is the remaining one and it is a live design question, not a bug.** Beyond
+   it no shell is drawn, so a target prone in grass at 1200 m stands on bare colormap while the
+   field still counts them concealed. Concealment is specified at 800 m (`00`, `04`), so the
+   current 1100 m covers the spec with room to spare — but the gap is real above that and the
+   honest options are to extend the draw distance or to bound the query by it. Do not "fix" this
+   by shortening the fade: that widens the gap.
+
+   **Test it, do not assume it.** Any change to the march bounds, the proxy geometry, or the fade
+   needs the hit-distance view (`?debug=1`, view 2) checked prone as well as standing. A ceiling
+   on hit distance is invisible in a normal render — it looks like ordinary bare ground.
 
 ---
 
@@ -475,6 +498,16 @@ Each of these cost real time. They are here so they cost it once.
 - **TSL type widening** bites on free functions; method chaining is more reliable. The graph is
   validated by compiling and running it, not by `tsc` — hence the deliberate loose `NodeArg`
   in `GrassMaterial.ts`.
+- **`.mix()`, `.smoothstep()` and `.step()` put the RECEIVER in a different argument slot than
+  the GLSL call does.** `t.mix(a, b)` is `mix(a, b, t)` — the receiver is the **interpolant**.
+  `x.smoothstep(lo, hi)` is `smoothstep(lo, hi, x)`. `x.step(edge)` is `step(edge, x)`. Three
+  registers these three through reordering wrappers (`mixElement`, `smoothstepElement`,
+  `stepElement` in `nodes/math/MathNode.js`); every other chained method — `clamp`, `min`,
+  `max`, `pow`, `distance` — keeps GLSL order, so the rule cannot be applied by habit. Check
+  `addMethodChaining` before writing a chained call with more than one argument.
+  Written the GLSL way, `a.mix(b, t)` compiles to `mix(b, t, a)`: a **valid expression with the
+  operands rotated**, so there is no error and no warning, only a wrong picture. This cost
+  several sessions as the "pale grass" artifact — see §9 and `docs/07` §9.
 - **Prone showing only grass is correct, not a bug.** If you are concealed you are also blind;
   that symmetry is the mechanic.
 

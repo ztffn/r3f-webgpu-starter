@@ -4,7 +4,25 @@ Goal: **60 fps at ground level on Green Mile**, at full resolution, without shor
 the grass draw distance. The premise is 1 km-plus sightlines and long-range
 concealment, so trading range for frame rate is not on the table.
 
-Status: baseline measured, no optimisation applied yet.
+Status: **TARGET MET at the current test vantage.** 8.3 ms standing AND prone at Green Mile
+(5, 375), dpr 1, mains power — which is the 120 Hz vsync cap, so the true cost is lower
+still and unknown. Was 72.10 ms at the §1 baseline.
+
+The wins, largest first: `GRASS_STEPS` was a stale constant running the march at 8x its
+designed sample count (§3.1.0); bracket-and-bisect replacing the adaptive march (§3.1); the
+baked jitter (§3.3); and the floor proxy narrowed to a per-pixel test (§3.1.1).
+
+**Prone is no longer the worst case** — it now matches standing, where before it was 1.6x.
+§3.2, horizon culling, has still not been attempted and is no longer needed to hit 60 fps
+here. Keep it in reserve for the scoped case (§4), which remains entirely unmeasured.
+
+Re-measure before quoting any older number in this document: most predate the §3.1.0 fix and
+describe a march doing 8x the work.
+
+**Every frame time in this document was measured while the pale-wash bug was live**
+(`docs/07` §9). That bug was in the colour expression, not in the march, so it did not
+change the sample count and the cost model in §2 still holds — but re-measure before
+quoting a number as current.
 
 ---
 
@@ -99,6 +117,21 @@ at no measurable cost, which suggests the world scale is wrong rather than the
 shader. `HEIGHT_SCALE` and `METERS_PER_TEXEL` are still the uncalibrated placeholders
 docs/01 §7 flags.
 
+### 3.0.1 Debug affordance added while chasing the pale wash
+
+The `?debug=1` panel gained views 4–9: `columns`, `faded`, the fog factor, the fog
+input, the distance fade, and the fog colour uniform flat. 6–8 are **banded false
+colour** (black / blue / green / yellow / red at 0.125 / 0.375 / 0.625 / 0.875), not
+greyscale — a greyscale readout is not legible through a JPEG screenshot, and two
+views that had to agree appeared to contradict until they were banded. Views ≥ 4 also
+force the shell **opaque**, so the terrain cannot show through an alpha-tested miss and
+be mistaken for a shader value.
+
+These bisect the colour expression from a uniform instead of from an edit, which is
+the difference between one build and one build per term. Reach for them before
+hypothesising: the pale wash survived four patched hypotheses and fell to one
+bisection.
+
 ### 3.1 Fixed-interval sampling (the whole target sits here)
 
 Replace "small adaptive step until hit, capped at 96" with: compute the ray's entry
@@ -124,6 +157,110 @@ Why this and not step tuning:
 Risk: uniform sampling can step over a thin column where the current fine march
 would catch it. Bisection recovers some of that. This needs a visual check against
 the reference method in `docs/07`, not just a frame-time check.
+
+### 3.1.0 The march was running 8x its designed sample count
+
+`GRASS_STEPS` was 96. That was a **stale unit, not a tuning choice**: 96 was the budget for
+the old adaptive march, which took many tiny steps until it hit something. The
+bracket-and-bisect rewrite (§3.1) redefined `steps` as samples spread across a *computed
+span*, and `GrassMaterial`'s own default is 12 — but the constant was never updated. So the
+app ran 96 coarse samples plus 4 bisections where the design intends 16 samples total.
+
+Measured at Green Mile (5, 375), standing, dpr 1:
+
+| Coarse steps | Frame time | fps |
+|---|---|---|
+| 96 (shipped) | **19.6 ms** | 51 |
+| 12 (design, now shipped) | **7.8 ms** | 127 |
+
+7.8 ms is at the 120 Hz vsync cap, so the true cost is lower still. **The single largest
+performance item found so far, and it was a leftover constant rather than an algorithm
+problem.** No visible loss of grass density or silhouette at that vantage.
+
+**Not yet checked:** prone, and along a ridge. The failure mode of too few coarse samples is
+stepping OVER a thin column and missing it, which shows as sparse patches at grazing angles
+rather than as uniform dimming — so standing at a moderate pitch is the *least* likely pose
+to reveal it. Verify before treating 12 as settled.
+
+**This invalidates the earlier rows in this document.** Everything measured before this
+point ran 96 coarse samples, so the absolute numbers describe a march doing 8x the intended
+work. The linear cost model in §2 still holds — that is what predicts this win — but
+re-measure any absolute figure before quoting it.
+
+### 3.1.2 Frame times move for reasons that are not the code — check power first
+
+A 4x regression (7.8 ms -> 33.3 ms) was blamed on a shader edit and the edit was reverted to
+isolate it. **Reverting changed nothing.** The cause was the laptop throttling on a low
+battery; on mains it went straight back.
+
+What made it diagnosable quickly, in the order that mattered:
+
+| Test | Result | What it ruled out |
+|---|---|---|
+| revert the suspect edit | still 33.3 ms | the edit |
+| `?steps=4` | still 33.3 ms | the march entirely |
+| `?grass=0` | still 33.3 ms | **the whole grass system** |
+
+Grass switched off being equally slow is what settles it — nothing in this document can
+explain a frame that slow with no grass in it. The other tell is the number itself: 33.3 ms
+is exactly 1/30 s, a vsync cadence rather than a workload. A real cost regression lands on
+an arbitrary number; a throttle lands on 1/30, 1/40 or 1/60.
+
+**Before attributing any frame-time change to an edit: confirm mains power, then measure
+`?grass=0`.** Both are seconds of work and either can save an afternoon.
+
+### 3.1.1 The floor proxy, and what it costs
+
+Closing the grass volume's coverage hole (`docs/07` §9) added a second pass: the same
+march against the un-lifted terrain surface, drawn only while the eye is inside the
+canopy. Toggle it with `?grassfloor=0` to measure it against its own absence at the
+same pose — a flag added because the only comparison otherwise available was
+prone-with-floor against standing-without, which differs in the march too.
+
+Rows are grouped by window, because the viewport sets the fragment count and rows from
+different windows are not comparable. Neither group is comparable to §1's 132-call window.
+
+**Window 1207 × 980, 93 base draw calls** — the sequence that located the cost:
+
+| Pose | Floor pass | Frame time | Draw calls |
+|---|---|---|---|
+| standing | not drawn (eye above canopy) | **16.1 ms** | 93 |
+| prone | `?grassfloor=0` | **17.4 ms** | 93 |
+| prone | drawn wherever the eye is in canopy | **37.5 ms** | 111 |
+| prone | + per-chunk narrowing | **26.5 ms** | 108 |
+| standing | per-chunk narrowing WITHOUT the inside-canopy gate | **29.0 ms** | 108 |
+
+**Window 1032 × 914, 93 base draw calls** — after the per-pixel cede test:
+
+| Pose | Floor pass | Frame time | Draw calls |
+|---|---|---|---|
+| standing | not drawn | **16.4 ms** | 93 |
+| prone | `?grassfloor=0` | **20.1 ms** | 93 |
+| prone | shipped | **21.1 ms** | 108 |
+
+Read these in order, because each killed an idea:
+
+- **Prone with the floor off matches standing** (17.4 vs 16.1). The march is not
+  stance-sensitive; every extra millisecond at prone was the floor pass.
+- **The floor drawn everywhere costs 20 ms** — it more than doubled the frame. The pixels it
+  covers are the ones previously skipped, so marching them is the fix, but 20 ms is not the
+  price of that fix.
+- **Per-chunk narrowing recovered 11 ms.** Chunks below the eye are already covered by the
+  ceiling.
+- **Dropping the inside-canopy gate for the per-chunk test alone cost 13 ms standing**
+  (29.0 vs 16.1): every chunk with a peak above eye level then draws its floor.
+  Geometrically more correct, not worth nearly doubling the standing frame for a failure
+  case never shown to exist. Both conditions ship.
+- **The per-pixel cede test is what actually fixed it: the floor pass now costs 1.0 ms**
+  (21.1 vs 20.1), down from 20. Coarse gating was attacking the wrong axis — the floor's
+  cost was fragments running a march the ceiling had already answered, and the only place
+  that can be decided is per pixel.
+
+What remains is **3.7 ms of prone-versus-standing that is the march itself** (20.1 vs 16.4
+with the floor off both times): a low eye means grazing rays and near columns. That is
+intrinsic to the viewpoint, not a bug, and it is what §3.2 attacks — at prone almost
+nothing past the first ridge is visible, and horizon culling drops chunks from both passes
+at once.
 
 ### 3.2 Horizon culling of grass chunks
 

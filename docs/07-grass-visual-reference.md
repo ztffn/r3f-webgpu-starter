@@ -353,3 +353,378 @@ with a real GPU.
 the repro pose (x = 0) sits exactly on one, since `chunkSize` is 256 m and
 `halfWorld` is 1024 m. If the gap is boundary-specific it is a skirt/LOD seam;
 if not, it is the chunk window's near edge.
+
+### Near grass missing whenever the eye is inside the canopy — CLOSED
+
+Reported as "it clips all near grass when the canopy is higher than the camera", and
+reproducible at the §1 vantage standing, eye 1.7 m above ground, with the canopy dial at
+11.3 m: the hit mask showed a band across the bottom of the frame with **zero** grass
+hits, plus a hole wherever the terrain dropped away.
+
+**It was not the terrain skirt** — the wedge in the next section is a separate defect,
+and it is present with grass switched off entirely.
+
+**Cause: the lifted shell is a CEILING and the volume had no floor.** The proxy is the
+terrain surface lifted to the canopy top. A ray that leaves the eye going downward and
+meets the ground never crosses that surface — the shell is above the entire ray — so no
+fragment is rasterised for the pixel and the march never runs. On level ground the split
+is exactly the horizon: the shell projects to everything above it, and everything below
+it had no grass proxy at all.
+
+No single surface can cover both cases. Rays entering from above need the top; rays
+going down from inside need the bottom; and the silhouette against sky — the edge this
+whole system exists to render — needs the top, so the bottom cannot simply replace it.
+
+**Fix:** close the volume with a second proxy at ground level (`floorMaterial`, one march
+graph, two `positionNode`s sharing every uniform), drawn by `Terrain.tsx` only while the
+eye is inside the canopy. Both passes march from the eye and write the hit's depth rather
+than the proxy's, which is what makes them agree where they meet instead of z-fighting
+along the horizon. Verified at the reproducing pose: the bare band is gone and the hit
+mask is solid to the bottom edge. Cost is 13.7 ms at prone and zero standing in 1.2 m
+grass — `docs/09` §3.1.1 has the numbers and what they mean for the target.
+
+**Still open at that pose:** a patch of distant terrain visible through a notch in the
+near canopy renders with no grass. Most likely correct — it is beyond `GRASS_FADE_END`,
+where no shell is drawn at all — but it has not been confirmed against the hit distance.
+
+### All distant grass vanished while prone — CLOSED, and it was a fairness bug
+
+Reported as "easy to stay prone in such a way that distant grass does not render, giving
+you an unfair advantage". Correct, and it was arithmetic rather than a tuning problem:
+
+```
+sEnter = inside ? nearClip : fragDistance      hitS <= sEnter + span      span <= maxSpan
+```
+
+`inside` is a property of the CAMERA, not the fragment. So the moment the eye entered the
+canopy, every fragment on screen started its march at `nearClip` and gave up after
+`maxSpan` — **no hit anywhere could resolve beyond about 49 m**, and everything past that
+was a forced miss drawing bare colormap. Going prone in grass switched off all distant
+grass at once.
+
+That is a competitive-fairness defect, not a cosmetic one. Concealment is queried
+analytically against `grassHeightField` (`04` §2), so a target prone in distant grass is
+concealed whatever the screen shows. A player who went prone therefore saw every distant
+target standing on bare ground while remaining hidden himself — and prone is already the
+strongest position. `08` §8 now carries this as an invariant: **the renderer must never
+conceal less than the field says it does.**
+
+**First attempt, reverted:** search a near interval and then, on a miss, a far one. It did
+fix the ceiling, but it inlined the whole march twice AND it kept the camera in the entry
+rule — so the *texture* of distant grass still changed as you went prone. It must not: a
+column 800 m away does not care about your stance.
+
+**Fix.** One rule, one march, no branch on the camera. The entry is where this pixel's ray
+first crosses into the slab, which is a property of the ray and the proxy and nothing else:
+
+- ceiling proxy — the fragment IS the canopy top, so the ray enters there.
+- floor proxy — the fragment is the ground, so the crossing was `span` earlier along the
+  ray; clamped to `nearClip`, which also makes near ground march from the eye with no
+  special case.
+
+The near-field occlusion that makes lying in grass blinding is no longer a special case —
+it falls out, because a floor fragment a metre away has its entry clamped.
+
+**One rule was still not enough, and this is the part that took a third pass.** Both
+proxies are drawn while the eye is in the canopy, and over the SAME pixel they search
+different intervals: the ceiling from its canopy-top crossing, the floor from `span` before
+the ground. Different intervals place the coarse samples differently, so they bracket
+different columns, and whichever resolves nearer wins the depth test. So the texture of
+distant grass still shifted on going prone — the ceiling alone answered while standing, and
+the floor started competing once prone. Uniform *code* is not the same as a uniform
+*answer*.
+
+**Fix: the floor yields to the ceiling per pixel.** The floor is only needed where the ray
+reaches ground without crossing the canopy top. That crossing is at `fragDist - span`, so
+when it sits comfortably ahead of the eye the ceiling owns the pixel and the floor skips its
+march entirely; below `nearClip` the eye is inside the slab along that ray and the floor is
+the only proxy there is. The two now partition the screen exactly instead of competing over
+it, so distant pixels are ceiling-only in every stance.
+
+**Verified** prone at the §1 vantage: hits resolve out to mid range in the hit-distance view
+where previously nothing beyond 49 m existed, and the distant band is unchanged between
+standing and prone screenshots at the same pose. Cost, same window: standing 16.4 ms,
+prone 21.1 ms, of which the floor pass is 1.0 ms — it was 20 ms before the per-pixel test
+(`docs/09` §3.1.1). The remaining 3.7 ms of prone-versus-standing is the march at a low eye,
+which is intrinsic to the viewpoint.
+
+A ceiling on hit distance is invisible in a normal render; it looks like ordinary bare
+ground. Check view 2 prone, not just standing, after touching the march bounds.
+
+### Strand height frequency — OPEN, and the amplitude was never the problem
+
+The DF2 references show a canopy edge that varies **strand to strand** — a ragged, hairy
+silhouette of thin blades at different lengths. Ours rolls in clumps. The height multiplier
+already spans 0.38–1.00 of the canopy after the standardisation above, so amplitude is not
+the limit. Frequency is:
+
+- the jitter texture is 1024² over a 120 m period, so **one texel is 0.117 m — about four
+  strands at the 0.03 m column width, which therefore share a single height**;
+- the field's finest fbm term sits at **0.35 m, roughly twelve strands**, so real variation
+  is smoother still.
+
+`GRASS_STRAND_JITTER` (0.18, `?strand=` to override, bake-time) trades fbm weight for noise
+at texel resolution — the highest frequency this texture can express. **Measured
+inconclusive:** an A/B at the §1 vantage, prone, was visually indistinguishable at 0 and
+0.18. Not a refutation — at 100–400 m each strand is sub-pixel and that view has no sky
+silhouette, so it cannot show a ragged edge either way. Re-test against a near ridge line
+with sky behind it.
+
+Two paths remain, and the second is the one the references actually used:
+
+1. **A second jitter texture at cell scale** — 256² over 7.68 m is 0.03 m per texel, so
+   genuinely per-strand. One extra fetch per march sample. Not the old nine-`sin` disaster
+   (99.8 ms); a fetch is cheap. The short repeat hides behind the coarse field.
+2. **Key height on RAY BEARING, as Voxel Space did.** DF2 drew one strand per screen column
+   via `DrawVerticalLine` from a single heightfield sample: strand width was one pixel by
+   construction at every distance, and every screen column had its own height. Our march is
+   per-pixel in world space, so strand identity is decoupled from the screen and both
+   thinness and per-strand variation have to be manufactured. `uToneMode = 1` already keys
+   *tone* on bearing with `stripePixels` setting the width; extending that to *height* is
+   cheap, because bearing is constant along a ray — one evaluation per fragment, not per
+   sample. This is the authentic mechanism and most likely the one that gets the look.
+
+Strand **width** is not a blocker on its own: `GRASS_CELL` is a live slider from 0.01 m. The
+limit is the march's sampling rate — 12 coarse samples over metres already makes which
+strand a ray hits somewhat arbitrary, and thinner strands turn that into shimmer rather
+than detail. Which is the same argument as path 2: fix the sampling to be per screen column
+and both problems go away together.
+
+### Grass swimming when the camera moves — CLOSED, march phase was camera-anchored
+
+Reported right after `GRASS_STEPS` dropped 96 -> 12 (`docs/09` §3.1.0): the grass appears to
+shift or crawl while walking, worst heading toward a hill crest.
+
+**Cause.** The coarse samples sit at `sEnter + k*ds`, and `sEnter` is the distance from the
+CAMERA to the shell fragment. So every sample plane slides along the ray as the camera
+moves. A thin column bracketed at sample k on one frame is stepped over on the next and a
+different column is hit instead — the resolved hit jumps by up to a full `ds`, and the field
+appears to swim. Nothing is wrong with the geometry; the sampling is just not anchored to
+anything fixed.
+
+Why it appeared exactly when it did: `ds = span / steps`, and at 96 steps that was about
+0.5 m — small enough that the jump was invisible. At the designed 12 it is up to 4 m for a
+grazing ray, and heading at a crest is precisely the grazing case.
+
+**Fix: anchor the sample planes to WORLD HEIGHT.** Pin them to fixed multiples of the
+per-step vertical drop, so they stay on the same world planes regardless of where the camera
+stands. With `dy = ds * vy`, the distance from the entry to the next plane is
+`fract(yEnter / dy) * ds` — four instructions, measured at the vsync cap either way.
+
+This does **not** make the march finer and is not meant to. It makes it STABLE. Coarse but
+steady reads as slightly blocky grass; coarse and sliding reads as the whole field crawling,
+which is far more objectionable and is what was reported.
+
+**Verified static only.** A still frame cannot show a temporal artifact — this needs a
+walking check, ideally the same approach-a-crest that surfaced it.
+
+### Terrain jagged and noisy where DF2 rolled softly — CLOSED, it was 8-bit terracing
+
+Asked whether this was a mesh or a texture problem. Neither: it is the elevation DATA, and
+the numbers are unambiguous. Measured over `public/assets/terrain/gmile/height.png`:
+
+| | |
+|---|---|
+| Storage | 8-bit, 170 distinct levels used of 256 |
+| One raw unit at `HEIGHT_SCALE` 1.0 over a 2 m texel | **26.6 degree facet** |
+| MEDIAN facet angle across the map | **26.6 degrees** |
+| Adjacent samples that are exactly equal | **48%** |
+
+The median facet angle being *exactly* the one-unit step angle is the proof: the surface is
+dominated by quantisation, not by real slope. Half the samples are flat, then the surface
+jumps a whole metre. Step-flat-step-flat — terracing, and that is what reads as jagged.
+
+**Why DF2 never showed it on the same data.** Voxel Space drew one column per screen column
+straight from the samples and never built triangles out of the steps, so quantisation
+appeared as vertical banding rather than as angular facets. Triangulating a terraced field
+is what turns a storage artifact into visible geometry — and raising mesh resolution makes
+it *worse*, not better, because more triangles only interpolate the terraces more precisely.
+
+**Fix:** reconstruct the sub-unit relief with a separable [1,2,1] binomial filter over the
+field, `HEIGHT_SMOOTH_PASSES = 2` (0 for the raw A/B). Each pass halves relief at the
+2-texel scale where the terracing lives and leaves the tens-of-metres features that carry
+the terrain's shape.
+
+**The part that is easy to get wrong:** the smoothing has to reach the shader too. Ground
+elevation is read in three places — the terrain mesh, the grass march, and the concealment
+query — and `docs/08` §8 invariant 3 requires they agree. Smoothing the CPU field alone
+would have left the grass marching a quantised surface the mesh no longer drew, floating it
+off the ground by up to half a metre. So `heightMap` is now built from the heightfield's own
+grid and carries **metres directly as half-float**, rather than raw bytes scaled in the
+shader. Half rather than float32 because WebGPU does not guarantee float32 textures are
+filterable and this needs LINEAR; half gives ~0.1 m precision over the map's 169 m of
+relief, well under the 1 m step being removed.
+
+Measured after: **19.6 ms / 51 fps** at Green Mile (5, 375) standing, dpr 1 — unchanged, as
+expected for a one-off CPU filter.
+
+Note this makes `HEIGHT_SCALE` matter more, not less. It is still an uncalibrated
+placeholder (`docs/01` §7): at 1.0 the map has 169 m of relief and one raw unit is a 26.6
+degree step; at 0.25 it would be 42 m and 7.1 degrees. Smoothing treats the symptom that
+the placeholder makes worst.
+
+### Hard-edged blocks in the grass colour — CLOSED, two separate causes
+
+Reported against a screenshot pair: the grass rendered as large angular plates with hard
+straight edges, over a colormap that is itself perfectly smooth (the terrain material
+samples it linearly and shows none of this). Two independent causes, and fixing the first
+one alone left the near-field blocks untouched.
+
+**1. NEAR FIELD — the colour lookup was snapped to the 2 m terrain texel.**
+
+`texelCentre()` quantised the colormap uv to the terrain texel, on the reasoning that DF2
+did `map.color[mapoffset]`, a nearest lookup, and painted a whole vertical span in that one
+colour. The reasoning is right about the original and wrong here, because the two engines'
+texel and column sizes do not correspond: **DF2's colour texel WAS its column, whereas ours
+is 2 m while a column is 0.03 m.** So roughly 67 adjacent columns shared one colour, and a
+2 m block at 10 m subtends about 170 px. That is the reported artifact, exactly.
+
+Now sampled at the struck COLUMN's centre with the texture's own linear filtering. What
+matters is preserved — one colour per column, smeared up its full height, which is what
+gives striations rather than soft volumetric grass (§1.1) — while neighbouring columns
+differ. The horizontal variation DF2 got from its colormap comes from the per-column tone
+hash instead, which is where it has to come from at this texel-to-column ratio.
+
+**2. MID FIELD — quantised `hitFrac` banding, aligned to shell facets.**
+
+`span` is canopy height over the ray's vertical rate, so a grazing ray takes the full 48 m
+clamp: `ds = 48/12 = 4 m`, and four bisections narrow that to 0.25 m. Against a 1.2 m
+canopy that quantises `hitFrac` into about five levels, and the 0.78–1.22 vertical ramp
+turns five levels into five flat brightness steps. They read as hard-edged polygons because
+the quantisation is driven by the ray's vertical rate and entry point, both of which change
+across every triangle of the faceted shell — so the banding lands on mesh facets and looks
+like geometry rather than error.
+
+Fixed by fading the vertical ramp to neutral once a column is narrower than a pixel
+(`cellSize / pixelAngle`, about 27 m at the 0.03 m default). Beyond that a base-to-tip
+gradient across a column cannot be seen, so the term carries nothing but its own
+quantisation error. Two instructions; the near field where the ramp is genuinely visible is
+untouched.
+
+`GRASS_TONE_VARIATION` also raised 0.85 -> 1.5, set by eye against the references.
+
+Measured after both: **19.1 ms / 52 fps** at Green Mile (5, 375) standing, dpr 1, canopy
+field (not forced), 99 draw calls.
+
+### Thin columns — UNBLOCKED, and the blocker was the jitter mapping
+
+Asked for: columns thinner than the 0.01 m slider floor, to match the fine strands in the
+DF2 references. Lowering the floor alone would not have worked, and it is worth recording
+why, because the number is decisive.
+
+The jitter texture was sampled in WORLD METRES — 1024² across the 120 m `hashPeriod`, so
+**one texel was 0.117 m**. Against column width that means:
+
+| Column width | Columns sharing one height/tone |
+|---|---|
+| 0.03 m (default) | 4 |
+| 0.01 m (old floor) | 12 |
+| 0.005 m | 23 |
+
+So thinning the column never added detail — it only made the *bands* of identical columns
+wider. The field feeding the geometry never got finer than 0.117 m no matter what the
+slider said.
+
+**Fix: sample the jitter per CELL, not per metre** (`cell.div(uJitterTexels)`). One texel is
+now one column at any width, so every column has its own height and tone. The slider floor
+drops to 0.002 m.
+
+**Verified** at Green Mile (5, 375) standing with the canopy forced on: at 0.002 m the
+canopy silhouette against sky is finely ragged, varying strand to strand, where at 0.030 m
+it is visibly blocky. That is the §1.3 edge, and it is the first time this renderer has
+produced it.
+
+**The trade is repeat distance.** Per-cell mapping makes the pattern repeat every
+`1024 × cellSize` — 30.7 m at 0.03 m, 5.1 m at 0.005 m — rather than a fixed 120 m. Short
+enough to tile visibly on its own. It is *masked*, not solved: the canopy envelope (2 m
+texels) and the ground elevation both vary underneath it. Watch for tiling at a grazing
+angle over flat ground with a uniform canopy, which is where the mask is weakest. Raising
+`JITTER_RESOLUTION` to 2048 doubles the repeat for 8 MB.
+
+**Cost is unmeasured and there is a specific reason to check it.** Sample count does not
+change with column width, so the march should cost the same — but per-cell sampling
+destroys texture-cache coherence: at 0.002 m columns, adjacent pixels land in unrelated
+texels where before they shared one. Measure 0.03 against 0.002 at the §1 vantage with the
+canopy field (NOT forced) before assuming it is free.
+
+Still open below 0.005 m: the march takes 12 coarse samples spread over metres, so which
+column a ray hits is already partly arbitrary, and thinner columns turn that into shimmer
+rather than detail. The slider hint says so. The real fix is per-screen-column sampling —
+see the bearing-keyed path above.
+
+### Debug: grow grass everywhere, ignoring the canopy field
+
+Green Mile's canopy is a colormap-derived stand-in, so it is patchy and a frame can
+legitimately be mostly bare — indistinguishable from the shader failing. The `?debug=1`
+panel now has **Canopy from: Field / Everywhere** (uniform `canopyForce`, live; `?canopyall=1`
+to start in it), which replaces the field with full height everywhere and isolates the column
+renderer from the data feeding it. Standing at the §1 vantage it costs almost nothing —
+16.8 ms against 16.4 — so the patchiness was not hiding cost. **Never measure with it on:**
+full canopy everywhere is both the worst case for the march and not what the map says.
+
+### Pale wash over all grass — CLOSED, it was TSL `.mix()` argument order
+
+Every grass fragment rendered near the fog colour regardless of its distance. Four
+hypotheses were patched before the term was isolated (envelope bracket, chunk cull
+box, frustum-gated building, mipmaps) and each made the build worse.
+
+**Isolated by bisecting the colour expression** through a live debug uniform rather
+than by editing and rebuilding per term (views 4–9 in `GrassMaterial.ts`, exposed in
+the `?debug=1` panel). `columns` alone was correct; `faded` alone was correct; the
+fog mix was pale.
+
+**Cause.** In TSL the receiver of `.mix()` is the **interpolant**, not the first
+operand: `t.mix(a, b)` is `mix(a, b, t)`. Written the GLSL way,
+
+```
+faded.mix(uFogColor, fogFactor)   ->   mix(uFogColor, fogFactor, faded)
+```
+
+so the fog colour became the base of the blend and the grass colour became the
+interpolant. The output sat near the fog colour at every distance. All four `.mix()`
+calls in the file had it — `shade`, `faded`, `shaded`, and `cellNoise`'s bilinear
+interpolation. See `docs/08` §11 for the general trap, including which sibling
+methods reorder and which do not.
+
+**Why the earlier fog tests looked exculpatory.** Pushing the fog range to
+900000..1000000 m only drives `fogFactor`, which in the rotated form is the *far end*
+of the blend weighted by `faded` — a dark colour — so it barely contributes and the
+picture did not change. That result was read as "fog is not involved", which sent the
+next four attempts elsewhere. **A parameter sweep that changes nothing is evidence
+about the expression's shape, not only about the parameter.**
+
+### The flat-grass regression the fix exposed — CLOSED
+
+Correcting the rotation replaced an effective 0.13–1.00 vertical ramp with the
+intended near-flat 0.88–1.05, and **that accidental ramp had been supplying nearly all
+the visible column structure.** Grass came out correct in colour and almost featureless.
+Two measured causes, both fixed:
+
+**1. The tone field only used a fifth of its range.** `fbm` returns a normalised
+weighted *average* of value-noise samples, so it clusters hard around 0.5. Measured over
+the 120 m tile the tone field had **σ = 0.105**, which with the dial at 0.85 gave a
+typical column-to-column brightness of 0.91–1.09 — ±9%. The dial claimed a range the
+data never reached. `bakeGrassJitter` now standardises both channels, mapping mean ± 2σ
+onto 0–1 (≈4% clipped per end): **σ 0.105 → 0.242**, typical tone 0.79–1.21, full range
+0.57–1.43 actually reachable. The height channel gains the same treatment, so the column
+height multiplier spans 0.38–1.00 instead of 0.62–0.76 — that is the irregular silhouette
+of §1.3, which was also being flattened.
+
+**2. There was no term at column resolution.** The tone field's finest fbm lattice is
+0.35 m, about twelve 0.03 m columns, so *adjacent* columns shared a tone. Corduroy is by
+definition variation between adjacent columns, so it cannot come from a 0.35 m lattice.
+The bake now adds a per-texel white-noise term (weight 0.22) to the tone. Deliberately
+**not** to the height channel: the march evaluates column height at every sample, and a
+one-texel height spike is exactly the thin feature bracket-and-bisect steps over
+(`docs/09` §3.0). Tone is evaluated once, at the hit, so it can carry detail height cannot.
+
+**3. The vertical ramp is now a dial, not an assumption.** `GRASS_SHADE_BASE` (0.78) sets
+the column base's brightness and the tip gets `2 - base`, so the ramp stays centred on 1.0
+and grass keeps the average brightness of the terrain under it. 0.78 gives a 0.44
+peak-to-peak vertical against the tone's 0.85 horizontal — h/v ≈ 1.9 against the ~1.6 the
+references measure (§1.4), close enough to be dialled by eye rather than argued. Exposed
+as the "Base shading" slider; 1.0 is flat.
+
+Frame time at the §1 benchmark vantage is unchanged — 22.5 ms against 21.9 ms before,
+inside the peak-to-peak spread, at the same 132 draw calls and 976k triangles. None of
+this adds march work: the field changes are a one-off CPU bake and the ramp is one `mix`.

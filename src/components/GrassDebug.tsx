@@ -4,9 +4,9 @@
 // rebuilt — rebuilding would throw away the terrain geometry cache and stall for
 // a second, which makes A/B comparison useless.
 //
-// Two loop counts and the hash wrap period are baked into the shader graph at
-// construction and cannot be sliders; they are listed at the bottom as URL
-// parameters that need a reload.
+// The coarse step COUNT is live (the loop compiles at a ceiling and runs to a uniform),
+// but the ceiling itself and the bisection count are baked into the graph at construction
+// and are listed at the bottom as URL parameters needing a reload.
 
 import { useEffect, useRef, useState } from "react";
 import type { GrassUniforms } from "../df2/GrassMaterial";
@@ -222,9 +222,17 @@ export function GrassDebug({ uniforms }: GrassDebugProps) {
       </div>
 
       <p className="note">
-        Baked into the shader — these need a reload:
+        <code>March steps</code> is live, but its CEILING is compiled — the slider stops at
+        whatever <code>?steps=</code> was at load (default 32), and reloading reseeds it to
+        the shipped running value rather than to where you left it.
         <br />
-        <code>?steps=</code> coarse samples, <code>?refine=</code> bisections
+        Still baked, still needs a reload: <code>?refine=</code> bisections.
+        <br />
+        Frame time reacts immediately, but it is <b>vsync-capped at 8.3 ms</b> on a 120 Hz
+        display — below that the counter cannot show an improvement, so read a change as
+        &ldquo;still at the cap&rdquo; rather than as &ldquo;no effect&rdquo;. Use
+        <code>?dpr=2</code> to push the frame off the cap when you need to see the
+        difference a dial actually makes.
       </p>
     </section>
   );

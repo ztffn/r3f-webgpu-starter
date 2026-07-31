@@ -3,7 +3,9 @@
 // Performance work needs a viewpoint and a configuration that can be reproduced
 // exactly, and numbers that can be read without squinting at a screenshot. With
 // ?bench=1 the camera is placed at a fixed spot on foot, the knobs below become
-// settable per-run, and each perf sample is published to window.__perf.
+// settable per-run, each perf sample is published to window.__perf, and the canopy
+// is forced to full height everywhere so the march is measured against a known
+// worst case rather than against whatever the map happens to grow underfoot.
 //
 // Dev affordance only: absent the bench parameter every value falls through to the
 // normal config, so nothing here changes how the app behaves for a player.
@@ -34,7 +36,23 @@ export interface BenchConfig {
   strand?: number;
   /** Longest span a ray searches, metres. Sets step size for grazing rays. */
   maxspan?: number;
-  /** Debug: grow full-height grass everywhere, ignoring the canopy field. */
+  /**
+   * Grow full-height grass everywhere, ignoring the canopy field. ON by default
+   * under `?bench=1`; `?canopyall=0` restores the map's own canopy.
+   *
+   * Defaulted on because it is the only way to make a bench number MEAN anything on
+   * this map. Green Mile's canopy is a colormap-derived stand-in with a median of
+   * raw 28 — about 0.13 m — and 11% of the map has none at all. The long-standing
+   * bench vantage (5, 375) sits on a texel with raw 0, so it was measuring a march
+   * over bare ground. Worse, absent canopy and a broken shader look identical in a
+   * normal render, which has already cost sessions.
+   *
+   * Full canopy is also the WORST CASE for the march, so a frame time measured here
+   * is an upper bound rather than a lucky vantage — which is what a benchmark should
+   * report. The trade is that it is not what the map says: any claim about grass
+   * PLACEMENT or coverage has to be re-checked with `?canopyall=0` (docs/08 §8
+   * invariant 5 — results are meaningless without their GrassSource).
+   */
   canopyAll?: boolean;
   /**
    * Debug: place human-scale figures as a contrast reference for the grass.
@@ -76,7 +94,8 @@ function parse(): BenchConfig {
     grassFloor: q.get("grassfloor") === null ? undefined : q.get("grassfloor") !== "0",
     strand: num("strand"),
     maxspan: num("maxspan"),
-    canopyAll: q.get("canopyall") === "1",
+    // Default ON under bench — see the field's note. `?canopyall=0` opts out.
+    canopyAll: q.get("canopyall") !== "0",
     targets: q.get("targets") === "1",
     stance:
       stance === "stand" || stance === "crouch" || stance === "prone" ? stance : undefined,

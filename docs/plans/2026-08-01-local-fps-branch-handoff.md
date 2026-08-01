@@ -34,8 +34,9 @@ all historical prototype work.
 4. Preserve terrain's renderer/LOD/grass changes and FPS's
    `CompositeWorldQuery(heightfield)` wiring. Visual terrain must not be
    registered in the collider adapter.
-5. Accept terrain's deletion of the unreferenced legacy `src/fps/ScopeRig.tsx`;
-   current scope presentation lives in `WeaponPrototype.tsx`.
+5. Preserve this branch's deletion of the unreferenced legacy
+   `src/fps/ScopeRig.tsx`; current scope presentation lives in
+   `WeaponPrototype.tsx`. The terrain PR deliberately excludes FPS files.
 6. Run the verification commands below and inspect the final diff against
    `origin/main` before pushing the FPS branch.
 

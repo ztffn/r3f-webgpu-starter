@@ -552,10 +552,8 @@ export function WeaponPrototype({
             // root while only its vertices follow the weapon bones. The target
             // is bone-parented and therefore is the actual physical reference
             // point for both ADS placement and the PiP camera.
-            rig.updateMatrixWorld(true);
-            scopeCameraTarget.getWorldPosition(opticLocal);
-            rig.worldToLocal(opticLocal);
-            aimOffset.copy(opticLocal).negate().add(new THREE.Vector3(0, 0, -0.075));
+            // The frame loop recomputes aimOffset from this locator immediately
+            // before every use, so a load-time copy would be dead state.
             hasOptic.current = true;
           }
         }

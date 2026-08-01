@@ -93,8 +93,7 @@ Everything below `src/df2/` is the Phase-1 spike. The target layout is `05` §7
 | `grassJitter.ts` | CPU bake of the per-column jitter/tone field | rendering |
 | `bench.ts` | `?bench=1` URL overrides, `window.__perf` | anything gameplay |
 | `components/GrassDebug.tsx` | live grass sliders; writes `uniform.value` directly | material internals |
-| `fps/WeaponPrototype.tsx` | first-person rig, weapon animation | terrain, grass |
-| `fps/ScopeRig.tsx` | picture-in-picture optic, reticles | terrain, grass |
+| `fps/WeaponPrototype.tsx` | first-person rig, weapon animation, picture-in-picture optic and reticle | terrain, grass |
 | `fps/TestTargets.tsx` | human-scale contrast ladder, `?targets=1` | anything but the heightfield |
 
 `Heightfield.ts` being Three-free is a **rule, not a preference**. It is the seed of the

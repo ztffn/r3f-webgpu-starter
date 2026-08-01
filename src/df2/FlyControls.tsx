@@ -141,7 +141,7 @@ export function FlyControls({
         }
         return;
       }
-      // ScopeRig owns right click for ADS. It must not also start a look-drag.
+      // WeaponPrototype owns right click for ADS. It must not also start a look-drag.
       if (e.button !== 0) return;
       rig.dragging = true;
       rig.lastX = e.clientX;

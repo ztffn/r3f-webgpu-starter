@@ -85,7 +85,7 @@ Everything below `src/df2/` is the Phase-1 spike. The target layout is `05` §7
 | `GrassMaterial.ts` | TSL columnar grass (march + depth) | geometry, chunk layout |
 | `loadTerrain.ts` | fetch + decode prepared assets, grass provenance | rendering |
 | `Terrain.tsx` | infinite chunk window, LOD selection, geometry cache | what a chunk looks like |
-| `FlyControls.tsx` | camera rig, stance eye heights | scene contents |
+| `FlyControls.tsx` | camera rig, stance eye heights, pointer-lock look | scene contents; `src/fps` beyond an OPTIONAL injected sensitivity curve (type-only import, so the terrain spike still runs with no game layer present) |
 | `PerfMonitor.tsx` | frame time, draw calls, backend | UI |
 | `DF2Scene.tsx` | composition: lights, fog, water, wiring | UI layout |
 | `components/GameCanvas.tsx` | async WebGPU init, camera planes | the scene |

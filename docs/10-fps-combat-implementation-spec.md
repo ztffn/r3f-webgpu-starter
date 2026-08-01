@@ -301,6 +301,24 @@ Then test `?scene=scope&shotdebug=1` at 600, 1,000, and 1,300 m:
    penetration differences;
 10. the HUD's projectile/query counters remain bounded during repeated fire.
 
+## 9.1 Two build traps, both paid for once
+
+**`--experimental-specifier-resolution=node` in the `test` script is LOAD-BEARING.** It reads
+as deprecated cruft and it is not. `node --test` runs these `.ts` files through Node's own ESM
+loader, which requires fully-specified relative imports; this flag is what lets the extensionless
+imports across `src/fps` resolve at all. Removing it takes the suite from 43 passing to 19
+collected with 7 failing, and the failures point at the importing test rather than the cause.
+It was removed on exactly that "deprecated flag" reasoning during review and put straight back.
+
+The consequence is that **`src/fps` carries a mix of extensionless and `.ts`-suffixed relative
+imports, and normalising them toward extensionless makes the problem worse.** The future-proof
+migration is the other direction — add `.ts` everywhere and drop the flag, which `tsconfig`
+already permits via `allowImportingTsExtensions` — but it touches every module and has not been
+done. Do not tidy this halfway.
+
+**`engines` now declares Node >= 22.6**, which is what `--experimental-strip-types` needs. Below
+that the test script fails in a way that does not name the version as the cause.
+
 ## 10. Deliberately deferred work
 
 - actual Glock/sidearm definition, GLB, animations, equip controls, and view;

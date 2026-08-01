@@ -31,7 +31,16 @@ export interface FlyControlsProps {
   stance: Stance;
   /** Use FPS-style captured mouse deltas instead of hold-to-drag look. */
   pointerLock?: boolean;
-  lookSensitivity: LookSensitivityController;
+  /**
+   * FPS look-sensitivity curve, supplied by the game layer.
+   *
+   * OPTIONAL ON PURPOSE, and the seam is one-way. This module is the terrain
+   * spike's camera rig (docs/08 §3); it must keep working with no `src/fps`
+   * present, which is why the type is imported as a type only and why absence
+   * simply falls back to the drag constant. Only consulted when `pointerLock`
+   * is set, which is the game layer's own mode.
+   */
+  lookSensitivity?: LookSensitivityController;
   /** Called at most a few times a second with the current rig state. */
   onState?: (s: FlyState) => void;
   onToggleGround?: () => void;
@@ -40,6 +49,9 @@ export interface FlyControlsProps {
 }
 
 const UP = new THREE.Vector3(0, 1, 0);
+
+/** Hold-to-drag look rate. Also the fallback when no sensitivity curve is injected. */
+const DRAG_RADIANS_PER_PIXEL = 0.0032;
 
 export function FlyControls({
   heightfield,
@@ -99,9 +111,10 @@ export function FlyControls({
     };
 
     const rotate = (movementX: number, movementY: number) => {
-      const radiansPerCount = pointerLock
-        ? lookSensitivity.radiansPerCountForMovement(movementX, movementY)
-        : 0.0032;
+      const radiansPerCount =
+        pointerLock && lookSensitivity
+          ? lookSensitivity.radiansPerCountForMovement(movementX, movementY)
+          : DRAG_RADIANS_PER_PIXEL;
       rig.yaw -= movementX * radiansPerCount;
       rig.pitch -= movementY * radiansPerCount;
       rig.pitch = Math.max(-1.5, Math.min(1.5, rig.pitch));

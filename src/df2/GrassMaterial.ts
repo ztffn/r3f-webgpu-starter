@@ -78,6 +78,14 @@ export interface GrassMaterialOptions {
   /** Chunk width in metres — the unit LOD switch distances are expressed in. */
   chunkSize: number;
   /**
+   * Metres between adjacent heightfield samples (`Heightfield.cellSize`).
+   *
+   * Needed to undo the half-texel offset between the two interpolation conventions:
+   * `Heightfield.sample` interpolates between grid NODES, node i at grid coordinate i,
+   * while GPU bilinear interpolates between texel CENTRES, at i + 0.5.
+   */
+  texelSize: number;
+  /**
    * LOD switch distances in METRES, in the order Terrain.tsx applies them.
    *
    * Both sides derive these from `LOD_DISTANCE_CHUNKS`; that shared origin is what
@@ -267,6 +275,7 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     jitterMap,
     heightMap,
     chunkSize,
+    texelSize,
     lodDistances,
     colorMap,
     worldSize,
@@ -386,8 +395,20 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
   // traversal, so a ray crossing a chunk boundary mid-slab is off by one level on the far
   // side. That is a fraction of the canopy height, against the metre-scale error this
   // whole change exists to remove.
-  const groundAt = (xz: NodeArg, mip: NodeArg): NodeArg =>
-    texture(heightMap, toUv(xz)).level(mip).r;
+  //
+  // HALF-TEXEL SHIFTED, and the shift GROWS WITH THE LEVEL. The two interpolations do
+  // not agree on where a sample sits: `Heightfield.sample` — which the mesh is built
+  // from — puts grid node i at grid coordinate i, while GPU bilinear puts texel i's
+  // centre at i + 0.5. Sampling the raw uv therefore reads the surface displaced
+  // horizontally by half a texel of the level in use: 1 m at LOD 0, but 8 m at LOD 3.
+  // On a slope that is metres of vertical error, and being a fixed horizontal offset it
+  // is DIRECTIONAL — it lands on whichever faces of a hill point along the shift, which
+  // is why the bald patches sat on one side of a cliff and moved as the camera turned
+  // rather than staying with the terrain.
+  const groundAt = (xz: NodeArg, mip: NodeArg): NodeArg => {
+    const halfTexel = float(texelSize).mul(mip.exp2()).mul(0.5);
+    return texture(heightMap, toUv(xz.add(halfTexel))).level(mip).r;
+  };
 
   /**
    * Smooth canopy envelope: WHERE grass grows and roughly how tall.
@@ -505,10 +526,6 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     const frag = positionWorld;
     const V = frag.sub(cameraPosition).normalize();
 
-    // The mesh LOD this fragment's chunk is drawn at — evaluated ONCE and reused for
-    // every ground lookup in the march. See the note beside `groundAt`.
-    const fragMip = meshMipAt(vec2(frag.x, frag.z)).toVar();
-
     // --- bracket, then bisect -------------------------------------------------
     // Everything is measured as distance from the EYE along V, so there is one
     // parameterisation for both the inside-canopy and outside-canopy cases.
@@ -625,6 +642,29 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     const cedeToCeiling: NodeArg | null = isFloor
       ? (fragDist.sub(span).greaterThan(uNearClip) as NodeArg)
       : null;
+
+    // --- which mesh LOD this ray marches against ------------------------------
+    // Sampled at BOTH ENDS of the interval the ray will search, and the COARSER of the
+    // two is used for the whole traversal.
+    //
+    // Per sample is exact and costs 21.9 ms against 10 ms — the march evaluates ground
+    // at every one of `steps + refineSteps` samples. Per fragment is free but keys the
+    // whole ray on the chunk the FRAGMENT sits in, so a grazing ray crossing into a
+    // neighbouring chunk drawn at a different level reads the wrong surface on the far
+    // side. That showed as bald patches that moved around the sides of cliffs as the
+    // camera turned, rather than staying put — the signature of a direction-dependent
+    // lookup rather than a fixed geometric hole.
+    //
+    // Two lookups instead of sixteen, and COARSER rather than finer because the two
+    // failure directions are not equally bad. Marching a surface FINER than the mesh
+    // lets the mesh sit above it, terrain wins the depth test, and the grass vanishes —
+    // a fairness bug (docs/08 §8 invariant 6). Marching one COARSER can put the grass
+    // slightly above the drawn terrain, which reads as a small float and is bounded by
+    // the difference between adjacent levels. Bias toward the harmless failure.
+    const farXZ = cameraPosition.add(V.mul(sEnter.add(span))) as NodeArg;
+    const fragMip = meshMipAt(vec2(frag.x, frag.z))
+      .max(meshMipAt(vec2(farXZ.x, farXZ.z)))
+      .toVar();
 
     const cellW = uCell;
     const hit = float(0).toVar();

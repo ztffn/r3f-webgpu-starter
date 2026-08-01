@@ -208,6 +208,7 @@ export function DF2Scene({
       // from the same constants. Passing them rather than re-deriving them is what keeps
       // the mesh and the march on one surface.
       chunkSize: world.heightfield.worldSize / CHUNK_COUNT,
+      texelSize: world.heightfield.cellSize,
       lodDistances: LOD_DISTANCE_CHUNKS.map(
         (c) => c * (world.heightfield.worldSize / CHUNK_COUNT)
       ),

@@ -245,7 +245,7 @@ export function DF2Scene({
   useEffect(
     () => () => {
       grassKit?.material.dispose();
-      grassKit?.floorMaterial.dispose();
+      grassKit?.capMaterial.dispose();
       grassKit?.heightTex.dispose();
       grassKit?.jitterTex.dispose();
     },
@@ -306,8 +306,8 @@ export function DF2Scene({
           heightfield={heightfield}
           material={material}
           grassMaterial={grassKit?.material ?? null}
-          grassFloorMaterial={
-            BENCH.grassFloor === false ? null : grassKit?.floorMaterial ?? null
+          grassCapMaterial={
+            BENCH.grassCap === false ? null : grassKit?.capMaterial ?? null
           }
           grassEnabled={grass}
           grassDistance={GRASS_FADE_END}

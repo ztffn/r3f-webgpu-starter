@@ -8,9 +8,11 @@
 // worst case rather than against whatever the map happens to grow underfoot.
 //
 // Dev affordance only. Absent the bench parameter every value falls through to the
-// normal config, with two deliberate exceptions that are useful without a fixed
+// normal config, with three deliberate exceptions that are useful without a fixed
 // vantage and are opt-in by an explicit URL parameter a player never types:
-// `?debug=1` (slider panel) and `?canopyall=1` (force full canopy).
+// `?debug=1` (slider panel), `?canopyall=1` (force full canopy) and `?blades=`
+// (the near-field blade layer, which docs/03 §4.2 wants A/B-able against the
+// authentic bladeless look from a camera you can steer).
 
 import type { Stance } from "./FlyControls";
 
@@ -35,6 +37,25 @@ export interface BenchConfig {
    * which differs in the march too and says nothing.
    */
   grassCap?: boolean;
+  /**
+   * Draw the near-field instanced BLADE layer (docs/03 §4.4). Defaults on;
+   * `?blades=0` disables it.
+   *
+   * Written before the layer existed, deliberately. The cap's own cost — 9.7 ms —
+   * stayed invisible for a whole session because there was no way to render the same
+   * pose without it, and the blade layer is the same shape of risk: an overlay whose
+   * cost lands in overdraw, prone, where nothing else changes on screen.
+   *
+   * Parsed WITHOUT `?bench=1` as well, unlike `grassCap`. Two different jobs: the bench
+   * one is measurement, but docs/03 §4.2 also asks for blades to be A/B'd against the
+   * authentic bladeless look, and that comparison needs a free camera rather than the
+   * fixed bench vantage — the same reasoning that split `?canopyall=` out.
+   */
+  blades?: boolean;
+  /** Blade instance count; the pool size, and the first dial to turn on cost. */
+  bladeCount?: number;
+  /** Blade field radius in metres; the second dial, and it moves density with it. */
+  bladeRadius?: number;
   /** Per-texel share of the baked height field. Baked, so reload to change. */
   strand?: number;
   /** Longest span a ray searches, metres. Sets step size for grazing rays. */
@@ -86,16 +107,26 @@ function parse(): BenchConfig {
   // move on any missing-grass report, and that is a hunt for a specific place and
   // heading. Reaching it through `?bench=1` pins the camera to the bench vantage, which
   // is the one place you cannot look from. Opt-in only, so a player never sees it.
-  if (q.get("bench") !== "1") {
-    return { enabled: false, debug, canopyAll: q.get("canopyall") === "1" };
-  }
-
   const num = (k: string): number | undefined => {
     const v = q.get(k);
     if (v === null) return undefined;
     const n = Number(v);
     return Number.isFinite(n) ? n : undefined;
   };
+  // Blades read the same way in both branches — see the field's note.
+  const blades = q.get("blades") === null ? undefined : q.get("blades") !== "0";
+
+  if (q.get("bench") !== "1") {
+    return {
+      enabled: false,
+      debug,
+      canopyAll: q.get("canopyall") === "1",
+      blades,
+      bladeCount: num("bladecount"),
+      bladeRadius: num("bladeradius"),
+    };
+  }
+
   const stance = q.get("stance");
 
   return {
@@ -106,6 +137,9 @@ function parse(): BenchConfig {
     refine: num("refine"),
     grass: q.get("grass") === null ? undefined : q.get("grass") !== "0",
     grassCap: q.get("grasscap") === null ? undefined : q.get("grasscap") !== "0",
+    blades,
+    bladeCount: num("bladecount"),
+    bladeRadius: num("bladeradius"),
     strand: num("strand"),
     maxspan: num("maxspan"),
     // Default ON under bench — see the field's note. `?canopyall=0` opts out.

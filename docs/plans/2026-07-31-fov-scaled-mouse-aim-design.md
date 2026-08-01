@@ -8,9 +8,10 @@ so that value produces a 4.16 m angular step at 1,300 m. The existing 140 m
 target ladder came from a grass-concealment test; it is not an acceptable aiming
 benchmark for a DF2-derived sniper system.
 
-The human acceptance range is 1,300 m. A one-count movement through the default
-optic must move the aim by no more than 5 cm at that range. The weapon query
-range and target harness must both reach beyond 1,300 m.
+The human acceptance range is 1,300 m. Normal ADS must support useful target
+scanning, while held-breath precision must resolve below 2 cm per count through
+the default optic. The weapon query range and target harness must both reach
+beyond 1,300 m.
 
 ## Considered approaches
 
@@ -24,7 +25,9 @@ fallback. Apply FOV-aware sniper scaling to a configurable base sensitivity:
 
 ```text
 opticRatio = tan(opticFov / 2) / tan(mainFov / 2)
-scopedSensitivity = baseSensitivity * opticRatio * precisionScale
+scanSensitivity = baseSensitivity * opticRatio
+precisionSensitivity = scanSensitivity * precisionScale
+scopedSensitivity = lerp(scanSensitivity, precisionSensitivity, breathBlend)
 effectiveSensitivity = lerp(baseSensitivity, scopedSensitivity, adsBlend)
 ```
 
@@ -35,11 +38,11 @@ without a rebuild. The existing damped optic presentation value supplies
 `adsBlend`, so sensitivity changes continuously through ADS. Variable optic FOV
 is read live, making Z/X zoom affect control resolution as well as magnification.
 
-At 1,300 m the expected one-count lateral steps are approximately:
+At 1,300 m the expected scan / held-breath one-count steps are approximately:
 
-- default optic, 5.5° FOV: 1.6 cm;
-- narrow optic, 2.5° FOV: 0.7 cm;
-- wide optic, 9° FOV: 2.7 cm.
+- default optic, 5.5° FOV: 6.5 / 1.6 cm;
+- narrow optic, 2.5° FOV: 3.0 / 0.7 cm;
+- wide optic, 9° FOV: 10.6 / 2.7 cm.
 
 This gives roughly 31 mouse counts across a 0.5 m torso at the default optic and
 68 at maximum magnification. The HUD reports the live centimetres-per-count value
@@ -57,9 +60,8 @@ The current sniper hitscan range is extended beyond the acceptance range, and
 the test-target harness gains long-range figures through 1,300 m.
 
 The scope capture, rangefinder, and shot resolver must share the authoritative
-camera direction. Cosmetic weapon sway may move the physical housing and eyebox,
-but must not rotate the scope picture away from the ray used to shoot; the prior
-rotation produced metre-scale reticle/impact disagreement at 1,300 m.
+aim direction, including gameplay sway. The weapon presentation consumes that
+same sway result rather than running a second cosmetic approximation.
 
 ## Verification
 

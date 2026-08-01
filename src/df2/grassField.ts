@@ -312,8 +312,15 @@ export function createGrassField(opts: GrassFieldOptions): GrassField {
     const c = salt === 0 ? cell : cell.add(vec2(salt * 37.13, salt * 91.71));
     // mul by 1/4096 rather than div: same wrap, one cheaper instruction.
     const w = c.sub(c.mul(1 / 4096).floor().mul(4096));
-    const p = w.mul(vec2(0.1031, 0.1030)).fract().toVar();
-    p.addAssign(p.dot(vec2(p.y, p.x).add(33.33)));
+    // WRITTEN WITHOUT A MUTABLE VAR, deliberately. `toVar()` and `addAssign()` need an
+    // enclosing `Fn()` to own the assignment, and this is called from two places with
+    // different scopes: the march builds it inside one, the blade layer at graph level.
+    // Outside a Fn, TSL logs "No stack defined for assign operation" on every load — the
+    // graph still works, but a permanent error is a place a real one can hide. The
+    // expression below is the same arithmetic: `p.addAssign(x)` is `p = p + x`, and the
+    // dot product reads the pre-assignment value in either form.
+    const p0 = w.mul(vec2(0.1031, 0.103)).fract();
+    const p = p0.add(p0.dot(vec2(p0.y, p0.x).add(33.33)));
     return p.x.add(p.y).mul(p.x).fract();
   };
 

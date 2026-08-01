@@ -32,6 +32,10 @@ export interface WeatherPreset extends ColorGradeSettings {
   fogFar: number;
   /** Flat background, used only when `sky` is null, and the hemisphere light's colour. */
   skyColor: string;
+  /** Fraction of the precipitation pool drawn, 0-1. 0 is dry. */
+  rain: number;
+  /** 0 rain, 1 snow. Blended, so a value between the two is sleet. */
+  snow: number;
 }
 
 /** Neutral: what shipped before presets existed, and what every real .trn carries. */
@@ -45,6 +49,8 @@ const DAY: WeatherPreset = {
   filter: [128, 128, 128],
   gamma: 128,
   saturation: 128,
+  rain: 0,
+  snow: 0,
 };
 
 /**
@@ -86,6 +92,8 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
     filter: [188, 134, 162],
     gamma: 128,
     saturation: 122,
+    rain: 0,
+    snow: 0,
   },
   clear: {
     id: "clear",
@@ -97,6 +105,8 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
     filter: [128, 128, 128],
     gamma: 128,
     saturation: 128,
+    rain: 0,
+    snow: 0,
   },
   overcast: {
     id: "overcast",
@@ -108,6 +118,8 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
     filter: [120, 91, 82],
     gamma: 128,
     saturation: 72,
+    rain: 0.25,
+    snow: 0,
   },
   apocalypse: {
     id: "apocalypse",
@@ -119,6 +131,8 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
     filter: [213, 75, 52],
     gamma: 128,
     saturation: 174,
+    rain: 0.3,
+    snow: 0,
   },
   dusk: {
     id: "dusk",
@@ -130,6 +144,8 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
     filter: [109, 83, 69],
     gamma: 128,
     saturation: 76,
+    rain: 0.12,
+    snow: 0,
   },
   moody: {
     id: "moody",
@@ -141,6 +157,8 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
     filter: [71, 51, 47],
     gamma: 128,
     saturation: 77,
+    rain: 0.55,
+    snow: 0,
   },
   dawn: {
     id: "dawn",
@@ -152,6 +170,8 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
     filter: [104, 45, 20],
     gamma: 128,
     saturation: 190,
+    rain: 0,
+    snow: 0,
   },
   sinister: {
     id: "sinister",
@@ -163,6 +183,8 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
     filter: [43, 32, 38],
     gamma: 128,
     saturation: 119,
+    rain: 0.8,
+    snow: 0,
   },
   techno: {
     id: "techno",
@@ -174,6 +196,8 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
     filter: [33, 29, 27],
     gamma: 128,
     saturation: 98,
+    rain: 0.2,
+    snow: 0,
   },
   netherworld: {
     id: "netherworld",
@@ -185,6 +209,8 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
     filter: [18, 20, 27],
     gamma: 128,
     saturation: 82,
+    rain: 0.4,
+    snow: 1,
   },
   night: {
     id: "night",
@@ -196,6 +222,8 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
     filter: [18, 20, 27],
     gamma: 128,
     saturation: 82,
+    rain: 0,
+    snow: 0,
   },
   space: {
     id: "space",
@@ -207,6 +235,8 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
     filter: [18, 20, 27],
     gamma: 128,
     saturation: 82,
+    rain: 0,
+    snow: 0,
   },
 };
 

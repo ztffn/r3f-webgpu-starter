@@ -19,6 +19,7 @@ import { createGrassMaterial, type GrassUniforms } from "./GrassMaterial";
 import { createBladeMaterial, createBladeMesh } from "./BladeMaterial";
 import { createColorGrade } from "./colorGrade";
 import { readWeather } from "./weather";
+import { createPrecipitation } from "./Precipitation";
 import { buildBladeGeometry } from "./bladeGeometry";
 import { readBallisticEnvironment } from "../fps/combat/BallisticEnvironment";
 import { bakeSyntheticMaps } from "./syntheticMaps";
@@ -91,6 +92,22 @@ import {
 } from "./config";
 
 const SUN_DISTANCE = 2000;
+
+/**
+ * Keeps the precipitation box on the camera.
+ *
+ * Its own component so the per-frame follow gets a `useFrame` without adding a hook to
+ * DF2Scene for a system that may not exist — the box is built only for wet presets.
+ */
+function PrecipitationRig({
+  precipitation,
+}: {
+  precipitation: ReturnType<typeof createPrecipitation>;
+}): React.ReactElement {
+  const camera = useThree((s) => s.camera);
+  useFrame(() => precipitation.update(camera));
+  return <primitive object={precipitation.object3D} />;
+}
 
 export interface DF2SceneProps {
   wireframe?: boolean;
@@ -254,6 +271,23 @@ export function DF2Scene({
       .load(["px.png", "nx.png", "py.png", "ny.png", "pz.png", "nz.png"]);
   }, [weather]);
   useEffect(() => () => skyBox?.dispose(), [skyBox]);
+
+  // --- precipitation ----------------------------------------------------------
+  // A camera-local box of drops, so a few thousand instances read as weather over an
+  // infinite world. Dry presets build nothing at all rather than an idle system.
+  const precipitation = useMemo(() => {
+    if (weather.rain <= 0) return null;
+    return createPrecipitation({
+      intensity: weather.rain,
+      mode: weather.snow,
+      // The SAME wind the grass bends to and the ballistics drifts on, read through the
+      // same function — so rain, grass and bullets cannot disagree about the weather.
+      wind: readBallisticEnvironment(
+        typeof window === "undefined" ? "" : window.location.search
+      ).windVelocity,
+    });
+  }, [weather]);
+  useEffect(() => () => precipitation?.dispose(), [precipitation]);
 
   const material = useMemo(
     () => (world?.colorMap ? createTerrainMaterial({ colorMap: world.colorMap, grade }) : null),
@@ -467,6 +501,8 @@ export function DF2Scene({
           counts a target hidden (docs/08 §8 invariant 6). Rendered here rather than
           inside the terrain group because the mesh needs no transform at all. */}
       {bladeMesh && grass && <primitive object={bladeMesh} />}
+
+      {precipitation && <PrecipitationRig precipitation={precipitation} />}
 
       {/* Scope mode promotes the contrast ladder into resettable shootable targets. */}
       {(BENCH.targets || (scopeDemo && !FPS_DEBUG.impactTest)) && heightfield && (

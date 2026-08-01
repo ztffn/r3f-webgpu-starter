@@ -49,8 +49,7 @@ import {
   viewZToPerspectiveDepth,
   struct,
 } from "three/tsl";
-import { createGrassField } from "./grassField";
-import type { GrassField } from "./grassField";
+import { createGrassField, type GrassField } from "./grassField";
 
 /**
  * Margin the shell is lifted above the smooth canopy envelope.

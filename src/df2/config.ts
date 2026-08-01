@@ -297,25 +297,28 @@ export const GRASS_BLADE_THIN_START = 2.5;
 // Keep probability at the rim. Not zero: the field edge must never be a place where
 // blades stop, only a place where they are rare, or the disc boundary reads as a ring.
 export const GRASS_BLADE_KEEP_MIN = 0.12;
-// Shaping exponent applied to the raw canopy value before it is used as the existence
-// probability. 1.0 is the literal reading of docs/03 §4.4: the canopy value IS the
-// probability, so bare ground grows nothing and short canopy grows sparse blades.
+// NOTE — there is deliberately no density-shaping exponent here. The canopy value IS
+// the existence probability (docs/03 §4.4), so bare ground grows nothing and short
+// canopy grows sparse blades, and the dial that briefly existed to reshape it is gone.
 //
-// It briefly shipped at 0.5 to compensate for a small instance pool — Green Mile's
-// canopy has a MEDIAN of raw 28 of 255 (docs/06 §7.1), so the literal rule rejects
-// ~89% of instances over ordinary ground and 4,000 blades became about twenty on
-// screen. Measuring the layer's real cost removed the need: density now comes from the
-// count, which is nearly free, rather than from bending the field's own meaning.
-//
-// Leave it at 1.0. Below 1.0 this layer starts describing a canopy the march does not
+// It shipped at 0.5 for one afternoon, to compensate for a small instance pool: Green
+// Mile's canopy has a MEDIAN of raw 28 of 255 (docs/06 §7.1), so the literal rule
+// rejects ~89% of instances over ordinary ground and 4,000 blades became about twenty
+// on screen. Measuring the layer's real cost removed the need — density comes from
+// GRASS_BLADE_COUNT, which is nearly free. Do not reintroduce the exponent: anything
+// other than the literal rule makes this layer describe a canopy the march does not
 // draw and the concealment query does not know about, which is the third-representation
 // failure docs/03 §4.4 names as its one hard constraint.
-export const GRASS_BLADE_DENSITY_GAMMA = 1.0;
-// Blade width at the root, metres, at height scale 1. About 1.7 GRASS_CELL columns,
-// so a blade is a little wider than the columns it stands among — wide enough to
-// read as an edge against the sky, narrow enough not to be a plank. Scales with the
-// instance's own height so short blades are not squat.
-export const GRASS_BLADE_WIDTH = 0.05;
+// Blade width at the root, in COLUMN WIDTHS. A blade is a little wider than the columns
+// it stands among — wide enough to read as an edge against the sky, narrow enough not
+// to be a plank. Scales with the instance's own height so short blades are not squat.
+//
+// Expressed against GRASS_CELL rather than as a bare 0.05 m because the two have to
+// move together: the whole point of the layer is that a column is too wide to read in
+// the near field, so a blade tuned in metres would silently stop being "wider than a
+// column" the moment the column width changes.
+export const GRASS_BLADE_WIDTH_COLUMNS = 1.7;
+export const GRASS_BLADE_WIDTH = GRASS_CELL * GRASS_BLADE_WIDTH_COLUMNS;
 // Multiplier on the march's own column height. 1.0 means a blade stands EXACTLY as
 // tall as the columns around it, which is the whole point of deriving height from
 // canopyBase rather than from a free parameter — a value away from 1.0 reintroduces

@@ -13,11 +13,6 @@ export interface BladeShape {
   /** Full width at the root, in the blade's own units. Tapers linearly to the apex. */
   width: number;
   /**
-   * Root-to-apex length. Left at 1 by the renderer, which scales it per instance to
-   * the canopy height the march would give that spot — see GrassMaterial's columnTop.
-   */
-  height: number;
-  /**
    * Centre-vertex offset along local +Z, as a fraction of that ring's OWN width.
    *
    * A fraction of the ring rather than of the root, so the V closes as the blade
@@ -28,7 +23,7 @@ export interface BladeShape {
   vDepth: number;
 }
 
-export interface BladeMesh {
+export interface BladeVertexData {
   /** xyz triples: 3 per ring for `segments` rings, then one apex vertex. */
   positions: Float32Array;
   /** uv pairs. u is 0 / 0.5 / 1 across the section, v is 0 at the root, 1 at the tip. */
@@ -46,7 +41,7 @@ export interface BladeMesh {
  * blade. They shade nothing, but they are still assembled and clipped, and at a few
  * thousand instances that is a third of the primitive setup for no picture.
  */
-export function bladeVertexData({ segments, width, height, vDepth }: BladeShape): BladeMesh {
+export function bladeVertexData({ segments, width, vDepth }: BladeShape): BladeVertexData {
   const rings = Math.max(1, Math.floor(segments));
   const positions = new Float32Array((rings * 3 + 1) * 3);
   const uvs = new Float32Array((rings * 3 + 1) * 2);
@@ -58,7 +53,11 @@ export function bladeVertexData({ segments, width, height, vDepth }: BladeShape)
   for (let s = 0; s < rings; s++) {
     const v = s / rings;
     const w = width * (1 - v);
-    const y = height * v;
+    // UNIT HEIGHT, always: the renderer scales each blade to the canopy height the
+    // march would give that spot (grassField.columnTop), so a height here would only
+    // fight it. That also makes uv.v and y the same number, which every later stage
+    // relies on — wind anchoring, the colour ramp, and the eventual trail masks.
+    const y = v;
     const z = w * vDepth;
     // left, centre, right — the order every index below assumes.
     positions[p * 3] = -w * 0.5;
@@ -82,7 +81,7 @@ export function bladeVertexData({ segments, width, height, vDepth }: BladeShape)
   }
   const apex = rings * 3;
   positions[apex * 3] = 0;
-  positions[apex * 3 + 1] = height;
+  positions[apex * 3 + 1] = 1;
   positions[apex * 3 + 2] = 0;
   uvs[apex * 2] = 0.5;
   uvs[apex * 2 + 1] = 1;
@@ -111,15 +110,26 @@ export function bladeVertexData({ segments, width, height, vDepth }: BladeShape)
 }
 
 /**
- * The same blade as a BufferGeometry, ready to hand to an InstancedMesh.
+ * The same blade as an instanced geometry, ready to draw.
  *
  * NO NORMALS. The material is unlit, following every other material in this renderer,
  * because the colormap is pre-shaded (docs/03 §4.4) — so `computeVertexNormals`, which
  * the reference calls here, would build an attribute nothing reads.
+ *
+ * INSTANCED BUFFER GEOMETRY rather than an InstancedMesh, because every blade derives
+ * its world position from `cameraPosition` in the vertex stage and so needs no per-
+ * instance matrix at all. An InstancedMesh would allocate 16 floats per instance —
+ * 1.9 MB at the shipped count — upload them, and then multiply every vertex by the
+ * identity, since three injects the instance matrix into `positionLocal` before the
+ * material's own `positionNode` runs.
  */
-export function buildBladeGeometry(shape: BladeShape): THREE.BufferGeometry {
+export function buildBladeGeometry(
+  shape: BladeShape,
+  instanceCount: number
+): THREE.InstancedBufferGeometry {
   const { positions, uvs, indices } = bladeVertexData(shape);
-  const geometry = new THREE.BufferGeometry();
+  const geometry = new THREE.InstancedBufferGeometry();
+  geometry.instanceCount = instanceCount;
   geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   geometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
   geometry.setIndex(new THREE.BufferAttribute(indices, 1));

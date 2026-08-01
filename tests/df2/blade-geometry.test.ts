@@ -9,7 +9,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { bladeVertexData } from "../../src/df2/bladeGeometry.ts";
 
-const SHAPE = { segments: 3, width: 0.05, height: 1, vDepth: 0.3 };
+// Blades are always unit height — the renderer scales them to the canopy — so v and
+// y are the same number, which the third test below relies on.
+const SHAPE = { segments: 3, width: 0.05, vDepth: 0.3 };
 
 const vertexCount = (positions: Float32Array): number => positions.length / 3;
 const at = (positions: Float32Array, i: number): [number, number, number] => [
@@ -58,7 +60,7 @@ test("width tapers linearly to a point, and the V closes with it", () => {
     // blade narrows to a point instead of to a fold.
     assert.ok(Math.abs(centre[2] - expected * SHAPE.vDepth) < 1e-6, `ring ${s} depth`);
   }
-  assert.deepEqual(at(positions, vertexCount(positions) - 1), [0, SHAPE.height, 0]);
+  assert.deepEqual(at(positions, vertexCount(positions) - 1), [0, 1, 0]);
 });
 
 test("no triangle is degenerate", () => {

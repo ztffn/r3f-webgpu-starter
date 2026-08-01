@@ -69,7 +69,6 @@ import {
   GRASS_BLADE_RADIUS,
   GRASS_BLADE_THIN_START,
   GRASS_BLADE_KEEP_MIN,
-  GRASS_BLADE_DENSITY_GAMMA,
   GRASS_BLADE_WIDTH,
   GRASS_BLADE_HEIGHT_SCALE,
   GRASS_BLADE_SEGMENTS,
@@ -291,17 +290,9 @@ export function DF2Scene({
   // position from `cameraPosition` in the vertex stage, so the field follows the player
   // without a per-frame CPU update and without the camera-graph trap the grass cap has
   // to work around (Terrain.tsx).
-  const bladeKit = useMemo(() => {
+  const bladeMesh = useMemo(() => {
     if (!grassKit || !world?.colorMap) return null;
     if (BENCH.blades === false) return null;
-    const geometry = buildBladeGeometry({
-      segments: GRASS_BLADE_SEGMENTS,
-      width: GRASS_BLADE_WIDTH,
-      // Unit height: the shader scales each blade to the canopy height the march
-      // would give that spot, so a number here would only fight it.
-      height: 1,
-      vDepth: GRASS_BLADE_V_DEPTH,
-    });
     const blade = createBladeMaterial({
       field: grassKit.field,
       colorMap: world.colorMap,
@@ -309,7 +300,6 @@ export function DF2Scene({
       radius: BENCH.bladeRadius ?? GRASS_BLADE_RADIUS,
       thinStart: GRASS_BLADE_THIN_START,
       keepMin: GRASS_BLADE_KEEP_MIN,
-      densityGamma: GRASS_BLADE_DENSITY_GAMMA,
       heightScale: GRASS_BLADE_HEIGHT_SCALE,
       bend: GRASS_BLADE_BEND,
       twist: GRASS_BLADE_TWIST,
@@ -326,16 +316,25 @@ export function DF2Scene({
       ).windVelocity,
       debug: BENCH.bladeDebug ?? 0,
     });
-    return { geometry, blade, mesh: createBladeMesh(geometry, blade) };
+    // Geometry after the material, because the material rounds the requested pool to a
+    // square lattice and the geometry carries that count.
+    const geometry = buildBladeGeometry(
+      {
+        segments: GRASS_BLADE_SEGMENTS,
+        width: GRASS_BLADE_WIDTH,
+        vDepth: GRASS_BLADE_V_DEPTH,
+      },
+      blade.count
+    );
+    return createBladeMesh(geometry, blade);
   }, [grassKit, world]);
 
   useEffect(
     () => () => {
-      bladeKit?.blade.material.dispose();
-      bladeKit?.geometry.dispose();
-      bladeKit?.mesh.dispose();
+      bladeMesh?.geometry.dispose();
+      (bladeMesh?.material as THREE.Material | undefined)?.dispose();
     },
-    [bladeKit]
+    [bladeMesh]
   );
 
   useEffect(() => {
@@ -410,7 +409,7 @@ export function DF2Scene({
           coverage over bare-looking ground would show where the concealment field
           counts a target hidden (docs/08 §8 invariant 6). Rendered here rather than
           inside the terrain group because the mesh needs no transform at all. */}
-      {bladeKit && grass && <primitive object={bladeKit.mesh} />}
+      {bladeMesh && grass && <primitive object={bladeMesh} />}
 
       {/* Scope mode promotes the contrast ladder into resettable shootable targets. */}
       {(BENCH.targets || (scopeDemo && !FPS_DEBUG.impactTest)) && heightfield && (

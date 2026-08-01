@@ -35,8 +35,6 @@ export interface BladeMaterialOptions {
   thinStart: number;
   /** Keep probability at the field edge. */
   keepMin: number;
-  /** Exponent applied to the canopy value before it becomes a keep probability. */
-  densityGamma: number;
   /** Multiplier on the march's own column height. 1 stands a blade among equals. */
   heightScale: number;
   /** Resting lean as a fraction of blade height, peak to peak. */
@@ -74,19 +72,13 @@ export interface BladeMaterial {
   material: THREE.MeshBasicNodeMaterial;
   /** Instances to draw. The square of the lattice side, so not exactly `count`. */
   count: number;
-  uniforms: {
-    radius: NodeArg;
-    thinStart: NodeArg;
-    keepMin: NodeArg;
-    densityGamma: NodeArg;
-    heightScale: NodeArg;
-    shadeBase: NodeArg;
-    lift: NodeArg;
-    /** Horizontal wind in m/s. Assign from BallisticEnvironment, never from taste. */
-    wind: NodeArg;
-    windGain: NodeArg;
-  };
 }
+
+// NO uniforms bag. The march exposes one because GrassDebug drives it live and
+// rebuilding that material would throw away the terrain geometry cache; nothing drives
+// blades live, so every dial here is resolved at construction from the URL. Publishing
+// handles nothing reads would only imply a wiring that does not exist — add them back
+// alongside a panel that uses them, not before.
 
 export function createBladeMaterial(opts: BladeMaterialOptions): BladeMaterial {
   const {
@@ -96,7 +88,6 @@ export function createBladeMaterial(opts: BladeMaterialOptions): BladeMaterial {
     radius,
     thinStart,
     keepMin,
-    densityGamma,
     heightScale,
     bend,
     twist,
@@ -126,36 +117,35 @@ export function createBladeMaterial(opts: BladeMaterialOptions): BladeMaterial {
   const uRadius = uniform(radius);
   const uThinStart = uniform(thinStart);
   const uKeepMin = uniform(keepMin);
-  const uGamma = uniform(densityGamma);
   const uHeightScale = uniform(heightScale);
   const uBend = uniform(bend);
   const uTwist = uniform(twist);
-  const uWind = uniform(new THREE.Vector2(wind.x, wind.z));
+  // Direction and speed SPLIT ON THE CPU. A shader cannot hoist a normalize across
+  // invocations, so deriving them from one vec2 uniform re-ran a sqrt and two divides
+  // for every vertex of every blade on a value that is constant for the whole draw.
+  const windSpeedValue = Math.hypot(wind.x, wind.z);
+  const uWindDir = uniform(
+    windSpeedValue > 1e-4
+      ? new THREE.Vector2(wind.x / windSpeedValue, wind.z / windSpeedValue)
+      : new THREE.Vector2(0, 0)
+  );
+  const uWindSpeed = uniform(windSpeedValue);
   const uWindGain = uniform(windGain);
   const uNoiseScale = uniform(noiseScale);
   const uGustRate = uniform(gustRate);
   const uTone = uniform(toneVariation);
   const uShadeBase = uniform(shadeBase);
   const uLift = uniform(lift);
-  /** 0 normal, 1 keep mask, 2 distance. Live, so the debug panel could drive it. */
-  const uDebug = uniform(debug);
 
   /**
    * Stable per-blade random, keyed on the world cell.
    *
-   * The same sin-free hash the march uses for per-strand height (`strandHash`), for
-   * the same two reasons: it costs about six ALU operations rather than a texture
-   * fetch, and it wraps its input first. Cell indices here are world-metres over a
-   * ~0.19 m cell, so they reach the thousands, and `fract()` on values that large has
-   * no bits left to vary — the hash would quietly degenerate to a constant.
+   * THE MARCH'S OWN HASH, salted — not a copy of it. It costs about six ALU operations
+   * rather than a texture fetch, and it wraps its input before hashing, which matters
+   * here: cell indices are world-metres over a ~0.19 m cell, so they reach the
+   * thousands, and `fract()` on values that large has no bits left to vary.
    */
-  const rnd = (cell: NodeArg, salt: number): NodeArg => {
-    const c = cell.add(V2(salt * 37.13, salt * 91.71));
-    const w = c.sub(c.mul(1 / 4096).floor().mul(4096));
-    const p = w.mul(V2(0.1031, 0.103)).fract().toVar();
-    p.addAssign(p.dot(V2(p.y, p.x).add(33.33)));
-    return p.x.add(p.y).mul(p.x).fract();
-  };
+  const rnd = (cell: NodeArg, salt: number): NodeArg => field.strandHash(cell, salt);
   /** The same, mapped to [-1, 1] — the reference's "signed seed". */
   const signed = (cell: NodeArg, salt: number): NodeArg => rnd(cell, salt).mul(2).sub(1);
 
@@ -194,8 +184,9 @@ export function createBladeMaterial(opts: BladeMaterialOptions): BladeMaterial {
   //
   // Bare ground therefore grows nothing — 11.2% of Green Mile (docs/06 §7.1) — short
   // canopy grows sparse blades, and the field edge is rare rather than absent.
-  const canopyN = field.canopyBase(column.centre).div(field.canopyMax).clamp(0, 1);
-  const density = canopyN.pow(uGamma);
+  // The canopy sample `columnTop` already took. Re-reading it here would emit a second
+  // grassMap fetch per vertex for a value the graph is holding.
+  const density = column.canopy;
   const dist = bladeXZ.distance(camXZ);
   const far = dist.smoothstep(uThinStart, uRadius);
   // Interpolant is the receiver: mix(1, keepMin, far).
@@ -204,9 +195,13 @@ export function createBladeMaterial(opts: BladeMaterialOptions): BladeMaterial {
   // The debug views draw EVERY instance, including the ones the test rejected. That is
   // the only way to see what the pool is spending itself on: a rejected blade collapses
   // to zero area, so a 90%-wasted pool and a correctly-sized one look identical.
-  const drawn = uDebug.greaterThan(float(0.5)).select(float(1), alive);
-  const vAlive: NodeArg = varying(alive);
-  const vDist: NodeArg = varying(dist);
+  //
+  // Branched HERE, in JavaScript, rather than on a uniform. `debug` is fixed at
+  // construction — it comes from the URL and nothing writes it afterwards — so a uniform
+  // would buy no live switching and cost the shipping build two varyings it never reads
+  // plus a per-fragment select on the layer with the most overdraw in the frame.
+  const debugging = debug > 0;
+  const drawn = debugging ? float(1) : alive;
 
   // --- the blade itself, in its own space -------------------------------------
   const t = uv().y;
@@ -255,13 +250,11 @@ export function createBladeMaterial(opts: BladeMaterialOptions): BladeMaterial {
   // The DIRECTION is BallisticEnvironment.windVelocity, which drifts bullets, so the
   // grass a shooter reads for windage cannot disagree with the ballistics. The
   // reference hardcodes +X; copying that would make the instrument lie.
-  const windSpeed = uWind.length();
-  const windDir = uWind.div(windSpeed.max(float(1e-4)));
   // A height-proportional lag SUBTRACTED from the noise time is what makes a gust
   // travel up the blade instead of the whole blade wobbling in unison, and the
   // per-blade speed offset stops the field pulsing as one.
   const lag = t.mul(1.2).add(bendAmount.mul(0.5));
-  const phase = time.mul(uGustRate).mul(windSpeed).mul(seed.mul(0.15).add(1)).sub(lag);
+  const phase = time.mul(uGustRate).mul(uWindSpeed).mul(seed.mul(0.15).add(1)).sub(lag);
   const ns = uNoiseScale;
   const n1 = mx_noise_float(
     V3(bladeXZ.x.mul(ns).add(phase), bladeXZ.y.mul(ns).add(phase.mul(0.7)), 0)
@@ -276,12 +269,12 @@ export function createBladeMaterial(opts: BladeMaterialOptions): BladeMaterial {
     .mul(t.pow(2.8))
     .mul(1.4)
     .mul(uWindGain)
-    .mul(windSpeed)
+    .mul(uWindSpeed)
     .mul(height);
   const blown = V3(
-    turned.x.add(windDir.x.mul(windBend)),
+    turned.x.add(uWindDir.x.mul(windBend)),
     turned.y.sub(windBend.abs().mul(0.3)),
-    turned.z.add(windDir.y.mul(windBend))
+    turned.z.add(uWindDir.y.mul(windBend))
   );
 
   // Rejected blades COLLAPSE rather than discarding fragments: every vertex lands on
@@ -300,7 +293,7 @@ export function createBladeMaterial(opts: BladeMaterialOptions): BladeMaterial {
   // with, and the pale-wash artifact this project already paid for came from exactly
   // that kind of implicit selection.
   const colour = texture(colorMap, field.toUv(bladeXZ)).level(float(0));
-  const swingRaw = float(0.5).mix(column.jitter.g, field.strandHash(column.cell));
+  const swingRaw = float(0.5).mix(column.jitter.g, column.strand);
   // Applied around 1.0 with the downward swing damped, as in the march: the colormap
   // is pre-shaded, so a raw multiply crushes its baked shadows to black.
   const swing = swingRaw.sub(0.5).mul(uTone);
@@ -310,22 +303,24 @@ export function createBladeMaterial(opts: BladeMaterialOptions): BladeMaterial {
   const material = new THREE.MeshBasicNodeMaterial();
   material.positionNode = world;
   // Base-to-tip ramp centred on 1.0, the same one the march applies up a column, so
-  // blades and columns shade alike. Interpolant is the receiver.
+  // blades and columns shade alike, then lifted so the layer separates from the march
+  // behind it. Interpolant is the receiver.
   const shade = t.clamp(0, 1).mix(uShadeBase, uShadeBase.oneMinus().add(1)).mul(uLift);
-  // 0 normal. 1 keep mask: green where the blade survived the canopy and distance test,
-  // magenta where it was rejected — magenta filling the frame means the pool is being
-  // spent on ground that grows nothing. 2 distance: red at the eye through to blue at
-  // the field edge, which shows the extent and where the thinning bites.
-  const kept = V3(0.15, 1, 0.25);
-  const rejected = V3(1, 0, 0.75);
-  const near = vDist.div(uRadius).clamp(0, 1);
-  const distanceView = V3(near.oneMinus(), near.mul(near.oneMinus()).mul(4), near);
-  const debugView: NodeArg = uDebug
-    .lessThan(float(1.5))
-    .select(vAlive.greaterThan(float(0.5)).select(kept, rejected), distanceView);
-  material.colorNode = (uDebug as NodeArg)
-    .lessThan(float(0.5))
-    .select(vColour.mul(shade), debugView);
+  if (debugging) {
+    // 1 keep mask: green where the blade survived the canopy and distance test, magenta
+    // where it was rejected — magenta filling the frame means the pool is being spent on
+    // ground that grows nothing. 2 distance: red at the eye through to blue at the field
+    // edge, which shows the extent and where the thinning bites.
+    const vAlive: NodeArg = varying(alive);
+    const vDist: NodeArg = varying(dist);
+    const near = vDist.div(uRadius).clamp(0, 1);
+    material.colorNode =
+      debug < 1.5
+        ? vAlive.greaterThan(float(0.5)).select(V3(0.15, 1, 0.25), V3(1, 0, 0.75))
+        : V3(near.oneMinus(), near.mul(near.oneMinus()).mul(4), near);
+  } else {
+    material.colorNode = vColour.mul(shade);
+  }
   // DOUBLE-SIDED. Single-sided is the right call for camera-facing sprites, where the
   // back is never seen; for world-anchored geometry backface culling does not save
   // fill, it deletes blades whenever you happen to view them from behind.
@@ -334,44 +329,32 @@ export function createBladeMaterial(opts: BladeMaterialOptions): BladeMaterial {
   // FOG_NEAR is 300 m, so three's automatic fog would contribute nothing but a term.
   material.fog = false;
 
-  return {
-    material,
-    count: instances,
-    uniforms: {
-      radius: uRadius,
-      thinStart: uThinStart,
-      keepMin: uKeepMin,
-      densityGamma: uGamma,
-      heightScale: uHeightScale,
-      shadeBase: uShadeBase,
-      lift: uLift,
-      wind: uWind,
-      windGain: uWindGain,
-    },
-  };
+  return { material, count: instances };
 }
 
 /**
  * The drawable object.
  *
+ * A plain Mesh over an InstancedBufferGeometry: the instance count lives on the
+ * geometry, and `instanceIndex` resolves to the backend's instance builtin either way.
+ * An InstancedMesh would additionally demand a per-instance matrix this layer has no
+ * use for — see buildBladeGeometry.
+ *
  * NOT RAYCASTABLE, and that is a hard constraint rather than an optimisation:
  * concealment is authoritative on the march and the CPU heightfield, so blade geometry
  * must never answer a gameplay query. three's Raycaster ignores `visible`, so an
- * un-neutered instanced mesh would report hits to the rangefinder — the same trap the
- * grass cap already documents in Terrain.tsx.
+ * un-neutered mesh would report hits to the rangefinder — the same trap the grass cap
+ * already documents in Terrain.tsx.
  *
- * NOT FRUSTUM CULLED either. The instances carry identity matrices and place themselves
- * from the camera in the vertex stage, so the bounding sphere three would compute sits
- * at the origin and would cull the whole layer the moment the player walked away.
+ * NOT FRUSTUM CULLED either. Blades place themselves from the camera in the vertex
+ * stage, so the bounding sphere three would compute sits at the origin and would cull
+ * the whole layer the moment the player walked away from it.
  */
 export function createBladeMesh(
-  geometry: THREE.BufferGeometry,
+  geometry: THREE.InstancedBufferGeometry,
   blade: BladeMaterial
-): THREE.InstancedMesh {
-  const mesh = new THREE.InstancedMesh(geometry, blade.material, blade.count);
-  const identity = new THREE.Matrix4();
-  for (let i = 0; i < blade.count; i++) mesh.setMatrixAt(i, identity);
-  mesh.instanceMatrix.needsUpdate = true;
+): THREE.Mesh {
+  const mesh = new THREE.Mesh(geometry, blade.material);
   mesh.frustumCulled = false;
   mesh.raycast = () => {};
   mesh.renderOrder = 2;

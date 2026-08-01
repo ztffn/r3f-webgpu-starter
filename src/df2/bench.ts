@@ -127,39 +127,35 @@ function parse(): BenchConfig {
     const n = Number(v);
     return Number.isFinite(n) ? n : undefined;
   };
-  // Blades read the same way in both branches — see the field's note.
-  const blades = q.get("blades") === null ? undefined : q.get("blades") !== "0";
+  // WHICH PARAMETERS ESCAPE THE BENCH GATE, in one object rather than as a rule
+  // restated in two return statements. Duplicating the list is how a new dial ends up
+  // silently bench-only, which is the exact failure `?canopyall=` was split out to
+  // avoid — and a comment saying "read the same way in both branches" is not a
+  // mechanism.
+  const ungated = {
+    debug,
+    blades: q.get("blades") === null ? undefined : q.get("blades") !== "0",
+    bladeCount: num("bladecount"),
+    bladeRadius: num("bladeradius"),
+    bladeDebug: num("bladedebug"),
+    bladeShade: num("bladeshade"),
+    bladeLift: num("bladelift"),
+  };
 
   if (q.get("bench") !== "1") {
-    return {
-      enabled: false,
-      debug,
-      canopyAll: q.get("canopyall") === "1",
-      blades,
-      bladeCount: num("bladecount"),
-      bladeRadius: num("bladeradius"),
-      bladeDebug: num("bladedebug"),
-      bladeShade: num("bladeshade"),
-      bladeLift: num("bladelift"),
-    };
+    return { enabled: false, ...ungated, canopyAll: q.get("canopyall") === "1" };
   }
 
   const stance = q.get("stance");
 
   return {
     enabled: true,
-    debug,
+    ...ungated,
     dpr: num("dpr"),
     steps: num("steps"),
     refine: num("refine"),
     grass: q.get("grass") === null ? undefined : q.get("grass") !== "0",
     grassCap: q.get("grasscap") === null ? undefined : q.get("grasscap") !== "0",
-    blades,
-    bladeCount: num("bladecount"),
-    bladeRadius: num("bladeradius"),
-    bladeDebug: num("bladedebug"),
-    bladeShade: num("bladeshade"),
-    bladeLift: num("bladelift"),
     strand: num("strand"),
     maxspan: num("maxspan"),
     // Default ON under bench — see the field's note. `?canopyall=0` opts out.

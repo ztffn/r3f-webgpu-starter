@@ -61,22 +61,25 @@ export interface GrassField {
   strandMix: NodeArg;
   /** Width of one grass column in metres. */
   cell: NodeArg;
-  worldSize: NodeArg;
-  halfWorld: NodeArg;
-  hashPeriod: NodeArg;
   toUv: (xz: NodeArg) => NodeArg;
   meshMipAt: (xz: NodeArg) => NodeArg;
   groundAt: (xz: NodeArg, mip: NodeArg) => NodeArg;
+  /** Raw canopy sample, 0-1. The existence probability, and what canopyBase scales. */
+  canopyNorm: (xz: NodeArg) => NodeArg;
   canopyBase: (xz: NodeArg) => NodeArg;
   cellHash: (cell: NodeArg, salt: number) => NodeArg;
   cellNoise: (cell: NodeArg, scale: number, salt: number) => NodeArg;
   jitterAt: (centre: NodeArg) => NodeArg;
-  strandHash: (cell: NodeArg) => NodeArg;
+  strandHash: (cell: NodeArg, salt?: number) => NodeArg;
   columnTop: (xz: NodeArg, mip: NodeArg) => {
     cell: NodeArg;
     centre: NodeArg;
     ground: NodeArg;
     jitter: NodeArg;
+    /** Raw canopy at the column, 0-1. Returned because `top` samples it anyway. */
+    canopy: NodeArg;
+    /** The per-strand hash at this cell, likewise already evaluated for `top`. */
+    strand: NodeArg;
     top: NodeArg;
   };
 }
@@ -216,8 +219,9 @@ export function createGrassField(opts: GrassFieldOptions): GrassField {
    * Never leave this on for a measurement: full canopy everywhere is both the worst
    * case for the march and not what the map says.
    */
-  const canopyBase = (xz: NodeArg): NodeArg =>
-    uCanopyForce.mix(texture(grassMap, toUv(xz)).r, float(1)).mul(uCanopyMax);
+  const canopyNorm = (xz: NodeArg): NodeArg =>
+    uCanopyForce.mix(texture(grassMap, toUv(xz)).r, float(1));
+  const canopyBase = (xz: NodeArg): NodeArg => canopyNorm(xz).mul(uCanopyMax);
 
   /**
    * Stable per-column hash, keyed on the grass cell.
@@ -298,10 +302,16 @@ export function createGrassField(opts: GrassFieldOptions): GrassField {
    * already documents. The wrap repeats every 4096 columns: 8.2 m at 0.002 m. Short,
    * but this term is white noise at strand frequency, where a repeat is far harder to
    * see than in the coarse structure the texture still supplies.
+   *
+   * `salt` offsets the input so one hash can serve several independent per-cell values.
+   * That is why the blade layer calls this rather than carrying its own copy: the wrap
+   * period and the three multipliers are a live tuning decision documented here, and a
+   * second copy would keep the old ones silently after any retune.
    */
-  const strandHash = (cell: NodeArg): NodeArg => {
+  const strandHash = (cell: NodeArg, salt = 0): NodeArg => {
+    const c = salt === 0 ? cell : cell.add(vec2(salt * 37.13, salt * 91.71));
     // mul by 1/4096 rather than div: same wrap, one cheaper instruction.
-    const w = cell.sub(cell.mul(1 / 4096).floor().mul(4096));
+    const w = c.sub(c.mul(1 / 4096).floor().mul(4096));
     const p = w.mul(vec2(0.1031, 0.1030)).fract().toVar();
     p.addAssign(p.dot(vec2(p.y, p.x).add(33.33)));
     return p.x.add(p.y).mul(p.x).fract();
@@ -318,11 +328,18 @@ export function createGrassField(opts: GrassFieldOptions): GrassField {
     const centre = cell.add(0.5).mul(uCell);
     const ground = groundAt(centre, mip);
     const j = jitterAt(centre);
+    // Both of these feed `top` below, and the blade layer wants them too. Returning
+    // them costs nothing and saves a second grassMap fetch and a second hash per blade
+    // vertex — the graph caches by node identity, so recomputing would emit both twice.
+    const canopy = canopyNorm(centre);
+    const strand = strandHash(cell);
     return {
       cell,
       centre,
       ground,
       jitter: j,
+      canopy,
+      strand,
       // Coarse clumping from the texture, per-strand raggedness from the hash.
       //
       // THIS is the term that costs, because the march evaluates it at every sample
@@ -330,7 +347,7 @@ export function createGrassField(opts: GrassFieldOptions): GrassField {
       // constant factor the compiler can hoist, so 0 is genuinely the cheap setting
       // and the slider is a real performance dial — the only one in the panel that is.
       top: ground.add(
-        canopyBase(centre).mul(uStrandMix.mix(j.r, strandHash(cell)).mul(0.62).add(0.38))
+        canopy.mul(uCanopyMax).mul(uStrandMix.mix(j.r, strand).mul(0.62).add(0.38))
       ),
     };
   };
@@ -340,12 +357,10 @@ export function createGrassField(opts: GrassFieldOptions): GrassField {
     canopyForce: uCanopyForce,
     strandMix: uStrandMix,
     cell: uCell,
-    worldSize: uWorldSize,
-    halfWorld: uHalfWorld,
-    hashPeriod: uHashPeriod,
     toUv,
     meshMipAt,
     groundAt,
+    canopyNorm,
     canopyBase,
     cellHash,
     cellNoise,

@@ -215,7 +215,7 @@ field; blades are visual only and must never be sampled for gameplay.
 | Per-instance data | packed attribute: static bend angle, height scale, colour seed | bit-packed traits, compute-generated |
 | Detail falloff | device tier only: mobile 35% capped at 20k, low-end GPU a further 45% | **stochastic thinning**, full to 10 units, 10% by 60 |
 | Culling | — | GPU frustum cull by pushing culled vertices out of view, not `discard`; ~1/3 visible |
-| Wind | vertex-stage 2-octave simplex, weighted by `uv.y^k` so the root is anchored, per-instance phase | noise-driven world-space offset; "the wind vector lives in the world, not the blade's local orientation" |
+| Wind | vertex-stage 2-octave simplex, weighted by `uv.y^2.8` so the root is anchored, per-instance phase and speed, gust travels root-to-tip via a `uv.y` time lag. **Fixed +X direction** | noise-driven world-space offset; "the wind vector lives in the world, not the blade's local orientation" |
 | Lighting | wrapped diffuse, subsurface, sheen + fresnel glint, sepia grade | `MeshBasicNodeMaterial`, unlit, AO only near the base |
 | Interaction | **trail render target** at a fixed 512², WebGL dual-pass (decay + additive brush), WebGPU compute variant with rise-fast/fall-slow spring physics | — |
 
@@ -230,6 +230,45 @@ Penev's trail texture is the piece with gameplay value rather than only visual v
 should flatten grass behind you, which is both a tell for other players and a readable
 consequence of the concealment mechanic. Blades sample displacement by world XZ from a small
 render target (512² is enough). Defer it, but do not design it out.
+
+#### Recovered parameters from the shipped bundle
+
+Read out of the deployed Nuxt chunk (`penev.tech/_nuxt/C3gbpMUr.js`, component `GrassCanvas`) —
+the labs page itself does not render its source in a readable form. The write-up is published as
+a tutorial with its snippets intended for reuse, so this is reference material to work from
+directly rather than to tiptoe around.
+
+It still has to be **ported, not pasted**, for a purely technical reason: his is raw GLSL, and
+this project authors shaders in **TSL** so one graph serves both the WebGPU and WebGL2 backends
+(`CLAUDE.md`). Keep the numbers below, rewrite the expression.
+
+| | value / shape |
+|---|---|
+| Blade defaults | width 0.12 m, height 1.0 m — note that is ~4 `GRASS_CELL` columns wide and about our full canopy height, so blades are COARSER than columns, which is why they overlay rather than replace |
+| Geometry | 3 verts per ring × (segments+1) rings, 4 tris per segment. Width tapers `w*(1-t)`; the centre vert is pushed to `z = w*0.5`, giving the V cross-section that reads as volume |
+| Per-instance attribute | ONE `vec3`: `(staticBend, heightScale, signedSeed)`. The seed is reused for twist, curve power, wind speed, trail rotation and colour — one number, five jobs |
+| Twist | `angle = seed * 2.5 * uv.y`, rotating the section about Y so the blade turns along its length |
+| Static bend | `pow(uv.y, curvePower) * staticBend`, with `curvePower` per instance in [2.0, 3.5] |
+| Wind noise | 2 octaves of simplex at `0.48 * uNoiseScale` and double that, weighted 0.8 / 0.2 |
+| Wind time | `uTime * windSpeed(200) * 0.0006 * (1 + seed*0.15)` — per-instance speed so blades desync |
+| Wind lag | `uv.y * 1.2 + staticBend * 0.5`, SUBTRACTED from time, so the gust travels root to tip |
+| Root anchor | `windBend = wind * pow(uv.y, 2.8) * 1.4` |
+| Trail masks | root `smoothstep(0, 0.15, uv.y)`, tip `pow(uv.y, 1.8)`, push ≤ 12.2, Y drop 0.3 × push |
+| Colour | `mix(base, tip, smoothstep(0,1,uv.y))` then 15% desaturation; base `#051105`, tip `#88cc00` |
+
+Three details that are not in his write-up and are worth taking:
+
+1. **Arc-length compensation.** Every bend also does `y -= abs(bend) * 0.3`. Without it a bending
+   blade visibly stretches, because rotating a vertical strip by displacing X alone lengthens it.
+   Cheap, and its absence is the tell that grass is "rubbery".
+2. **The gust travels.** Subtracting a `uv.y`-proportional lag from the noise time is what makes
+   wind look like moving air rather than synchronised wobble. It costs one subtraction.
+3. **Normals are synthesised, never derived from the geometry** — assembled analytically from the
+   bend directions. We need none of this: unlit means no normal at all, which is a straight saving.
+
+**The one place we must diverge: he displaces X only**, i.e. wind blows along world +X forever.
+Ours has to displace along the XZ direction of `BallisticEnvironment.windVelocity`, or the
+instrument lies — see the wind section below.
 
 #### Reject Penev's shading wholesale — it is the one thing that would break the look
 

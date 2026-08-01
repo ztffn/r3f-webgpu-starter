@@ -709,11 +709,16 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     //
     // Bounded, not free: the cap searches the near interval, so its hit is normally the
     // nearer one and wins the depth test, and the picture stays right. The cost is a
-    // second march on those pixels. NOT YET MEASURED — the frame times in docs/09 §0 are
-    // both at the vsync cap, which is exactly where a cost like this hides. Measure with
-    // `?grasscap=0` crouched on the real canopy (`?canopyall=0`) before assuming it is
-    // small, and check the picture too: two intervals bracketing different columns is the
-    // artifact the cede test existed to kill.
+    // second march on those pixels, and it is BIG — measured crouch on the real canopy at
+    // dpr 2, the cap is 9.7 ms against 10.95 ms without it, so it nearly doubles the frame
+    // (docs/09 §0.1). At shipped settings it is invisible because both readings sit at the
+    // 120 Hz vsync cap, which is exactly where a cost like this hides.
+    //
+    // Not all of that is waste — the cap also does the near-field march nothing else does.
+    // The redundant half is the fix candidate: the per-pixel cede test deleted with the
+    // floor proxy, re-keyed on the LOCAL canopy instead of the global maximum. Deliberately
+    // not attempted in this PR; it is a march change and docs/08 §11 wants it measured
+    // across several vantages and headings, not one.
 
     // --- which mesh LOD this ray marches against ------------------------------
     // Sampled at BOTH ENDS of the interval the ray will search, and the COARSER of the

@@ -400,8 +400,11 @@ drawing. Wherever local canopy < eye < global max, the eye is above the local ce
 ceiling is front-facing, and BOTH proxies march the pixel. With Green Mile's 0.13 m median
 against a 1.199 m maximum (`06` §7.1) that is most of the map at crouch and prone. The picture
 stays right — the cap searches the near interval and wins the depth test — but the second march
-is real and **has not been measured**; both numbers in `09` §0 are at the vsync cap, which is
-where a cost like this hides. `?grasscap=0` at a crouched pose on the real canopy is the A/B.
+is real and it is **expensive: 9.7 ms against 10.95 ms without it**, crouch on the real canopy
+at dpr 2 (`09` §0.1). At shipped settings it is invisible because everything sits at the 120 Hz
+vsync cap, which is where a cost like this hides. Not all of it is waste — the cap also does the
+near-field march nothing else does — and the fix candidate is the per-pixel cede test that was
+deleted with the floor proxy, re-keyed on the LOCAL canopy. Filed, not attempted.
 
 `heightTexture.ts` builds the elevation texture with a point-decimated mip chain so the march
 can follow the surface the mesh drew. See §11's "three surfaces" trap.

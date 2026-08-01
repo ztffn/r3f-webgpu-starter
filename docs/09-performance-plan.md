@@ -58,6 +58,32 @@ restores the map's own canopy, and any claim about grass PLACEMENT still needs i
 | 256 coarse samples per ray | 106.6 ms vs 10.9 ms | see §3.6 |
 | Point-decimated height mips | ~4 ms FASTER | coarser mips at range improve cache locality |
 
+### 0.1 The cap costs about half the frame at crouch on the REAL canopy — measured
+
+The review of PR #4 doubted the claim that ceiling and cap cannot overlap. It was right, and
+the cost is large. Crouch, Green Mile at (-375, 787), **real canopy** (`?canopyall=0`), dpr 2:
+
+| Config | cap OFF | cap ON | cap costs |
+|---|---|---|---|
+| `?steps=48` | 8.33 ms (AT the 120 Hz cap) | 13.35 ms | ≥ 5.0 ms |
+| `?steps=96` | 10.95 ms | 20.63 ms | **9.7 ms — near double** |
+
+Draw calls differ by exactly one, so this is not submission cost; it is the full-screen cap
+fragment marching. **At shipped settings it is completely invisible** — crouch and prone both
+read 8.34 ms, which is the 120 Hz cap, so the whole cost hides under vsync. That is the trap
+in §3.1.2 wearing a new hat, and it is why the §0 table's two rows cannot be read as "free".
+
+Why it is there: `Terrain.tsx` gates the cap on the map-GLOBAL `canopyMax`, so wherever local
+canopy < eye < global max the eye is above the LOCAL ceiling, that ceiling is front-facing and
+marches, and the cap marches over it. Green Mile's median canopy is 0.13 m against a 1.199 m
+maximum (`06` §7.1), so at crouch that is most of the map.
+
+**Not all of the 9.7 ms is waste** — the cap also does the near-field march that makes
+concealment work, which nothing else would do. Isolating the redundant half needs the
+`?canopyall=1` comparison, where the eye IS under the local ceiling and no overlap is possible.
+Not yet run. The candidate fix is the per-pixel cede test that was deleted with the floor
+proxy, re-keyed on the local canopy rather than the global maximum.
+
 ### §3.1.2 has a second failure mode: the vsync staircase
 
 The battery-throttle story below is real, but it made `33.3 ms` look like a throttle signature

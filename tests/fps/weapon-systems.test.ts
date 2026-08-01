@@ -137,15 +137,17 @@ test("stance, movement, grounded state, ADS, and breath produce ordered dispersi
   const stand = cone(STATIONARY_STAND);
   const crouch = cone({ ...STATIONARY_STAND, stance: "crouch" });
   const prone = cone({ ...STATIONARY_STAND, stance: "prone" });
-  const running = cone({ ...STATIONARY_STAND, planarSpeedMetresPerSecond: 5.5 });
+  const moving = cone({ ...STATIONARY_STAND, planarSpeedMetresPerSecond: 5.5 });
+  const sprinting = cone({ ...STATIONARY_STAND, planarSpeedMetresPerSecond: 22 });
   const airborne = cone({ ...STATIONARY_STAND, stance: "prone", grounded: false });
   const ads = cone(STATIONARY_STAND, true);
   const adsBreath = cone({ ...STATIONARY_STAND, breathStabilization: 1 }, true);
 
   assert.ok(stand > crouch);
   assert.ok(crouch > prone);
-  assert.ok(running > stand);
-  assert.ok(airborne >= running);
+  assert.ok(moving > stand);
+  assert.ok(sprinting > moving);
+  assert.ok(airborne >= moving);
   assert.ok(ads < stand);
   assert.ok(adsBreath < ads);
   assert.ok(adsBreath > M4_DEFINITION.accuracy.mechanicalDispersionRadians);

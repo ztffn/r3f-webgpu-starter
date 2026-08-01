@@ -233,7 +233,7 @@ capture click does not fire. Escape releases the pointer.
 | mouse | look without holding a button |
 | left mouse down / up | serialized trigger edges |
 | right click | toggle ADS |
-| Shift while ADS | stabilize breath and blend to precision sensitivity |
+| Shift | sprint; while ADS, also stabilize breath and blend to precision sensitivity |
 | R | leave ADS and reload |
 | T | reset targets and husks |
 | 1 / 2 / 3 | equip sniper / M4 / Glock |

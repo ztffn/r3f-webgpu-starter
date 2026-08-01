@@ -191,13 +191,13 @@ radians (`1 mrad = 0.001 rad`).
 Handling uses one allocation-free formula:
 
 ```text
-speed01 = clamp(planarSpeed / 5.5 m/s, 0, 1)
+movementFactor = clamp(planarSpeed / 5.5 m/s, 0, 2)
 adsFactor = lerp(1.0, 0.12, adsProgress)
 breathFactor = lerp(1.0, 0.75, breathStabilization * adsProgress)
 stanceFactor = stand 1.00 | crouch 0.62 | prone 0.30
 
 groundedHandling =
-  (hip * adsFactor + movement * speed01) * stanceFactor * breathFactor
+  (hip * adsFactor + movement * movementFactor) * stanceFactor * breathFactor
 
 standMovingBaseline = (hip * adsFactor + movement) * breathFactor
 
@@ -228,10 +228,11 @@ The implementation must also obey these relationships:
 | pause | recoil and bloom recover monotonically in simulation time |
 
 Stance multipliers start with the existing sway values: stand `1.00`, crouch
-`0.62`, prone `0.30`. Planar speed is normalized against an authored reference
-run speed and clamped to `[0, 1]`. Invalid context values are clamped to safe
-finite ranges. Invalid negative, non-finite, or internally inconsistent weapon
-tuning fails definition validation in the constructor.
+`0.62`, prone `0.30`. Planar speed is normalized against the current 5.5 m/s
+movement reference and clamped to `[0, 2]`, so Shift-sprinting can widen the
+cone without creating an unbounded speed penalty. Invalid context values are
+clamped to safe finite ranges. Invalid negative, non-finite, or internally
+inconsistent weapon tuning fails definition validation in the constructor.
 
 ## Aim composition and presentation
 

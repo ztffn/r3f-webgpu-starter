@@ -41,7 +41,8 @@ export const STANCE_HANDLING_MULTIPLIER: Readonly<Record<PlayerStance, number>> 
   prone: 0.3,
 };
 
-const REFERENCE_RUN_SPEED_METRES_PER_SECOND = 5.5;
+const REFERENCE_MOVEMENT_SPEED_METRES_PER_SECOND = 5.5;
+const MAX_MOVEMENT_FACTOR = 2;
 const FULL_ADS_HANDLING_FACTOR = 0.12;
 const FULL_BREATH_HANDLING_FACTOR = 0.75;
 
@@ -63,14 +64,16 @@ export function calculateDispersionConeRadians(
 ): number {
   const ads = clamp01(adsProgress);
   const breath = clamp01(breathStabilization) * ads;
-  const speed = clamp01(
-    finiteNonNegative(planarSpeedMetresPerSecond) / REFERENCE_RUN_SPEED_METRES_PER_SECOND
+  const movementFactor = Math.min(
+    MAX_MOVEMENT_FACTOR,
+    finiteNonNegative(planarSpeedMetresPerSecond) / REFERENCE_MOVEMENT_SPEED_METRES_PER_SECOND
   );
   const stanceFactor = STANCE_HANDLING_MULTIPLIER[stance] ?? STANCE_HANDLING_MULTIPLIER.stand;
   const adsFactor = 1 + (FULL_ADS_HANDLING_FACTOR - 1) * ads;
   const breathFactor = 1 + (FULL_BREATH_HANDLING_FACTOR - 1) * breath;
   const groundedHandling =
-    (accuracy.hipDispersionRadians * adsFactor + accuracy.movementDispersionRadians * speed) *
+    (accuracy.hipDispersionRadians * adsFactor +
+      accuracy.movementDispersionRadians * movementFactor) *
     stanceFactor *
     breathFactor;
   const standMovingBaseline =
@@ -85,4 +88,3 @@ export function calculateDispersionConeRadians(
     finiteNonNegative(bloomRadians)
   );
 }
-

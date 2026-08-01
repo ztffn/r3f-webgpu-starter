@@ -92,7 +92,8 @@ a gameplay/test definition with semi and automatic modes. B cycles each
 definition's authored mode order. Click the canvas once to capture the pointer;
 that capture click does not fire. Mouse movement then aims without holding a
 button, Escape releases it, left mouse down/up sends trigger edges, and right
-click toggles ADS. Shift holds breath while ADS is active, R reloads, and T
+click toggles ADS. Shift boosts movement and, while ADS is active, also holds
+breath; firing remains available while moving or sprinting. R reloads, and T
 resets targets. Blur, pointer-lock loss, and teardown release held-trigger state.
 
 All selectable weapons currently use the same clearly labelled
@@ -113,7 +114,8 @@ empty automatic weapon emits one dry-fire event per press.
 
 Spread and recoil are authoritative weapon state. Each definition separately
 authors mechanical dispersion, hip/movement/airborne handling error, bounded
-bloom, pitch/yaw recoil, caps, and recovery. Stance, measured planar speed,
+bloom, pitch/yaw recoil, caps, and recovery. Stance, measured planar speed
+(including a bounded extra sprint penalty),
 grounded state, ADS, and breath stabilization resolve into the cone; going prone
 does not erase a weapon's mechanical grouping limit. Every accepted shot samples
 that cone from a deterministic weapon-instance seed and shot sequence, captures

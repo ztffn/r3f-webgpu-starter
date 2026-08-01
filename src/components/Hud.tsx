@@ -347,7 +347,7 @@ export function Hud({
           <dt>Wheel</dt>
           <dd>fly speed</dd>
           <dt>Shift</dt>
-          <dd>{fpsMode ? "breath / precision" : "boost ×4"}</dd>
+          <dd>{fpsMode ? "sprint / ADS breath" : "boost ×4"}</dd>
           <dt>G</dt>
           <dd>foot / fly</dd>
           <dt>X C Z</dt>

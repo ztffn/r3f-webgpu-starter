@@ -57,7 +57,7 @@ export function HipfireCrosshair() {
   }, []);
 
   const lineProps = {
-    stroke: "rgba(230, 239, 226, 0.92)",
+    stroke: "rgba(255, 157, 46, 0.98)",
     strokeWidth: 1.25,
     strokeLinecap: "square" as const,
     vectorEffect: "non-scaling-stroke" as const,
@@ -84,7 +84,7 @@ export function HipfireCrosshair() {
         <line ref={right} y1="0" y2="0" {...lineProps} />
         <line ref={top} x1="0" x2="0" {...lineProps} />
         <line ref={bottom} x1="0" x2="0" {...lineProps} />
-        <circle cx="0" cy="0" r="1.35" fill="rgba(232, 163, 61, 0.95)" />
+        <circle cx="0" cy="0" r="1.35" fill="rgba(255, 157, 46, 0.98)" />
       </g>
     </svg>
   );

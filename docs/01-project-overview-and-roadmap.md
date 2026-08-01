@@ -220,6 +220,23 @@ and immediately answers "does this feel like DF2?".
   standing reads 525 px. That is a rendered-pixel measurement, not the analytic query this
   phase specifies — the query API itself does not exist yet.
 
+- ⬜ **Set the grass draw range from engagement range, not from the current placeholders.**
+  `GRASS_FADE_START` / `GRASS_FADE_END` are 700/1100 m, which was chosen when nothing was
+  shooting at anything. The concealment query is analytic and has no distance limit, so
+  beyond the fade a prone target stands on bare colormap while the field still counts them
+  concealed (`08-...md` §8 invariant 6). Ridge-crawling duels happen at 1000 m-plus, so the
+  fade wants to be more like 1500–3000 m. **This is a design dial, not a bug** — settle it
+  with the engagement ranges Phase 4 actually produces, and re-measure, since draw distance
+  is the one grass parameter that buys frame time back directly.
+- ⬜ **Bound the terrain LOD schedule by a fairness criterion.** `LOD_DISTANCE_CHUNKS` is
+  four hand-picked chunk multiples. Measured on Green Mile, the mesh's deviation from the
+  full-resolution surface is 0.26 m at LOD 0, 0.92 m at LOD 1, 2.31 m at LOD 2 and 5.40 m at
+  LOD 3. A prone soldier is 0.35 m tall, so from LOD 2 outward the terrain silhouette is
+  wrong by several times the thing being hidden behind it — and that decides whether a head
+  clears a crest at range, for the player MODEL as much as for grass. Derive the switch
+  distances from measured deviation against a stated bound instead. LOD 0 everywhere is
+  exact and measured 17.5 ms against 9 ms, so it is not the answer.
+
 ### Phase 4 — Integration (⬜ not started)
 - ⬜ First-person controller, physics (rapier or cannon-es), basic AI/objectives.
   *(What exists today is a camera rig only — `FlyControls.tsx` clamps to the surface at a

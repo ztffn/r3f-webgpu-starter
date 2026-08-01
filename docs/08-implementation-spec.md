@@ -609,6 +609,10 @@ timestamp queries are used.
 
 Each of these cost real time. They are here so they cost it once.
 
+**If you are reviewing this code, read "Looks like a bug, is not" below FIRST.** Much of this
+subsystem is deliberately counter-intuitive because the intuitive version was measured and was
+worse. A review that has not read it will propose changes that have already been tried.
+
 - **`_d.pcx` is the HEIGHTMAP** (`elev_map`), not a detail map. `_m.pcx` is the detail map.
 - **The colormap is JPEG, not TGA.** Both colormap and heightmap are 1024².
 - **Two grass "fixes" that fixed nothing.** (a) Lifting the shell by local canopy: 2390 → 2394
@@ -685,6 +689,70 @@ fragments then drew **in front of everything, including sky**. One distant miss 
 upper frame. "The shell covers this pixel" and "something far away missed" became
 indistinguishable, which is the exact question those views exist to answer, and a wrong
 conclusion was drawn from it before it was spotted. Misses now write the shell's own distance.
+
+### Looks like a bug, is not — READ BEFORE "FIXING" ANY OF THESE
+
+A code review of this branch flagged several of these as defects. They are deliberate, most
+were measured, and every one has cost time at least once. If a reviewer — human or agent —
+proposes changing one, the burden is a measurement, not an argument.
+
+**The coarse march has no below-terrain early-out, and reordering one in is a regression.**
+`top` is `ground + canopy * m` with `m >= 0.38`, so reaching the line after the column test
+already implies `P.y >= ground`: any such test is dead, which is why there isn't one. It was
+reordered ABOVE the column test on exactly that reasoning and drew concentric rings of missing
+grass across every hillside. The column test firing first is load-bearing — a sample starting
+marginally below the reconstructed ground still brackets the column instead of missing, and
+since mesh and march agree only to within the LOD reconstruction, that is routine.
+
+**`GRASS_NEAR_CLIP` is capped at half the ray's slab crossing.** The 0.5 is not a fudge factor;
+it is a bound that guarantees half the interval remains searchable. Applied flat, the clip
+starts the march past the ground the ray is heading for and blanks the near field prone — §8
+invariant 6.
+
+**The ceiling is `FrontSide` while the cap is `DoubleSide`.** Not an oversight. The ceiling's
+underside is where a ray LEAVES the volume, and treating that as an entry is what made prone
+read hits at 120-300 m; the cap owns that case with one fragment per pixel. Making the ceiling
+double-sided again costs 33.3 ms against 8.3 ms.
+
+**The mesh-LOD lookup is hoisted per FRAGMENT, not per sample.** Knowingly approximate: a ray
+crossing a chunk boundary mid-slab is off by one level on the far side. Per sample is exact and
+costs 21.9 ms against 10 ms.
+
+**The two-ended LOD lookup takes the COARSER of the two ends.** The failure directions are not
+symmetric. Marching a surface finer than the mesh lets the mesh occlude grass, which is
+invariant 6; marching one coarser floats it slightly, which is harmless and bounded.
+
+**The jitter texture is mapped across METRES, not per grass cell.** Per-cell resolves a strand
+and looks better. It also halves the frame rate, because the march evaluates column height at
+every sample and each fetch then misses the texture cache. Fine detail comes from the ALU
+`strandHash` instead — that apparent duplication is a cache decision, not an oversight.
+
+**The colormap is sampled at explicit `.level(0)`.** Not a missing mip optimisation. The uv
+derives from a raymarch hit, so neighbouring pixels land metres apart, implicit derivatives
+pick a mip near the top of the pyramid, and grass renders as a pale wash. That cost several
+sessions.
+
+**Fog is applied inside `colorNode` with `material.fog = false`.** three fogs by the RASTERISED
+depth, which for this material is the shell — hundreds of metres from where the ray hit.
+
+**`depthNode` disables early-Z, and that is accepted.** Without correct depth at the hit,
+nothing can stand in the grass convincingly, which is the entire point of the system.
+
+**Chunk building is not frustum-gated.** It was, and it demonstrably dropped chunks that were
+on screen — large wedges of near terrain rendered as sky. Slots are visited nearest-first, so
+the budget still favours the near field.
+
+**Terrain draws to 2304 m against a 1100 m grass fade.** Invariant 1: the march finds columns
+standing on terrain, so terrain must be drawn at least as far as grass is rendered.
+
+**`?bench=1` forces full canopy.** Not a debug flag left on. It is the only way a bench number
+means anything on a map whose canopy is a stand-in with a 0.13 m median and 11% bare — and it
+is the worst case, which is what a benchmark should report.
+
+**Flagged and genuinely unresolved:** the ten-way debug view chain compiles into the shipping
+shader. `uDebugMode` is a uniform so the untaken branches do not execute, but nine nested
+conditionals on the heaviest fragment shader may cost occupancy. Gating it on `BENCH.debug` the
+way `isCap` is gated would compile it out. **Measure before acting** — it may be free.
 
 ### Method traps, not code traps
 

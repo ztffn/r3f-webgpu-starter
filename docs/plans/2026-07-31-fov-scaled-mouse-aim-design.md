@@ -37,6 +37,8 @@ with raw input) and `0.25` for the sniper precision scale. Query parameters
 without a rebuild. The existing damped optic presentation value supplies
 `adsBlend`, so sensitivity changes continuously through ADS. Variable optic FOV
 is read live, making Z/X zoom affect control resolution as well as magnification.
+Slow deltas remain linear; a bounded scan curve accelerates larger deltas and
+fades out as breath stabilization engages.
 
 At 1,300 m the expected scan / held-breath one-count steps are approximately:
 

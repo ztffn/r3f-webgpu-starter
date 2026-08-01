@@ -22,6 +22,7 @@ import {
   AIM_DIAGNOSTIC_RANGE_METRES,
   type LookSensitivityController,
 } from "./core/LookSensitivityController";
+import { AimSwayController } from "./core/AimSwayController";
 
 const WORLD_LAYER = 0;
 const WEAPON_LAYER = 1;
@@ -37,12 +38,6 @@ const WEAPON_FOV = 40;
 const WEAPON_NEAR = 0.01;
 const WEAPON_FAR = 10;
 const AIM_RESPONSE = 18;
-const HIP_SWAY_RADIANS = 0.012;
-const AIM_SWAY_RADIANS = 0.0032;
-const HIP_SWAY_METRES = 0.009;
-const AIM_SWAY_METRES = 0.0018;
-const HOLD_BREATH_MULTIPLIER = 0.24;
-const HOLD_BREATH_RESPONSE = 14;
 const EYEBOX_RADIUS_METRES = 0.02;
 const EYEBOX_MAX_OFFSET = 0.32;
 const FAKE_PARALLAX_STRENGTH = 0.04;
@@ -51,6 +46,9 @@ const LOOK_LAG_MAX_METRES = 0.006;
 const LOOK_LAG_RETURN = 12;
 const RANGE_SAMPLE_INTERVAL_MS = 160;
 const HIP_OFFSET = new THREE.Vector3(0.24, -0.37, -0.56);
+const OPTIC_EYE_OFFSET = new THREE.Vector3(0, 0, -0.075);
+const LOCAL_X = new THREE.Vector3(1, 0, 0);
+const LOCAL_Y = new THREE.Vector3(0, 1, 0);
 // The circular lens mesh is authored in this local X/Y square. Use geometry
 // coordinates for its optical screen space—the texture-atlas UV island is
 // rotated relative to the physical glass.
@@ -182,9 +180,8 @@ export function WeaponPrototype({
   const mixer = useRef<THREE.AnimationMixer | null>(null);
   const segmentActions = useRef<THREE.AnimationAction[]>([]);
   const activeAction = useRef<THREE.AnimationAction | null>(null);
-  const breathHold = useRef(0);
   const aim = useRef(0);
-  const swayTime = useRef(0);
+  const aimSway = useMemo(() => new AimSwayController(), []);
   const cameraMotionReady = useRef(false);
   const optic = useRef<THREE.Object3D | null>(null);
   const opticLocal = useMemo(() => new THREE.Vector3(), []);
@@ -199,6 +196,9 @@ export function WeaponPrototype({
   const rangeOrigin = useMemo(() => new THREE.Vector3(), []);
   const rangeDirection = useMemo(() => new THREE.Vector3(), []);
   const authoritativeDirection = useMemo(() => new THREE.Vector3(), []);
+  const authoritativeAimQuaternion = useMemo(() => new THREE.Quaternion(), []);
+  const aimYawQuaternion = useMemo(() => new THREE.Quaternion(), []);
+  const aimPitchQuaternion = useMemo(() => new THREE.Quaternion(), []);
   const playerPose = useMemo(
     () => ({ position: camera.position, stance, grounded }),
     [camera]
@@ -288,10 +288,11 @@ export function WeaponPrototype({
       combatTelemetry.clear();
       shotDebugStore.clear();
       lookSensitivity.reset();
+      aimSway.reset();
       unregisterTerrain.current?.();
       unregisterTerrain.current = null;
     },
-    [lookSensitivity]
+    [aimSway, lookSensitivity]
   );
 
   useEffect(() => {
@@ -487,47 +488,50 @@ export function WeaponPrototype({
     }
 
     camera.updateMatrixWorld();
-    camera.getWorldDirection(authoritativeDirection);
     playerPose.stance = stance;
     playerPose.grounded = grounded;
-    player.syncPresentationPose(playerPose, authoritativeDirection);
     player.consumeCommands(commands);
     weapon.setAdsWanted(commands.adsWanted);
     if (commands.reloadRequested) weapon.requestReload();
     for (let i = 0; i < commands.triggerPresses; i += 1) weapon.pressTrigger();
     loadout.update(delta);
+    const aimTarget = scopeDemo && hasOptic.current ? weapon.adsProgress : 0;
+    aim.current = THREE.MathUtils.damp(aim.current, aimTarget, AIM_RESPONSE, delta);
+    const holdingScopeBreath = scopeDemo && commands.holdingBreath;
+    aimSway.update(delta, {
+      stance,
+      adsBlend: aim.current,
+      holdingBreath: holdingScopeBreath,
+    });
+    if (scopeDemo) {
+      lookSensitivity.setOpticState(
+        aim.current,
+        aimSway.breathStabilization,
+        CAMERA_FOV,
+        scopeFov.current
+      );
+    } else lookSensitivity.reset();
+    combatTelemetry.publishAimDiagnostics(
+      lookSensitivity.centimetresPerCountAt(AIM_DIAGNOSTIC_RANGE_METRES),
+      AIM_DIAGNOSTIC_RANGE_METRES,
+      Math.tan(aimSway.angularAmplitudeRadians) * AIM_DIAGNOSTIC_RANGE_METRES,
+      aimSway.breathStabilization,
+      stance
+    );
+
+    authoritativeAimQuaternion.copy(camera.quaternion);
+    aimYawQuaternion.setFromAxisAngle(LOCAL_Y, aimSway.yawRadians);
+    aimPitchQuaternion.setFromAxisAngle(LOCAL_X, aimSway.pitchRadians);
+    authoritativeAimQuaternion.multiply(aimYawQuaternion).multiply(aimPitchQuaternion);
+    authoritativeDirection.set(0, 0, -1).applyQuaternion(authoritativeAimQuaternion).normalize();
+    player.syncPresentationPose(playerPose, authoritativeDirection);
+    // Shot events are drained only after the exact swayed aim shown this frame
+    // has become authoritative gameplay state.
     loadout.drainEvents(handleWeaponEvent);
     combatTelemetry.publishWeapon(weapon.getSnapshot());
 
     mixer.current?.update(delta);
-    swayTime.current += delta;
-    const aimTarget = scopeDemo && hasOptic.current ? weapon.adsProgress : 0;
-    aim.current = THREE.MathUtils.damp(aim.current, aimTarget, AIM_RESPONSE, delta);
-    if (scopeDemo) lookSensitivity.setOpticState(aim.current, CAMERA_FOV, scopeFov.current);
-    else lookSensitivity.reset();
-    combatTelemetry.publishAimResolution(
-      lookSensitivity.centimetresPerCountAt(AIM_DIAGNOSTIC_RANGE_METRES),
-      AIM_DIAGNOSTIC_RANGE_METRES
-    );
     scopeActive.value = scopeDemo ? aim.current : 0;
-    const holdingScopeBreath = scopeDemo && commands.holdingBreath;
-    // Blend the transition so holding Shift never snaps the weapon or sight
-    // picture to a different point in its breathing cycle.
-    breathHold.current = THREE.MathUtils.damp(
-      breathHold.current,
-      holdingScopeBreath ? 1 : 0,
-      HOLD_BREATH_RESPONSE,
-      delta
-    );
-    const swayMultiplier = THREE.MathUtils.lerp(1, HOLD_BREATH_MULTIPLIER, breathHold.current);
-    const swayRadians = THREE.MathUtils.lerp(HIP_SWAY_RADIANS, AIM_SWAY_RADIANS, aim.current) * swayMultiplier;
-    const swayMetres = THREE.MathUtils.lerp(HIP_SWAY_METRES, AIM_SWAY_METRES, aim.current) * swayMultiplier;
-    const swayYaw =
-      (Math.sin(swayTime.current * 1.15) + Math.sin(swayTime.current * 0.41) * 0.35) * swayRadians;
-    const swayPitch =
-      (Math.cos(swayTime.current * 1.43) + Math.sin(swayTime.current * 0.57) * 0.25) * swayRadians * 0.72;
-    const swayX = Math.sin(swayTime.current * 1.15) * swayMetres;
-    const swayY = Math.cos(swayTime.current * 1.43) * swayMetres * 0.55;
 
     // Mouse-look rotates the camera immediately, but a held rifle has a small
     // positional lag. Feed that physical lag into the eyebox rather than
@@ -566,18 +570,18 @@ export function WeaponPrototype({
     if (hasOptic.current && optic.current) {
       optic.current.getWorldPosition(opticLocal);
       rig.worldToLocal(opticLocal);
-      aimOffset.copy(opticLocal).negate().add(new THREE.Vector3(0, 0, -0.075));
+      aimOffset.copy(opticLocal).negate().add(OPTIC_EYE_OFFSET);
     }
 
     offset.copy(HIP_OFFSET);
     if (hasOptic.current) offset.lerp(aimOffset, aim.current);
-    rig.translateX(offset.x + swayX + lookLag.x);
-    rig.translateY(offset.y + swayY + lookLag.y);
+    rig.translateX(offset.x + aimSway.positionXMetres + lookLag.x);
+    rig.translateY(offset.y + aimSway.positionYMetres + lookLag.y);
     rig.translateZ(offset.z);
     recoilPitch.current = THREE.MathUtils.damp(recoilPitch.current, 0, 8, delta);
     recoilYaw.current = THREE.MathUtils.damp(recoilYaw.current, 0, 10, delta);
-    rig.rotateY(swayYaw + recoilYaw.current);
-    rig.rotateX(swayPitch + recoilPitch.current);
+    rig.rotateY(aimSway.yawRadians + recoilYaw.current);
+    rig.rotateX(aimSway.pitchRadians + recoilPitch.current);
     rig.updateMatrixWorld(true);
 
     weaponCamera.position.copy(camera.position);
@@ -597,11 +601,9 @@ export function WeaponPrototype({
         THREE.MathUtils.clamp(-opticInEyeSpace.y / EYEBOX_RADIUS_METRES, -EYEBOX_MAX_OFFSET, EYEBOX_MAX_OFFSET)
       );
       scopeCamera.position.copy(opticWorld);
-      // The reticle, rangefinder and shot must describe one authoritative ray.
-      // Weapon sway can move the physical housing/eyebox, but rotating this
-      // capture by cosmetic sway would move the apparent impact by metres at
-      // 1,300 m while gameplay still fired along the player-camera direction.
-      scopeCamera.quaternion.copy(camera.quaternion);
+      // Scope picture, rangefinder, shot resolver and trajectory debug all use
+      // the same authoritative aim, including stance/breath gameplay sway.
+      scopeCamera.quaternion.copy(authoritativeAimQuaternion);
       scopeCamera.updateMatrixWorld();
       renderer.setRenderTarget(target);
       renderer.clear();

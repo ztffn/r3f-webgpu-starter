@@ -33,9 +33,10 @@ repeats the gameplay query.
 
 ## Aim coordinate contract
 
-`AuthoritativeAimState` is an undamped, unclamped world-space origin and unit
-direction. Shooting, targeting indicators, and future network serialization
-read this form only.
+`AuthoritativeAimState` is an unclamped world-space origin and unit direction
+after base mouse look and deterministic gameplay sway are composed. Shooting,
+scope capture, rangefinding, targeting indicators, and future network
+serialization read this form only; none derive aim from presentation bones.
 
 `AimRigRenderInput` is cosmetic. Angles are radians in character-render-root
 local space. The current authored character-forward convention is `+Z`;
@@ -84,11 +85,18 @@ while ADS is active, R reloads, and T resets targets. The numbered keys remain
 direct authored-animation inspection.
 
 Pointer-lock sensitivity is FOV-scaled through the live ADS transition and
-variable optic zoom. The default optic resolves to roughly 1.6 cm per mouse
-count at 1,300 m; the HUD publishes the live value. Use `mousesens` to override
-base radians per count and `scopesens` to override the additional sniper
-precision scale (defaults: `0.0006` and `0.25`). The target harness extends to
-1,300 m and the prototype sniper query range is 2,000 m.
+variable optic zoom. At 1,300 m the default optic resolves to roughly 6.5 cm per
+count while scanning and 1.6 cm while Shift stabilizes breath; the HUD publishes
+the live value. Slow input stays linear, while a bounded curve accelerates large
+scan movements and fades out during breath hold. Use `mousesens`, `scopesens`,
+and `aimcurve` to override base radians/count, held-breath precision scale, and
+extra scan boost (defaults: `0.0006`, `0.25`, and `1.25`; zero curve disables
+acceleration). The target harness extends to 1,300 m and the prototype sniper
+query range is 2,000 m.
+
+Sway is authoritative gameplay aim. Stand, crouch, and prone use multipliers
+`1.0`, `0.62`, and `0.30`; Shift while ADS smoothly reduces both sway and mouse
+sensitivity. The scope picture, rangefinder, shot, and trace share that result.
 
 Add `&shotdebug=1` to draw the latest resolved shot in world space. The cyan
 line is the shot path, the white segment is initial authoritative aim, and red

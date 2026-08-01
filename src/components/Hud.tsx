@@ -155,6 +155,13 @@ export function Hud({
                 {fmt(combat.aimResolution.centimetresPerCount, 1)} cm /{" "}
                 {fmt(combat.aimResolution.rangeMetres)} m
               </dd>
+              <dt>Sway amp</dt>
+              <dd>
+                {fmt(combat.aimResolution.swayMetresAtRange, 2)} m /{" "}
+                {fmt(combat.aimResolution.rangeMetres)} m
+              </dd>
+              <dt>Breath</dt>
+              <dd>{fmt(combat.aimResolution.breathStabilization * 100)}%</dd>
             </>
           )}
           {combat.weapon && (
@@ -245,11 +252,17 @@ export function Hud({
           <dt>Wheel</dt>
           <dd>fly speed</dd>
           <dt>Shift</dt>
-          <dd>boost ×4</dd>
+          <dd>{fpsMode ? "breath / precision" : "boost ×4"}</dd>
           <dt>G</dt>
           <dd>foot / fly</dd>
           <dt>X C Z</dt>
           <dd>stand / crouch / prone</dd>
+          {fpsMode && (
+            <>
+              <dt>Z / X (ADS)</dt>
+              <dd>zoom in / out</dd>
+            </>
+          )}
           <dt>Left click</dt>
           <dd>fire (scope demo)</dd>
           <dt>Right click</dt>

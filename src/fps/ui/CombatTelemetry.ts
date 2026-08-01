@@ -1,5 +1,6 @@
 import type { HitscanResult } from "../combat/HitscanResolver";
 import type { ShotTraceMode } from "../combat/ShotTrace";
+import type { PlayerStance } from "../core/PlayerMotor";
 import type { WeaponSnapshot } from "../weapons/WeaponSystem";
 
 export type CombatRangeKind = "terrain" | "target" | "world";
@@ -12,6 +13,9 @@ export interface CombatRangeSample {
 export interface AimResolutionSample {
   readonly centimetresPerCount: number;
   readonly rangeMetres: number;
+  readonly swayMetresAtRange: number;
+  readonly breathStabilization: number;
+  readonly stance: PlayerStance;
 }
 
 export interface ShotTelemetry {
@@ -113,18 +117,33 @@ export class CombatTelemetry {
     });
   }
 
-  publishAimResolution(centimetresPerCount: number, rangeMetres: number): void {
+  publishAimDiagnostics(
+    centimetresPerCount: number,
+    rangeMetres: number,
+    swayMetresAtRange: number,
+    breathStabilization: number,
+    stance: PlayerStance
+  ): void {
     const previous = this.snapshot.aimResolution;
     if (
       previous &&
       previous.rangeMetres === rangeMetres &&
-      Math.abs(previous.centimetresPerCount - centimetresPerCount) < 0.05
+      previous.stance === stance &&
+      Math.abs(previous.centimetresPerCount - centimetresPerCount) < 0.05 &&
+      Math.abs(previous.swayMetresAtRange - swayMetresAtRange) < 0.01 &&
+      Math.abs(previous.breathStabilization - breathStabilization) < 0.01
     ) {
       return;
     }
     this.replace({
       ...this.snapshot,
-      aimResolution: { centimetresPerCount, rangeMetres },
+      aimResolution: {
+        centimetresPerCount,
+        rangeMetres,
+        swayMetresAtRange,
+        breathStabilization,
+        stance,
+      },
     });
   }
 

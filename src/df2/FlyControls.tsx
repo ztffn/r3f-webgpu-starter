@@ -99,7 +99,9 @@ export function FlyControls({
     };
 
     const rotate = (movementX: number, movementY: number) => {
-      const radiansPerCount = pointerLock ? lookSensitivity.radiansPerCount : 0.0032;
+      const radiansPerCount = pointerLock
+        ? lookSensitivity.radiansPerCountForMovement(movementX, movementY)
+        : 0.0032;
       rig.yaw -= movementX * radiansPerCount;
       rig.pitch -= movementY * radiansPerCount;
       rig.pitch = Math.max(-1.5, Math.min(1.5, rig.pitch));

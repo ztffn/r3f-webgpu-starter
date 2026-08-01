@@ -18,9 +18,10 @@ order survive this pass.
 
 `LocalPlayerController` captures discrete combat commands and owns a mutable
 world-space `AuthoritativeAimState`. For this transitional slice it synchronizes
-position, stance, and aim from the existing camera motor instead of replacing
-`FlyControls`. Shooting always copies the undamped authoritative ray before any
-presentation recoil is applied.
+position, stance, and base view from the existing camera motor instead of
+replacing `FlyControls`. `AimSwayController` composes stance/breath gameplay sway
+into the authoritative direction before shots are resolved. Presentation recoil
+remains a post-shot event and cannot retroactively change that resolved ray.
 
 `LoadoutSystem` owns generic slots and delegates runtime behavior to the
 equipped `WeaponSystem`. A data-only `WeaponDefinition` supplies magazine,

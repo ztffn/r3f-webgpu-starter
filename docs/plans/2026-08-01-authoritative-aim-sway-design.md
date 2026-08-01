@@ -52,6 +52,11 @@ At the default 5.5° optic and 1,300 m, scan mode is approximately 6.5 cm per
 mouse count and held-breath precision is 1.6 cm. The transition uses the same
 damped breath value as sway, so pressing or releasing Shift cannot snap aim.
 
+Slow one-count input remains exactly linear. Larger per-event deltas pass through
+a bounded smoothstep response curve, reaching at most `2.25x` scan speed. Breath
+stabilization fades that boost to `1x`, so held-breath input is predictable. The
+extra curve boost is configurable with `aimcurve` and `0` disables it.
+
 ## Frame order
 
 ```text

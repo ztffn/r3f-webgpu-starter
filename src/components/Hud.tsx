@@ -293,6 +293,12 @@ export function Hud({
             <>
               <dt>Z / X (ADS)</dt>
               <dd>zoom in / out</dd>
+              <dt>↑ ↓ (ADS)</dt>
+              <dd>scope zero</dd>
+              <dt>← → (ADS)</dt>
+              <dd>windage ±0.1 mil</dd>
+              <dt>0 (ADS)</dt>
+              <dd>reset turrets</dd>
             </>
           )}
           <dt>Left click</dt>

@@ -1,6 +1,11 @@
 import * as THREE from "three/webgpu";
 import type { WorldHit, WorldQuery } from "../core/WorldQuery";
 import type { BallisticEnvironment } from "./BallisticEnvironment";
+import {
+  DEFAULT_G1_REFERENCE_DRAG_PER_METRE,
+  integrateBallisticVelocity,
+  type MutableVelocity,
+} from "./BallisticModel.ts";
 import type { ShotResult } from "./ShotResult";
 import type { ShotTrace } from "./ShotTrace";
 import type { TargetHitReport } from "./TargetHitReport";
@@ -10,6 +15,7 @@ export interface BallisticShot {
   readonly sequence: number;
   readonly origin: THREE.Vector3Like;
   readonly direction: THREE.Vector3Like;
+  readonly sightDirection?: THREE.Vector3Like;
   readonly maxDistance: number;
   readonly damage: number;
   readonly muzzleVelocityMetresPerSecond: number;
@@ -18,9 +24,11 @@ export interface BallisticShot {
   readonly captureTrace?: boolean;
 }
 
-export interface SpawnedBallisticShot extends Omit<BallisticShot, "origin" | "direction"> {
+export interface SpawnedBallisticShot
+  extends Omit<BallisticShot, "origin" | "direction" | "sightDirection"> {
   readonly origin: THREE.Vector3;
   readonly direction: THREE.Vector3;
+  readonly sightDirection: THREE.Vector3;
 }
 
 export interface BallisticResult extends ShotResult<SpawnedBallisticShot> {}
@@ -44,9 +52,6 @@ export interface BallisticMetrics {
 
 const DEFAULT_CAPACITY = 2_048;
 const DEFAULT_TRACE_POINTS = 1_024;
-// Calibrated so BC 0.505 loses velocity at about 0.0008 / metre, matching the
-// prototype 175 gr profile through its published 500-yard velocity table.
-const DEFAULT_G1_REFERENCE_DRAG_PER_METRE = 0.000404;
 const EPSILON = 1e-9;
 
 /**
@@ -89,6 +94,7 @@ export class BallisticProjectileSystem {
   private readonly segmentOrigin = new THREE.Vector3();
   private readonly segmentDirection = new THREE.Vector3();
   private readonly impactDirection = new THREE.Vector3();
+  private readonly nextVelocity: MutableVelocity = { x: 0, y: 0, z: 0 };
   private accumulator = 0;
   private readonly results: BallisticResult[] = [];
 
@@ -163,11 +169,19 @@ export class BallisticProjectileSystem {
 
   spawn(input: BallisticShot): boolean {
     const direction = new THREE.Vector3(input.direction.x, input.direction.y, input.direction.z);
+    const sightDirection = new THREE.Vector3(
+      input.sightDirection?.x ?? direction.x,
+      input.sightDirection?.y ?? direction.y,
+      input.sightDirection?.z ?? direction.z
+    );
     const directionLengthSq = direction.lengthSq();
+    const sightDirectionLengthSq = sightDirection.lengthSq();
     if (
       this.freeCount === 0 ||
       !Number.isFinite(directionLengthSq) ||
       directionLengthSq <= EPSILON ||
+      !Number.isFinite(sightDirectionLengthSq) ||
+      sightDirectionLengthSq <= EPSILON ||
       !Number.isFinite(input.origin.x) ||
       !Number.isFinite(input.origin.y) ||
       !Number.isFinite(input.origin.z) ||
@@ -190,6 +204,7 @@ export class BallisticProjectileSystem {
       ...input,
       origin: new THREE.Vector3(input.origin.x, input.origin.y, input.origin.z),
       direction,
+      sightDirection: sightDirection.normalize(),
     };
     this.shots[slot] = shot;
     this.px[slot] = this.ox[slot] = shot.origin.x;
@@ -275,22 +290,19 @@ export class BallisticProjectileSystem {
       const oldVx = this.vx[slot];
       const oldVy = this.vy[slot];
       const oldVz = this.vz[slot];
-      const relativeX = oldVx - this.environment.windVelocity.x;
-      const relativeY = oldVy - this.environment.windVelocity.y;
-      const relativeZ = oldVz - this.environment.windVelocity.z;
-      const relativeSpeed = Math.hypot(relativeX, relativeY, relativeZ);
-      const dragPerMetre = this.referenceG1DragPerMetre / shot.ballisticCoefficientG1;
-      const dragAcceleration = dragPerMetre * relativeSpeed * relativeSpeed;
-      const invRelativeSpeed = relativeSpeed > EPSILON ? 1 / relativeSpeed : 0;
-      const nextVx =
-        oldVx +
-        (this.environment.gravity.x - dragAcceleration * relativeX * invRelativeSpeed) * dt;
-      const nextVy =
-        oldVy +
-        (this.environment.gravity.y - dragAcceleration * relativeY * invRelativeSpeed) * dt;
-      const nextVz =
-        oldVz +
-        (this.environment.gravity.z - dragAcceleration * relativeZ * invRelativeSpeed) * dt;
+      integrateBallisticVelocity(
+        oldVx,
+        oldVy,
+        oldVz,
+        shot.ballisticCoefficientG1,
+        this.environment,
+        dt,
+        this.nextVelocity,
+        this.referenceG1DragPerMetre
+      );
+      const nextVx = this.nextVelocity.x;
+      const nextVy = this.nextVelocity.y;
+      const nextVz = this.nextVelocity.z;
 
       let stepX = (oldVx + nextVx) * 0.5 * dt;
       let stepY = (oldVy + nextVy) * 0.5 * dt;
@@ -417,6 +429,7 @@ export class BallisticProjectileSystem {
       shotSequence: shot.sequence,
       sourceId: shot.sourceId,
       mode: "ballistic",
+      sightDirection: shot.sightDirection.clone(),
       initialDirection: shot.direction.clone(),
       points: this.buildTracePoints(slot, impactPoint),
       impact: hit

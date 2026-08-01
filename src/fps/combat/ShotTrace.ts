@@ -16,6 +16,7 @@ export interface ShotTrace {
   readonly shotSequence: number;
   readonly sourceId: string;
   readonly mode: ShotTraceMode;
+  readonly sightDirection: THREE.Vector3;
   readonly initialDirection: THREE.Vector3;
   readonly points: readonly THREE.Vector3[];
   readonly impact: ShotImpact | null;

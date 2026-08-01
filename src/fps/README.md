@@ -85,6 +85,13 @@ releases it, left click fires, and right click toggles ADS. Shift holds breath
 while ADS is active, R reloads, and T resets targets. The numbered keys remain
 direct authored-animation inspection.
 
+While pointer-locked and ADS, Arrow Up/Down select a 100–1,300 m ammunition-
+calibrated elevation zero, Arrow Left/Right apply manual 0.1 mrad windage
+clicks, and 0 resets both turrets. Page Up/Down mirror elevation on full
+keyboards. Matching keydown events are consumed only in that scope context;
+keyup remains available to clear the arrow-key movement fallback. Z/X continue
+to control magnification.
+
 Pointer-lock sensitivity is FOV-scaled through the live ADS transition and
 variable optic zoom. At 1,300 m the default optic resolves to roughly 6.5 cm per
 count while scanning and 1.6 cm while Shift stabilizes breath; the HUD publishes
@@ -111,6 +118,10 @@ The default wind is +4 m/s on world X. Use `windx` and `windz` query parameters
 for controlled tests, including `&windx=0` for still air and `&windx=-4` for an
 equal opposite crosswind. Flight time, drop, signed drift, impact speed, damage,
 HUD telemetry, and trajectory debug all come from the resolved simulation.
+The optic displays the current zero and signed windage inside the lens. Its
+reticle/rangefinder use the optical sightline, while the projectile launches
+along the turret-adjusted bore direction. Debug draws the sightline white and
+the bore direction yellow before the cyan resolved path.
 
 The projectile core uses a 2,048-slot typed-array pool and performs no
 per-projectile allocations inside a fixed step. Automated loads cover 16/32
@@ -118,6 +129,6 @@ shooters at 600 RPM and 32 shooters at 900 RPM. The current Three.js world-query
 adapter is still a local fallback; a production multiplayer authority requires
 spatially indexed collision behind the same contract.
 
-Out of scope here: scope zeroing, ammunition selection, spread, decals, physics
-movement, stamina, attachments, networking, bot presentation, and remote tracer
-presentation.
+Out of scope here: saved/custom keybindings, ammunition selection, spread,
+decals, physics movement, stamina, attachments, networking, bot presentation,
+and remote tracer presentation.

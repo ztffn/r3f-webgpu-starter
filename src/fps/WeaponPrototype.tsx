@@ -25,6 +25,11 @@ import {
   type LookSensitivityController,
 } from "./core/LookSensitivityController";
 import { AimSwayController } from "./core/AimSwayController";
+import {
+  ScopeAdjustmentController,
+  scopeAdjustmentActionForKey,
+  type ScopeAdjustmentSnapshot,
+} from "./core/ScopeAdjustmentController";
 
 const WORLD_LAYER = 0;
 const WEAPON_LAYER = 1;
@@ -32,6 +37,7 @@ const MODEL_URL = new URL("../../testmodels/fps_rig.glb", import.meta.url).href;
 const RETICLE_URL = "/assets/reticles/default-mildot.png";
 const MODEL_SCALE = 3;
 const SCOPE_TARGET_SIZE = 512;
+const SCOPE_STATUS_SIZE = 512;
 const SCOPE_FOV = 5.5;
 const SCOPE_FOV_MIN = 2.5;
 const SCOPE_FOV_MAX = 9;
@@ -97,7 +103,48 @@ function disposeObject(root: THREE.Object3D) {
 
 // TSL's uniform node generic is erased when passed across a helper boundary.
 // Keep it loose here; the graph is validated by the WebGPU shader compilation.
-function createLensMaterial(target: THREE.RenderTarget, eyeOffset: any, scopeActive: any, reticleMap: THREE.Texture) {
+function drawScopeStatus(textureMap: THREE.CanvasTexture, snapshot: ScopeAdjustmentSnapshot) {
+  const canvas = textureMap.image as HTMLCanvasElement;
+  const context = canvas.getContext("2d");
+  if (!context) return;
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.font = "600 18px ui-monospace, SFMono-Regular, Menlo, monospace";
+  context.textBaseline = "middle";
+  context.fillStyle = "rgba(8, 14, 10, 0.68)";
+  context.fillRect(100, 360, 312, 38);
+  context.fillStyle = "rgba(211, 239, 205, 0.94)";
+  context.textAlign = "left";
+  context.fillText(`ZERO ${snapshot.zeroDistanceMetres} M`, 116, 379);
+  const windage = snapshot.windageMilliradians;
+  const windageLabel =
+    windage === 0
+      ? "W 0.0"
+      : `W ${windage < 0 ? "L" : "R"} ${Math.abs(windage).toFixed(1)}`;
+  context.textAlign = "right";
+  context.fillText(windageLabel, 396, 379);
+  textureMap.needsUpdate = true;
+}
+
+function createScopeStatusTexture(snapshot: ScopeAdjustmentSnapshot): THREE.CanvasTexture {
+  const canvas = document.createElement("canvas");
+  canvas.width = SCOPE_STATUS_SIZE;
+  canvas.height = SCOPE_STATUS_SIZE;
+  const textureMap = new THREE.CanvasTexture(canvas);
+  textureMap.colorSpace = THREE.SRGBColorSpace;
+  textureMap.generateMipmaps = false;
+  textureMap.minFilter = THREE.LinearFilter;
+  textureMap.magFilter = THREE.LinearFilter;
+  drawScopeStatus(textureMap, snapshot);
+  return textureMap;
+}
+
+function createLensMaterial(
+  target: THREE.RenderTarget,
+  eyeOffset: any,
+  scopeActive: any,
+  reticleMap: THREE.Texture,
+  scopeStatusMap: THREE.Texture
+) {
   const material = new THREE.MeshBasicNodeMaterial();
   // `SCOPE_Lens` uses a rotated atlas UV island. Its raw geometry coordinates
   // describe the actual circular glass, so they keep the capture and reticle
@@ -118,7 +165,9 @@ function createLensMaterial(target: THREE.RenderTarget, eyeOffset: any, scopeAct
   // the magnified render target coordinates, so Z/X changes only the world.
   const reticle = texture(reticleMap, lensUv);
   const withReticle = mix(world, reticle.rgb, reticle.a);
-  const activeDisplay = mix(withReticle, vec3(0), opticEdge.max(shadow));
+  const scopeStatus = texture(scopeStatusMap, lensUv);
+  const withScopeStatus = mix(withReticle, scopeStatus.rgb, scopeStatus.a);
+  const activeDisplay = mix(withScopeStatus, vec3(0), opticEdge.max(shadow));
 
   // Hip-fire never updates the PiP target, so do not show its old frame on the
   // visible glass. This is deliberately a coated-glass approximation rather
@@ -169,6 +218,18 @@ export function WeaponPrototype({
     () => new BallisticProjectileSystem(worldQuery, ballisticEnvironment),
     [ballisticEnvironment, worldQuery]
   );
+  const scopeAdjustments = useMemo(
+    () =>
+      new ScopeAdjustmentController(
+        {
+          muzzleVelocityMetresPerSecond:
+            SNIPER_DEFINITION.shot.muzzleVelocityMetresPerSecond,
+          ballisticCoefficientG1: SNIPER_DEFINITION.shot.ballisticCoefficientG1,
+        },
+        ballisticEnvironment
+      ),
+    [ballisticEnvironment]
+  );
   const commands = useMemo<LocalPlayerCommands>(
     () => ({ triggerPresses: 0, reloadRequested: false, adsWanted: false, holdingBreath: false }),
     []
@@ -206,6 +267,7 @@ export function WeaponPrototype({
   const rangeOrigin = useMemo(() => new THREE.Vector3(), []);
   const rangeDirection = useMemo(() => new THREE.Vector3(), []);
   const authoritativeDirection = useMemo(() => new THREE.Vector3(), []);
+  const boreDirection = useMemo(() => new THREE.Vector3(), []);
   const authoritativeAimQuaternion = useMemo(() => new THREE.Quaternion(), []);
   const aimYawQuaternion = useMemo(() => new THREE.Quaternion(), []);
   const aimPitchQuaternion = useMemo(() => new THREE.Quaternion(), []);
@@ -243,9 +305,13 @@ export function WeaponPrototype({
     map.generateMipmaps = true;
     return map;
   }, []);
+  const scopeStatusMap = useMemo(
+    () => createScopeStatusTexture(scopeAdjustments.getSnapshot()),
+    [scopeAdjustments]
+  );
   const lensMaterial = useMemo(
-    () => createLensMaterial(target, eyeOffset, scopeActive, reticleMap),
-    [eyeOffset, reticleMap, scopeActive, target]
+    () => createLensMaterial(target, eyeOffset, scopeActive, reticleMap, scopeStatusMap),
+    [eyeOffset, reticleMap, scopeActive, scopeStatusMap, target]
   );
 
   const playSegment = useCallback((segmentNumber: number) => {
@@ -269,7 +335,8 @@ export function WeaponPrototype({
           sourceId: SNIPER_DEFINITION.id,
           sequence: event.sequence,
           origin: player.aim.origin,
-          direction: player.aim.direction,
+          direction: boreDirection,
+          sightDirection: player.aim.direction,
           maxDistance: event.range,
           damage: event.damage,
           muzzleVelocityMetresPerSecond: event.muzzleVelocityMetresPerSecond,
@@ -291,7 +358,7 @@ export function WeaponPrototype({
         playSegment(event.animationSegment);
       }
     },
-    [ballistics, captureShotTrace, playSegment, player]
+    [ballistics, boreDirection, captureShotTrace, playSegment, player]
   );
 
   const handleBallisticResult = useCallback((result: BallisticResult) => {
@@ -316,6 +383,16 @@ export function WeaponPrototype({
   useEffect(() => {
     combatTelemetry.publishBallisticEnvironment(ballisticEnvironment);
   }, [ballisticEnvironment]);
+
+  useEffect(() => {
+    const publish = () => {
+      const snapshot = scopeAdjustments.getSnapshot();
+      drawScopeStatus(scopeStatusMap, snapshot);
+      combatTelemetry.publishScopeAdjustment(snapshot);
+    };
+    publish();
+    return scopeAdjustments.subscribe(publish);
+  }, [scopeAdjustments, scopeStatusMap]);
 
   useEffect(() => {
     const playDebugSegment = (event: KeyboardEvent) => {
@@ -357,6 +434,22 @@ export function WeaponPrototype({
       event.preventDefault();
       event.stopImmediatePropagation();
     };
+    const adjustTurrets = (event: KeyboardEvent) => {
+      const action = scopeAdjustmentActionForKey(event);
+      if (
+        !action ||
+        !player.wantsAds ||
+        document.pointerLockElement !== gl.domElement
+      ) {
+        return;
+      }
+      // Consume matching keydown even when held, but apply one exact click only
+      // on the initial press. Keyup is deliberately not intercepted so the
+      // movement controller can always clear an earlier arrow-key press.
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (!event.repeat) scopeAdjustments.apply(action);
+    };
     const togglePointer = (event: PointerEvent) => {
       // The browser requires a user gesture before pointer lock. Do not also
       // turn that first capture click into an accidental shot.
@@ -372,6 +465,7 @@ export function WeaponPrototype({
     const preventMenu = (event: MouseEvent) => event.preventDefault();
     addEventListener("keydown", requestReload);
     addEventListener("keydown", adjustMagnification, true);
+    addEventListener("keydown", adjustTurrets, true);
     addEventListener("keydown", holdBreath, true);
     addEventListener("keyup", holdBreath, true);
     addEventListener("blur", clearInput);
@@ -380,13 +474,14 @@ export function WeaponPrototype({
     return () => {
       removeEventListener("keydown", requestReload);
       removeEventListener("keydown", adjustMagnification, true);
+      removeEventListener("keydown", adjustTurrets, true);
       removeEventListener("keydown", holdBreath, true);
       removeEventListener("keyup", holdBreath, true);
       removeEventListener("blur", clearInput);
       gl.domElement.removeEventListener("pointerdown", togglePointer);
       gl.domElement.removeEventListener("contextmenu", preventMenu);
     };
-  }, [gl, player, scopeCamera, scopeDemo]);
+  }, [gl, player, scopeAdjustments, scopeCamera, scopeDemo]);
 
   useEffect(() => {
     let alive = true;
@@ -551,6 +646,7 @@ export function WeaponPrototype({
     aimPitchQuaternion.setFromAxisAngle(LOCAL_X, aimSway.pitchRadians);
     authoritativeAimQuaternion.multiply(aimYawQuaternion).multiply(aimPitchQuaternion);
     authoritativeDirection.set(0, 0, -1).applyQuaternion(authoritativeAimQuaternion).normalize();
+    scopeAdjustments.applyToSightDirection(authoritativeDirection, boreDirection);
     player.syncPresentationPose(playerPose, authoritativeDirection);
     // Shot events are drained only after the exact swayed aim shown this frame
     // has become authoritative gameplay state.
@@ -682,8 +778,9 @@ export function WeaponPrototype({
       target.dispose();
       lensMaterial.dispose();
       reticleMap.dispose();
+      scopeStatusMap.dispose();
     },
-    [lensMaterial, reticleMap, target]
+    [lensMaterial, reticleMap, scopeStatusMap, target]
   );
 
   return null;

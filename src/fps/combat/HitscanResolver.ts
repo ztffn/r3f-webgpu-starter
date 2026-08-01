@@ -31,6 +31,7 @@ export class HitscanResolver {
       shotSequence: shot.sequence,
       sourceId: shot.sourceId,
       mode: "hitscan",
+      sightDirection: direction.clone(),
       initialDirection: direction.clone(),
       points: [origin, end],
       impact: hit

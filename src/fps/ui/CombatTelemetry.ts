@@ -2,6 +2,7 @@ import type { BallisticEnvironment } from "../combat/BallisticEnvironment";
 import type { ShotResult } from "../combat/ShotResult";
 import type { ShotTraceMode } from "../combat/ShotTrace";
 import type { PlayerStance } from "../core/PlayerMotor";
+import type { ScopeAdjustmentSnapshot } from "../core/ScopeAdjustmentController";
 import type { WeaponSnapshot } from "../weapons/WeaponSystem";
 
 export type CombatRangeKind = "terrain" | "target" | "world";
@@ -52,6 +53,7 @@ export interface CombatSnapshot {
   readonly recentShots: readonly ShotTelemetry[];
   readonly aimResolution: AimResolutionSample | null;
   readonly ballistics: BallisticEnvironmentTelemetry | null;
+  readonly scopeAdjustment: ScopeAdjustmentSnapshot | null;
   readonly dryFireSequence: number;
   readonly projectileRejectSequence: number;
 }
@@ -65,6 +67,7 @@ const EMPTY: CombatSnapshot = {
   recentShots: [],
   aimResolution: null,
   ballistics: null,
+  scopeAdjustment: null,
   dryFireSequence: 0,
   projectileRejectSequence: 0,
 };
@@ -156,6 +159,11 @@ export class CombatTelemetry {
       return;
     }
     this.replace({ ...this.snapshot, ballistics });
+  }
+
+  publishScopeAdjustment(scopeAdjustment: ScopeAdjustmentSnapshot): void {
+    if (this.snapshot.scopeAdjustment === scopeAdjustment) return;
+    this.replace({ ...this.snapshot, scopeAdjustment });
   }
 
   publishAimDiagnostics(

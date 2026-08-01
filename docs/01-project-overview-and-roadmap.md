@@ -231,6 +231,9 @@ and immediately answers "does this feel like DF2?".
   tests cover 16/32 shooters at 600 RPM and 32 at 900 RPM. The remaining production gap
   is a spatially indexed multiplayer `WorldQuery`; the current Three.js scene adapter is
   a local fallback, not the final authority collision path.
+- 🟡 Scope turrets provide ammunition-calibrated 100–1,300 m elevation zeroing and manual
+  0.1 mrad windage with compact-keyboard ADS controls and an in-optic readout. Saved user
+  rebinding remains to be built.
 - ⬜ First-person collision and stance motor using Rapier; basic AI/objectives.
   *(What exists today is a camera rig only — `FlyControls.tsx` clamps to the surface at a
   stance eye height. No physics, no collision.)*

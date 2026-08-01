@@ -83,6 +83,22 @@ test("fixed-step outcome is independent of render-frame cadence", () => {
   }
 });
 
+test("ballistic trace preserves separate optical sight and adjusted bore directions", () => {
+  const system = new BallisticProjectileSystem(MISS_QUERY, environment(), { capacity: 1 });
+  const bore = new Vector3(0.001, 0.01, -1).normalize();
+  const sight = new Vector3(0, 0, -1);
+  system.spawn({ ...BASE_SHOT, direction: bore, sightDirection: sight, maxDistance: 100 });
+  let result: BallisticResult | null = null;
+  while (!result) {
+    system.update(1 / 60);
+    system.drainResults((next) => {
+      result = next;
+    });
+  }
+  assert.deepEqual(result.trace.sightDirection.toArray(), sight.toArray());
+  assert.ok(result.trace.initialDirection.angleTo(bore) < 1e-9);
+});
+
 test("swept collision delays damage until the projectile reaches a thin target", () => {
   const target = new HealthDamageable("thin-target", 100);
   const object = new Object3D();

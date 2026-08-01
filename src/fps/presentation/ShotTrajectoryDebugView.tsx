@@ -2,7 +2,7 @@ import { useEffect, useMemo, useSyncExternalStore } from "react";
 import * as THREE from "three/webgpu";
 import { shotDebugStore } from "../debug/ShotDebugStore";
 
-const INITIAL_AIM_LENGTH = 2;
+const INITIAL_AIM_LENGTH = 25;
 const NORMAL_LENGTH = 1.25;
 
 function makeLine(color: THREE.ColorRepresentation): THREE.Line {
@@ -37,9 +37,14 @@ export function ShotTrajectoryDebugView() {
     group.add(path);
 
     const initialAim = makeLine("#ffffff");
-    initialAim.name = "authoritative-aim-segment";
+    initialAim.name = "scope-sightline-segment";
     initialAim.renderOrder = 1_001;
     group.add(initialAim);
+
+    const bore = makeLine("#ffd447");
+    bore.name = "adjusted-bore-segment";
+    bore.renderOrder = 1_001;
+    group.add(bore);
 
     const impactMaterial = new THREE.MeshBasicMaterial({
       color: "#ff3d2e",
@@ -58,11 +63,11 @@ export function ShotTrajectoryDebugView() {
     group.add(normal);
 
     group.visible = false;
-    return { group, path, initialAim, impact, normal };
+    return { group, path, initialAim, bore, impact, normal };
   }, []);
 
   useEffect(() => {
-    const { group, path, initialAim, impact, normal } = objects;
+    const { group, path, initialAim, bore, impact, normal } = objects;
     if (!trace || trace.points.length < 2) {
       group.visible = false;
       return;
@@ -72,8 +77,10 @@ export function ShotTrajectoryDebugView() {
     path.geometry.setFromPoints([...trace.points]);
 
     const start = trace.points[0];
-    const aimEnd = start.clone().addScaledVector(trace.initialDirection, INITIAL_AIM_LENGTH);
+    const aimEnd = start.clone().addScaledVector(trace.sightDirection, INITIAL_AIM_LENGTH);
     initialAim.geometry.setFromPoints([start, aimEnd]);
+    const boreEnd = start.clone().addScaledVector(trace.initialDirection, INITIAL_AIM_LENGTH);
+    bore.geometry.setFromPoints([start, boreEnd]);
 
     const resolvedImpact = trace.impact;
     impact.visible = resolvedImpact !== null;
@@ -103,6 +110,8 @@ export function ShotTrajectoryDebugView() {
       (objects.path.material as THREE.Material).dispose();
       objects.initialAim.geometry.dispose();
       (objects.initialAim.material as THREE.Material).dispose();
+      objects.bore.geometry.dispose();
+      (objects.bore.material as THREE.Material).dispose();
       objects.impact.geometry.dispose();
       (objects.impact.material as THREE.Material).dispose();
       objects.normal.geometry.dispose();

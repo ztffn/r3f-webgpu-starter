@@ -84,6 +84,34 @@ concealment work, which nothing else would do. Isolating the redundant half need
 Not yet run. The candidate fix is the per-pixel cede test that was deleted with the floor
 proxy, re-keyed on the local canopy rather than the global maximum.
 
+### 0.2 The near-field blade layer costs 0.04 ms per thousand blades — measured
+
+Prone, Green Mile at (-375, 787), **real canopy** (`?canopyall=0`), `?dpr=2&steps=32` so that
+both sides read clear of the 120 Hz cap. `?blades=0` is the comparison.
+
+| Config | frame | triangles | layer costs |
+|---|---|---|---|
+| blades off | 10.45 ms | 415k | — |
+| `?bladecount=4000` | 10.65 ms | 472k | 0.19 ms |
+| `?bladecount=40000` | 11.91 ms | 835k | 1.46 ms |
+
+Linear in the count at roughly **0.04 ms per thousand**, which makes the instance count a free
+parameter over the range anyone would want. At shipped settings (dpr 1) the whole layer is
+invisible in the frame time, because everything is at the 8.3 ms cap — which is exactly why the
+`?blades=` toggle went in before the rendering code did.
+
+**This overturns the sizing in `03` §4.4.** That brief proposed "order 4,000 blades" on the
+assumption that the layer is an expensive accent over a march that already covers the ground.
+It is not expensive, and 4,000 over a 12 m field on this map draws about twenty visible blades,
+because Green Mile's canopy median is raw 28 of 255 and the canopy value is the existence
+probability. The shipped default is 30,000 (`GRASS_BLADE_COUNT`), which buys density from the
+count instead of from bending the canopy rule — see that constant's note.
+
+**Read the first number of a run and you will get 471 ms.** The terrain build budget spends
+several seconds of chunk geometry after a navigation, and a frame sampled inside that window
+says nothing about steady state. Wait for the draw-call count to settle before reading
+`window.__perf`. This cost the first reading of this very measurement.
+
 ### §3.1.2 has a second failure mode: the vsync staircase
 
 The battery-throttle story below is real, but it made `33.3 ms` look like a throttle signature

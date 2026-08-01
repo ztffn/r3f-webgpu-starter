@@ -72,6 +72,30 @@ export const LOD_SEGMENTS: number[] = [128, 64, 32, 16, 8];
 // with the map. Parallel to LOD_SEGMENTS; last entry catches everything beyond.
 export const LOD_DISTANCE_CHUNKS: number[] = [1.2, 2.5, 4.5, 8, Infinity];
 
+/**
+ * The chunk grid and LOD schedule, derived ONCE.
+ *
+ * Both the terrain mesh (Terrain.tsx, picking each chunk's LOD) and the grass march
+ * (GrassMaterial, picking which mip of the height texture to read) must land on the
+ * same surface, and they do that by agreeing on these numbers. Deriving them
+ * separately at each call site is how they drift — which is the bug class docs/08
+ * §11 "three surfaces where there should be one" records.
+ */
+export function lodSchedule(worldSize: number): {
+  chunkSize: number;
+  lodDistances: number[];
+  finestVertexSpacing: number;
+} {
+  const chunkSize = worldSize / CHUNK_COUNT;
+  return {
+    chunkSize,
+    lodDistances: LOD_DISTANCE_CHUNKS.map((c) => c * chunkSize),
+    // What LOD 0 actually samples at. NOT necessarily METERS_PER_TEXEL — the synthetic
+    // fallback's 512-sample grid over 2048 m gives a 4 m texel against 2 m vertices.
+    finestVertexSpacing: chunkSize / LOD_SEGMENTS[0],
+  };
+}
+
 // Perimeter skirt depth used to hide cracks between differing-LOD chunks
 // (docs/03-terrain-and-grass-rendering-design.md §2.3).
 export const SKIRT_DEPTH = 12; // meters
@@ -105,21 +129,33 @@ export const GRASS_SCALE = 0.0047;
 // without a rebuild. 32 leaves headroom to sweep; the shipped running value is the
 // slider's default, which seeds from this.
 export const GRASS_STEPS = 32;
-// Width of one grass column in metres — the DDA grid, deliberately decoupled
-// from the 2 m terrain texel. Striations must land near screen resolution: a 2 m
-// column is ~100 px wide at 10 m, which reads as mush.
-//
-// 0.03 is the value tools/grass-rig measured against the reference screenshots.
-// The app previously shipped 0.06, which no measurement covered.
 // Coarse samples actually taken per fragment — what runs, and the frame-time dial.
 // GRASS_STEPS above is only the compiled ceiling the slider may sweep up to.
-// Measured 8.3 ms (120 Hz vsync cap) standing AND prone at Green Mile (5, 375), dpr 1.
+// Measured 8.3 ms (120 Hz vsync cap) standing AND prone at Green Mile, dpr 1, with the
+// canopy forced on.
 export const GRASS_STEPS_RUN = 12;
+// Width of one grass column in metres — the cell grid, deliberately decoupled from the
+// 2 m terrain texel. Striations must land near screen resolution: a 2 m column is
+// ~100 px wide at 10 m, which reads as mush.
+//
+// 0.03 is the value tools/grass-rig measured against the reference screenshots. The app
+// previously shipped 0.06, which no measurement covered.
+//
+// FIXED IN WORLD SPACE, which is the near-field weakness: a column is correct at range
+// and ~90 px wide at 0.3 m. DF2 avoided this by drawing one column per SCREEN column.
+// See docs/08 §9 (near-field blockiness) — the fix is the docs/03 §4.4 blade layer, not
+// a smaller number here.
 export const GRASS_CELL = 0.03;
 // Metres ahead of the eye at which the march starts when standing INSIDE the
 // canopy. Also the rig-measured value; the app previously passed nothing and
 // silently took the material's own 0.45 default, which the material's own
 // documentation says is too close to separate adjacent columns.
+//
+// This is a REQUEST, not a hard floor. The shader caps it at the midpoint of the
+// ray's slab crossing, because a flat floor here starts the march past the ground
+// the ray is heading for and blanks the near field prone — docs/08 §8 invariant 6.
+// Raising it past about 2 m therefore stops buying anything in the near field; it
+// only moves the point at which the cap takes over.
 export const GRASS_NEAR_CLIP = 1.2;
 // Bisections inside the coarse bracket. Each halves the residual error, so four
 // takes a 4 m bracket to 0.25 m and a steep ray's 0.18 m bracket to 11 mm.
@@ -137,6 +173,15 @@ export const GRASS_REFINE_STEPS = 4;
 // the renderer concealing LESS than grassHeightField says (docs/08 §8 invariant 6).
 // ?maxspan= overrides it; the debug panel has it as a live slider.
 export const GRASS_MAX_SPAN = 28;
+// Reach, metres, for a ray that starts INSIDE the canopy — the cap's rays. Bounded
+// separately from GRASS_MAX_SPAN because such a ray is already in the volume and strikes
+// grass within a couple of metres, so the full reach only buys wasted samples; shortening
+// it also tightens sample spacing, which is span/steps.
+//
+// It DOES bound reach, so it sits under docs/08 §8 invariant 6 like GRASS_MAX_SPAN: if a
+// ray inside the canopy can no longer see distant grass through a gap, suspect this.
+// Measured as frame-time-neutral — kept on correctness grounds, not performance ones.
+export const GRASS_INSIDE_SPAN = 12;
 // Width of one tone stripe in pixels, used when the tone is keyed on ray bearing
 // rather than on the world cell. Live-switchable in the ?debug=1 panel.
 export const GRASS_STRIPE_PIXELS = 3;
@@ -155,10 +200,13 @@ export const GRASS_TONE_VARIATION = 1.5;
 // Brightness at a column's BASE; the tip gets 2 - this, so the ramp is centred on
 // 1.0 and grass keeps the average brightness of the terrain under it.
 //
-// 0.78 gives a 0.44 peak-to-peak vertical ramp against the tone's 0.85 horizontal,
-// an h/v ratio near 1.9 — the references measure ~1.6 (docs/07 §1.4), so this is in
-// the right neighbourhood while staying clear of blowing out the brighter colormap
-// texels once the tone multiplier stacks on top. It is a live slider because the
+// 0.78 gives a 0.44 peak-to-peak vertical ramp. The references measure a horizontal-to-
+// vertical derivative ratio of ~1.6 (docs/07 §1.4), and the horizontal half is
+// GRASS_TONE_VARIATION — so the two constants together encode one design quantity and
+// neither can be read alone. STALE FIGURE WARNING: the ratio quoted here was 1.9 when
+// the tone was 0.85; at the current 1.5 it is far higher, so the balance wants
+// re-measuring against docs/07 §1.4 rather than trusting either number. It is a live
+// slider because the
 // vertical/horizontal balance is the thing that decides whether this reads as DF2
 // grass, and that is settled by looking, not by argument.
 export const GRASS_SHADE_BASE = 0.78;

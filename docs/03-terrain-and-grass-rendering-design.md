@@ -139,6 +139,10 @@ Use both, each doing the job it's actually good at:
 > original look has *no* blade silhouettes at all, so this layer is a deliberate
 > **modernisation, not a fidelity requirement** — it should be optional and toggleable so it
 > can be A/B'd against the authentic look. Do not treat it as blocking Phase 2.
+>
+> **Read §4.4 before starting.** It is the implementation brief, written against a working
+> relief layer, and it revises the priority above: the near field is now a measured weakness
+> and a gameplay requirement rather than optional polish.
 
 Adopt the *Ghost of Tsushima* production pipeline as reference, adapted to Three.js
 WebGPURenderer + TSL compute:
@@ -171,6 +175,93 @@ Blend the two layers over a distance band (e.g. 10–20m) so the transition is n
 either a simple alpha crossfade or, more robustly, thinning §4.2's blade density to zero
 across the band while §4.1 fades in, matching the density-preserving trick GoT uses at its
 own internal LOD boundaries.
+
+### 4.4 Implementation brief for §4.2 — written 2026-08-01, before any code
+
+§4.2 says *what* to build. This says what we now know that changes *how*, and it is written
+against a working relief layer rather than a blank page.
+
+#### Why it is worth building now, which is not the reason §4.2 gave
+
+§4.2 files this as a modernisation, optional, not blocking. Two things have changed that.
+
+**The near field is the relief march's structural weak spot, and it is measured.** A column is
+`GRASS_CELL` = 0.03 m in WORLD space, so it subtends ~22 px at 1.2 m and ~90 px at 0.3 m. One
+flat colour per column is deliberate and correct — it is what produces striations — but at that
+size it reads as tiling. DF2 never hit this because it drew one column per SCREEN column; its
+columns were a pixel wide by construction. No amount of march tuning fixes a world-fixed cell
+size (`08` §9, near-field blockiness).
+
+**And it is now a gameplay requirement, not a polish item.** The mechanic is graded concealment
+— lying in tall grass with your head positioned to see out through a gap. That is decided in the
+first two metres of the ray, which is exactly where the relief layer is coarsest.
+
+#### The one hard constraint: this is a THIRD representation of the canopy
+
+Alongside the relief march and the analytic concealment query. **Blade placement, height and
+clumping must be DERIVED from the same `grassMap` canopy field and the same `jitterMap`, not
+re-derived from a fresh noise function.** If a blade stands where the march says there is no
+column, or at a different height, the layers disagree — and the whole of the 2026-07-31 session
+was spent on two representations of one field disagreeing by half a texel (`08` §11, "three
+surfaces where there should be one"). Concealment stays authoritative on the march and the CPU
+field; blades are visual only and must never be sampled for gameplay.
+
+#### Two reference implementations, and what each settles
+
+| | [penev.tech/labs/grass](https://penev.tech/labs/grass) | [aleksandargjoreski.dev](https://aleksandargjoreski.dev/blog/growing-my-grass-shader/) |
+|---|---|---|
+| Primitive | curved 3-edge blade, real geometry | camera-facing sprite, single-faced |
+| Count | ~200k `InstancedMesh` | 1.18M, one draw call |
+| Detail falloff | device-tier instance scaling | **stochastic thinning** — full to ~10 units, 10% by 60 |
+| Culling | — | GPU-side frustum cull by pushing culled vertices out of view |
+| Interaction | **trail render target**, WebGPU compute variant with spring physics | — |
+
+The load-bearing lesson is Gjoreski's framing: **the bottleneck is how many times you shade the
+same pixel, not triangle count.** Overlapping thin geometry is overdraw. That is precisely the
+bug that cost 33.3 ms against 8.5 ms this session — one pixel marching several times — so it is
+the right lens, not a generic optimisation tip. Corollaries worth taking on faith: single-faced
+sprites halve fragment work outright, and `discard` is wasteful because the work is already done
+by the time it runs.
+
+Penev's trail texture is the piece with gameplay value rather than only visual value: crawling
+should flatten grass behind you, which is both a tell for other players and a readable
+consequence of the concealment mechanic. Blades sample displacement by world XZ from a small
+render target (512² is enough). Defer it, but do not design it out.
+
+#### Perf: state the structural win, do not assume blades are cheap
+
+The saving is **not** that blades are cheap. It is that they let the relief layer stop doing
+near-field work entirely — and the near field is where the march is most expensive, because
+prone it is the whole screen. That is a real, bankable saving.
+
+Against it: prone you are inside the canopy, so blades fill the frame, which is exactly the
+overdraw case Gjoreski spends his effort on. His 120 fps is a flat patch with no terrain march
+underneath; we would have both layers plus terrain. **Measure it, do not claim it.**
+
+#### Measurement protocol, because the traps here are known
+
+- Bench with `?bench=1` (forces full canopy) and compare **prone** as the primary case, not
+  standing — prone is where this layer earns its place.
+- `8.3 ms` is the 120 Hz cap and `16.7`/`33.3 ms` are the 60/30 Hz steps. A frame anywhere
+  between 16.7 and 33.3 reports as 33.3, so halving resolution can look like a no-op. Escape the
+  cap with `?dpr=0.25` or `?steps=1` before concluding where a cost lives (`09` §0).
+- Give the layer its own `?` toggle from the start, so it can be measured against its own
+  absence at the same pose. That is why `?grasscap=` exists.
+
+#### Open decisions, listed so they are made deliberately
+
+1. **Sprite or real blade geometry.** Sprites are cheaper and Gjoreski's argument is strong.
+   But DF2's look has *no* blade silhouettes at all (`07` §4), so this layer is already a
+   departure — decide how far to take it against `00`'s recognisability test before building.
+2. **Radius and handover.** §4.2 proposes 0–15 m. The relief layer's columns become
+   sub-pixel around 28 m, which is a more principled boundary. Stochastic thinning across the
+   band is likely better than an alpha crossfade, and matches the existing distance fade's
+   intent.
+3. **Whether blades replace the march in their radius or overlay it.** Replacing is cheaper and
+   avoids double-shading; overlaying is safer for coverage. Note the march must still run for
+   concealment-relevant depth even where blades draw.
+4. **WebGL2 fallback** (§4.2 already flags this). The relief layer is confirmed on WebGL2; this
+   layer needs a reduced path or none.
 
 ## 5. Terrain base mesh (context for the grass layers above)
 

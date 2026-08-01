@@ -27,7 +27,7 @@ import {
   CHUNK_COUNT,
   VIEW_RADIUS_MAX_CHUNKS,
   LOD_SEGMENTS,
-  LOD_DISTANCE_CHUNKS,
+  lodSchedule,
   FOG_FAR,
   REFERENCE_P11,
 } from "./config";
@@ -42,11 +42,21 @@ import {
  */
 const BUILD_MS = 6;
 
+/**
+ * Metres in front of the camera at which the grass cap sits.
+ *
+ * Only has to clear the near plane (`CAMERA_NEAR`, 0.05 m) — the cap is never seen,
+ * it exists so the pixel gets a fragment and the march runs. Keeping it close keeps
+ * the plane small, which is why it can be one quad rather than screen-space geometry.
+ */
+const CAP_DISTANCE = 0.2;
+
+/** Scratch for placing the cap; module-level so the frame loop allocates nothing. */
+const capForward = new THREE.Vector3();
+
 interface Slot {
   mesh: THREE.Mesh;
   grass: THREE.Mesh | null;
-  /** Floor proxy for the grass volume; only drawn while the eye is in the canopy. */
-  grassFloor: THREE.Mesh | null;
   /** Absolute chunk indices currently displayed (can be negative / unbounded). */
   cx: number;
   cz: number;
@@ -69,12 +79,11 @@ export interface TerrainProps {
    */
   grassMaterial?: THREE.Material | null;
   /**
-   * Floor proxy for the grass volume — the same march against the un-lifted
-   * terrain surface. Drawn only while the eye is inside the canopy, because the
-   * lifted shell is a ceiling that downward rays never cross (see GrassMaterial's
-   * `floorPositionNode`). Must be as stable as `grassMaterial`.
+   * Screen-covering cap, drawn only while the eye is inside the canopy — it gives a
+   * ray that is ALREADY inside the volume a fragment to march from, which no surface
+   * of that volume can mark. Must be as stable as `grassMaterial`.
    */
-  grassFloorMaterial?: THREE.Material | null;
+  grassCapMaterial?: THREE.Material | null;
   /** Draw the grass shell at all. Free to toggle; affects visibility only. */
   grassEnabled?: boolean;
   /** Distance (m) beyond which the grass shell is not drawn, at the base FOV. */
@@ -82,7 +91,7 @@ export interface TerrainProps {
   /**
    * Live tallest-canopy height, metres. Read every frame rather than passed as a
    * value because the debug panel writes the canopy uniform directly without a
-   * React render — the floor pass has to switch on the height actually in effect.
+   * React render — the cap has to switch on the height actually in effect.
    */
   grassCanopyMax?: () => number;
   wireframe?: boolean;
@@ -92,7 +101,7 @@ export function Terrain({
   heightfield,
   material,
   grassMaterial = null,
-  grassFloorMaterial = null,
+  grassCapMaterial = null,
   grassEnabled = true,
   grassDistance = 1100,
   grassCanopyMax,
@@ -105,8 +114,7 @@ export function Terrain({
     const group = new THREE.Group();
     group.name = "terrain";
 
-    const chunkSize = heightfield.worldSize / CHUNK_COUNT;
-    const lodDistances = LOD_DISTANCE_CHUNKS.map((c) => c * chunkSize);
+    const { chunkSize, lodDistances } = lodSchedule(heightfield.worldSize);
 
     // Reach far enough that the fog, not the window edge, is what ends the view.
     const radius = Math.min(
@@ -174,29 +182,51 @@ export function Terrain({
         group.add(grass);
       }
 
-      // Shares the ceiling's geometry — same chunk, same LOD 0, same cache entry.
-      // Only the material differs, and only in whether the vertex is lifted.
-      let grassFloor: THREE.Mesh | null = null;
-      if (grassMaterial && grassFloorMaterial) {
-        grassFloor = new THREE.Mesh(undefined, grassFloorMaterial);
-        grassFloor.frustumCulled = true;
-        grassFloor.renderOrder = 1;
-        grassFloor.visible = false;
-        group.add(grassFloor);
-      }
-      return { mesh, grass, grassFloor, cx: NaN, cz: NaN, lod: -1, grassLod: -1, dx, dz };
+      return { mesh, grass, cx: NaN, cz: NaN, lod: -1, grassLod: -1, dx, dz };
     });
+
+    // --- the cap ------------------------------------------------------------
+    // ONE screen-covering proxy, parented to the camera, drawn only while the eye is
+    // inside the canopy. It replaces the per-chunk floor proxy: both exist so that a
+    // ray already inside the volume gets a fragment at all, but the floor answered it
+    // with geometry per chunk, so one pixel could be covered several times over and
+    // march several times over with it (33.3 ms against 8.5 ms).
+    //
+    // A plane just beyond the near plane rather than a screen-space triangle, so the
+    // standard model-view-projection still applies and `positionWorld` is a real point
+    // on the ray — which is all the march needs to derive its direction.
+    let cap: THREE.Mesh | null = null;
+    if (grassCapMaterial) {
+      cap = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), grassCapMaterial);
+      // In the terrain group and moved onto the camera each frame, NOT parented to the
+      // camera: R3F's camera is not part of the scene graph, so a child of it is never
+      // traversed and simply never draws.
+      cap.frustumCulled = false;
+      // EXCLUDED FROM RAYCASTS. three's Raycaster does not test Object3D.visible, so a
+      // quad 0.2 m in front of the camera, inside the group named "terrain", is hit by
+      // every rangefinder sample — reporting 0.2 m whether the cap is drawn or not.
+      cap.raycast = () => {};
+      cap.renderOrder = 1;
+      cap.visible = false;
+      group.add(cap);
+    }
 
     return {
       group,
       slots,
+      cap,
       buildGeometry,
       cached,
       chunkSize,
       lodDistances,
       cache,
     };
-  }, [heightfield, material, grassMaterial, grassFloorMaterial]);
+  }, [heightfield, material, grassMaterial, grassCapMaterial]);
+
+  useEffect(() => {
+    const cap = state.cap;
+    return () => cap?.geometry.dispose();
+  }, [state.cap]);
 
   useEffect(() => {
     (material as THREE.MeshStandardMaterial).wireframe = wireframe;
@@ -227,15 +257,40 @@ export function Terrain({
     // The shader stretches its distance fade by the same zoom factor, so the cull
     // has to move with it or the mesh disappears while the fade is still running.
     const p11 = (camera as THREE.PerspectiveCamera).projectionMatrix.elements[5];
-    const grassCull = grassDistance * Math.max(1, p11 / REFERENCE_P11);
+    // Half-diagonal added because `dist` below is to the chunk CENTRE: without it a
+    // chunk centred just past the fade end is dropped while its near corner is still
+    // rendering grass at ~40% strength, which pops as a ring at the draw boundary.
+    const grassCull =
+      grassDistance * Math.max(1, p11 / REFERENCE_P11) + chunkSize * Math.SQRT1_2;
 
-    // Height of the grass volume's ceiling, for the floor tests below.
+    // Height of the grass volume's ceiling, for the cap test below.
     const canopyMax = grassCanopyMax ? grassCanopyMax() * CANOPY_MARGIN : 0;
     // Is the eye inside the grass volume where it stands? Conservative — uses the
     // tallest canopy on the map rather than the local one, because the canopy field
     // lives in a texture and this side only has the terrain heightfield. Erring
     // towards drawing costs frame time; erring the other way leaves a hole.
     const insideCanopy = canopyMax > 0 && p.y < heightfield.sample(p.x, p.z) + canopyMax;
+
+    // --- cap: drawn only while the eye is inside the canopy -------------------
+    // Sized to the frustum at CAP_DISTANCE so it covers the screen exactly. Recomputed
+    // per frame because both the field of view and the aspect ratio move — the scope
+    // narrows the FOV, and a resize changes the aspect.
+    if (state.cap) {
+      state.cap.visible = grassEnabled && insideCanopy;
+      if (state.cap.visible) {
+        const cam = camera as THREE.PerspectiveCamera;
+        const h = 2 * CAP_DISTANCE * Math.tan(((cam.fov * Math.PI) / 180) / 2);
+        // A hair of margin so the edges of the frame are never left uncovered by
+        // floating-point slop in the projection.
+        state.cap.scale.set(h * cam.aspect * 1.02, h * 1.02, 1);
+        // Square onto the camera, CAP_DISTANCE ahead of it.
+        state.cap.quaternion.copy(cam.quaternion);
+        state.cap.position.copy(cam.position).addScaledVector(
+          capForward.set(0, 0, -1).applyQuaternion(cam.quaternion),
+          CAP_DISTANCE
+        );
+      }
+    }
 
     // Chunk the camera currently occupies, in absolute (unwrapped) indices.
     const camCx = Math.floor((p.x + half) / chunkSize);
@@ -264,7 +319,6 @@ export function Terrain({
       if (slot.cx !== cx || slot.cz !== cz) {
         slot.mesh.position.set(ox, 0, oz);
         slot.grass?.position.set(ox, 0, oz);
-        slot.grassFloor?.position.set(ox, 0, oz);
         slot.cx = cx;
         slot.cz = cz;
         slot.lod = -1; // force geometry refresh for the new location
@@ -286,63 +340,38 @@ export function Terrain({
       slot.mesh.visible = slot.lod >= 0;
 
       // --- grass shell ------------------------------------------------------
-      // Always LOD 0, and skirtless. The shell is lifted per vertex by the canopy
-      // at that vertex, so at LOD 1-2 spacing (4-8 m) the lift was interpolated
-      // across quads far coarser than the 2 m canopy texel: it clipped column tops
-      // where the canopy peaked between vertices and overhung bare ground where it
-      // dipped, which is the floating-grass fringe in docs/07 §9. Pinning the shell
-      // to LOD 0 makes its vertex spacing match the canopy texel, and also stops
-      // the artifact changing as the terrain chunk switches LOD underneath it.
+      // THE CHUNK'S OWN LOD, and skirtless — the shell must stand on the same surface
+      // the march reads and the terrain draws.
+      //
+      // This was pinned to LOD 0 while the march read the full-resolution heightfield,
+      // which paired correctly at the time. Once the march moved onto the mesh's LOD
+      // lattice (heightTexture.ts) that pin became a NEW disagreement, and a worse one:
+      // the shell entered the volume at the LOD-0 surface plus canopy while the march
+      // measured ground on the LOD-k surface, so wherever the coarse surface sits above
+      // the fine one by more than the canopy is tall, the entry point is already
+      // underground. The march's first sample then fails its below-terrain test and
+      // breaks immediately, and the fragment misses. That showed as bald slopes with the
+      // canopy forced on everywhere — fragments present, hit mask empty.
+      //
+      // Tracking the chunk LOD puts shell, mesh and march on one surface, which is the
+      // whole point of the change. The original reason for the pin — canopy lift being
+      // interpolated across quads coarser than the 2 m canopy texel — is handled by
+      // CANOPY_MARGIN rather than by resolution, since the shell only has to ENCLOSE the
+      // volume; the march re-evaluates the true column height per pixel regardless.
       if (slot.grass) {
         const want = grassEnabled && dist < grassCull;
-        if (want && slot.grassLod !== 0) {
-          const hit = cached(cx, cz, 0, false);
+        if (want && slot.grassLod !== lod) {
+          const hit = cached(cx, cz, lod, false);
           if (hit) {
             slot.grass.geometry = hit;
-            slot.grassLod = 0;
+            slot.grassLod = lod;
           } else if (mayBuild) {
-            slot.grass.geometry = buildGeometry(cx, cz, 0, false);
-            slot.grassLod = 0;
+            slot.grass.geometry = buildGeometry(cx, cz, lod, false);
+            slot.grassLod = lod;
             mayBuild = performance.now() < deadline;
           }
         }
-        slot.grass.visible = want && slot.grassLod === 0;
-
-        // The floor rides on the ceiling's geometry and its readiness — same chunk,
-        // same LOD 0 cache entry — so it needs no build budget of its own.
-        //
-        // WHERE the floor is needed. The ceiling proxy fails a pixel only when the ray
-        // reaches the ground without ever crossing the canopy top — which happens
-        // exactly where the terrain plus its canopy stands ABOVE the eye. Look
-        // downhill or across a valley and the ray descends through the canopy top on
-        // the way in, so the ceiling covers it and the floor is pure overdraw.
-        //
-        // Two conditions, both measured, and both needed:
-        //
-        //   insideCanopy   — the eye is in the grass. Without this the floor is drawn
-        //                    while standing for every chunk that has a peak above eye
-        //                    level, which measured 29.0 ms against 16.0 ms at the
-        //                    docs/09 §1 vantage. Nearly doubling the standing frame is
-        //                    not worth it for a case that has not been shown to fail.
-        //   chunk max > eye — drops the downhill half of the world when prone. Worth
-        //                    31.5 ms against 37.5 ms on its own.
-        //
-        // KNOWN GAP, unverified: standing and looking at an uphill slope that rises
-        // above eye level, the ray can reach ground without crossing the canopy top, so
-        // the ceiling has no fragment and `insideCanopy` suppresses the floor. Whether
-        // that actually shows as missing grass has NOT been tested — check the hit mask
-        // on a steep uphill before assuming either way, and read docs/08 §8 invariant 6
-        // first, because missing grass is a fairness bug and not a cosmetic one.
-        //
-        // The real answer is to stop needing a second pass at all: extend the ceiling
-        // proxy downward at its silhouette so it is a closed surface, and every ray has
-        // an entry fragment from any viewpoint. That is one march, no gate, no cases.
-        if (slot.grassFloor) {
-          const top = slot.grass.geometry.boundingBox?.max.y;
-          const chunkAboveEye = top === undefined || top + canopyMax > p.y;
-          slot.grassFloor.geometry = slot.grass.geometry;
-          slot.grassFloor.visible = slot.grass.visible && insideCanopy && chunkAboveEye;
-        }
+        slot.grass.visible = want && slot.grassLod >= 0;
       }
     }
   });

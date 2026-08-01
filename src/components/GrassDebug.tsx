@@ -10,6 +10,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { GrassUniforms } from "../df2/GrassMaterial";
+import { GRASS_STEPS } from "../df2/config";
+import { BENCH } from "../df2/bench";
 
 export interface GrassDebugProps {
   uniforms: GrassUniforms | null;
@@ -21,22 +23,27 @@ interface Dial {
   min: number;
   max: number;
   step: number;
-  /** Written to a second uniform in lockstep — canopyMax tracks grassScale. */
-  also?: keyof GrassUniforms;
   hint?: string;
 }
 
-// grassScale and canopyMax are the same quantity at two scalings: the shader
-// stores grassScale pre-multiplied by 255 (metres per raw unit x 255) while
-// canopyMax is the resulting metres for a raw 255. Slide metres, write both.
+// The canopy height is ONE uniform in metres — it both scales the canopy field and
+// bounds the march span. It used to be two holding the same number, written in
+// lockstep from here; the slider now writes the one.
+/**
+ * The compiled loop ceiling. The march runs to the live `steps` uniform but the loop
+ * is COMPILED at this count, so dragging past it changes the readout and nothing else.
+ * Derived rather than a literal — it was 64 against a ceiling of 32, so the top half of
+ * the one dial that sets frame time did nothing.
+ */
+const STEP_CEILING = Math.max(GRASS_STEPS, BENCH.steps ?? 0);
+
 const DIALS: Dial[] = [
   {
-    key: "grassScale",
+    key: "canopyMax",
     label: "Canopy height",
     min: 0.2,
     max: 12,
     step: 0.1,
-    also: "canopyMax",
     hint: "metres for the tallest canopy — the 'length' dial",
   },
   {
@@ -54,7 +61,7 @@ const DIALS: Dial[] = [
     key: "steps",
     label: "March steps",
     min: 1,
-    max: 64,
+    max: STEP_CEILING,
     step: 1,
     // Capped by the COMPILED count — ?steps=N at load sets the ceiling, and this cannot
     // go above it. Load with ?steps=32 to sweep the whole range.
@@ -122,8 +129,9 @@ export function GrassDebug({ uniforms }: GrassDebugProps) {
     if (!uniforms || seeded.current) return;
     const next: Record<string, number> = {};
     for (const d of DIALS) next[d.key] = Number(uniforms[d.key].value);
-    // Shown in metres; the uniform holds metres x 255.
-    next.grassScale = Number(uniforms.canopyMax.value);
+    // canopyMax is a DIAL now, so the loop above already has it — it used to need a
+    // second read here because the slider showed metres while the uniform held metres
+    // x 255. One uniform, one unit, no special case.
     next.toneMode = Number(uniforms.toneMode.value);
     next.canopyForce = Number(uniforms.canopyForce.value);
     next.debugMode = Number(uniforms.debugMode.value);
@@ -135,13 +143,7 @@ export function GrassDebug({ uniforms }: GrassDebugProps) {
 
   const write = (key: string, v: number) => {
     const dial = DIALS.find((d) => d.key === key);
-    if (dial?.key === "grassScale") {
-      // metres -> the shader's pre-multiplied form, and the span bound alongside.
-      uniforms.grassScale.value = v;
-      uniforms.canopyMax.value = v;
-    } else if (dial) {
-      uniforms[dial.key].value = v;
-    }
+    if (dial) uniforms[dial.key].value = v;
     setVals((p) => ({ ...p, [key]: v }));
   };
 

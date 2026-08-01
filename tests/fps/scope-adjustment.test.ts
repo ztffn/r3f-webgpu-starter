@@ -10,6 +10,7 @@ import {
   scopeAdjustmentActionForKey,
   solveElevationZeroRadians,
 } from "../../src/fps/core/ScopeAdjustmentController.ts";
+import { AMMUNITION_DEFINITIONS } from "../../src/fps/weapons/AmmunitionDefinition.ts";
 
 const PROFILE = {
   muzzleVelocityMetresPerSecond: 792.48,
@@ -33,6 +34,24 @@ test("every 100–1300 m elevation preset crosses the sightline", () => {
       `${range} m zero missed sightline by ${prediction.verticalOffsetMetres} m`
     );
   }
+});
+
+test("low-velocity ammunition uses only reachable scope zero presets", () => {
+  const pistolProfile = AMMUNITION_DEFINITIONS["9mm"];
+  const elevation800 = solveElevationZeroRadians(pistolProfile, STILL_AIR, 800);
+  const prediction800 = predictBallisticAtSightRange(
+    pistolProfile,
+    STILL_AIR,
+    800,
+    elevation800
+  );
+  assert.ok(Math.abs(prediction800.verticalOffsetMetres) < 0.001);
+
+  const controller = new ScopeAdjustmentController(pistolProfile, STILL_AIR);
+  for (let step = 0; step < SCOPE_ZERO_DISTANCES_METRES.length; step += 1) {
+    controller.apply("elevation-up");
+  }
+  assert.equal(controller.getSnapshot().zeroDistanceMetres, 900);
 });
 
 test("turret clicks are bounded, symmetric, and resettable", () => {

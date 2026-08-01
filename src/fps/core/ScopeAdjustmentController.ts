@@ -9,6 +9,9 @@ export const WINDAGE_CLICK_RADIANS = 0.0001; // 0.1 mrad
 const MAX_WINDAGE_CLICKS = 100;
 const MAX_PREDICTION_SECONDS = 15;
 const ZERO_SOLVE_ITERATIONS = 28;
+const INITIAL_ZERO_ELEVATION_RADIANS = 0.15;
+const MAX_ZERO_ELEVATION_RADIANS = 0.75;
+const ZERO_BRACKET_STEP_RADIANS = 0.05;
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
 
 export interface BallisticSightProfile {
@@ -124,15 +127,48 @@ export function solveElevationZeroRadians(
   environment: BallisticEnvironment,
   rangeMetres: number
 ): number {
+  const solution = trySolveElevationZeroRadians(profile, environment, rangeMetres);
+  if (solution === null) throw new Error(`Unable to solve ${rangeMetres} m scope zero`);
+  return solution;
+}
+
+/** Returns null when the projectile cannot reach or cross the sightline at this range. */
+export function trySolveElevationZeroRadians(
+  profile: BallisticSightProfile,
+  environment: BallisticEnvironment,
+  rangeMetres: number
+): number | null {
   const stillAir: BallisticEnvironment = {
     ...environment,
     windVelocity: { x: 0, y: 0, z: 0 },
   };
   let low = 0;
-  let high = 0.15;
-  if (predictBallisticAtSightRange(profile, stillAir, rangeMetres, high).verticalOffsetMetres < 0) {
-    throw new Error(`Unable to solve ${rangeMetres} m scope zero`);
+  let lowPrediction: BallisticPrediction;
+  try {
+    lowPrediction = predictBallisticAtSightRange(profile, stillAir, rangeMetres, low);
+  } catch {
+    return null;
   }
+  if (lowPrediction.verticalOffsetMetres >= 0) return 0;
+
+  let high = INITIAL_ZERO_ELEVATION_RADIANS;
+  let bracketed = false;
+  while (high <= MAX_ZERO_ELEVATION_RADIANS + Number.EPSILON) {
+    try {
+      if (predictBallisticAtSightRange(profile, stillAir, rangeMetres, high).verticalOffsetMetres >= 0) {
+        bracketed = true;
+        break;
+      }
+    } catch {
+      // Increasing elevation only reduces forward velocity. Once the round can
+      // no longer reach the range, no steeper zero can recover it.
+      return null;
+    }
+    low = high;
+    high += ZERO_BRACKET_STEP_RADIANS;
+  }
+  if (!bracketed) return null;
+
   for (let iteration = 0; iteration < ZERO_SOLVE_ITERATIONS; iteration += 1) {
     const middle = (low + high) * 0.5;
     const prediction = predictBallisticAtSightRange(profile, stillAir, rangeMetres, middle);
@@ -142,11 +178,16 @@ export function solveElevationZeroRadians(
   return (low + high) * 0.5;
 }
 
+interface ScopeElevationPreset {
+  readonly rangeMetres: number;
+  readonly elevationRadians: number;
+}
+
 type Listener = () => void;
 
 /** Mutable gameplay turret state; presentation reads its immutable snapshots. */
 export class ScopeAdjustmentController {
-  private readonly elevationByZero: readonly number[];
+  private readonly elevationPresets: readonly ScopeElevationPreset[];
   private readonly listeners = new Set<Listener>();
   private zeroIndex = 0;
   private windageClicks = 0;
@@ -154,9 +195,13 @@ export class ScopeAdjustmentController {
   private readonly right = new THREE.Vector3();
 
   constructor(profile: BallisticSightProfile, environment: BallisticEnvironment) {
-    this.elevationByZero = SCOPE_ZERO_DISTANCES_METRES.map((range) =>
-      solveElevationZeroRadians(profile, environment, range)
-    );
+    this.elevationPresets = SCOPE_ZERO_DISTANCES_METRES.flatMap((rangeMetres) => {
+      const elevationRadians = trySolveElevationZeroRadians(profile, environment, rangeMetres);
+      return elevationRadians === null ? [] : [{ rangeMetres, elevationRadians }];
+    });
+    if (this.elevationPresets.length === 0) {
+      this.elevationPresets = [{ rangeMetres: SCOPE_ZERO_DISTANCES_METRES[0], elevationRadians: 0 }];
+    }
     this.snapshot = this.createSnapshot();
   }
 
@@ -171,7 +216,7 @@ export class ScopeAdjustmentController {
     const previousZero = this.zeroIndex;
     const previousWindage = this.windageClicks;
     if (action === "elevation-up") {
-      this.zeroIndex = Math.min(SCOPE_ZERO_DISTANCES_METRES.length - 1, this.zeroIndex + 1);
+      this.zeroIndex = Math.min(this.elevationPresets.length - 1, this.zeroIndex + 1);
     } else if (action === "elevation-down") {
       this.zeroIndex = Math.max(0, this.zeroIndex - 1);
     } else if (action === "windage-left") {
@@ -195,15 +240,16 @@ export class ScopeAdjustmentController {
     this.right.crossVectors(target, WORLD_UP);
     if (this.right.lengthSq() > Number.EPSILON) {
       this.right.normalize();
-      target.applyAxisAngle(this.right, this.elevationByZero[this.zeroIndex]);
+      target.applyAxisAngle(this.right, this.elevationPresets[this.zeroIndex].elevationRadians);
     }
     return target.normalize();
   }
 
   private createSnapshot(): ScopeAdjustmentSnapshot {
-    const elevationRadians = this.elevationByZero[this.zeroIndex];
+    const preset = this.elevationPresets[this.zeroIndex];
+    const elevationRadians = preset.elevationRadians;
     return {
-      zeroDistanceMetres: SCOPE_ZERO_DISTANCES_METRES[this.zeroIndex],
+      zeroDistanceMetres: preset.rangeMetres,
       elevationRadians,
       elevationMilliradians: elevationRadians * 1_000,
       windageClicks: this.windageClicks,

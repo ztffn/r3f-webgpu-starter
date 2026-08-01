@@ -9,6 +9,12 @@ operator reference. If a dated proposal disagrees with this document, this
 document describes the current implementation. Terrain and grass remain covered
 by `08-implementation-spec.md` and the terrain-specific design documents.
 
+For the trigger-to-impact lifecycle, formulas, failure budgets, and the
+attachment/perk extension contract, see
+`11-weapon-ballistics-and-modifier-system-spec.md`. Its staged implementation
+sequence is in
+`plans/2026-08-02-weapon-ballistics-modifier-roadmap.md`.
+
 ## 1. Current result
 
 The `?scene=scope` route is a local-first FPS combat slice built beneath the

@@ -4,6 +4,12 @@ For the full as-built module map, performance boundaries, human acceptance
 checklist, and deliberately deferred work, start with
 [`docs/10-fps-combat-implementation-spec.md`](../../docs/10-fps-combat-implementation-spec.md).
 
+The detailed trigger-to-impact contract, formulas, modifier seams, and failure
+budgets are in
+[`docs/11-weapon-ballistics-and-modifier-system-spec.md`](../../docs/11-weapon-ballistics-and-modifier-system-spec.md).
+The attachment/perk implementation sequence is in the
+[`weapon-ballistics modifier roadmap`](../../docs/plans/2026-08-02-weapon-ballistics-modifier-roadmap.md).
+
 `src/fps` is a local-first gameplay slice, not a general ECS or game framework.
 Mutable systems own gameplay truth; React Three Fiber components adapt that
 truth to cameras, GLBs, mixers, materials, and HUD snapshots.

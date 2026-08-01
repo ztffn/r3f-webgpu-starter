@@ -1041,7 +1041,18 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     // grass and pops in front of it, which breaks the one thing this system
     // exists for. (This is the integration hurdle for GPU Voxel Space ports:
     // mixing polygonal objects, not raw speed.)
-    const hitWorld = cameraPosition.add(V.mul(hitS.max(float(0))));
+    // On a MISS, fall back to the shell fragment's own distance rather than leaving
+    // hitS at 0, which puts the point at the camera and writes near-plane depth.
+    //
+    // In normal rendering that never mattered — a miss is alpha-tested away, so its
+    // depth is discarded. In the DEBUG views it mattered a great deal and was actively
+    // misleading: views >= 4 force opacity to 1 precisely so every shell fragment
+    // reports its answer, and those fragments were then drawing at the near plane, in
+    // front of everything including sky. A distant miss painted itself over the whole
+    // upper frame, so "the shell covers this pixel" and "some far fragment missed" were
+    // indistinguishable — which is exactly the question those views exist to answer.
+    const depthS = hit.equal(1).select(hitS.max(float(0)), fragDist) as NodeArg;
+    const hitWorld = cameraPosition.add(V.mul(depthS));
     const viewZ = cameraViewMatrix.mul(vec4(hitWorld, 1)).z;
     const hitDepth = viewZToPerspectiveDepth(viewZ, cameraNear, cameraFar);
 

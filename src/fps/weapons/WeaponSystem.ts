@@ -33,6 +33,7 @@ export interface WeaponSnapshot {
   readonly dryFireEmittedForPress: boolean;
   readonly burstRoundsRemaining: number;
   readonly shotSequence: number;
+  readonly instanceSeed: number;
   readonly recoilPitchRadians: number;
   readonly recoilYawRadians: number;
   readonly bloomRadians: number;
@@ -163,7 +164,7 @@ export class WeaponSystem {
   }
 
   update(dtSeconds: number): void {
-    let dt = Math.min(Math.max(dtSeconds, 0), DT_MAX);
+    let dt = Number.isFinite(dtSeconds) ? Math.min(Math.max(dtSeconds, 0), DT_MAX) : 0;
 
     if (this.reloadRemaining > 0) {
       const reloadElapsed = Math.min(dt, this.reloadRemaining);
@@ -221,6 +222,7 @@ export class WeaponSystem {
       dryFireEmittedForPress: this.dryFireEmittedForPress,
       burstRoundsRemaining: this.burstRoundsRemaining,
       shotSequence: this.shotSequence,
+      instanceSeed: this.instanceSeed,
       recoilPitchRadians: this.recoilPitchRadians,
       recoilYawRadians: this.recoilYawRadians,
       bloomRadians: this.bloomRadians,

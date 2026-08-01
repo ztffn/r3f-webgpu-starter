@@ -38,6 +38,7 @@ import {
   type ScopeAdjustmentSnapshot,
 } from "./core/ScopeAdjustmentController";
 import { weaponPresentationFor } from "./presentation/WeaponPresentationDefinition";
+import { weaponAimIndicator } from "./ui/WeaponAimIndicator";
 
 const WORLD_LAYER = 0;
 const WEAPON_LAYER = 1;
@@ -306,6 +307,7 @@ export function WeaponPrototype({
   const cameraDeltaQuaternion = useMemo(() => new THREE.Quaternion(), []);
   const rangeOrigin = useMemo(() => new THREE.Vector3(), []);
   const rangeDirection = useMemo(() => new THREE.Vector3(), []);
+  const crosshairPoint = useMemo(() => new THREE.Vector3(), []);
   const authoritativeDirection = useMemo(() => new THREE.Vector3(), []);
   const boreDirection = useMemo(() => new THREE.Vector3(), []);
   const eventSightDirection = useMemo(() => new THREE.Vector3(), []);
@@ -473,6 +475,7 @@ export function WeaponPrototype({
       lookSensitivity.reset();
       aimSway.reset();
       ballistics.clear();
+      weaponAimIndicator.clear();
     },
     [aimSway, ballistics, lookSensitivity]
   );
@@ -845,6 +848,24 @@ export function WeaponPrototype({
     aimComposer.directionFromQuaternion(currentMeanAimQuaternion, authoritativeDirection);
     activeScopeAdjustments.current.applyToSightDirection(authoritativeDirection, boreDirection);
     player.syncAim(authoritativeDirection);
+    crosshairPoint.copy(camera.position).add(authoritativeDirection).project(camera);
+    const perspectiveCamera = camera as THREE.PerspectiveCamera;
+    const coneRadiusPixels =
+      (Math.tan(weaponSnapshot.dispersionConeRadians) /
+        Math.tan(THREE.MathUtils.degToRad(perspectiveCamera.fov) * 0.5)) *
+      size.height *
+      0.5;
+    weaponAimIndicator.publish(
+      (crosshairPoint.x * 0.5 + 0.5) * size.width,
+      (-crosshairPoint.y * 0.5 + 0.5) * size.height,
+      coneRadiusPixels,
+      1 - THREE.MathUtils.smoothstep(aim.current, 0.15, 0.75),
+      scopeDemo &&
+        FPS_DEBUG.hipfireCrosshair &&
+        document.pointerLockElement === gl.domElement &&
+        crosshairPoint.z >= -1 &&
+        crosshairPoint.z <= 1
+    );
     // Every event carries the pre-impulse recoil and dispersion captured at its
     // own cadence boundary, so several rounds drained here retain distinct aim.
     loadout.drainEvents(handleWeaponEvent);

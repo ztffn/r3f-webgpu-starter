@@ -91,12 +91,13 @@ export class LoadoutSystem {
   }
 
   update(dtSeconds: number): void {
+    const dt = Number.isFinite(dtSeconds) ? Math.max(0, dtSeconds) : 0;
     if (this.switchingTo) {
-      this.switchRemaining = Math.max(0, this.switchRemaining - Math.max(0, dtSeconds));
+      this.switchRemaining = Math.max(0, this.switchRemaining - dt);
       if (this.switchRemaining === 0) this.finishSwitch();
     }
     for (const weapon of this.slots.values()) {
-      weapon.update(dtSeconds);
+      weapon.update(dt);
       this.collectWeaponEvents(weapon);
     }
   }

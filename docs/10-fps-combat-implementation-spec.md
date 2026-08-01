@@ -17,7 +17,8 @@ existing animated sniper presentation. It currently provides:
 - pointer-lock mouse look with FOV-aware scan/precision response;
 - authoritative stance- and breath-dependent sway;
 - a data-driven weapon/loadout runtime with ammunition, cadence, reload, ADS,
-  dry-fire, and recoil events;
+  semi/burst/automatic fire, dry-fire, deterministic dispersion, recoil, and
+  bounded bloom/recovery;
 - fixed-step gravity/drag/wind ballistics with delayed damage;
 - default-.308 scope elevation zeroing from 100–1,300 m, reachable-preset
   filtering for slower profiles, and manual windage;
@@ -25,15 +26,16 @@ existing animated sniper presentation. It currently provides:
 - material resistance, bounded penetration, target damage, and intact-to-husk
   object transitions;
 - bounded instanced impact particles and positional impact audio;
-- HUD snapshots, hit reports, performance counters, and opt-in trajectory debug;
+- HUD snapshots, a truthful hipfire crosshair, hit reports, performance
+  counters, and opt-in trajectory debug;
 - deterministic unit/load coverage for the gameplay systems.
 
 This is not yet a complete player, weapon library, or multiplayer match. There
-is one mounted sniper GLB, no physical character controller, no network
-authority, no remote-character presentation, and no in-game loadout or settings
-screen. The `ammo=9mm` option is a representative 9x19 mm ballistic profile for
-diagnostics; a Glock weapon definition, model, animations, and sidearm switching
-presentation have **not** been implemented.
+is one proxy FPS rig shared by the selectable sniper, M4, and Glock, no physical
+character controller, no network authority, no remote-character presentation,
+and no in-game loadout or settings screen. The SAW is a complete
+semi/automatic gameplay and load-test definition but is not in the development
+loadout. Authored per-weapon models and animations have not been added.
 
 ## 2. Ownership and data flow
 
@@ -43,41 +45,48 @@ throttled snapshots to the HUD.
 
 | Layer | Owns | Must not own |
 | --- | --- | --- |
-| `LocalPlayerController` | input commands, position, stance, authoritative world aim | meshes, bones, scope materials |
+| `LocalPlayerController` | input commands, position, stance, planar speed, authoritative world aim | meshes, bones, scope materials |
 | `AimSwayController` | deterministic gameplay sway and breath stabilization | a second cosmetic-only shot direction |
 | `LookSensitivityController` | FOV-scaled pointer response and scan curve | camera or React state |
 | `LoadoutSystem` | slots, equipped weapon, switch state | GLTF animation details |
-| `WeaponSystem` | ammunition, cadence, reload, ADS, recoil and shot events | terrain, targets, or scope shaders |
+| `WeaponSystem` | ammunition, cadence, reload, ADS, handling context, deterministic dispersion, recoil/bloom and shot events | terrain, targets, or scope shaders |
 | `BallisticProjectileSystem` | live projectile state, integration, contacts, damage, reports | rendered terrain or per-shot React objects |
 | `WorldQuery` | nearest gameplay collision contract | weapons, UI, or render LOD policy |
 | `Damageable` / world prefabs | health, authored surface/thickness, hit/destruction response | player input |
 | presentation components | GLBs, mixers, scope PiP, particles, sound, debug lines | gameplay truth |
 | `CombatTelemetry` | immutable low-frequency snapshots | raycasting or simulation |
+| `WeaponAimIndicator` | mutable crosshair presentation values | accepting shots or generating spread |
 
 ```text
 DOM input
   -> LocalPlayerController commands
+  -> stance / speed / grounded / breath handling context
   -> weapon/loadout update queues an accepted shot event
   -> authoritative base aim + gameplay sway
-  -> scope turret-adjusted bore direction
-  -> drain accepted shot event with the resolved directions
+  -> event-captured pre-shot recoil offset
+  -> scope turret-adjusted mean bore
+  -> event-captured deterministic dispersion
+  -> drain accepted shot event with its resolved directions
   -> pooled 120 Hz ballistic simulation
   -> CompositeWorldQuery swept segments
   -> penetration / Damageable / impact events
   -> telemetry + target/impact/debug presentation
 ```
 
-Three direction concepts must remain distinct:
+Five direction concepts must remain distinct:
 
-1. **Optical sightline:** the swayed direction shown by the reticle and used by
-   the rangefinder.
-2. **Bore direction:** the sightline adjusted by elevation zero and windage; the
-   projectile launches along this direction.
-3. **Resolved trajectory:** the curved, wind-drifted projectile path.
+1. **Base sightline:** camera aim plus authoritative stance/breath sway.
+2. **Mean sight direction:** base sight plus recoil remaining from earlier
+   accepted rounds; the scope/crosshair shows this state for the next shot.
+3. **Mean bore direction:** mean sight adjusted by elevation zero and windage.
+4. **Accepted projectile direction:** mean bore plus this shot's deterministic
+   mechanical/handling/bloom dispersion sample.
+5. **Resolved trajectory:** the curved, wind-drifted projectile path.
 
-Recoil is emitted after a shot is accepted and cannot retroactively alter that
-shot. Sway is different: it is composed into authoritative aim before firing and
-is therefore gameplay, not decoration.
+A shot captures recoil before applying its own impulse, so recoil cannot
+retroactively alter that shot. Later rounds—including several cadence events
+drained during one render frame—use the state left by earlier rounds. Sway,
+recoil, and spread are gameplay; the extra fast proxy-rig kick is cosmetic.
 
 ## 3. Frame order
 
@@ -87,15 +96,17 @@ R3F frame integration. The important order is:
 ```text
 advance existing projectiles
 drain impact/result events
+sample player pose, planar speed, stance, grounded state, and breath
+set equipped-weapon handling context
 consume current input commands
-update weapon/loadout state
+update weapon/loadout cadence, reload, ADS, recoil, and bloom recovery
 update ADS presentation blend
 update authoritative sway from stance + ADS + breath
-derive optical sightline
-derive turret-adjusted bore direction
+derive base and current mean sight directions
+derive current turret-adjusted mean bore
 sync AuthoritativeAimState
-drain accepted weapon events and spawn projectiles
-update mixer and presentation
+drain accepted weapon events, compose each captured offset, and spawn projectiles
+update mixer, cosmetic recoil, crosshair, and presentation
 render scope/world/weapon passes
 ```
 
@@ -177,8 +188,14 @@ Automated synthetic spawn loads exercise five simulated seconds at 16 and 32
 shooters at 600 RPM and 32 shooters at 900 RPM, including misses, analytic
 terrain traversal, indexed colliders, and a cloth-contact stress case. They
 verify bounded capacity, deterministic results, and that the gameplay query no
-longer scales with the rendered terrain scene. They do not instantiate 32
-weapon systems or assert a machine-independent millisecond threshold.
+longer scales with the rendered terrain scene.
+
+A separate weapon-layer load instantiates 32 complete loadouts with independent
+deterministic seeds. At 600 and 900 RPM it depletes magazines, dry-fires once
+per press, reloads, resumes automatic fire, drains every event queue, and
+compares event counts, rolling direction checksums, and final recoil/bloom at
+30, 60, and 144 Hz. Both loads report elapsed CPU time but deliberately avoid a
+machine-independent millisecond threshold.
 
 They do **not** prove that a complete 32-player browser match meets frame budget.
 That later acceptance test must include character skinning/animation, remote
@@ -214,18 +231,20 @@ capture click does not fire. Escape releases the pointer.
 | Input | Scope behavior |
 | --- | --- |
 | mouse | look without holding a button |
-| left click | one semi-auto trigger press |
+| left mouse down / up | serialized trigger edges |
 | right click | toggle ADS |
 | Shift while ADS | stabilize breath and blend to precision sensitivity |
 | R | leave ADS and reload |
 | T | reset targets and husks |
+| 1 / 2 / 3 | equip sniper / M4 / Glock |
+| B | cycle the equipped weapon's supported fire modes |
 | Z / X while ADS | increase / decrease magnification |
 | Arrow Up / Down | increase / decrease elevation zero |
 | Arrow Left / Right | 0.1 mrad windage clicks |
 | Page Up / Page Down | full-keyboard elevation aliases |
 | 0 | reset zero and windage |
 | L | clear the latest debug trace |
-| 1–8 | directly inspect authored GLB animation segments |
+| 1–8 in `scene=weapon&weaponanim=1` | directly inspect authored GLB animation segments |
 
 Turret keys are consumed only while ADS, pointer-locked, and in the scope scene,
 so compact Mac keyboards do not need Page Up/Down. Reload is authored animation
@@ -236,7 +255,7 @@ Useful URLs:
 
 | Query | Purpose |
 | --- | --- |
-| `?scene=scope` | playable sniper/target slice |
+| `?scene=scope` | playable sniper/M4/Glock proxy loadout and target slice |
 | `&shotdebug=1` | white sightline, yellow bore, cyan curved path, material contacts |
 | `&impacttest=1` | cloth/wood/metal/glass/stone/dirt/water cover lanes |
 | `&ammo=9mm\|556\|308\|50bmg` | select diagnostic ballistic profile (`308` default) |
@@ -244,6 +263,8 @@ Useful URLs:
 | `&mousesens=<rad/count>` | base pointer sensitivity |
 | `&scopesens=<scale>` | held-breath precision multiplier |
 | `&aimcurve=<boost>` | large-delta scan boost; `0` disables it |
+| `&crosshair=0` | disable the hipfire handling indicator |
+| `&weaponanim=1` | enable source animation inspection in `scene=weapon` |
 
 The rangefinder is intentionally a straight optical ray. The debug trajectory
 is the evidence of gravity and wind curvature.
@@ -255,10 +276,11 @@ is the evidence of gravity and wind curvature.
 | `core/LocalPlayerController.ts` | command buffer and authoritative player pose |
 | `core/AuthoritativeAimState.ts` | undamped world-space gameplay aim |
 | `core/AimSwayController.ts` | deterministic stance/breath gameplay sway |
+| `core/WeaponAimComposer.ts` | allocation-free local recoil/dispersion direction composition |
 | `core/LookSensitivityController.ts` | FOV-scaled pointer response |
 | `core/ScopeAdjustmentController.ts` | reachable zeros, elevation, and windage |
 | `core/WorldQuery.ts` | analytic terrain, collider index, composite query |
-| `weapons/*` | definitions, ammunition, weapon state, generic loadout slots |
+| `weapons/*` | definitions, ammunition, handling math, weapon state, generic loadout slots |
 | `combat/BallisticProjectileSystem.ts` | pooled active rounds and authoritative contacts |
 | `combat/BallisticModel.ts` | allocation-free gravity/drag/wind velocity step |
 | `combat/SurfaceProfile.ts` / `PenetrationResolver.ts` | material tuning and terminal response |
@@ -268,6 +290,7 @@ is the evidence of gravity and wind curvature.
 | `presentation/ShotTrajectoryDebugView.tsx` | latest-shot world debug |
 | `presentation/CharacterAimRig.ts` | procedural post-mixer bones |
 | `ui/CombatTelemetry.ts` | throttled immutable HUD snapshots |
+| `ui/WeaponAimIndicator.ts` / `HipfireCrosshair.tsx` | mutable mean/cone feedback without frame-rate React state |
 | `WeaponPrototype.tsx` | transitional first-person GLB/scope/frame host |
 | `BallisticTestRange.tsx` | opt-in material/penetration diagnostic range |
 | `TestTargets.tsx` | long-range resettable human target ladder |
@@ -290,16 +313,20 @@ npm run build
 Then test `?scene=scope&shotdebug=1` at 600, 1,000, and 1,300 m:
 
 1. first click captures the pointer without firing;
-2. normal ADS can scan while Shift gives finer movement and visibly less sway;
-3. prone sway is lower than crouch, which is lower than standing;
-4. the scope readout is two small dark text rows at lower right inside the lens;
-5. zeroing changes the yellow bore but not the white optical rangefinder line;
-6. the cyan trajectory curves and wind changes its signed drift;
-7. impact damage occurs after time of flight, not on click;
-8. R plays segment 4 to completion before another shot is accepted;
-9. `impacttest=1` produces different material effects and plausible authored
-   penetration differences;
-10. the HUD's projectile/query counters remain bounded during repeated fire.
+2. 1/2/3 switch the proxy between sniper/M4/Glock gameplay definitions and B
+   cycles only supported modes;
+3. normal ADS can scan while Shift gives finer movement and visibly less sway;
+4. stationary crouch and prone contract the hipfire crosshair while movement
+   expands it; sustained fire blooms it and a pause recovers it;
+5. the crosshair centre follows authoritative recoil and fades during ADS;
+6. the scope readout is two small dark text rows at lower right inside the lens;
+7. zeroing changes the yellow bore but not the optical rangefinder line;
+8. the cyan trajectory curves and wind changes its signed drift;
+9. impact damage occurs after time of flight, not on click;
+10. R plays segment 4 to completion before another shot is accepted;
+11. `impacttest=1` produces different material effects and plausible authored
+    penetration differences;
+12. the HUD's projectile/query counters remain bounded during repeated fire.
 
 ## 9.1 Two build traps, both paid for once
 
@@ -321,13 +348,14 @@ that the test script fails in a way that does not name the version as the cause.
 
 ## 10. Deliberately deferred work
 
-- actual Glock/sidearm definition, GLB, animations, equip controls, and view;
+- authored per-weapon GLBs, animations, sounds, and final tuning;
 - in-game ammunition/loadout selection and saved/rebindable controls;
 - Rapier-backed player collision, slopes, stance clearance, and vehicles;
 - third-person character host, bot harness, and 32/64-rig browser benchmark;
 - network authority, prediction/reconciliation, replication, and remote tracers;
 - full piecewise drag/weather model, moving target lead aids, and wind estimation;
-- automatic-fire weapon behavior and recoil recovery patterns;
+- attachment inventory/slots, stamina, injury, suppression, bipods, leaning,
+  supported-fire detection, and authored recoil-pattern textures;
 - ricochet, decals, spall, layered armor, staged destruction, and death bodies;
 - production weapon firing/reload audio and authored material effect assets;
 - a full-match CPU/GPU/network performance benchmark on target hardware.

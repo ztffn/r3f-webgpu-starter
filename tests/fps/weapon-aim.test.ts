@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import * as THREE from "three/webgpu";
 import { WeaponAimComposer } from "../../src/fps/core/WeaponAimComposer.ts";
+import { WeaponAimIndicator } from "../../src/fps/ui/WeaponAimIndicator.ts";
 
 test("weapon aim composition preserves zero offsets and normalized directions", () => {
   const composer = new WeaponAimComposer();
@@ -24,4 +25,17 @@ test("weapon aim composition applies yaw and pitch in weapon-local space", () =>
   assert.ok(actual.x < 0, "positive local yaw turns the bore left");
   assert.ok(actual.y > 0, "positive local pitch raises the bore");
   assert.ok(Math.abs(actual.length() - 1) < 1e-12);
+});
+
+test("weapon aim indicator sanitizes presentation values and clears visibility", () => {
+  const indicator = new WeaponAimIndicator();
+  indicator.publish(Number.NaN, 20, -4, 2, true);
+  assert.equal(indicator.centreXPixels, 0);
+  assert.equal(indicator.centreYPixels, 20);
+  assert.equal(indicator.coneRadiusPixels, 0);
+  assert.equal(indicator.opacity, 1);
+  assert.equal(indicator.visible, true);
+  indicator.clear();
+  assert.equal(indicator.visible, false);
+  assert.equal(indicator.opacity, 0);
 });

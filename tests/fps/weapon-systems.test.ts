@@ -123,6 +123,7 @@ test("dispersion sampling is deterministic per weapon instance and shot sequence
   const otherShooter = firstShot(M4_DEFINITION, 5678);
   assert.equal(left.dispersionPitchRadians, replay.dispersionPitchRadians);
   assert.equal(left.dispersionYawRadians, replay.dispersionYawRadians);
+  assert.equal(new WeaponSystem(M4_DEFINITION, 1234).getSnapshot().instanceSeed, 1234);
   assert.notDeepEqual(
     [left.dispersionPitchRadians, left.dispersionYawRadians],
     [otherShooter.dispersionPitchRadians, otherShooter.dispersionYawRadians]
@@ -195,6 +196,57 @@ test("mode changes preserve cooldown, recoil, and bloom", () => {
   assert.equal(after.recoilPitchRadians, before.recoilPitchRadians);
   assert.equal(after.recoilYawRadians, before.recoilYawRadians);
   assert.equal(after.bloomRadians, before.bloomRadians);
+});
+
+test("reload and unequipped time recover handling state instead of resetting or freezing it", () => {
+  const primary = new WeaponSystem(M4_DEFINITION, 10);
+  const secondary = new WeaponSystem(GLOCK_DEFINITION, 11);
+  const loadout = new LoadoutSystem(
+    [
+      { inputSlot: 1, id: "primary", weapon: primary },
+      { inputSlot: 2, id: "sidearm", weapon: secondary },
+    ],
+    "primary"
+  );
+  loadout.handleCommand({ type: "triggerDown" });
+  loadout.handleCommand({ type: "triggerUp" });
+  drainLoadout(loadout);
+  const afterShot = primary.getSnapshot();
+  loadout.handleCommand({ type: "reload" });
+  loadout.update(0.1);
+  const duringReload = primary.getSnapshot();
+  assert.ok(duringReload.recoilPitchRadians < afterShot.recoilPitchRadians);
+  assert.ok(duringReload.bloomRadians < afterShot.bloomRadians);
+
+  loadout.handleCommand({ type: "equipSlot", slot: 2 });
+  loadout.update(0.35);
+  const afterUnequippedTime = primary.getSnapshot();
+  assert.ok(afterUnequippedTime.recoilPitchRadians < duringReload.recoilPitchRadians);
+  assert.ok(afterUnequippedTime.bloomRadians < duringReload.bloomRadians);
+  assert.ok(afterUnequippedTime.recoilPitchRadians > 0, "switching must not hard-reset recoil");
+});
+
+test("flat handling modifiers deterministically affect spread, recoil, bloom, and sway", () => {
+  const weapon = new WeaponSystem(M4_DEFINITION, 77);
+  weapon.setHandlingModifiers({
+    dispersionFactor: 0.5,
+    recoilPitchFactor: 0.8,
+    recoilYawFactor: 0.7,
+    recoilRecoveryFactor: 1.2,
+    bloomPerShotFactor: 0.6,
+    bloomRecoveryFactor: 1.1,
+    swayFactor: 0.75,
+  });
+  weaponCommand(weapon, { type: "triggerDown" });
+  const shot = drainWeapon(weapon).find(
+    (event): event is Extract<WeaponEvent, { type: "shot" }> => event.type === "shot"
+  );
+  assert.ok(shot);
+  assert.equal(shot.recoilImpulsePitchRadians, M4_DEFINITION.recoil.pitchRadians * 0.8);
+  assert.equal(Math.abs(shot.recoilImpulseYawRadians), M4_DEFINITION.recoil.yawRadians * 0.7);
+  const snapshot = weapon.getSnapshot();
+  assert.equal(snapshot.bloomRadians, M4_DEFINITION.accuracy.bloomPerShotRadians * 0.6);
+  assert.equal(snapshot.swayFactor, 0.75);
 });
 
 test("semi-auto fires once per trigger-down edge and never repeats while held", () => {
@@ -384,6 +436,9 @@ interface LoadResult {
   readonly counts: EventCounts;
   readonly magazines: readonly number[];
   readonly reserves: readonly number[];
+  readonly directionChecksums: readonly number[];
+  readonly handlingStates: readonly string[];
+  readonly undrainedEvents: number;
 }
 
 function runWeaponLoad(roundsPerMinute: number, renderHz: number): LoadResult {
@@ -397,13 +452,31 @@ function runWeaponLoad(roundsPerMinute: number, renderHz: number): LoadResult {
   };
   const loadouts = Array.from({ length: 32 }, (_, index) =>
     new LoadoutSystem(
-      [{ inputSlot: 1, id: "primary", weapon: new WeaponSystem({ ...definition, id: `${definition.id}-${index}` }) }],
+      [
+        {
+          inputSlot: 1,
+          id: "primary",
+          weapon: new WeaponSystem({ ...definition, id: `${definition.id}-${index}` }, index + 1),
+        },
+      ],
       "primary"
     )
   );
   const counts = createCounts();
+  const directionChecksums = new Uint32Array(loadouts.length);
   const drainAll = () => {
-    for (const loadout of loadouts) loadout.drainEvents((event) => countEvent(counts, event));
+    for (let index = 0; index < loadouts.length; index += 1) {
+      loadouts[index].drainEvents((event) => {
+        countEvent(counts, event);
+        if (event.type !== "shot") return;
+        let checksum = directionChecksums[index];
+        checksum = Math.imul(checksum ^ Math.round(event.recoilOffsetPitchRadians * 1e9), 16777619);
+        checksum = Math.imul(checksum ^ Math.round(event.recoilOffsetYawRadians * 1e9), 16777619);
+        checksum = Math.imul(checksum ^ Math.round(event.dispersionPitchRadians * 1e9), 16777619);
+        checksum = Math.imul(checksum ^ Math.round(event.dispersionYawRadians * 1e9), 16777619);
+        directionChecksums[index] = checksum >>> 0;
+      });
+    }
   };
   const commandAll = (command: WeaponCommand) => {
     for (const loadout of loadouts) loadout.handleCommand(command);
@@ -430,10 +503,30 @@ function runWeaponLoad(roundsPerMinute: number, renderHz: number): LoadResult {
   advanceAll(0.5 + 1e-7);
   commandAll({ type: "triggerUp" });
 
+  let undrainedEvents = 0;
+  for (const loadout of loadouts) {
+    loadout.drainEvents(() => {
+      undrainedEvents += 1;
+    });
+  }
+
   return {
     counts,
     magazines: loadouts.map((loadout) => loadout.equippedWeapon.magazine),
     reserves: loadouts.map((loadout) => loadout.equippedWeapon.reserve),
+    directionChecksums: [...directionChecksums],
+    handlingStates: loadouts.map((loadout) => {
+      const snapshot = loadout.equippedWeapon.getSnapshot();
+      return [
+        snapshot.recoilPitchRadians,
+        snapshot.recoilYawRadians,
+        snapshot.bloomRadians,
+        snapshot.dispersionConeRadians,
+      ]
+        .map((value) => value.toFixed(12))
+        .join(":");
+    }),
+    undrainedEvents,
   };
 }
 
@@ -443,6 +536,7 @@ test("32 complete automatic weapon systems are deterministic at 30, 60, and 144 
     hz: number;
     elapsedMilliseconds: number;
     counts: EventCounts;
+    directionChecksum: number;
   }> = [];
 
   for (const rpm of [600, 900]) {
@@ -455,6 +549,10 @@ test("32 complete automatic weapon systems are deterministic at 30, 60, and 144 
         hz,
         elapsedMilliseconds: Number((performance.now() - started).toFixed(2)),
         counts: result.counts,
+        directionChecksum: result.directionChecksums.reduce(
+          (checksum, value) => (checksum + value) >>> 0,
+          0
+        ),
       });
       if (reference) assert.deepEqual(result, reference);
       else reference = result;
@@ -469,6 +567,8 @@ test("32 complete automatic weapon systems are deterministic at 30, 60, and 144 
       });
       assert.deepEqual(result.magazines, Array(32).fill(30 - roundsAfterReload));
       assert.deepEqual(result.reserves, Array(32).fill(0));
+      assert.equal(result.undrainedEvents, 0);
+      assert.ok(new Set(result.directionChecksums).size > 1, "independent seeds must diverge");
     }
   }
 
@@ -481,4 +581,7 @@ test("weapon simulation clamps hitches instead of producing an unbounded catch-u
   drainWeapon(weapon);
   weapon.update(60);
   assert.equal(drainWeapon(weapon).filter((event) => event.type === "shot").length, 1);
+  const beforeInvalidDelta = weapon.getSnapshot();
+  weapon.update(Number.NaN);
+  assert.deepEqual(weapon.getSnapshot(), beforeInvalidDelta);
 });

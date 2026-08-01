@@ -111,6 +111,25 @@ and mode changes cancel incomplete bursts; switching also cancels reload rather
 than pausing it on an unequipped weapon. Mode changes preserve cooldown, and an
 empty automatic weapon emits one dry-fire event per press.
 
+Spread and recoil are authoritative weapon state. Each definition separately
+authors mechanical dispersion, hip/movement/airborne handling error, bounded
+bloom, pitch/yaw recoil, caps, and recovery. Stance, measured planar speed,
+grounded state, ADS, and breath stabilization resolve into the cone; going prone
+does not erase a weapon's mechanical grouping limit. Every accepted shot samples
+that cone from a deterministic weapon-instance seed and shot sequence, captures
+the recoil left by earlier rounds, and only then applies its own recoil/bloom for
+later rounds. Recovery advances at cadence boundaries, including when several
+automatic rounds are accepted in one render frame or while a weapon is reloading
+or unequipped.
+
+The hipfire crosshair projects the current mean sight direction and expands to
+the current cone radius. It is presentation feedback only and never chooses a
+shot direction. Its SVG attributes read a mutable presentation snapshot without
+causing frame-rate React/HUD updates; it fades during ADS and hides outside
+pointer lock. Use `&crosshair=0` to disable it. Future attachments can resolve to
+the existing flat dispersion/recoil/bloom/recovery/sway modifier channels, but
+attachment slots and inventory remain out of scope.
+
 While pointer-locked and ADS, Arrow Up/Down select an ammunition-calibrated
 elevation zero, Arrow Left/Right apply manual 0.1 mrad windage clicks, and 0
 resets both turrets. The default .308 profile spans 100–1,300 m; slower
@@ -138,9 +157,10 @@ line is the shot path, the white segment is initial authoritative aim, and red
 marks the impact and surface normal. The HUD retains a short recent-shot log.
 Press L to clear the current debug trace.
 
-The sniper now uses an active 120 Hz ballistic projectile. Its 792.48 m/s,
-G1-0.505 prototype ammunition is affected by gravity, drag, and world-space
-wind; damage is delayed until a swept path segment actually reaches a target.
+Accepted weapon events use active 120 Hz ballistic projectiles. The sniper's
+792.48 m/s, G1-0.505 prototype ammunition is affected by gravity, drag, and
+world-space wind; damage is delayed until a swept path segment actually reaches
+a target.
 The default wind is +4 m/s on world X. Use `windx` and `windz` query parameters
 for controlled tests, including `&windx=0` for still air and `&windx=-4` for an
 equal opposite crosswind. Flight time, drop, signed drift, impact speed, damage,
@@ -162,8 +182,10 @@ lifetime, so a slow missed round cannot occupy a slot indefinitely.
 Weapon-layer coverage separately instantiates 32 complete loadouts, depletes
 automatic magazines, drains all real weapon events, completes reloads, and
 resumes fire at both 600 and 900 RPM. Equivalent timelines at 30, 60, and 144 Hz
-must produce identical shot, ammo, dry-fire, and reload counts. The test reports
-CPU time but deliberately has no machine-specific millisecond assertion.
+must produce identical shot offsets, final recoil/bloom, ammo, dry-fire, and
+reload outcomes. The test uses independent shooter seeds, retains only rolling
+direction checksums, and reports CPU time without a machine-specific millisecond
+assertion.
 
 ## Surface penetration and impacts
 

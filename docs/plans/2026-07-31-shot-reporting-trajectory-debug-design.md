@@ -43,7 +43,20 @@ The view consumes `ShotTrace`; it does not recompute a trajectory. This prevents
 the diagnostic from disagreeing with gameplay. The latest trace persists until
 the next accepted shot or L explicitly clears it.
 
-## Physics and later ballistics
+## Authoritative gameplay ballistics
+
+Projectile ballistics are gameplay truth, not presentation polish. The current
+hitscan resolver is only a temporary integration harness for validating aim,
+collision, damage reporting, and diagnostics. It is not an acceptable final
+model for the sniper gameplay slice, especially at DF2-scale ranges up to
+1,300 m.
+
+The ballistic solver determines whether and where a shot hits. The scope,
+trajectory view, HUD, target response, and damage system consume its result;
+none of them may add a visual-only drop or wind curve, or retain a separate
+straight hitscan result. `ShotTrace` must contain the actual world-space path
+used for swept collision tests so the debug drawing is evidence of gameplay
+rather than an approximation.
 
 Rapier is the selected world physics engine for player collision, stance,
 vehicles, rigid bodies, and broad scene queries. It is not installed in this
@@ -55,6 +68,24 @@ ballistic coefficients belong there; Rapier may back collision queries, but a
 bullet will not be represented as a dynamic rigid body. This avoids tunnelling
 and large per-projectile rigid-body cost while preserving one hit/report/trace
 contract for hitscan and ballistic weapons.
+
+The first ballistic implementation must include:
+
+- muzzle velocity from the equipped weapon/ammunition definition;
+- gravity, aerodynamic drag, and a world-space wind field;
+- deterministic fixed-step integration with swept collision queries between
+  every pair of simulated positions;
+- time of flight, accumulated drop, wind drift, and actual sampled path in the
+  resolved `ShotTrace`;
+- damage and target hit reports derived from the first swept impact, never from
+  a parallel aim ray; and
+- frame-rate-independent results suitable for deterministic tests.
+
+Long-range acceptance tests must cover at least 100, 300, 600, 1,000, and
+1,300 m. They must demonstrate increasing time of flight and drop, mirrored
+wind drift for equal opposite winds, identical impact results across render
+frame rates, and exact agreement between collision, damage, HUD report, and
+the trajectory debug path.
 
 ## Human test
 
@@ -68,6 +99,7 @@ contract for hitscan and ballistic weapons.
 6. Reset targets and confirm health/visibility return without clearing weapon
    state.
 
-Only after this alignment test passes should drop/wind be introduced, so any
-ballistic miss is attributable to the solver rather than an existing aim-space
-or raycast mismatch.
+This alignment test is the prerequisite harness for the ballistic solver, not
+the completed sniper mechanic. The next gameplay milestone replaces hitscan
+resolution with authoritative drop, wind, drag, and flight time while retaining
+the same reporting contracts.

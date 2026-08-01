@@ -22,10 +22,12 @@ input from owning camera implementation details.
 
 ## Trajectory semantics
 
-The current solver is hitscan, so its resolved path is exactly straight and its
-flight time, drop, and drift are zero. The HUD labels this explicitly. The debug
-view must not draw cosmetic curvature: a later fixed-step ballistic solver will
-emit the actual curved sample points through the same `ShotTrace` contract.
+The current temporary integration solver is hitscan, so its resolved path is
+exactly straight and its flight time, drop, and drift are zero. The HUD labels
+this limitation explicitly. The required fixed-step ballistic solver will make
+the actual curved path authoritative for swept collision, hit/damage results,
+and `ShotTrace`; the debug view will render those same samples. Ballistic drop,
+wind drift, drag, and time of flight are gameplay mechanics, not visual effects.
 
 ## Verification
 

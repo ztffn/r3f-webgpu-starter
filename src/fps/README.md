@@ -103,12 +103,17 @@ line is the shot path, the white segment is initial authoritative aim, and red
 marks the impact and surface normal. The HUD retains a short recent-shot log.
 Press L to clear the current debug trace.
 
-This slice remains hitscan. Rapier is reserved for world/player physics. Future
-rifle drop, wind, and drag will be integrated by a fixed-step solver using swept
-`WorldQuery` segments and emitting the same `ShotTrace`/`TargetHitReport`
-contracts. Until then the trajectory is correctly straight, with zero flight
-time, drop, and drift; the debug view never invents cosmetic curvature.
+This temporary integration slice remains hitscan. It validates aim, collision,
+damage reporting, and diagnostics, but it is not the intended sniper gameplay
+model. The required rifle solver will integrate muzzle velocity, gravity, wind,
+and drag at a fixed step, use swept `WorldQuery` segments for authoritative
+collision, and emit the same `ShotTrace`/`TargetHitReport` contracts. Damage,
+impact, flight time, drop, drift, HUD telemetry, and the debug trajectory must
+all come from that simulated path. Rapier remains reserved for world/player
+physics and may back queries; bullets will not be dynamic rigid bodies.
 
-Out of scope here: projectiles, spread, decals, physics movement, stamina,
-attachments, networking, bot presentation, and the 32/64-character browser
-benchmark harness.
+Out of scope for the already-committed integration scaffold: the authoritative
+ballistic solver, spread, decals, physics movement, stamina, attachments,
+networking, bot presentation, and the 32/64-character browser benchmark
+harness. Ballistics is the next gameplay milestone defined in the
+shot-reporting design, not deferred presentation polish.

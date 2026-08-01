@@ -223,12 +223,16 @@ and immediately answers "does this feel like DF2?".
 ### Phase 4 — Integration (🟡 local FPS slice started)
 - 🟡 Local-first controller/weapon/loadout/hitscan contracts, resettable test targets,
   structured hit reports, and opt-in latest-shot trajectory diagnostics are built for
-  human validation before projectile ballistics.
+  human validation before projectile ballistics. Hitscan is an integration harness, not
+  the intended sniper mechanic.
+- ⬜ **Authoritative fixed-step rifle ballistics** (muzzle velocity, gravity, wind, drag,
+  time of flight, and swept world-query collision) validated through 1,300 m. This is a
+  gameplay requirement for the first credible long-range DF2 slice: damage and hit
+  reports must come from the simulated path. Do not model fast rounds as Rapier dynamic
+  rigid bodies and do not substitute a visual-only curved trace.
 - ⬜ First-person collision and stance motor using Rapier; basic AI/objectives.
   *(What exists today is a camera rig only — `FlyControls.tsx` clamps to the surface at a
   stance eye height. No physics, no collision.)*
-- ⬜ Fixed-step rifle ballistics (gravity, wind and drag) using swept world-query segments;
-  do not model fast rounds as Rapier dynamic rigid bodies.
 - ⬜ ECS (bitECS) as entity count grows (`05-...md` §3).
 
 ### Phase 5 — Polish (⬜ not started)

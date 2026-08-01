@@ -50,6 +50,7 @@ import {
   struct,
 } from "three/tsl";
 import { createGrassField } from "./grassField";
+import type { GrassField } from "./grassField";
 
 /**
  * Margin the shell is lifted above the smooth canopy envelope.
@@ -297,6 +298,13 @@ export interface GrassMaterial {
    */
   capMaterial: THREE.MeshBasicNodeMaterial;
   uniforms: GrassUniforms;
+  /**
+   * The canopy samplers this material was built from, handed out so the near-field
+   * blade layer can be built from the SAME ones — same uniform objects, so the debug
+   * sliders move both layers together, and the same height formula, so blades stand
+   * exactly as tall as the columns they sit among (grassField.ts).
+   */
+  field: GrassField;
 }
 
 export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
@@ -1132,5 +1140,6 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
       fadeEnd: uFadeEnd,
       debugMode: uDebugMode,
     },
+    field,
   };
 }

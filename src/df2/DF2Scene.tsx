@@ -16,6 +16,9 @@ import { FlyControls, type FlyState, type Stance } from "./FlyControls";
 import { Heightfield } from "./Heightfield";
 import { createTerrainMaterial } from "./TerrainMaterial";
 import { createGrassMaterial, type GrassUniforms } from "./GrassMaterial";
+import { createBladeMaterial, createBladeMesh } from "./BladeMaterial";
+import { buildBladeGeometry } from "./bladeGeometry";
+import { readBallisticEnvironment } from "../fps/combat/BallisticEnvironment";
 import { bakeSyntheticMaps } from "./syntheticMaps";
 import { bakeGrassJitter } from "./grassJitter";
 import { buildHeightTexture } from "./heightTexture";
@@ -62,6 +65,21 @@ import {
   GRASS_STRAND_MIX,
   GRASS_FADE_START,
   GRASS_FADE_END,
+  GRASS_BLADE_COUNT,
+  GRASS_BLADE_RADIUS,
+  GRASS_BLADE_THIN_START,
+  GRASS_BLADE_KEEP_MIN,
+  GRASS_BLADE_DENSITY_GAMMA,
+  GRASS_BLADE_WIDTH,
+  GRASS_BLADE_HEIGHT_SCALE,
+  GRASS_BLADE_SEGMENTS,
+  GRASS_BLADE_V_DEPTH,
+  GRASS_BLADE_SHADE_BASE,
+  GRASS_BLADE_BEND,
+  GRASS_BLADE_TWIST,
+  GRASS_BLADE_WIND_GAIN,
+  GRASS_BLADE_NOISE_SCALE,
+  GRASS_BLADE_GUST_RATE,
   WATER_COLOR,
   SUN_DIRECTION,
   SKY_COLOR,
@@ -264,6 +282,60 @@ export function DF2Scene({
     [grassKit]
   );
 
+  // --- near-field blade layer (docs/03 §4.4) --------------------------------
+  // Built from the march's OWN field object, not from a second set of samplers, so
+  // blade height, placement and colour cannot drift from the columns they stand among.
+  //
+  // The mesh never moves and is not parented to anything: each blade derives its world
+  // position from `cameraPosition` in the vertex stage, so the field follows the player
+  // without a per-frame CPU update and without the camera-graph trap the grass cap has
+  // to work around (Terrain.tsx).
+  const bladeKit = useMemo(() => {
+    if (!grassKit || !world?.colorMap) return null;
+    if (BENCH.blades === false) return null;
+    const geometry = buildBladeGeometry({
+      segments: GRASS_BLADE_SEGMENTS,
+      width: GRASS_BLADE_WIDTH,
+      // Unit height: the shader scales each blade to the canopy height the march
+      // would give that spot, so a number here would only fight it.
+      height: 1,
+      vDepth: GRASS_BLADE_V_DEPTH,
+    });
+    const blade = createBladeMaterial({
+      field: grassKit.field,
+      colorMap: world.colorMap,
+      count: BENCH.bladeCount ?? GRASS_BLADE_COUNT,
+      radius: BENCH.bladeRadius ?? GRASS_BLADE_RADIUS,
+      thinStart: GRASS_BLADE_THIN_START,
+      keepMin: GRASS_BLADE_KEEP_MIN,
+      densityGamma: GRASS_BLADE_DENSITY_GAMMA,
+      heightScale: GRASS_BLADE_HEIGHT_SCALE,
+      bend: GRASS_BLADE_BEND,
+      twist: GRASS_BLADE_TWIST,
+      windGain: GRASS_BLADE_WIND_GAIN,
+      noiseScale: GRASS_BLADE_NOISE_SCALE,
+      gustRate: GRASS_BLADE_GUST_RATE,
+      toneVariation: GRASS_TONE_VARIATION,
+      shadeBase: BENCH.bladeShade ?? GRASS_BLADE_SHADE_BASE,
+      // The SAME function the ballistics reads, so the grass a shooter judges windage
+      // from cannot disagree with the drift the bullet actually takes.
+      wind: readBallisticEnvironment(
+        typeof window === "undefined" ? "" : window.location.search
+      ).windVelocity,
+      debug: BENCH.bladeDebug ?? 0,
+    });
+    return { geometry, blade, mesh: createBladeMesh(geometry, blade) };
+  }, [grassKit, world]);
+
+  useEffect(
+    () => () => {
+      bladeKit?.blade.material.dispose();
+      bladeKit?.geometry.dispose();
+      bladeKit?.mesh.dispose();
+    },
+    [bladeKit]
+  );
+
   useEffect(() => {
     onGrassReady?.(grassKit?.uniforms ?? null);
   }, [grassKit, onGrassReady]);
@@ -331,6 +403,12 @@ export function DF2Scene({
           wireframe={wireframe}
         />
       )}
+
+      {/* Blades ride on top of the march rather than replacing it: a gap in blade
+          coverage over bare-looking ground would show where the concealment field
+          counts a target hidden (docs/08 §8 invariant 6). Rendered here rather than
+          inside the terrain group because the mesh needs no transform at all. */}
+      {bladeKit && grass && <primitive object={bladeKit.mesh} />}
 
       {/* Scope mode promotes the contrast ladder into resettable shootable targets. */}
       {(BENCH.targets || (scopeDemo && !FPS_DEBUG.impactTest)) && heightfield && (

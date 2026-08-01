@@ -261,40 +261,56 @@ export const GRASS_FADE_END = 1100;
 // This is the FIRST dial to turn if the layer costs too much, and it is a pool rather
 // than a blade count: instances that fail the existence test collapse to a degenerate
 // triangle, so the drawn count is always lower and moves with the canopy.
-export const GRASS_BLADE_COUNT = 4000;
-// Radius of the camera-following disc, metres.
 //
-// §4.4 left this open between §4.2's 0-15 m and the 28 m where columns go sub-pixel.
-// 12 m is chosen because the mechanic this layer serves — reading a gap through grass
-// while prone — is decided in the first two metres of the ray, and because the near
-// bias below already concentrates instances there. At 4,000 over a 12 m disc the
-// AVERAGE is ~9 blades/m², but the near bias makes the first metres several times
-// denser than that and the rim correspondingly sparser.
-export const GRASS_BLADE_RADIUS = 12;
-// Radial placement exponent: r = radius * u^this, u uniform in [0,1).
+// 30,000, not the 4,000 docs/03 §4.4 proposed, and the difference is a MEASUREMENT
+// rather than a preference. §4.4 sized the layer small on the assumption that blades
+// are an expensive silhouette accent over a march that already covers the ground. They
+// are not: measured prone at (-375, 787) with the vsync cap escaped (?dpr=2&steps=32),
+// 4,000 blades cost 0.19 ms and 40,000 cost 1.46 ms against a 10.45 ms baseline —
+// about 0.04 ms per thousand, linear, and dominated by nothing in particular.
 //
-// 0.5 is the textbook uniform-over-a-disc sampling and is the WRONG default here —
-// it puts most instances near the rim, which is exactly where they are least useful
-// and where they are about to be thinned away anyway. 1.0 gives density proportional
-// to 1/r, which over-concentrates at the eye. 0.75 splits them.
-export const GRASS_BLADE_NEAR_BIAS = 0.75;
-// Distance at which stochastic thinning starts, metres. It ends at the field radius
+// Buying density with count is what lets the existence test below stay honest. At 4,000
+// the canopy probability had to be square-rooted to make blades visible at all on this
+// map; at 30,000 the literal rule works and the fudge is gone. See docs/09 §0.2.
+export const GRASS_BLADE_COUNT = 30000;
+// Half-extent of the camera-following field, metres. The field is a SQUARE lattice of
+// side 2x this, one blade per cell, jittered inside its own cell.
+//
+// A lattice rather than a random scatter, and that choice forces this number. The
+// per-blade random has to be derived from the WORLD cell so a blade keeps its identity
+// when the field wraps; that makes the pattern exactly stationary in world space, and
+// it also makes camera-relative density impossible — near-biased placement means the
+// pattern must change as you move, which is the thing being ruled out. So density is
+// uniform inside the field and the near bias comes from choosing a modest extent.
+//
+// 6 m against §4.2's 0-15 m: the mechanic this serves — reading a gap through grass
+// while prone — is decided in the first two metres of the ray, and the march still
+// draws full-coverage grass beyond the field, so the edge costs nothing. At 4,000 over
+// a 12 m square that is a 0.19 m cell and ~28 blades/m² everywhere in the field, where
+// 4,000 over §4.4's 15 m suggestion would have given 6/m². Reach is the thing to trade
+// for density here, and the sweep in the plan's task 11 is where that gets settled.
+export const GRASS_BLADE_RADIUS = 6;
+// Distance at which stochastic thinning starts, metres. It ends at the field extent
 // by construction — there are no instances beyond it — so there is deliberately no
 // second "end radius" constant to drift out of agreement with the first.
-export const GRASS_BLADE_THIN_START = 4;
+export const GRASS_BLADE_THIN_START = 2.5;
 // Keep probability at the rim. Not zero: the field edge must never be a place where
 // blades stop, only a place where they are rare, or the disc boundary reads as a ring.
 export const GRASS_BLADE_KEEP_MIN = 0.12;
 // Shaping exponent applied to the raw canopy value before it is used as the existence
-// probability. 1.0 is the literal reading of "the canopy value IS the probability".
+// probability. 1.0 is the literal reading of docs/03 §4.4: the canopy value IS the
+// probability, so bare ground grows nothing and short canopy grows sparse blades.
 //
-// 0.5 instead, because the literal reading is too dark on this map: Green Mile's
-// canopy has a MEDIAN of raw 28 of 255 (docs/06 §7.1), so a linear probability
-// rejects ~89% of instances over typical ground and the layer would be invisible
-// exactly where a player spends their time. A square root lifts the middle while
-// leaving zero at zero — the 11.2% of the map with no canopy still grows nothing,
-// which is the property that matters and the one to check with `?canopyall=0`.
-export const GRASS_BLADE_DENSITY_GAMMA = 0.5;
+// It briefly shipped at 0.5 to compensate for a small instance pool — Green Mile's
+// canopy has a MEDIAN of raw 28 of 255 (docs/06 §7.1), so the literal rule rejects
+// ~89% of instances over ordinary ground and 4,000 blades became about twenty on
+// screen. Measuring the layer's real cost removed the need: density now comes from the
+// count, which is nearly free, rather than from bending the field's own meaning.
+//
+// Leave it at 1.0. Below 1.0 this layer starts describing a canopy the march does not
+// draw and the concealment query does not know about, which is the third-representation
+// failure docs/03 §4.4 names as its one hard constraint.
+export const GRASS_BLADE_DENSITY_GAMMA = 1.0;
 // Blade width at the root, metres, at height scale 1. About 1.7 GRASS_CELL columns,
 // so a blade is a little wider than the columns it stands among — wide enough to
 // read as an edge against the sky, narrow enough not to be a plank. Scales with the
@@ -306,7 +322,21 @@ export const GRASS_BLADE_WIDTH = 0.05;
 // the height seam this layer exists to hide. Kept as a constant only so the seam can
 // be made visible on purpose when checking that the two layers agree.
 export const GRASS_BLADE_HEIGHT_SCALE = 1.0;
-// Rings minus one along the blade. 3 segments is 4 rings, 12 vertices, 12 triangles;
+// Base-to-tip brightness at a BLADE's root; the tip gets 2 - this. The march's own
+// columns use GRASS_SHADE_BASE (0.78, a 0.44 swing); blades get a wider one.
+//
+// Not a lighting model and not a brightening. A blade only reads as a blade when it
+// separates from the canopy mass behind it, and what separates it is CONTRAST along
+// its own length: dark at the root where it sits inside the mass, bright at the tip
+// where a real blade catches sky. Widening the ramp buys that while keeping the colour
+// anchored to the colormap, so a blade over a dark patch is still dark.
+//
+// 0.55 gives a 0.9 swing, roughly double the march's. Raising it much past that starts
+// clipping to white in already-bright colormap patches and implies a light source the
+// rest of this renderer does not have — every material here is unlit because the
+// colormap is pre-shaded. Sweep it with `?bladeshade=`.
+export const GRASS_BLADE_SHADE_BASE = 0.55;
+// Rings minus one along the blade. 3 segments is 4 rings, 10 vertices, 10 triangles;
 // the reference uses 5, but its blades are a metre tall in isolation while ours are
 // ankle height over most of this map and cannot show that much curvature.
 export const GRASS_BLADE_SEGMENTS = 3;
@@ -315,6 +345,33 @@ export const GRASS_BLADE_SEGMENTS = 3;
 // degree V that reads as a rounded modern blade. 0.3 keeps DF2's near-flat columnar
 // identity while still catching a different shade from each half.
 export const GRASS_BLADE_V_DEPTH = 0.3;
+// Resting lean, as a fraction of the blade's own height, peak to peak. Every blade
+// gets a fixed bend in a fixed direction so a windless field is not a bed of nails;
+// the reference's equivalent is (rand-0.5)*2.5 against a unit-height blade, which is
+// far more lean than DF2's near-vertical striations can carry.
+export const GRASS_BLADE_BEND = 0.35;
+// Twist of the cross-section about the blade's own axis, radians at the tip, peak to
+// peak. Stops a near-flat blade reading as a flat card when seen edge-on. Straight
+// from the reference (seed * 2.5 * uv.y), which is one of the few of its numbers that
+// transfers unchanged, since it is about the primitive rather than about the field.
+export const GRASS_BLADE_TWIST = 2.5;
+// Tip displacement in metres per metre of blade height, per m/s of wind, before the
+// noise term scales it down. At the default 4 m/s that is a tip lean of ~0.24 of the
+// blade's height, which reads as a stiff breeze without the field looking liquid.
+//
+// The DIRECTION is not tunable and must not become so: it comes from
+// BallisticEnvironment.windVelocity, which drifts bullets, so grass is the instrument
+// a shooter reads for windage (docs/03 §4.4). A free direction here would make the
+// instrument lie.
+export const GRASS_BLADE_WIND_GAIN = 0.06;
+// Metres of noise lattice per metre of world, i.e. the size of a gust. 0.48 from the
+// reference: gusts about 2 m across, which is the scale that reads as air moving over
+// grass rather than as the whole field breathing.
+export const GRASS_BLADE_NOISE_SCALE = 0.48;
+// How fast the noise field drifts, in lattice units per second per m/s of wind. At
+// 4 m/s and the scale above this walks a gust across the ground at ~0.5 m/s — slower
+// than the wind itself, which is correct: what travels is the gust pattern, not the air.
+export const GRASS_BLADE_GUST_RATE = 0.06;
 
 // --- Atmosphere --------------------------------------------------------------
 export const SKY_COLOR = "#9fb8cf";

@@ -56,6 +56,18 @@ export interface BenchConfig {
   bladeCount?: number;
   /** Blade field radius in metres; the second dial, and it moves density with it. */
   bladeRadius?: number;
+  /**
+   * Blade debug view. 0 normal, 1 keep mask, 2 distance.
+   *
+   * The keep mask is the one that answers "are we wasting instances": rejected blades
+   * normally collapse to a degenerate triangle and vanish, so the pool being 90%
+   * discarded looks identical to the pool being the right size. Mode 1 draws every
+   * instance regardless and colours it — green kept, magenta rejected — so the waste
+   * is visible rather than inferred.
+   */
+  bladeDebug?: number;
+  /** Blade base-to-tip contrast; the tip gets 2 - this. Sweeps how much they read. */
+  bladeShade?: number;
   /** Per-texel share of the baked height field. Baked, so reload to change. */
   strand?: number;
   /** Longest span a ray searches, metres. Sets step size for grazing rays. */
@@ -124,6 +136,8 @@ function parse(): BenchConfig {
       blades,
       bladeCount: num("bladecount"),
       bladeRadius: num("bladeradius"),
+      bladeDebug: num("bladedebug"),
+      bladeShade: num("bladeshade"),
     };
   }
 
@@ -140,6 +154,8 @@ function parse(): BenchConfig {
     blades,
     bladeCount: num("bladecount"),
     bladeRadius: num("bladeradius"),
+    bladeDebug: num("bladedebug"),
+    bladeShade: num("bladeshade"),
     strand: num("strand"),
     maxspan: num("maxspan"),
     // Default ON under bench — see the field's note. `?canopyall=0` opts out.

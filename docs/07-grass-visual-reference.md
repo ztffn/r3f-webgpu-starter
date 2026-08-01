@@ -266,6 +266,30 @@ concealment work must check the verdict before believing the pixel counts.
 
 ## 9. Two reported artifacts, diagnosed
 
+### Prone and crouch not being concealed — CLOSED
+
+The headline gameplay failure: lying in grass twice your eye height, the horizon stayed fully
+visible. Forcing the canopy to 1.2 m everywhere — nearly four times prone eye height — changed
+nothing, which is what ruled out canopy height as the cause.
+
+**What it was.** Not missing fragments and not short grass. The entry rule took the ceiling
+fragment as where the ray *entered* the canopy, which is only true coming from outside. Inside
+the volume that fragment is where the ray **leaves** through the roof, hundreds of metres away
+for a near-level ray, so the march began at the exit and stepped over the metre of canopy around
+the player's head. The hit-distance view read **120-300 m** across the upper frame: the grass on
+screen was grass hundreds of metres away.
+
+Fixed by giving rays that start inside the volume their own proxy — a single camera cap, entry
+at the near clip (`08` §7). Prone and crouch are now properly obstructed, with a correct grass
+horizon, and it cost nothing: 33.3 ms to 8.3 ms.
+
+**Method note worth keeping.** Three wrong explanations were proposed and discarded before this
+one, and each was killed by a measurement rather than an argument: canopy height (killed by
+`?canopyall=1`), missing fragments (killed by the COLUMNS view, once its own miss-depth bug was
+fixed), and the volume being an open surface (killed by the hit-distance reading, which showed
+fragments existed and were simply marching the wrong interval). **The hit-distance view is the
+one that answers "where is the march looking", and it is the question that mattered.**
+
 ### "Floating grass" along ridgelines — OPEN, cause not yet isolated
 
 A band of grass appears above ridge silhouettes with sky beneath it, detached

@@ -149,6 +149,42 @@ stretch heights) is the gating asset:
 to **build and validate the entire Phase 2 grass + Phase 3 concealment pipeline with zero
 base-game files.**
 
+### 7.1 Green Mile's substituted canopy is ANKLE HEIGHT — measured
+
+Decoded from `public/assets/terrain/gmile/grass.png` (1024², one byte per texel), converted
+with the shipped `GRASS_SCALE` of 0.0047 m per raw unit:
+
+| | raw | metres |
+|---|---|---|
+| 25th percentile | 10 | 0.047 |
+| **median** | **28** | **0.132** |
+| 75th percentile | 44 | 0.207 |
+| 95th percentile | 72 | 0.338 |
+| 99th percentile | 116 | 0.545 |
+| maximum | 255 | 1.199 |
+
+Mean 30.7 (0.144 m). **11.2% of the map has no canopy at all.**
+
+Against the stance eye heights in `FlyControls.STANCE_EYE` — 1.7 m standing, 0.95 m crouched,
+0.35 m prone — **crouch is above essentially all the grass on this map and prone is above 95%
+of it.** Concealment cannot work here regardless of how good the renderer is, and no amount of
+shader work will change that.
+
+`GRASS_SCALE` was calibrated so raw **255** maps to 1.2 m, staying under standing eye height
+(`08` §8 invariant 4). But the field almost never approaches 255, so the TYPICAL column lands
+at a tenth of the intended height. The invariant constrains the wrong end of the distribution.
+A straight linear rescale cannot fix it either: pushing the median to concealment height sends
+the maximum to eight metres.
+
+**This is a substituted stand-in** (`grass.assets.substituted: true`, derived from the
+colormap), so it says nothing about what real DF2 canopy looked like. Do not recalibrate
+`GRASS_SCALE` against it. Prepare **egypt** or **R66/blizzard/vul001**, which ship genuine
+`detail_elev` strips, and measure the real distribution first.
+
+Also worth knowing: the long-standing benchmark vantage `x=5&z=375` sits on a texel with raw
+**0**. Every grass measurement taken there was a march over bare ground — which is why
+`?bench=1` now forces full canopy (`09` §0).
+
 **Still needed for the marquee grass maps specifically:** `dfdg1_dm` / `dfdg1_cm` (and
 `dfg1_cm`) — the standard DF2 grass detail set, which lives in a **base-game `.pff`** (not in
 either modding installer).

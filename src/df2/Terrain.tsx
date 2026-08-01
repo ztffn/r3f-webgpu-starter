@@ -286,27 +286,38 @@ export function Terrain({
       slot.mesh.visible = slot.lod >= 0;
 
       // --- grass shell ------------------------------------------------------
-      // Always LOD 0, and skirtless. The shell is lifted per vertex by the canopy
-      // at that vertex, so at LOD 1-2 spacing (4-8 m) the lift was interpolated
-      // across quads far coarser than the 2 m canopy texel: it clipped column tops
-      // where the canopy peaked between vertices and overhung bare ground where it
-      // dipped, which is the floating-grass fringe in docs/07 §9. Pinning the shell
-      // to LOD 0 makes its vertex spacing match the canopy texel, and also stops
-      // the artifact changing as the terrain chunk switches LOD underneath it.
+      // THE CHUNK'S OWN LOD, and skirtless — the shell must stand on the same surface
+      // the march reads and the terrain draws.
+      //
+      // This was pinned to LOD 0 while the march read the full-resolution heightfield,
+      // which paired correctly at the time. Once the march moved onto the mesh's LOD
+      // lattice (heightTexture.ts) that pin became a NEW disagreement, and a worse one:
+      // the shell entered the volume at the LOD-0 surface plus canopy while the march
+      // measured ground on the LOD-k surface, so wherever the coarse surface sits above
+      // the fine one by more than the canopy is tall, the entry point is already
+      // underground. The march's first sample then fails its below-terrain test and
+      // breaks immediately, and the fragment misses. That showed as bald slopes with the
+      // canopy forced on everywhere — fragments present, hit mask empty.
+      //
+      // Tracking the chunk LOD puts shell, mesh and march on one surface, which is the
+      // whole point of the change. The original reason for the pin — canopy lift being
+      // interpolated across quads coarser than the 2 m canopy texel — is handled by
+      // CANOPY_MARGIN rather than by resolution, since the shell only has to ENCLOSE the
+      // volume; the march re-evaluates the true column height per pixel regardless.
       if (slot.grass) {
         const want = grassEnabled && dist < grassCull;
-        if (want && slot.grassLod !== 0) {
-          const hit = cached(cx, cz, 0, false);
+        if (want && slot.grassLod !== lod) {
+          const hit = cached(cx, cz, lod, false);
           if (hit) {
             slot.grass.geometry = hit;
-            slot.grassLod = 0;
+            slot.grassLod = lod;
           } else if (mayBuild) {
-            slot.grass.geometry = buildGeometry(cx, cz, 0, false);
-            slot.grassLod = 0;
+            slot.grass.geometry = buildGeometry(cx, cz, lod, false);
+            slot.grassLod = lod;
             mayBuild = performance.now() < deadline;
           }
         }
-        slot.grass.visible = want && slot.grassLod === 0;
+        slot.grass.visible = want && slot.grassLod >= 0;
 
         // The floor rides on the ceiling's geometry and its readiness — same chunk,
         // same LOD 0 cache entry — so it needs no build budget of its own.

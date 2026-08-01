@@ -262,17 +262,21 @@ export const GRASS_FADE_END = 1100;
 // than a blade count: instances that fail the existence test collapse to a degenerate
 // triangle, so the drawn count is always lower and moves with the canopy.
 //
-// 30,000, not the 4,000 docs/03 §4.4 proposed, and the difference is a MEASUREMENT
+// 250,000, not the 4,000 docs/03 §4.4 proposed, and the difference is a MEASUREMENT
 // rather than a preference. §4.4 sized the layer small on the assumption that blades
-// are an expensive silhouette accent over a march that already covers the ground. They
-// are not: measured prone at (-375, 787) with the vsync cap escaped (?dpr=2&steps=32),
-// 4,000 blades cost 0.19 ms and 40,000 cost 1.46 ms against a 10.45 ms baseline —
-// about 0.04 ms per thousand, linear, and dominated by nothing in particular.
+// are an expensive silhouette accent over a march that already covers the ground.
+// Measured prone at (-375, 787) with the vsync cap escaped (?dpr=2&steps=32), against a
+// 10.45 ms baseline: 4,000 cost 0.19 ms, 40,000 cost 1.46 ms, 250,000 cost 2.7 ms.
+//
+// SUBLINEAR, and that is the useful part — 6x the blades for 1.8x the cost between the
+// last two. Fragment work saturates once blades occlude one another, so past a few tens
+// of thousands you are only paying vertex cost. Count is therefore a cheap dial and
+// reach is the expensive one.
 //
 // Buying density with count is what lets the existence test below stay honest. At 4,000
 // the canopy probability had to be square-rooted to make blades visible at all on this
-// map; at 30,000 the literal rule works and the fudge is gone. See docs/09 §0.2.
-export const GRASS_BLADE_COUNT = 30000;
+// map; at this count the literal rule works and the fudge is gone. See docs/09 §0.2.
+export const GRASS_BLADE_COUNT = 250000;
 // Half-extent of the camera-following field, metres. The field is a SQUARE lattice of
 // side 2x this, one blade per cell, jittered inside its own cell.
 //
@@ -283,13 +287,17 @@ export const GRASS_BLADE_COUNT = 30000;
 // pattern must change as you move, which is the thing being ruled out. So density is
 // uniform inside the field and the near bias comes from choosing a modest extent.
 //
-// 6 m against §4.2's 0-15 m: the mechanic this serves — reading a gap through grass
-// while prone — is decided in the first two metres of the ray, and the march still
-// draws full-coverage grass beyond the field, so the edge costs nothing. At 4,000 over
-// a 12 m square that is a 0.19 m cell and ~28 blades/m² everywhere in the field, where
-// 4,000 over §4.4's 15 m suggestion would have given 6/m². Reach is the thing to trade
-// for density here, and the sweep in the plan's task 11 is where that gets settled.
-export const GRASS_BLADE_RADIUS = 6;
+// PAIRED WITH THE COUNT, through the cell size they imply: cell = 2*radius/sqrt(count).
+// There is a floor worth knowing about — once the blade cell is finer than GRASS_CELL,
+// neighbouring blades sit in the SAME grass column, so they share one height and one
+// tone and stop adding variation. Extra blades past that point buy overlap, not detail.
+//
+// At 250,000 a 6 m extent gives a 0.024 m cell, already under the 0.03 m column; 12 m
+// gives 0.048 m, comfortably above it, ~430 blades/m², and twice the reach. That is why
+// the count going up moved this with it rather than leaving it alone: at a fixed count
+// the two trade against each other, but the count is the cheap axis (see above) and the
+// cell floor is what decides where the spare instances should go.
+export const GRASS_BLADE_RADIUS = 12;
 // Distance at which stochastic thinning starts, metres. It ends at the field extent
 // by construction — there are no instances beyond it — so there is deliberately no
 // second "end radius" constant to drift out of agreement with the first.
@@ -357,6 +365,29 @@ export const GRASS_BLADE_SHADE_BASE = 0.55;
 // 1.45 x 2.0 = 2.9, and tips are a small fraction of the covered pixels. Read the two
 // constants together or neither means anything. Sweep it with `?bladelift=`.
 export const GRASS_BLADE_LIFT = 2.0;
+// --- blades pushed aside by the player ---------------------------------------
+// Grass within this radius of the eye leans away from it, metres.
+//
+// The cheap half of the crushed-grass work in docs/03 §4.4 item 4, and it needs none of
+// the machinery: the push centre is the camera, which the vertex stage already has, so
+// there is no render target, no history and no per-frame upload. What it does NOT do is
+// persist — this is grass parting around you, not a trail behind you. The trail needs
+// the 512² field precisely because it has to remember where you have been.
+//
+// Two things it buys immediately. Crawling through grass reads as displacing it rather
+// than sliding through a static field, and the weapon stops intersecting blades that
+// would otherwise stand up through it at the eye.
+//
+// 0.9 m is roughly a prone soldier's width plus the weapon in front of them.
+export const GRASS_BLADE_PUSH_RADIUS = 0.9;
+// How far a blade at the centre leans, as a fraction of its own height.
+//
+// FAIRNESS BOUND, not a look dial. Grass pushed away from the eye is grass the player
+// can see through, so a large value here lets them open a window the concealment field
+// does not know about — the wrong direction for docs/08 §8 invariant 6, which the rest
+// of this layer is careful about. Keep it at "parting", not "clearing"; if it ever
+// becomes large enough to see through, the push has to feed grassHeightField too.
+export const GRASS_BLADE_PUSH_STRENGTH = 0.55;
 // Rings minus one along the blade. 3 segments is 4 rings, 10 vertices, 10 triangles;
 // the reference uses 5, but its blades are a metre tall in isolation while ours are
 // ankle height over most of this map and cannot show that much curvature.

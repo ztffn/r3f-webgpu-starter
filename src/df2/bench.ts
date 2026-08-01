@@ -70,6 +70,10 @@ export interface BenchConfig {
   bladeShade?: number;
   /** Blade brightness against the march behind them. The "do they read" dial. */
   bladeLift?: number;
+  /** How far blades lean away from the player, as a fraction of blade height. */
+  bladePush?: number;
+  /** Radius of that lean, metres. */
+  bladePushRadius?: number;
   /** Per-texel share of the baked height field. Baked, so reload to change. */
   strand?: number;
   /** Longest span a ray searches, metres. Sets step size for grazing rays. */
@@ -140,6 +144,8 @@ function parse(): BenchConfig {
     bladeDebug: num("bladedebug"),
     bladeShade: num("bladeshade"),
     bladeLift: num("bladelift"),
+    bladePush: num("bladepush"),
+    bladePushRadius: num("bladepushradius"),
   };
 
   if (q.get("bench") !== "1") {

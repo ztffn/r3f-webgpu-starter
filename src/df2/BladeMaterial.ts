@@ -43,6 +43,10 @@ export interface BladeMaterialOptions {
   twist: number;
   /** Tip displacement per metre of height per m/s of wind. */
   windGain: number;
+  /** Radius within which blades lean away from the player, metres. */
+  pushRadius: number;
+  /** Lean at the centre of that radius, as a fraction of blade height. */
+  pushStrength: number;
   /** Noise lattice units per metre — the size of a gust. */
   noiseScale: number;
   /** Noise drift in lattice units per second per m/s of wind. */
@@ -92,6 +96,8 @@ export function createBladeMaterial(opts: BladeMaterialOptions): BladeMaterial {
     bend,
     twist,
     windGain,
+    pushRadius,
+    pushStrength,
     noiseScale,
     gustRate,
     toneVariation,
@@ -131,6 +137,8 @@ export function createBladeMaterial(opts: BladeMaterialOptions): BladeMaterial {
   );
   const uWindSpeed = uniform(windSpeedValue);
   const uWindGain = uniform(windGain);
+  const uPushRadius = uniform(pushRadius);
+  const uPushStrength = uniform(pushStrength);
   const uNoiseScale = uniform(noiseScale);
   const uGustRate = uniform(gustRate);
   const uTone = uniform(toneVariation);
@@ -277,11 +285,34 @@ export function createBladeMaterial(opts: BladeMaterialOptions): BladeMaterial {
     turned.z.add(uWindDir.y.mul(windBend))
   );
 
+  // --- pushed aside by the player ---------------------------------------------
+  // Radially away from the camera, which IS the player on foot — so this needs no
+  // uniform, no render target and no per-frame update: the vertex stage already has
+  // `cameraPosition` because every blade places itself from it.
+  //
+  // Root-anchored and tip-weighted like the wind, so grass bends away rather than
+  // sliding, and shortened by the same arc-length compensation, or a leaning blade
+  // stretches. Deliberately has NO MEMORY — this is grass parting around you. A trail
+  // that stays behind you is a different feature and needs a field that remembers
+  // (docs/03 §4.4 item 4).
+  const fromPlayer = bladeXZ.sub(camXZ);
+  const playerDist = fromPlayer.length();
+  const pushDir = fromPlayer.div(playerDist.max(float(1e-3)));
+  // 1 at the eye, 0 at the radius. Edges ascending then inverted — smoothstep with
+  // descending edges is indeterminate in both the GLSL ES and WGSL specs.
+  const pushFall = playerDist.smoothstep(float(0), uPushRadius).oneMinus();
+  const push = pushFall.mul(uPushStrength).mul(t.pow(1.8)).mul(height);
+  const parted = V3(
+    blown.x.add(pushDir.x.mul(push)),
+    blown.y.sub(push.abs().mul(0.3)),
+    blown.z.add(pushDir.y.mul(push))
+  );
+
   // Rejected blades COLLAPSE rather than discarding fragments: every vertex lands on
   // the base point, so the triangles have zero area and cost no fill at all. Discarding
   // in the fragment stage would pay for the fragments before killing them.
   const base = V3(bladeXZ.x, column.ground, bladeXZ.y);
-  const world = base.add(blown.mul(drawn));
+  const world = base.add(parted.mul(drawn));
 
   // --- colour: from the colormap, never from a palette ------------------------
   // Sampled at the blade's own position and modulated by the same per-column tone the

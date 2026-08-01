@@ -39,7 +39,7 @@ Both tile **infinitely** — DF2 terrain has no edges (`06` §10).
 | Phase 0 — extraction | core done: PFF3 unpack, `.trn` parse, PCX decode, canopy bake |
 | Phase 1 — terrain | done: chunked LOD, skirts, analytic normals, TSL biome material, infinite tiling |
 | Phase 1.5 — real map | done: Green Mile renders from extracted assets |
-| Phase 2 — grass | columnar fragment march, bracket-and-bisect. **60 fps target met** (8.3 ms standing and prone at Green Mile, vsync-capped). Seven defects closed this session (`07` §9); crest layering and crouch/prone quality remain |
+| Phase 2 — grass | columnar fragment march, bracket-and-bisect. **60 fps target met** — 8.3 ms standing AND prone at Green Mile with the canopy forced on, both vsync-capped, so true cost is lower and unknown. Prone/crouch concealment now works (`07` §9). Open: crest layering, near-field blockiness, ridgeline floating grass, and the canopy field being ankle height (`06` §7.1) |
 | Phase 3 — concealment | demonstrated in the test rig (`07` §8), not yet a gameplay system |
 | Phase 4 — game | not started |
 
@@ -91,6 +91,7 @@ Everything below `src/df2/` is the Phase-1 spike. The target layout is `05` §7
 | `components/GameCanvas.tsx` | async WebGPU init, camera planes | the scene |
 | `components/Hud.tsx` | all UI | rendering internals |
 | `grassJitter.ts` | CPU bake of the per-column jitter/tone field | rendering |
+| `heightTexture.ts` | elevation texture + **point-decimated** mip chain matching the mesh's LOD lattice | chunk placement |
 | `bench.ts` | `?bench=1` URL overrides, `window.__perf` | anything gameplay |
 | `components/GrassDebug.tsx` | live grass sliders; writes `uniform.value` directly | material internals |
 | `fps/WeaponPrototype.tsx` | first-person rig, weapon animation, picture-in-picture optic and reticle | terrain, grass |
@@ -338,6 +339,9 @@ Anything else reading `info` per frame needs the same treatment.
 | `GRASS_STEPS` | 32 | **compiled ceiling only.** `?steps=` raises it; the slider sweeps up to it |
 | `GRASS_STEPS_RUN` | 12 | what actually runs. Was 96 — a stale unit from the pre-bracket march, costing 8x (`09` §3.1.0) |
 | `GRASS_MAX_SPAN` | 28 | lowered from 48 for the crest layering. **Trades reach, and touches invariant 6** — see `09` §3.1 and the DDA addendum |
+| `GRASS_NEAR_CLIP` | 1.2 | a REQUEST, not a hard floor — capped at half the ray's slab crossing, or it starts the march past the ground and blanks the near field prone (§8 invariant 6) |
+| `insideSpan` | 12 | reach for a ray starting inside the canopy. Earned nothing on frame time; kept because such a ray genuinely needs no more, and it tightens sample spacing |
+| `CAP_DISTANCE` | 0.2 m | `Terrain.tsx`. How far ahead of the camera the cap sits; only has to clear `CAMERA_NEAR` |
 | `GRASS_FADE_START/END` | 700 / 1100 | scaled by zoom in-shader |
 | `CHUNK_COUNT` | 8 | → 256 m chunks |
 | `VIEW_RADIUS_MAX_CHUNKS` | 12 | derived per-frame from `FOG_FAR`, capped here |
@@ -365,7 +369,44 @@ do: the compiled step ceiling (`?steps=`) and the bisection count (`?refine=`).
 
 `CANOPY_MARGIN` (exported from `GrassMaterial.ts`) is the 1.04 shell lift. It is read in two
 places that must agree — the vertex lift, and `Terrain.tsx`'s inside-canopy test that decides
-whether the grass floor proxy is drawn. Do not re-inline it as a literal.
+whether the grass cap is drawn. Do not re-inline it as a literal.
+
+### The two grass proxies, and why there are exactly two
+
+The march only runs where something rasterises a fragment, and the entry distance depends on
+whether the ray was already inside the volume.
+
+| Proxy | Geometry | Entry | Drawn when |
+|---|---|---|---|
+| **ceiling** | terrain lifted to local canopy, chunk LOD, **FrontSide** | the fragment | always, within the grass radius |
+| **cap** | one quad on the camera (`CAP_DISTANCE` = 0.2 m) | the near clip | only while the eye is inside the canopy |
+
+Front faces only on the ceiling is load-bearing, not an optimisation. Its underside is where a
+ray LEAVES the volume, and treating that as an entry is what made prone read hits at 120-300 m.
+The cap owns that case, with **one fragment per pixel** — which is the whole point. The floor
+proxy it replaced answered the same case per chunk, so one pixel marched several times over
+(33.3 ms vs 8.5 ms).
+
+The cap is a **rasterisation trigger, not something visible.** It has no appearance of its own;
+coverage, gaps and how far you see through the canopy are all still decided per pixel by the
+march. It lives in the terrain group and is moved onto the camera each frame — NOT parented to
+the camera, because R3F's camera is not in the scene graph and a child of it never draws.
+
+**They are not strictly exclusive, and the gap is bigger than it sounds.** "Drawn when the eye
+is inside the canopy" means the map-GLOBAL `canopyMax`: `Terrain.tsx` has the terrain
+heightfield but not the canopy field, so it cannot know the LOCAL height and errs toward
+drawing. Wherever local canopy < eye < global max, the eye is above the local ceiling, that
+ceiling is front-facing, and BOTH proxies march the pixel. With Green Mile's 0.13 m median
+against a 1.199 m maximum (`06` §7.1) that is most of the map at crouch and prone. The picture
+stays right — the cap searches the near interval and wins the depth test — but the second march
+is real and it is **expensive: 9.7 ms against 10.95 ms without it**, crouch on the real canopy
+at dpr 2 (`09` §0.1). At shipped settings it is invisible because everything sits at the 120 Hz
+vsync cap, which is where a cost like this hides. Not all of it is waste — the cap also does the
+near-field march nothing else does — and the fix candidate is the per-pixel cede test that was
+deleted with the floor proxy, re-keyed on the LOCAL canopy. Filed, not attempted.
+
+`heightTexture.ts` builds the elevation texture with a point-decimated mip chain so the march
+can follow the surface the mesh drew. See §11's "three surfaces" trap.
 
 ---
 
@@ -391,13 +432,45 @@ Nothing throws when these break. Check them after touching `config.ts`.
    queried analytically against the field (`04` §2), so a target prone in distant grass counts
    as concealed no matter what the screen draws. Any rendering limit that silently drops distant
    grass therefore hands the player who triggers it free vision of concealed targets — and the
-   cheapest way to trigger it is to go prone, which is also the strongest position. Two limits
+   cheapest way to trigger it is to go prone, which is also the strongest position. Three limits
    have already done exactly this:
    - `sEnter = inside ? nearClip : fragDistance` with `hitS <= sEnter + span` and
      `span <= GRASS_MAX_SPAN` put a hard 49 m ceiling on every hit on screen the moment the eye
      entered the canopy. Fixed by computing the entry per fragment and searching a near interval
      then a far one (`07` §9).
    - The lifted shell had no floor, so nothing below the horizon was marched at all (`07` §9).
+   - **`GRASS_NEAR_CLIP` as a flat floor on the march start.** A floor-proxy fragment's own
+     ground point is `fragDist` away, so its ray is inside the slab over
+     `[fragDist - span, fragDist]` and nowhere else. Clamping the start up to a flat 1.2 m put
+     the WHOLE interval underground whenever the ground was nearer than that: the first sample
+     tested below-terrain and broke, so the fragment missed regardless of the grass standing
+     there. Prone at 0.35 m AGL every ray steeper than ~16 degrees crosses the ground inside
+     1.2 m, so this was a solid bare band across the near field — fairness-INVERTED, since prone
+     in grass you could see bare ground where the field counts a target concealed, the exact
+     opposite of "concealed means blind" (§11). Fixed by capping the clip at the midpoint of the
+     slab crossing, so half the interval is always searched and the clip still applies in full at
+     any normal range.
+
+     Found exactly the way this section prescribes, and worth noting as method: the hit mask
+     prone, with `?canopyall=1` forcing the canopy on. The band survived full canopy unchanged,
+     which is what separated "the march is broken here" from "no grass grows here" — on Green
+     Mile's patchy stand-in canopy those two look identical in a normal render.
+   - **Taking the ceiling fragment as the ENTRY when the ray started inside the volume.** Prone
+     or crouched the eye is already in the canopy, so the ceiling fragment the ray reaches is
+     where it LEAVES through the roof — hundreds of metres away for a near-level ray. The march
+     therefore began at the exit and never tested the grass around the player's head. Measured:
+     the hit-distance view read 120-300 m across the upper frame. Fixed by the cap (§7).
+
+   **THE PATTERN, which is the useful part.** Every one of these is the same mistake wearing a
+   different hat: **the march looking at the wrong place along the ray.** Not a sampling problem,
+   not a canopy problem, not a reach problem — an ENTRY problem. Four separate bugs this session
+   reduced to it. When grass is missing, establish *where the march is looking* before anything
+   else; the hit-distance view answers that directly and none of the others do.
+
+   The corollary is that the entry rule accumulated a special case per discovery, each keyed on
+   something different — the camera, the proxy, the facing. That is why it kept being wrong. It
+   is now two rules: outside the volume you enter at the fragment, inside it you enter at the eye
+   and the cap is what tells you which you are.
 
    **`GRASS_FADE_END` is the remaining one and it is a live design question, not a bug.** Beyond
    it no shell is drawn, so a target prone in grass at 1200 m stands on bare colormap while the
@@ -427,18 +500,33 @@ traversal** (Amanatides-Woo) bounded by an analytic exit: it cannot step over a 
 always finds the true nearest vertical face — which is also how Voxel Space did it. `09` §3.1
 already specifies the analytic exit half; only the entry was ever built.
 
+**Crouch and prone NOT BEING BLINDED — CLOSED.** The eye inside the canopy saw straight to
+the horizon, and forcing the canopy to full height everywhere changed nothing. It was never a
+canopy-height problem and never a missing-fragment problem: the ceiling fragment a ray reaches
+from inside the volume is where it **leaves** through the roof, and the entry rule took that as
+where it *entered*, so the march started at the exit. Hit-distance view prone read 120-300 m
+across the upper frame — the grass being drawn was grass hundreds of metres away while the
+canopy around the player's head was stepped straight over. Fixed by the cap (§7).
+
+**Near-field grass is blocky — OPEN.**
+Up close a column is a large flat rectangle: `GRASS_CELL` is a fixed 0.03 m in WORLD space, so
+it is correct at range and enormous at arm's length (~22 px at 1.2 m, ~90 px at 0.3 m). One
+colour per column is deliberate and right — it is what makes striations — but at that size it
+reads as tiling. DF2 dodged this by construction, drawing one column per SCREEN column, so its
+columns were always a pixel wide. Two candidate fixes: make the cell size track the pixel
+footprint (quantised to powers of two so columns stay world-anchored and do not swim), or hand
+the near field to the `03` §4 instanced-geometry layer, which is the agreed direction anyway.
+
 **Crouch and prone quality — OPEN.**
 Structurally the raymarch's weakest case: eye inside the volume, grazing rays, longest spans,
-coarsest sampling, and columns largest on screen. Frame time is fine (matches standing). The
-agreed direction is the `03` §4 hybrid — real instanced geometry in a small radius around the
-player, visual only, with the march still authoritative for concealment so the gameplay field
-does not fork. Separate PR.
+coarsest sampling, and columns largest on screen. Frame time is now fine (matches standing, both
+at the vsync cap). The agreed direction is the `03` §4 hybrid — real instanced geometry in a
+small radius around the player, visual only, with the march still authoritative for concealment
+so the gameplay field does not fork. Separate PR.
 
-**Uphill floor-proxy gap — OPEN, unverified.**
-Standing and looking at a slope that rises above eye level, the ceiling proxy may have no
-fragment while the `insideCanopy` gate suppresses the floor. Whether it shows as missing grass
-has not been tested. Missing grass is a fairness bug (§8 invariant 6), not a cosmetic one.
-Note the two CPU gates' justification is now stale — see the DDA addendum.
+**Uphill floor-proxy gap — GONE WITH THE FLOOR.** The floor proxy and both its CPU gates were
+deleted (§7); a single camera cap covers every ray that starts inside the volume, with no gate
+to be wrong.
 
 **Black skirt band at eye height — terrain, not grass. OPEN.**
 On foot with the camera pitched down, a flat dark plane cuts across the lower frame with a
@@ -450,7 +538,16 @@ nothing. Unexplained: the sky visible *beyond* the skirt's bottom edge — the s
 plug exactly that. Repro pose sat at `x = 0`, which is exactly a chunk boundary; compare
 against a pose 100 m inside a chunk to separate "seam" from "window edge".
 
+**Terrain swallowing grass on hillsides — CLOSED.** Whole hillsides returned no grass with the
+canopy forced on. Not the canopy, not march reach (span 28 -> 300 changed nothing) — the terrain
+MESH was drawing over the grass, proven by wireframing the terrain and watching it all reappear.
+Mesh and march read the same field but RECONSTRUCTED it differently, and there were three
+separate reconstructions in play. See §11's "three surfaces" trap for the full anatomy; all
+three are now one.
+
 **Floating grass along ridgelines. OPEN.**
+Predicted to be the same LOD disagreement with the opposite sign, and the LOD work did NOT fix
+it — recorded because that prediction was wrong and the next session should not re-spend it.
 A band of grass above ridge silhouettes with sky beneath. `debugDistance` shows it hits at mean
 428 m while neighbouring grass hits at 21 m — genuinely distant grass drawn where the near view
 shows sky. Three hypotheses ruled out by measurement. Still unexplained: 1 m of canopy at 428 m
@@ -524,6 +621,10 @@ timestamp queries are used.
 
 Each of these cost real time. They are here so they cost it once.
 
+**If you are reviewing this code, read "Looks like a bug, is not" below FIRST.** Much of this
+subsystem is deliberately counter-intuitive because the intuitive version was measured and was
+worse. A review that has not read it will propose changes that have already been tried.
+
 - **`_d.pcx` is the HEIGHTMAP** (`elev_map`), not a detail map. `_m.pcx` is the detail map.
 - **The colormap is JPEG, not TGA.** Both colormap and heightmap are 1024².
 - **Two grass "fixes" that fixed nothing.** (a) Lifting the shell by local canopy: 2390 → 2394
@@ -550,6 +651,139 @@ Each of these cost real time. They are here so they cost it once.
   several sessions as the "pale grass" artifact — see §9 and `docs/07` §9.
 - **Prone showing only grass is correct, not a bug.** If you are concealed you are also blind;
   that symmetry is the mechanic.
+
+### The half-texel convention gap — cost a session on its own
+
+`Heightfield.sample` interpolates between grid NODES: node `i` sits at grid coordinate `i`. GPU
+bilinear interpolates between texel CENTRES, at `i + 0.5`. **The two disagree by half a texel,
+always.** Sampling the height texture at the naive uv therefore reads the surface displaced
+horizontally from the one the mesh is built on.
+
+At the base level that is 1 m and looks like nothing. It became visible only once the march
+started selecting mip levels, where it becomes half a texel **of the level in use** — 8 m at
+LOD 3. On a slope that is metres of vertical error, and being a fixed horizontal offset it is
+DIRECTIONAL: it lands on whichever faces point along the shift. The symptom was bald patches
+that sat on one side of a cliff and **moved as the camera turned** rather than staying with the
+terrain. A shift that tracks the camera and not the world is the tell; if you see it, suspect a
+coordinate convention before you suspect the march.
+
+The fix is `+ 0.5 * texelSize * exp2(mip)` on the world position before the uv conversion. Any
+new consumer of `heightMap` needs it too.
+
+### Three surfaces where there should be one
+
+The mesh, the grass shell and the march were each reconstructing the same heightfield
+differently, and every pair of them produced its own artifact:
+
+| | reconstruction | symptom when it disagreed |
+|---|---|---|
+| terrain mesh | flat triangles on the chunk's LOD lattice | swallowed grass whole on hillsides |
+| grass shell | flat triangles, pinned to LOD 0 | entry point underground, march broke on sample 1 |
+| the march | bilinear texture, full resolution | — |
+
+All three now share one surface: the height texture carries a **point-decimated** mip chain
+(every 2^k-th sample, matching what the mesh's vertices actually are — NOT an averaging mipmap,
+which would invent a fourth surface), the march selects its level from the same
+`LOD_DISTANCE_CHUNKS` rule the CPU picks chunk LOD with, and the shell is built at its chunk's
+LOD instead of pinned.
+
+**Measure the budget before designing the fix.** Triangle-versus-bilinear disagreement on this
+heightfield: 0.26 m at LOD 0, 0.92 m at LOD 1, **2.31 m at LOD 2**, 5.40 m at LOD 3, 8.26 m at
+LOD 4 — against a canopy of 1.199 m at full height. Past LOD 2 the interpolation difference
+alone exceeds the entire canopy, which is why alignment has to be exact rather than close.
+
+### Debug views lie if a miss writes near-plane depth
+
+On a march miss `hitS` stays 0, so the depth point resolved to the camera and the fragment wrote
+near-plane depth. Harmless in normal rendering, where a miss is alpha-tested away — but debug
+views >= 4 force opacity to 1 so that every shell fragment reports its answer, and those
+fragments then drew **in front of everything, including sky**. One distant miss painted the whole
+upper frame. "The shell covers this pixel" and "something far away missed" became
+indistinguishable, which is the exact question those views exist to answer, and a wrong
+conclusion was drawn from it before it was spotted. Misses now write the shell's own distance.
+
+### Looks like a bug, is not — READ BEFORE "FIXING" ANY OF THESE
+
+A code review of this branch flagged several of these as defects. They are deliberate, most
+were measured, and every one has cost time at least once. If a reviewer — human or agent —
+proposes changing one, the burden is a measurement, not an argument.
+
+**The coarse march has no below-terrain early-out, and reordering one in is a regression.**
+`top` is `ground + canopy * m` with `m >= 0.38`, so reaching the line after the column test
+already implies `P.y >= ground`: any such test is dead, which is why there isn't one. It was
+reordered ABOVE the column test on exactly that reasoning and drew concentric rings of missing
+grass across every hillside. The column test firing first is load-bearing — a sample starting
+marginally below the reconstructed ground still brackets the column instead of missing, and
+since mesh and march agree only to within the LOD reconstruction, that is routine.
+
+**`GRASS_NEAR_CLIP` is capped at half the ray's slab crossing.** The 0.5 is not a fudge factor;
+it is a bound that guarantees half the interval remains searchable. Applied flat, the clip
+starts the march past the ground the ray is heading for and blanks the near field prone — §8
+invariant 6.
+
+**The ceiling is `FrontSide` while the cap is `DoubleSide`.** Not an oversight. The ceiling's
+underside is where a ray LEAVES the volume, and treating that as an entry is what made prone
+read hits at 120-300 m; the cap owns that case with one fragment per pixel. Making the ceiling
+double-sided again costs 33.3 ms against 8.3 ms.
+
+**The mesh-LOD lookup is hoisted per FRAGMENT, not per sample.** Knowingly approximate: a ray
+crossing a chunk boundary mid-slab is off by one level on the far side. Per sample is exact and
+costs 21.9 ms against 10 ms.
+
+**The two-ended LOD lookup takes the COARSER of the two ends.** The failure directions are not
+symmetric. Marching a surface finer than the mesh lets the mesh occlude grass, which is
+invariant 6; marching one coarser floats it slightly, which is harmless and bounded.
+
+**The jitter texture is mapped across METRES, not per grass cell.** Per-cell resolves a strand
+and looks better. It also halves the frame rate, because the march evaluates column height at
+every sample and each fetch then misses the texture cache. Fine detail comes from the ALU
+`strandHash` instead — that apparent duplication is a cache decision, not an oversight.
+
+**The colormap is sampled at explicit `.level(0)`.** Not a missing mip optimisation. The uv
+derives from a raymarch hit, so neighbouring pixels land metres apart, implicit derivatives
+pick a mip near the top of the pyramid, and grass renders as a pale wash. That cost several
+sessions.
+
+**Fog is applied inside `colorNode` with `material.fog = false`.** three fogs by the RASTERISED
+depth, which for this material is the shell — hundreds of metres from where the ray hit.
+
+**`depthNode` disables early-Z, and that is accepted.** Without correct depth at the hit,
+nothing can stand in the grass convincingly, which is the entire point of the system.
+
+**Chunk building is not frustum-gated.** It was, and it demonstrably dropped chunks that were
+on screen — large wedges of near terrain rendered as sky. Slots are visited nearest-first, so
+the budget still favours the near field.
+
+**Terrain draws to 2304 m against a 1100 m grass fade.** Invariant 1: the march finds columns
+standing on terrain, so terrain must be drawn at least as far as grass is rendered.
+
+**`?bench=1` forces full canopy.** Not a debug flag left on. It is the only way a bench number
+means anything on a map whose canopy is a stand-in with a 0.13 m median and 11% bare — and it
+is the worst case, which is what a benchmark should report.
+
+**Flagged and genuinely unresolved:** the ten-way debug view chain compiles into the shipping
+shader. `uDebugMode` is a uniform so the untaken branches do not execute, but nine nested
+conditionals on the heaviest fragment shader may cost occupancy. Gating it on `BENCH.debug` the
+way `isCap` is gated would compile it out. **Measure before acting** — it may be free.
+
+### Method traps, not code traps
+
+- **One vantage is not verification.** A fix was measured at one spot, declared done, and was
+  still broken almost everywhere else. Grass artifacts are strongly direction- and
+  slope-dependent; check several positions AND several headings before claiming anything.
+- **`?canopyall=1` is the first move on any "missing grass" report**, not the last. Absent canopy
+  and a broken march look identical in a normal render, and Green Mile's canopy is a patchy
+  stand-in (median 0.13 m). If the hole survives full canopy, it is the renderer.
+  It works **on its own**, without `?bench=1` — deliberately, because this is a hunt for a
+  specific place and heading and `?bench=1` pins the camera to the bench vantage. Under
+  `?bench=1` it is instead the default and `?canopyall=0` opts out (`09` §0).
+- **Wireframing the terrain separates occlusion from a march miss** in one click. `wireframe`
+  applies only to the terrain material, so grass still renders normally — if the hole fills, the
+  terrain was drawing over it.
+- **`33.3 ms` is 1/30 s and `16.7 ms` is 1/60 s.** Both are vsync cadences, so a frame anywhere
+  between 16.7 and 33.3 reports as 33.3 and resolution changes appear to do nothing. Escape the
+  cap (`?dpr=0.25`, `?steps=1`) before concluding a cost is not resolution-bound — that mistake
+  was made this session and briefly blamed on the battery, wrongly.
 
 ---
 

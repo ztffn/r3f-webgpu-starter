@@ -18,43 +18,26 @@ import * as THREE from "three/webgpu";
 import { fbm, hash2 } from "./noise";
 
 /**
- * Texels per side. The shader samples ONE TEXEL PER GRASS CELL.
+ * Texels per side, mapped across `period` METRES — one texel is 0.117 m at the
+ * shipped 120 m period.
  *
- * This used to be mapped across `period` metres instead, which made a texel 0.117 m —
- * so four columns shared a height at the 0.03 m default, twelve at 0.01 m, and
- * twenty-three at 0.005 m. Thinning the column then only widened the banding, because
- * the field feeding it never got finer. The references show height varying strand to
- * strand (docs/07 §1.3), so the field has to resolve a strand.
+ * PER-CELL MAPPING WAS TRIED AND REVERTED; do not reinstate it. Sampling one texel
+ * per grass cell resolves a strand, which looks right and is the obvious thing to
+ * want — and it HALVED THE FRAME RATE. The march evaluates column height at every
+ * sample, and at sub-centimetre columns a single march step spans tens of texels, so
+ * every one of those fetches misses the texture cache instead of hitting it. The
+ * metre mapping is what makes one fetch per sample affordable at all. See the note
+ * beside `jitterAt` in GrassMaterial.ts.
  *
- * Per-cell mapping makes the repeat distance `RESOLUTION * cellSize` — 30.7 m at
- * 0.03 m columns, 5.1 m at 0.005 m — rather than a fixed 120 m. That is short enough
- * to tile visibly on its own; it is masked by the canopy envelope and the ground
- * elevation varying underneath, not solved. Raising this trades memory for repeat
- * distance directly: 2048² is 8 MB and doubles it.
+ * So this texture supplies COARSE clumping only. Per-strand detail comes from
+ * `strandHash` in the shader — about six ALU operations against a cache miss costing
+ * hundreds of cycles — mixed in at `GRASS_STRAND_MIX`. That split is a cache decision
+ * before it is a visual one.
+ *
+ * Raising this trades memory for detail within the same 120 m repeat: 2048² is 8 MB
+ * and halves the texel to 0.059 m.
  */
 const RESOLUTION = 1024;
-
-/**
- * Bake the jitter/tone fields over a `period`-metre tile.
- *
- * Both fields are two octaves plus a grain term, matching the shape of the shader's
- * clump(): a broad tuft scale, a medium scale, and fine variation. Frequencies are
- * expressed in cycles per tile so the result is seamless.
- */
-/**
- * Per-texel white noise that tiles over `size`.
- *
- * The tone field's finest fbm lattice is 0.35 m, which at 0.03 m columns is about twelve
- * columns wide — so NEIGHBOURING columns shared a tone and there was no corduroy at all,
- * only broad patches. Corduroy is by definition variation between adjacent columns, so it
- * has to come from a term at texel resolution.
- *
- * Uses the project's own `hash2` rather than a private copy: it is the hash `fbm` is built
- * on, and noise.ts records that its determinism is load-bearing for the concealment field.
- * Two copies could drift.
- */
-const texelNoise = (i: number, j: number, seed: number, size: number): number =>
-  hash2(i, j, seed, size);
 
 /**
  * Map a field onto the full 0-1 range by standardising it, mean ± 2σ -> 0..1.
@@ -82,6 +65,12 @@ function standardise(field: Float32Array): void {
 }
 
 /**
+ * Bake the jitter/tone fields over a `period`-metre tile.
+ *
+ * Both fields are two octaves plus a grain term, matching the shape of the shader's
+ * clump(): a broad tuft scale, a medium scale, and fine variation. Frequencies are
+ * expressed in cycles per tile so the result is seamless.
+ *
  * @param period Metres the pattern repeats over.
  * @param strandJitter Share of the HEIGHT field carried by per-texel noise, 0-1.
  *
@@ -126,16 +115,22 @@ export function bakeGrassJitter(period: number, strandJitter = 0): THREE.DataTex
           fbm(u * medium, v * medium, { seed: 2207, octaves: 2, period: medium }) * 0.3 +
           fbm(u * grain, v * grain, { seed: 3313, octaves: 1, period: grain }) * 0.15) *
           fbmWeight +
-        texelNoise(i, j, 4409, size) * strandJitter;
+        hash2(i, j, 4409, size) * strandJitter;
 
       // Tone field, independent of height so a tall column is not always a bright
       // one — that correlation reads as embossing rather than as grass.
-      // The clump octaves give tufting; the per-texel term gives the corduroy.
+      //
+      // The clump octaves give tufting; the per-texel `hash2` term gives the corduroy,
+      // and it has to be per texel: the finest fbm lattice here is 0.35 m, about twelve
+      // columns at 0.03 m, so without it neighbouring columns share a tone and there is
+      // no corduroy at all. Corduroy is by definition variation between ADJACENT columns.
+      // `hash2` is the same hash `fbm` is built on — noise.ts records that its
+      // determinism is load-bearing for the concealment field, so do not copy it.
       tones[k] =
         fbm(u * broad, v * broad, { seed: 5417, octaves: 2, period: broad }) * 0.42 +
         fbm(u * medium, v * medium, { seed: 6521, octaves: 2, period: medium }) * 0.24 +
         fbm(u * grain, v * grain, { seed: 7621, octaves: 1, period: grain }) * 0.12 +
-        texelNoise(i, j, 8731, size) * 0.22;
+        hash2(i, j, 8731, size) * 0.22;
     }
   }
 

@@ -26,6 +26,75 @@ quoting a number as current.
 
 ---
 
+## 0. Current numbers, and what they cost to get
+
+Measured at 1685 x 914, mains power, **canopy forced on everywhere** (`?bench=1` now does this
+by default — see below). Both rows are at the 120 Hz vsync cap, so the true cost is lower and
+unknown.
+
+| Pose | dpr | Before | After |
+|---|---|---|---|
+| standing | 2 | 17.1 ms | **8.3 ms** |
+| prone, level | 1 | 33.3 ms | **8.3 ms** |
+
+Neither came from tuning the march. Both came from **removing work that should never have been
+issued**: the ceiling was double-sided, so every shell had its underside rasterised and marched
+as well as its top, and a ray inside the canopy passed under many chunks' ceilings and marched
+each one for the same near column. One camera cap plus front-face-only ceilings removed all of
+it. Draw calls fell by ~17 at the same time, because the per-chunk floor proxy went with it.
+
+**The bench now forces full canopy.** Green Mile's canopy is a colormap-derived stand-in with a
+median of raw 28 (~0.13 m), 11% of the map bare, and the long-standing bench vantage (5, 375)
+sits on a texel with raw **0** — so every number measured there was a march over bare ground.
+Full canopy is also the worst case, which is what a benchmark should report. `?canopyall=0`
+restores the map's own canopy, and any claim about grass PLACEMENT still needs it.
+
+### Costs measured while getting there — reuse these rather than re-deriving
+
+| Change | Cost | Verdict |
+|---|---|---|
+| LOD 0 terrain out to 1536 m | 17.5 ms vs 9 ms | rules out "just draw more vertices" |
+| Mesh-LOD lookup per march sample | 21.9 ms vs 10 ms | hoist it per fragment |
+| 256 coarse samples per ray | 106.6 ms vs 10.9 ms | see §3.6 |
+| Point-decimated height mips | ~4 ms FASTER | coarser mips at range improve cache locality |
+
+### 0.1 The cap costs about half the frame at crouch on the REAL canopy — measured
+
+The review of PR #4 doubted the claim that ceiling and cap cannot overlap. It was right, and
+the cost is large. Crouch, Green Mile at (-375, 787), **real canopy** (`?canopyall=0`), dpr 2:
+
+| Config | cap OFF | cap ON | cap costs |
+|---|---|---|---|
+| `?steps=48` | 8.33 ms (AT the 120 Hz cap) | 13.35 ms | ≥ 5.0 ms |
+| `?steps=96` | 10.95 ms | 20.63 ms | **9.7 ms — near double** |
+
+Draw calls differ by exactly one, so this is not submission cost; it is the full-screen cap
+fragment marching. **At shipped settings it is completely invisible** — crouch and prone both
+read 8.34 ms, which is the 120 Hz cap, so the whole cost hides under vsync. That is the trap
+in §3.1.2 wearing a new hat, and it is why the §0 table's two rows cannot be read as "free".
+
+Why it is there: `Terrain.tsx` gates the cap on the map-GLOBAL `canopyMax`, so wherever local
+canopy < eye < global max the eye is above the LOCAL ceiling, that ceiling is front-facing and
+marches, and the cap marches over it. Green Mile's median canopy is 0.13 m against a 1.199 m
+maximum (`06` §7.1), so at crouch that is most of the map.
+
+**Not all of the 9.7 ms is waste** — the cap also does the near-field march that makes
+concealment work, which nothing else would do. Isolating the redundant half needs the
+`?canopyall=1` comparison, where the eye IS under the local ceiling and no overlap is possible.
+Not yet run. The candidate fix is the per-pixel cede test that was deleted with the floor
+proxy, re-keyed on the local canopy rather than the global maximum.
+
+### §3.1.2 has a second failure mode: the vsync staircase
+
+The battery-throttle story below is real, but it made `33.3 ms` look like a throttle signature
+when it is simply **1/30 s**. A frame anywhere between 16.7 and 33.3 ms reports as 33.3, so
+halving the resolution can appear to change nothing at all and the cost looks resolution-
+independent when it is not. That happened this session and was briefly blamed on the battery.
+
+**Both checks, in order:** confirm mains power AND `?grass=0` (which isolates the whole grass
+system), then escape the cap with `?dpr=0.25` or `?steps=1` before concluding anything about
+where a cost lives.
+
 ## 1. Baseline
 
 Machine: Apple GPU, WebGPU backend, 120 Hz display. Viewport 1597 × 914 CSS px.
@@ -307,6 +376,44 @@ A max-of-(ground + canopy) mip pyramid lets rays leap bare ground, which is the
 standard height-field answer and attacks the miss case. Its value drops sharply once
 §3.1 bounds iterations, since the unbounded miss is what it was going to fix. Keep it
 in reserve.
+
+### 3.6 What dense sampling actually converges to — read before building DDA
+
+`docs/08` §9 says the structural fix for horizontal layering is DDA cell traversal, and the
+handover treated that as settled. Before building it, the premise was tested the cheap way:
+sweep the coarse sample count to 256, which is roughly what cell traversal converges to, and
+look at the picture it is aiming for.
+
+**The layering does disappear.** It cost 106.6 ms against 10.9 ms, which is the number any
+traversal scheme has to beat.
+
+**But what it converges to is not obviously the target.** The picture resolves into blocky
+pillars roughly 0.3 m across, not the fine striations `07` calls for, and pushing
+`GRASS_STRAND_MIX` to 1.0 does not break them up. Cell traversal cannot do better than this —
+resolving every column correctly is precisely what produces it. So the open question is not
+"how do we sample densely enough" but "is the column geometry right at that scale", and that is
+a `00`-pillars judgement, not a performance one.
+
+Related and probably the same root: `08` §9's near-field blockiness. Columns are a fixed 0.03 m
+in WORLD space, so they are correct at range and enormous close up. DF2 avoided this by drawing
+one column per SCREEN column — its columns were a pixel wide by construction. Any scheme that
+fixes cell size in world space inherits this.
+
+**Recommendation: settle the converged look before spending a session on the traversal.** The
+256-sample render is a free preview of what it would deliver.
+
+### 3.7 An acceleration structure is not optional for DDA at 0.03 m cells
+
+Plain Amanatides-Woo visits every cell. At `GRASS_CELL` = 0.03 m a grazing ray over a 28 m span
+crosses roughly 900 cells, against 12 samples today. The property that makes DDA correct — it
+cannot step over a column — is exactly the property that makes it cost one iteration per cell.
+
+So §3.5 (max mipmap for empty-space skipping) stops being "keep it in reserve" and becomes a
+prerequisite, the same way §3.3 turned out to be a prerequisite for §3.1. A max pyramid over
+`ground + canopy` is an EXACT upper bound on the jittered column top, because the strand term
+`mix(j.r, strandHash)*0.62 + 0.38` is bounded above by 1.0 — so it can be built from the two
+smooth fields with no hash involved. `heightTexture.ts` already has the hand-built mip machinery
+that needs.
 
 ## 4. Second target, not yet measured
 

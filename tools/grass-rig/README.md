@@ -35,8 +35,10 @@ node drive.mjs '[{"name":"shot","camX":672,"camZ":288,"yaw":2.2,"pitch":0,"fov":
   check grass depth-sorts against polygonal objects.
 - **Metrics** (`metric.py`) — |dx| / |dy| and directional autocorrelation, the
   measures the reference screenshots are scored on (docs/07 §5). Score GRASS
-  PIXELS ONLY, masked with `debugHit: true`; whole-crop numbers are dominated by
-  bare terrain.
+  PIXELS ONLY; whole-crop numbers are dominated by bare terrain. The mask used to
+  come from a `debugHit` rig option, which no longer exists — the material's debug
+  views are driven by the `debugMode` uniform now, so a rig run wanting the mask has
+  to set that on the returned `uniforms` (view 1 is the hit mask).
 
 ## Caveat
 

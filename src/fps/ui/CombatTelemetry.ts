@@ -4,6 +4,10 @@ import type { ShotTraceMode } from "../combat/ShotTrace";
 import type { PlayerStance } from "../core/PlayerMotor";
 import type { ScopeAdjustmentSnapshot } from "../core/ScopeAdjustmentController";
 import type { WeaponSnapshot } from "../weapons/WeaponSystem";
+import type { AmmunitionId } from "../weapons/AmmunitionDefinition";
+import type { PenetrationOutcome } from "../combat/PenetrationResolver";
+import type { SurfaceId } from "../combat/SurfaceProfile";
+import type { ImpactEvent } from "../combat/ImpactEvent";
 
 export type CombatRangeKind = "terrain" | "target" | "world";
 
@@ -38,12 +42,33 @@ export interface ShotTelemetry {
   readonly verticalDropMetres: number;
   readonly lateralDriftMetres: number;
   readonly impactSpeedMetresPerSecond: number | null;
+  readonly ammunitionId: AmmunitionId | null;
+  readonly surfaceId: SurfaceId | null;
+  readonly penetrationOutcome: PenetrationOutcome | null;
+  readonly interactionCount: number;
+  readonly effectiveThicknessMetres: number | null;
+  readonly retainedSpeedMetresPerSecond: number | null;
 }
 
 export interface BallisticEnvironmentTelemetry {
   readonly gravityMetresPerSecondSquared: number;
   readonly windXMetresPerSecond: number;
   readonly windZMetresPerSecond: number;
+}
+
+export interface ImpactTelemetry {
+  readonly shotSequence: number;
+  readonly interactionIndex: number;
+  readonly ammunitionId: AmmunitionId;
+  readonly surfaceId: SurfaceId;
+  readonly outcome: PenetrationOutcome;
+  readonly targetId: string | null;
+  readonly damageApplied: number;
+  readonly healthAfter: number | null;
+  readonly destroyed: boolean;
+  readonly effectiveThicknessMetres: number;
+  readonly speedBeforeMetresPerSecond: number;
+  readonly speedAfterMetresPerSecond: number;
 }
 
 export interface CombatSnapshot {
@@ -54,6 +79,7 @@ export interface CombatSnapshot {
   readonly aimResolution: AimResolutionSample | null;
   readonly ballistics: BallisticEnvironmentTelemetry | null;
   readonly scopeAdjustment: ScopeAdjustmentSnapshot | null;
+  readonly lastImpact: ImpactTelemetry | null;
   readonly dryFireSequence: number;
   readonly projectileRejectSequence: number;
 }
@@ -68,6 +94,7 @@ const EMPTY: CombatSnapshot = {
   aimResolution: null,
   ballistics: null,
   scopeAdjustment: null,
+  lastImpact: null,
   dryFireSequence: 0,
   projectileRejectSequence: 0,
 };
@@ -113,14 +140,16 @@ export class CombatTelemetry {
   publishShot(result: ShotResult): void {
     const report = result.report;
     const impact = result.trace.impact;
+    const interactions = result.trace.interactions;
+    const lastInteraction = interactions.at(-1) ?? null;
     const lastShot: ShotTelemetry = {
       sequence: result.shot.sequence,
       sourceId: result.shot.sourceId,
       mode: result.trace.mode,
-      hit: result.hit !== null,
-      kind: result.hit?.kind ?? null,
+      hit: result.hit !== null || interactions.length > 0,
+      kind: result.hit?.kind ?? lastInteraction?.kind ?? null,
       targetId: report?.targetId ?? null,
-      objectName: impact?.objectName || null,
+      objectName: impact?.objectName || lastInteraction?.objectName || null,
       damage: result.damageApplied,
       healthBefore: report?.healthBefore ?? null,
       healthAfter: report?.healthAfter ?? null,
@@ -131,11 +160,37 @@ export class CombatTelemetry {
       verticalDropMetres: result.trace.verticalDropMetres,
       lateralDriftMetres: result.trace.lateralDriftMetres,
       impactSpeedMetresPerSecond: result.trace.impactSpeedMetresPerSecond,
+      ammunitionId: lastInteraction?.ammunitionId ?? null,
+      surfaceId: lastInteraction?.surfaceId ?? null,
+      penetrationOutcome: lastInteraction?.outcome ?? null,
+      interactionCount: interactions.length,
+      effectiveThicknessMetres: lastInteraction?.effectiveThicknessMetres ?? null,
+      retainedSpeedMetresPerSecond: lastInteraction?.speedAfterMetresPerSecond ?? null,
     };
     this.replace({
       ...this.snapshot,
       lastShot,
       recentShots: [lastShot, ...this.snapshot.recentShots].slice(0, 5),
+    });
+  }
+
+  publishImpact(event: ImpactEvent): void {
+    this.replace({
+      ...this.snapshot,
+      lastImpact: {
+        shotSequence: event.shotSequence,
+        interactionIndex: event.interactionIndex,
+        ammunitionId: event.ammunitionId,
+        surfaceId: event.surfaceId,
+        outcome: event.outcome,
+        targetId: event.targetId,
+        damageApplied: event.damageApplied,
+        healthAfter: event.healthAfter,
+        destroyed: event.destroyed,
+        effectiveThicknessMetres: event.effectiveThicknessMetres,
+        speedBeforeMetresPerSecond: event.speedBeforeMetresPerSecond,
+        speedAfterMetresPerSecond: event.speedAfterMetresPerSecond,
+      },
     });
   }
 

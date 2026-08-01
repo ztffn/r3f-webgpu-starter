@@ -66,9 +66,12 @@ export function Hud({
 
   return (
     <div className="hud-root">
-      {combat.lastShot?.hit && combat.lastShot.damage > 0 && (
-        <div className="hit-marker" key={combat.lastShot.sequence}>
-          {combat.lastShot.destroyed ? "TARGET DOWN" : "HIT"}
+      {combat.lastImpact && combat.lastImpact.damageApplied > 0 && (
+        <div
+          className="hit-marker"
+          key={`${combat.lastImpact.shotSequence}-${combat.lastImpact.interactionIndex}`}
+        >
+          {combat.lastImpact.destroyed ? "TARGET DOWN" : "HIT"}
         </div>
       )}
       {combat.recentShots.length > 0 && (
@@ -76,13 +79,13 @@ export function Hud({
           <span className="eyebrow">Recent shots · {combat.lastShot?.mode}</span>
           <ol className="shot-log">
             {combat.recentShots.map((shot) => {
-              const subject = shot.targetId ?? shot.kind ?? "miss";
+              const subject = shot.targetId ?? shot.surfaceId ?? shot.kind ?? "miss";
               const detail = shot.targetId
                 ? `${shot.metres === null ? "—" : fmt(shot.metres, 1)} m · ${fmt(shot.flightTimeSeconds, 2)} s · ${fmt(shot.damage)} dmg · ${
                     shot.destroyed ? "down" : `${fmt(shot.healthAfter ?? 0)} hp`
                   }`
                 : shot.hit
-                  ? `${shot.metres === null ? "—" : fmt(shot.metres, 1)} m · ${fmt(shot.flightTimeSeconds, 2)} s`
+                  ? `${shot.penetrationOutcome ?? "impact"} · ${shot.ammunitionId ?? "—"} · ${shot.interactionCount} contact${shot.interactionCount === 1 ? "" : "s"}`
                   : `no impact · ${fmt(shot.flightTimeSeconds, 2)} s`;
               const status = shot.destroyed ? "down" : shot.damage > 0 ? "hit" : undefined;
               return (
@@ -171,6 +174,40 @@ export function Hud({
                 {combat.lastShot.impactSpeedMetresPerSecond === null
                   ? "—"
                   : `${fmt(combat.lastShot.impactSpeedMetresPerSecond)} m/s`}
+              </dd>
+              {combat.lastShot.surfaceId && (
+                <>
+                  <dt>Surface</dt>
+                  <dd>
+                    {combat.lastShot.surfaceId} · {combat.lastShot.penetrationOutcome}
+                  </dd>
+                  <dt>Thickness</dt>
+                  <dd>
+                    {combat.lastShot.effectiveThicknessMetres === null
+                      ? "—"
+                      : `${fmt(combat.lastShot.effectiveThicknessMetres * 100, 1)} cm`}
+                  </dd>
+                  <dt>Exit speed</dt>
+                  <dd>
+                    {combat.lastShot.retainedSpeedMetresPerSecond === null
+                      ? "—"
+                      : `${fmt(combat.lastShot.retainedSpeedMetresPerSecond)} m/s`}
+                  </dd>
+                </>
+              )}
+            </>
+          )}
+          {combat.lastImpact && (
+            <>
+              <dt>Last contact</dt>
+              <dd>
+                {combat.lastImpact.ammunitionId} · {combat.lastImpact.surfaceId} ·{" "}
+                {combat.lastImpact.outcome}
+              </dd>
+              <dt>Contact speed</dt>
+              <dd>
+                {fmt(combat.lastImpact.speedBeforeMetresPerSecond)} →{" "}
+                {fmt(combat.lastImpact.speedAfterMetresPerSecond)} m/s
               </dd>
             </>
           )}

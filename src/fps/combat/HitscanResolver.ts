@@ -34,6 +34,7 @@ export class HitscanResolver {
       sightDirection: direction.clone(),
       initialDirection: direction.clone(),
       points: [origin, end],
+      interactions: [],
       impact: hit
         ? {
             point: hit.point.clone(),
@@ -50,7 +51,7 @@ export class HitscanResolver {
       impactSpeedMetresPerSecond: null,
     };
     if (!hit?.damageable) {
-      return { shot, hit, damageApplied: 0, destroyed: false, report: null, trace };
+      return { shot, hit, damageApplied: 0, destroyed: false, report: null, reports: [], trace };
     }
 
     const healthBefore = hit.damageable.health;
@@ -61,24 +62,26 @@ export class HitscanResolver {
       sourceId: shot.sourceId,
       shotSequence: shot.sequence,
     });
+    const report = {
+      targetId: hit.damageable.id,
+      objectName: hit.object.name,
+      sourceId: shot.sourceId,
+      shotSequence: shot.sequence,
+      point: hit.point.clone(),
+      normal: hit.normal?.clone() ?? null,
+      rangeMetres: hit.distance,
+      damageApplied: damage.applied,
+      healthBefore,
+      healthAfter: damage.health,
+      destroyed: damage.destroyed,
+    };
     return {
       shot,
       hit,
       damageApplied: damage.applied,
       destroyed: damage.destroyed,
-      report: {
-        targetId: hit.damageable.id,
-        objectName: hit.object.name,
-        sourceId: shot.sourceId,
-        shotSequence: shot.sequence,
-        point: hit.point.clone(),
-        normal: hit.normal?.clone() ?? null,
-        rangeMetres: hit.distance,
-        damageApplied: damage.applied,
-        healthBefore,
-        healthAfter: damage.health,
-        destroyed: damage.destroyed,
-      },
+      report,
+      reports: [report],
       trace,
     };
   }

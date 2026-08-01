@@ -17,8 +17,10 @@ import { readBallisticEnvironment } from "./combat/BallisticEnvironment";
 import { LoadoutSystem } from "./weapons/LoadoutSystem";
 import { WeaponSystem, type WeaponEvent } from "./weapons/WeaponSystem";
 import { SNIPER_DEFINITION } from "./weapons/weaponDefinitions";
+import { ammunitionFromSearch } from "./weapons/AmmunitionDefinition";
 import { combatTelemetry } from "./ui/CombatTelemetry";
 import { shotDebugStore } from "./debug/ShotDebugStore";
+import { impactEffectBus } from "./presentation/ImpactEffectBus";
 import { FPS_DEBUG } from "./debug/debugConfig";
 import {
   AIM_DIAGNOSTIC_RANGE_METRES,
@@ -202,7 +204,26 @@ export function WeaponPrototype({
 }: WeaponPrototypeProps) {
   const { camera, gl, scene, size } = useThree();
   const player = useMemo(() => new LocalPlayerController(), []);
-  const weapon = useMemo(() => new WeaponSystem(SNIPER_DEFINITION), []);
+  const ammunition = useMemo(
+    () => ammunitionFromSearch(typeof window === "undefined" ? "" : window.location.search),
+    []
+  );
+  const weaponDefinition = useMemo(
+    () => ({
+      ...SNIPER_DEFINITION,
+      displayName:
+        ammunition.id === "308"
+          ? SNIPER_DEFINITION.displayName
+          : `${SNIPER_DEFINITION.displayName} · ${ammunition.displayName} test`,
+      shot: {
+        ...SNIPER_DEFINITION.shot,
+        damage: ammunition.baseDamage,
+        ammunition,
+      },
+    }),
+    [ammunition]
+  );
+  const weapon = useMemo(() => new WeaponSystem(weaponDefinition), [weaponDefinition]);
   const loadout = useMemo(
     () => new LoadoutSystem([{ id: "primary", weapon }], "primary"),
     [weapon]
@@ -220,13 +241,12 @@ export function WeaponPrototype({
     () =>
       new ScopeAdjustmentController(
         {
-          muzzleVelocityMetresPerSecond:
-            SNIPER_DEFINITION.shot.muzzleVelocityMetresPerSecond,
-          ballisticCoefficientG1: SNIPER_DEFINITION.shot.ballisticCoefficientG1,
+          muzzleVelocityMetresPerSecond: ammunition.muzzleVelocityMetresPerSecond,
+          ballisticCoefficientG1: ammunition.ballisticCoefficientG1,
         },
         ballisticEnvironment
       ),
-    [ballisticEnvironment]
+    [ammunition, ballisticEnvironment]
   );
   const commands = useMemo<LocalPlayerCommands>(
     () => ({ triggerPresses: 0, reloadRequested: false, adsWanted: false, holdingBreath: false }),
@@ -330,15 +350,14 @@ export function WeaponPrototype({
     (event: WeaponEvent) => {
       if (event.type === "shot") {
         const spawned = ballistics.spawn({
-          sourceId: SNIPER_DEFINITION.id,
+          sourceId: weaponDefinition.id,
           sequence: event.sequence,
           origin: player.aim.origin,
           direction: boreDirection,
           sightDirection: player.aim.direction,
           maxDistance: event.range,
           damage: event.damage,
-          muzzleVelocityMetresPerSecond: event.muzzleVelocityMetresPerSecond,
-          ballisticCoefficientG1: event.ballisticCoefficientG1,
+          ammunition: event.ammunition,
           captureTrace: captureShotTrace,
         });
         if (!spawned) combatTelemetry.publishProjectileRejected();
@@ -356,12 +375,17 @@ export function WeaponPrototype({
         playSegment(event.animationSegment);
       }
     },
-    [ballistics, boreDirection, captureShotTrace, playSegment, player]
+    [ballistics, boreDirection, captureShotTrace, playSegment, player, weaponDefinition]
   );
 
   const handleBallisticResult = useCallback((result: BallisticResult) => {
     combatTelemetry.publishShot(result);
     shotDebugStore.publish(result.trace);
+  }, []);
+
+  const handleImpact = useCallback((event: Parameters<typeof impactEffectBus.publish>[0]) => {
+    combatTelemetry.publishImpact(event);
+    impactEffectBus.publish(event);
   }, []);
 
   useEffect(
@@ -605,6 +629,7 @@ export function WeaponPrototype({
     // Existing rounds advance before this frame's input can spawn another one,
     // so a newly accepted shot never receives time that elapsed before firing.
     ballistics.update(delta);
+    ballistics.drainImpactEvents(handleImpact);
     ballistics.drainResults(handleBallisticResult);
 
     camera.updateMatrixWorld();
@@ -622,7 +647,7 @@ export function WeaponPrototype({
       stance,
       adsBlend: aim.current,
       holdingBreath: holdingScopeBreath,
-    });
+  });
     if (scopeDemo) {
       lookSensitivity.setOpticState(
         aim.current,

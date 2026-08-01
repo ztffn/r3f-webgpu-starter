@@ -28,10 +28,16 @@ import { LookSensitivityController } from "../fps/core/LookSensitivityController
 const TestTargets = lazy(() =>
   import("../fps/TestTargets").then((m) => ({ default: m.TestTargets }))
 );
+const BallisticTestRange = lazy(() =>
+  import("../fps/BallisticTestRange").then((m) => ({ default: m.BallisticTestRange }))
+);
 const ShotTrajectoryDebugView = lazy(() =>
   import("../fps/presentation/ShotTrajectoryDebugView").then((m) => ({
     default: m.ShotTrajectoryDebugView,
   }))
+);
+const ImpactEffects = lazy(() =>
+  import("../fps/presentation/ImpactEffects").then((m) => ({ default: m.ImpactEffects }))
 );
 import { BENCH } from "./bench";
 import {
@@ -342,7 +348,7 @@ export function DF2Scene({
       )}
 
       {/* Scope mode promotes the contrast ladder into resettable shootable targets. */}
-      {(BENCH.targets || scopeDemo) && heightfield && (
+      {(BENCH.targets || (scopeDemo && !FPS_DEBUG.impactTest)) && heightfield && (
         <Suspense fallback={null}>
           <TestTargets
             heightfield={heightfield}
@@ -353,11 +359,23 @@ export function DF2Scene({
         </Suspense>
       )}
 
+      {scopeDemo && FPS_DEBUG.impactTest && heightfield && (
+        <Suspense fallback={null}>
+          <BallisticTestRange heightfield={heightfield} worldQuery={worldQuery} />
+        </Suspense>
+      )}
+
       {showWater && <Water level={waterLevel} span={waterSpan} material={waterMaterial} />}
 
       {scopeDemo && FPS_DEBUG.shotTrajectory && (
         <Suspense fallback={null}>
           <ShotTrajectoryDebugView />
+        </Suspense>
+      )}
+
+      {scopeDemo && (
+        <Suspense fallback={null}>
+          <ImpactEffects />
         </Suspense>
       )}
 

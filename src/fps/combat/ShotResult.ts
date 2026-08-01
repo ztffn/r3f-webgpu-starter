@@ -14,5 +14,6 @@ export interface ShotResult<TShot extends ResolvedShotIdentity = ResolvedShotIde
   readonly damageApplied: number;
   readonly destroyed: boolean;
   readonly report: TargetHitReport | null;
+  readonly reports: readonly TargetHitReport[];
   readonly trace: ShotTrace;
 }

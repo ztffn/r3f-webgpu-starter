@@ -1,5 +1,6 @@
 import type * as THREE from "three/webgpu";
 import type { WorldHitKind } from "../core/WorldQuery";
+import type { ImpactEvent } from "./ImpactEvent";
 
 export type ShotTraceMode = "hitscan" | "ballistic";
 
@@ -19,6 +20,7 @@ export interface ShotTrace {
   readonly sightDirection: THREE.Vector3;
   readonly initialDirection: THREE.Vector3;
   readonly points: readonly THREE.Vector3[];
+  readonly interactions: readonly ImpactEvent[];
   readonly impact: ShotImpact | null;
   readonly flightTimeSeconds: number;
   readonly verticalDropMetres: number;

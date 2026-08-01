@@ -6,6 +6,7 @@ import { HitscanResolver } from "../../src/fps/combat/HitscanResolver.ts";
 import type { WorldQuery } from "../../src/fps/core/WorldQuery.ts";
 import { ShotDebugStore } from "../../src/fps/debug/ShotDebugStore.ts";
 import { CombatTelemetry } from "../../src/fps/ui/CombatTelemetry.ts";
+import { ImpactEffectBus } from "../../src/fps/presentation/ImpactEffectBus.ts";
 
 test("hitscan resolves against world query and applies target damage", () => {
   const target = new HealthDamageable("target", 100);
@@ -15,6 +16,9 @@ test("hitscan resolves against world query and applies target damage", () => {
       point: new Vector3(0, 1, -42),
       normal: new Vector3(0, 0, 1),
       kind: "target",
+      objectId: "target",
+      surfaceId: "flesh",
+      penetrationThicknessMetres: 0.24,
       damageable: target,
       object: { name: "target-mesh" } as never,
     }),
@@ -98,4 +102,46 @@ test("telemetry retains five reports and debug store retains only the latest tra
   assert.equal(debug.getSnapshot().trace, null);
   assert.equal(notifications, 7);
   unsubscribe();
+});
+
+test("penetrating contacts publish immediate telemetry and presentation events", () => {
+  const telemetry = new CombatTelemetry();
+  const bus = new ImpactEffectBus();
+  let presentationEvents = 0;
+  const unsubscribe = bus.subscribe(() => {
+    presentationEvents += 1;
+  });
+  const event = {
+    sourceId: "sniper",
+    shotSequence: 7,
+    interactionIndex: 1,
+    ammunitionId: "308" as const,
+    kind: "target" as const,
+    objectId: "target",
+    objectName: "target-mesh",
+    targetId: "target",
+    damageApplied: 100,
+    healthBefore: 100,
+    healthAfter: 0,
+    destroyed: true,
+    surfaceId: "flesh" as const,
+    outcome: "penetrated" as const,
+    point: new Vector3(0, 1, -20),
+    exitPoint: new Vector3(0, 1, -20.24),
+    normal: new Vector3(0, 0, 1),
+    effectiveThicknessMetres: 0.24,
+    speedBeforeMetresPerSecond: 780,
+    speedAfterMetresPerSecond: 690,
+    energyBeforeJoules: 3_450,
+    energyAfterJoules: 2_700,
+  };
+  telemetry.publishImpact(event);
+  bus.publish(event);
+  assert.equal(telemetry.getSnapshot().lastImpact?.targetId, "target");
+  assert.equal(telemetry.getSnapshot().lastImpact?.destroyed, true);
+  assert.equal(telemetry.getSnapshot().lastShot, null, "contact does not fake shot completion");
+  assert.equal(presentationEvents, 1);
+  unsubscribe();
+  bus.publish(event);
+  assert.equal(presentationEvents, 1);
 });

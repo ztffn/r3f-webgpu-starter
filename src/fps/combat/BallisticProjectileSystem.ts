@@ -1,5 +1,7 @@
 import * as THREE from "three/webgpu";
 import type { WorldHit, WorldQuery } from "../core/WorldQuery";
+import type { AmmunitionDefinition } from "../weapons/AmmunitionDefinition";
+import { kineticEnergyJoules } from "../weapons/AmmunitionDefinition.ts";
 import type { BallisticEnvironment } from "./BallisticEnvironment";
 import {
   DEFAULT_G1_REFERENCE_DRAG_PER_METRE,
@@ -9,6 +11,9 @@ import {
 import type { ShotResult } from "./ShotResult";
 import type { ShotTrace } from "./ShotTrace";
 import type { TargetHitReport } from "./TargetHitReport";
+import type { ImpactEvent } from "./ImpactEvent";
+import { resolvePenetration } from "./PenetrationResolver.ts";
+import { SURFACE_PROFILES } from "./SurfaceProfile.ts";
 
 export interface BallisticShot {
   readonly sourceId: string;
@@ -18,8 +23,7 @@ export interface BallisticShot {
   readonly sightDirection?: THREE.Vector3Like;
   readonly maxDistance: number;
   readonly damage: number;
-  readonly muzzleVelocityMetresPerSecond: number;
-  readonly ballisticCoefficientG1: number;
+  readonly ammunition: AmmunitionDefinition;
   /** False is intended for authority load tests/remote rounds, not local debug. */
   readonly captureTrace?: boolean;
 }
@@ -48,11 +52,16 @@ export interface BallisticMetrics {
   readonly completed: number;
   readonly fixedSteps: number;
   readonly segmentQueries: number;
+  readonly surfaceInteractions: number;
+  readonly droppedImpactEvents: number;
 }
 
 const DEFAULT_CAPACITY = 2_048;
 const DEFAULT_TRACE_POINTS = 1_024;
 const EPSILON = 1e-9;
+const EXIT_EPSILON_METRES = 0.002;
+const MAX_SURFACE_INTERACTIONS = 8;
+const IMPACT_EVENT_CAPACITY = 4_096;
 
 /**
  * Fixed-capacity, fixed-step gameplay projectile pool. Numeric state is stored
@@ -86,10 +95,15 @@ export class BallisticProjectileSystem {
   private readonly rightZ: Float64Array;
   private readonly distance: Float64Array;
   private readonly elapsed: Float64Array;
+  private readonly damageApplied: Float64Array;
+  private readonly destroyed: Uint8Array;
+  private readonly interactionCounts: Uint8Array;
   private readonly traceCounts: Uint16Array;
   private readonly traceBuffers: Array<Float32Array | null>;
   private readonly freeTraceBuffers: Float32Array[] = [];
   private readonly shots: Array<SpawnedBallisticShot | null>;
+  private readonly interactions: Array<ImpactEvent[] | null>;
+  private readonly reports: Array<TargetHitReport[] | null>;
 
   private readonly segmentOrigin = new THREE.Vector3();
   private readonly segmentDirection = new THREE.Vector3();
@@ -97,6 +111,7 @@ export class BallisticProjectileSystem {
   private readonly nextVelocity: MutableVelocity = { x: 0, y: 0, z: 0 };
   private accumulator = 0;
   private readonly results: BallisticResult[] = [];
+  private readonly impactEvents: ImpactEvent[] = [];
 
   private peakActive = 0;
   private spawned = 0;
@@ -104,6 +119,8 @@ export class BallisticProjectileSystem {
   private completed = 0;
   private fixedSteps = 0;
   private segmentQueries = 0;
+  private surfaceInteractions = 0;
+  private droppedImpactEvents = 0;
 
   constructor(
     worldQuery: WorldQuery,
@@ -162,9 +179,14 @@ export class BallisticProjectileSystem {
     this.rightZ = new Float64Array(this.capacity);
     this.distance = new Float64Array(this.capacity);
     this.elapsed = new Float64Array(this.capacity);
+    this.damageApplied = new Float64Array(this.capacity);
+    this.destroyed = new Uint8Array(this.capacity);
+    this.interactionCounts = new Uint8Array(this.capacity);
     this.traceCounts = new Uint16Array(this.capacity);
     this.traceBuffers = Array.from({ length: this.capacity }, () => null);
     this.shots = Array.from({ length: this.capacity }, () => null);
+    this.interactions = Array.from({ length: this.capacity }, () => null);
+    this.reports = Array.from({ length: this.capacity }, () => null);
   }
 
   spawn(input: BallisticShot): boolean {
@@ -189,10 +211,14 @@ export class BallisticProjectileSystem {
       !(input.maxDistance > 0) ||
       !Number.isFinite(input.damage) ||
       !(input.damage >= 0) ||
-      !Number.isFinite(input.muzzleVelocityMetresPerSecond) ||
-      !(input.muzzleVelocityMetresPerSecond > 0) ||
-      !Number.isFinite(input.ballisticCoefficientG1) ||
-      !(input.ballisticCoefficientG1 > 0)
+      !Number.isFinite(input.ammunition.muzzleVelocityMetresPerSecond) ||
+      !(input.ammunition.muzzleVelocityMetresPerSecond > 0) ||
+      !Number.isFinite(input.ammunition.ballisticCoefficientG1) ||
+      !(input.ammunition.ballisticCoefficientG1 > 0) ||
+      !Number.isFinite(input.ammunition.projectileMassKilograms) ||
+      !(input.ammunition.projectileMassKilograms > 0) ||
+      !Number.isFinite(input.ammunition.penetrationMultiplier) ||
+      !(input.ammunition.penetrationMultiplier > 0)
     ) {
       this.rejectedSpawns += 1;
       return false;
@@ -213,9 +239,9 @@ export class BallisticProjectileSystem {
     this.dx[slot] = direction.x;
     this.dy[slot] = direction.y;
     this.dz[slot] = direction.z;
-    this.vx[slot] = direction.x * input.muzzleVelocityMetresPerSecond;
-    this.vy[slot] = direction.y * input.muzzleVelocityMetresPerSecond;
-    this.vz[slot] = direction.z * input.muzzleVelocityMetresPerSecond;
+    this.vx[slot] = direction.x * input.ammunition.muzzleVelocityMetresPerSecond;
+    this.vy[slot] = direction.y * input.ammunition.muzzleVelocityMetresPerSecond;
+    this.vz[slot] = direction.z * input.ammunition.muzzleVelocityMetresPerSecond;
     const horizontalRightLength = Math.hypot(direction.z, direction.x);
     if (horizontalRightLength > EPSILON) {
       this.rightX[slot] = -direction.z / horizontalRightLength;
@@ -226,6 +252,11 @@ export class BallisticProjectileSystem {
     }
     this.distance[slot] = 0;
     this.elapsed[slot] = 0;
+    this.damageApplied[slot] = 0;
+    this.destroyed[slot] = 0;
+    this.interactionCounts[slot] = 0;
+    this.interactions[slot] = null;
+    this.reports[slot] = null;
     this.traceCounts[slot] = 0;
     if (shot.captureTrace !== false) {
       this.traceBuffers[slot] =
@@ -260,6 +291,11 @@ export class BallisticProjectileSystem {
     this.results.length = 0;
   }
 
+  drainImpactEvents(visitor: (event: ImpactEvent) => void): void {
+    for (const event of this.impactEvents) visitor(event);
+    this.impactEvents.length = 0;
+  }
+
   getMetrics(): BallisticMetrics {
     return {
       active: this.activeCount,
@@ -269,6 +305,8 @@ export class BallisticProjectileSystem {
       completed: this.completed,
       fixedSteps: this.fixedSteps,
       segmentQueries: this.segmentQueries,
+      surfaceInteractions: this.surfaceInteractions,
+      droppedImpactEvents: this.droppedImpactEvents,
     };
   }
 
@@ -278,6 +316,7 @@ export class BallisticProjectileSystem {
       this.releaseSlot(slot);
     }
     this.results.length = 0;
+    this.impactEvents.length = 0;
     this.accumulator = 0;
   }
 
@@ -294,7 +333,7 @@ export class BallisticProjectileSystem {
         oldVx,
         oldVy,
         oldVz,
-        shot.ballisticCoefficientG1,
+        shot.ammunition.ballisticCoefficientG1,
         this.environment,
         dt,
         this.nextVelocity,
@@ -342,7 +381,7 @@ export class BallisticProjectileSystem {
         this.vy[slot] = THREE.MathUtils.lerp(oldVy, nextVy, stepFraction * hitFraction);
         this.vz[slot] = THREE.MathUtils.lerp(oldVz, nextVz, stepFraction * hitFraction);
         this.appendTracePoint(slot, this.px[slot], this.py[slot], this.pz[slot]);
-        this.resolve(activeIndex, slot, segmentHit, this.vx[slot], this.vy[slot], this.vz[slot]);
+        this.handleImpact(activeIndex, slot, segmentHit);
         continue;
       }
 
@@ -361,6 +400,144 @@ export class BallisticProjectileSystem {
         this.appendTracePoint(slot, this.px[slot], this.py[slot], this.pz[slot]);
         this.resolve(activeIndex, slot, null, this.vx[slot], this.vy[slot], this.vz[slot]);
       }
+    }
+  }
+
+  private handleImpact(activeIndex: number, slot: number, hit: WorldHit): void {
+    const shot = this.shots[slot];
+    if (!shot) return;
+    const speedBefore = Math.hypot(this.vx[slot], this.vy[slot], this.vz[slot]);
+    if (!(speedBefore > EPSILON)) {
+      this.resolve(activeIndex, slot, hit, this.vx[slot], this.vy[slot], this.vz[slot]);
+      return;
+    }
+
+    this.impactDirection
+      .set(this.vx[slot], this.vy[slot], this.vz[slot])
+      .multiplyScalar(1 / speedBefore);
+    const incidenceCosine = hit.normal
+      ? Math.abs(this.impactDirection.dot(hit.normal))
+      : 1;
+    const response = resolvePenetration({
+      ammunition: shot.ammunition,
+      surface: SURFACE_PROFILES[hit.surfaceId],
+      speedMetresPerSecond: speedBefore,
+      thicknessMetres: hit.penetrationThicknessMetres,
+      incidenceCosine,
+    });
+    const interactionIndex = this.interactionCounts[slot];
+    const canContinue =
+      response.outcome === "penetrated" && interactionIndex < MAX_SURFACE_INTERACTIONS - 1;
+    const outcome = canContinue ? "penetrated" : "stopped";
+    const exitPoint = canContinue
+      ? hit.point
+          .clone()
+          .addScaledVector(
+            this.impactDirection,
+            response.effectiveThicknessMetres + EXIT_EPSILON_METRES
+          )
+      : null;
+
+    let targetId: string | null = null;
+    let interactionDamage = 0;
+    let interactionHealthBefore: number | null = null;
+    let interactionHealthAfter: number | null = null;
+    let interactionDestroyed = false;
+    if (hit.damageable) {
+      targetId = hit.damageable.id;
+      const healthBefore = hit.damageable.health;
+      interactionHealthBefore = healthBefore;
+      const muzzleEnergy = kineticEnergyJoules(
+        shot.ammunition,
+        shot.ammunition.muzzleVelocityMetresPerSecond
+      );
+      // Preserve nominal weapon damage through ordinary flight while still
+      // reducing lethality after substantial drag or prior penetration.
+      const damageScale = THREE.MathUtils.clamp(
+        response.energyBeforeJoules / (muzzleEnergy * 0.7),
+        0.1,
+        1
+      );
+      const damage = hit.damageable.applyDamage({
+        amount: shot.damage * damageScale,
+        point: hit.point,
+        direction: this.impactDirection,
+        sourceId: shot.sourceId,
+        shotSequence: shot.sequence,
+      });
+      this.damageApplied[slot] += damage.applied;
+      if (damage.destroyed) this.destroyed[slot] = 1;
+      interactionDamage = damage.applied;
+      interactionHealthAfter = damage.health;
+      interactionDestroyed = damage.destroyed;
+      const report: TargetHitReport = {
+        targetId,
+        objectName: hit.object.name,
+        sourceId: shot.sourceId,
+        shotSequence: shot.sequence,
+        point: hit.point.clone(),
+        normal: hit.normal?.clone() ?? null,
+        rangeMetres: shot.origin.distanceTo(hit.point),
+        damageApplied: damage.applied,
+        healthBefore,
+        healthAfter: damage.health,
+        destroyed: damage.destroyed,
+      };
+      (this.reports[slot] ??= []).push(report);
+    }
+
+    const interaction: ImpactEvent = {
+      sourceId: shot.sourceId,
+      shotSequence: shot.sequence,
+      interactionIndex,
+      ammunitionId: shot.ammunition.id,
+      kind: hit.kind,
+      objectId: hit.objectId,
+      objectName: hit.object.name,
+      targetId,
+      damageApplied: interactionDamage,
+      healthBefore: interactionHealthBefore,
+      healthAfter: interactionHealthAfter,
+      destroyed: interactionDestroyed,
+      surfaceId: hit.surfaceId,
+      outcome,
+      point: hit.point.clone(),
+      exitPoint,
+      normal: hit.normal?.clone() ?? null,
+      effectiveThicknessMetres: response.effectiveThicknessMetres,
+      speedBeforeMetresPerSecond: speedBefore,
+      speedAfterMetresPerSecond: canContinue ? response.speedAfterMetresPerSecond : 0,
+      energyBeforeJoules: response.energyBeforeJoules,
+      energyAfterJoules: canContinue ? response.energyAfterJoules : 0,
+    };
+    this.interactionCounts[slot] += 1;
+    this.surfaceInteractions += 1;
+    (this.interactions[slot] ??= []).push(interaction);
+    if (this.impactEvents.length < IMPACT_EVENT_CAPACITY) this.impactEvents.push(interaction);
+    else this.droppedImpactEvents += 1;
+
+    if (!canContinue || !exitPoint) {
+      this.resolve(activeIndex, slot, hit, this.vx[slot], this.vy[slot], this.vz[slot]);
+      return;
+    }
+
+    const traversalDistance = response.effectiveThicknessMetres + EXIT_EPSILON_METRES;
+    const averageSpeed = Math.max(
+      EPSILON,
+      (speedBefore + response.speedAfterMetresPerSecond) * 0.5
+    );
+    this.distance[slot] += traversalDistance;
+    this.elapsed[slot] += traversalDistance / averageSpeed;
+    this.px[slot] = exitPoint.x;
+    this.py[slot] = exitPoint.y;
+    this.pz[slot] = exitPoint.z;
+    this.vx[slot] = this.impactDirection.x * response.speedAfterMetresPerSecond;
+    this.vy[slot] = this.impactDirection.y * response.speedAfterMetresPerSecond;
+    this.vz[slot] = this.impactDirection.z * response.speedAfterMetresPerSecond;
+    this.appendTracePoint(slot, exitPoint.x, exitPoint.y, exitPoint.z);
+
+    if (this.distance[slot] + EPSILON >= shot.maxDistance) {
+      this.resolve(activeIndex, slot, null, this.vx[slot], this.vy[slot], this.vz[slot]);
     }
   }
 
@@ -385,35 +562,10 @@ export class BallisticProjectileSystem {
           normal: segmentHit.normal?.clone() ?? null,
         }
       : null;
-    let damageApplied = 0;
-    let destroyed = false;
-    let report: TargetHitReport | null = null;
-    if (hit?.damageable) {
-      const healthBefore = hit.damageable.health;
-      this.impactDirection.set(impactVx, impactVy, impactVz).normalize();
-      const damage = hit.damageable.applyDamage({
-        amount: shot.damage,
-        point: impactPoint,
-        direction: this.impactDirection,
-        sourceId: shot.sourceId,
-        shotSequence: shot.sequence,
-      });
-      damageApplied = damage.applied;
-      destroyed = damage.destroyed;
-      report = {
-        targetId: hit.damageable.id,
-        objectName: hit.object.name,
-        sourceId: shot.sourceId,
-        shotSequence: shot.sequence,
-        point: impactPoint.clone(),
-        normal: hit.normal?.clone() ?? null,
-        rangeMetres: lineOfSightDistance,
-        damageApplied,
-        healthBefore,
-        healthAfter: damage.health,
-        destroyed,
-      };
-    }
+    const reports = this.reports[slot] ?? [];
+    const report = reports.at(-1) ?? null;
+    const damageApplied = this.damageApplied[slot];
+    const destroyed = this.destroyed[slot] === 1;
 
     const displacementX = this.px[slot] - this.ox[slot];
     const displacementY = this.py[slot] - this.oy[slot];
@@ -432,6 +584,7 @@ export class BallisticProjectileSystem {
       sightDirection: shot.sightDirection.clone(),
       initialDirection: shot.direction.clone(),
       points: this.buildTracePoints(slot, impactPoint),
+      interactions: this.interactions[slot] ?? [],
       impact: hit
         ? {
             point: impactPoint.clone(),
@@ -448,7 +601,7 @@ export class BallisticProjectileSystem {
       pathLengthMetres: this.distance[slot],
       impactSpeedMetresPerSecond: impactSpeed,
     };
-    this.results.push({ shot, hit, damageApplied, destroyed, report, trace });
+    this.results.push({ shot, hit, damageApplied, destroyed, report, reports, trace });
     this.completed += 1;
     this.removeActive(activeIndex, slot);
   }
@@ -492,6 +645,11 @@ export class BallisticProjectileSystem {
 
   private releaseSlot(slot: number): void {
     this.shots[slot] = null;
+    this.interactions[slot] = null;
+    this.reports[slot] = null;
+    this.damageApplied[slot] = 0;
+    this.destroyed[slot] = 0;
+    this.interactionCounts[slot] = 0;
     this.traceCounts[slot] = 0;
     const traceBuffer = this.traceBuffers[slot];
     if (traceBuffer) this.freeTraceBuffers.push(traceBuffer);

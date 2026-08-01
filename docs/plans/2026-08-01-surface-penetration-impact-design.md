@@ -12,6 +12,12 @@ Winchester, and .50 BMG profiles. Only the existing sniper has complete weapon
 presentation. The other profiles are selectable diagnostic ammunition, not
 claims that the sniper model has changed into those weapons.
 
+External-ballistic baselines use manufacturer data: Federal's 124 gr 9 mm and
+62 gr 5.56 data, the existing 175 gr .308 match baseline, and Barrett's 660 gr
+.50 BMG data. Penetration multipliers and surface resistance remain visibly
+authored game tuning; manufacturer velocity does not imply a universal real-
+world barrier result.
+
 ## Selected model
 
 Use authored surface resistance and collider thickness against the projectile's

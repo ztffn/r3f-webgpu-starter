@@ -13,7 +13,7 @@ DOM input
   -> accepted shot event
   -> BallisticProjectileSystem (120 Hz gravity / drag / wind)
   -> swept WorldQuery segments
-  -> Damageable + TargetHitReport + ShotTrace
+  -> surface penetration + Damageable + ImpactEvent + TargetHitReport + ShotTrace
   -> CombatTelemetry + shot debug presentation
   -> weapon presentation / target presentation / HUD
 ```
@@ -129,6 +129,42 @@ shooters at 600 RPM and 32 shooters at 900 RPM. The current Three.js world-query
 adapter is still a local fallback; a production multiplayer authority requires
 spatially indexed collision behind the same contract.
 
-Out of scope here: saved/custom keybindings, ammunition selection, spread,
-decals, physics movement, stamina, attachments, networking, bot presentation,
-and remote tracer presentation.
+## Surface penetration and impacts
+
+World-query registrations now carry an explicit gameplay surface and authored
+simplified-collider thickness. Three.js visual material names never determine
+cover behavior. The fixed-step projectile compares its remaining energy against
+surface resistance adjusted for incidence angle. A penetrating round loses
+speed, emits authoritative entry/exit data, advances beyond that collider, and
+continues as the same pooled projectile. It does not spawn a second hitscan ray.
+
+Surface profiles cover cloth, wood, sheet metal, armored metal, stone, dirt,
+flesh, water, and glass. `WorldObjectPrefab` composes a procedural visual,
+simplified box collider, optional health, and one intact-to-husk transition;
+objects without health still produce material impacts. This is a small prefab
+runtime, not an ECS.
+
+Impact presentation subscribes to completed gameplay contacts. Visual debris
+uses one 384-slot instanced draw. Spatial sound uses 24 positional Web Audio
+voices with prebuilt procedural surface variants, distance culling, and bounded
+voice stealing. A local hit marker is published at contact time even when the
+projectile penetrates and remains in flight.
+
+Open `?scene=scope&impacttest=1&shotdebug=1` for eight cover lanes, ordered left
+to right: cloth, wood, sheet metal, armored metal, glass, stone, dirt, and water.
+Each has a resettable flesh target behind it. Choose representative diagnostic
+ammunition with `ammo=9mm`, `ammo=556`, `ammo=308` (default), or `ammo=50bmg`.
+The current sniper GLB remains mounted for all four because only its presentation
+exists; the URL changes authoritative ammunition data, not the displayed gun.
+The first canvas press also unlocks spatial audio. T resets the target husks.
+
+Shot debug keeps the cyan gameplay path, white sightline, and yellow bore.
+Surface entries are orange, exits green, and stops red. HUD contact telemetry
+reports ammunition, surface, outcome, effective thickness, and speed before and
+after. Automated coverage includes 32 shooters at 900 RPM with one cloth impact
+per round; projectile slots and impact-event queues remain bounded.
+
+Out of scope here: saved/custom keybindings, in-game ammunition/loadout
+selection, decals, ricochet, layered armor, projectile deformation, physics
+movement, stamina, attachments, networking, bot presentation, and remote tracer
+presentation.

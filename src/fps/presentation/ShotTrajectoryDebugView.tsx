@@ -4,6 +4,7 @@ import { shotDebugStore } from "../debug/ShotDebugStore";
 
 const INITIAL_AIM_LENGTH = 25;
 const NORMAL_LENGTH = 1.25;
+const MAX_INTERACTION_MARKERS = 16;
 
 function makeLine(color: THREE.ColorRepresentation): THREE.Line {
   const material = new THREE.LineBasicMaterial({
@@ -62,14 +63,49 @@ export function ShotTrajectoryDebugView() {
     normal.renderOrder = 1_002;
     group.add(normal);
 
+    const interactionMarkers = new THREE.InstancedMesh(
+      new THREE.SphereGeometry(0.075, 8, 6),
+      new THREE.MeshBasicMaterial({ vertexColors: true, depthTest: false, depthWrite: false }),
+      MAX_INTERACTION_MARKERS
+    );
+    interactionMarkers.name = "surface-interaction-markers";
+    interactionMarkers.renderOrder = 1_003;
+    interactionMarkers.frustumCulled = false;
+    interactionMarkers.count = 0;
+    group.add(interactionMarkers);
+
+    const markerMatrix = new THREE.Matrix4();
+    const markerColor = new THREE.Color();
+
     group.visible = false;
-    return { group, path, initialAim, bore, impact, normal };
+    return {
+      group,
+      path,
+      initialAim,
+      bore,
+      impact,
+      normal,
+      interactionMarkers,
+      markerMatrix,
+      markerColor,
+    };
   }, []);
 
   useEffect(() => {
-    const { group, path, initialAim, bore, impact, normal } = objects;
+    const {
+      group,
+      path,
+      initialAim,
+      bore,
+      impact,
+      normal,
+      interactionMarkers,
+      markerMatrix,
+      markerColor,
+    } = objects;
     if (!trace || trace.points.length < 2) {
       group.visible = false;
+      interactionMarkers.count = 0;
       return;
     }
 
@@ -94,6 +130,29 @@ export function ShotTrajectoryDebugView() {
         ]);
       }
     }
+
+    let marker = 0;
+    for (const interaction of trace.interactions) {
+      if (marker >= MAX_INTERACTION_MARKERS) break;
+      markerMatrix.makeTranslation(interaction.point.x, interaction.point.y, interaction.point.z);
+      markerColor.set(interaction.outcome === "penetrated" ? "#ff9d2e" : "#ff3d2e");
+      interactionMarkers.setMatrixAt(marker, markerMatrix);
+      interactionMarkers.setColorAt(marker, markerColor);
+      marker += 1;
+      if (!interaction.exitPoint || marker >= MAX_INTERACTION_MARKERS) continue;
+      markerMatrix.makeTranslation(
+        interaction.exitPoint.x,
+        interaction.exitPoint.y,
+        interaction.exitPoint.z
+      );
+      markerColor.set("#62ff78");
+      interactionMarkers.setMatrixAt(marker, markerMatrix);
+      interactionMarkers.setColorAt(marker, markerColor);
+      marker += 1;
+    }
+    interactionMarkers.count = marker;
+    interactionMarkers.instanceMatrix.needsUpdate = true;
+    if (interactionMarkers.instanceColor) interactionMarkers.instanceColor.needsUpdate = true;
   }, [objects, trace]);
 
   useEffect(() => {
@@ -116,6 +175,8 @@ export function ShotTrajectoryDebugView() {
       (objects.impact.material as THREE.Material).dispose();
       objects.normal.geometry.dispose();
       (objects.normal.material as THREE.Material).dispose();
+      objects.interactionMarkers.geometry.dispose();
+      (objects.interactionMarkers.material as THREE.Material).dispose();
     },
     [objects]
   );

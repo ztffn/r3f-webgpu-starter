@@ -1,5 +1,10 @@
 import * as THREE from "three/webgpu";
 import type { Damageable } from "../combat/Damageable";
+import {
+  DEFAULT_SURFACE_BY_KIND,
+  DEFAULT_THICKNESS_BY_KIND,
+  type SurfaceId,
+} from "../combat/SurfaceProfile.ts";
 
 export type WorldHitKind = "terrain" | "target" | "world";
 
@@ -8,6 +13,9 @@ export interface WorldHit {
   readonly point: THREE.Vector3;
   readonly normal: THREE.Vector3 | null;
   readonly kind: WorldHitKind;
+  readonly objectId: string;
+  readonly surfaceId: SurfaceId;
+  readonly penetrationThicknessMetres: number;
   readonly damageable: Damageable | null;
   readonly object: THREE.Object3D;
 }
@@ -19,6 +27,10 @@ export interface WorldQuery {
 export interface WorldQueryRegistration {
   readonly root: THREE.Object3D;
   readonly kind: WorldHitKind;
+  readonly objectId?: string;
+  readonly surfaceId?: SurfaceId;
+  /** Thickness of the simplified ballistic collider along its authored normal. */
+  readonly penetrationThicknessMetres?: number;
   readonly damageable?: Damageable;
 }
 
@@ -67,11 +79,20 @@ export class ThreeWorldQuery implements WorldQuery {
     }
     if (!owner) return null;
 
+    const thickness =
+      owner.penetrationThicknessMetres ?? DEFAULT_THICKNESS_BY_KIND[owner.kind];
+
     return {
       distance: nearest.distance,
       point: nearest.point.clone(),
       normal: nearest.face?.normal.clone().transformDirection(nearest.object.matrixWorld) ?? null,
       kind: owner.kind,
+      objectId: owner.objectId || owner.root.name || nearest.object.uuid,
+      surfaceId: owner.surfaceId ?? DEFAULT_SURFACE_BY_KIND[owner.kind],
+      penetrationThicknessMetres:
+        Number.isFinite(thickness) && thickness >= 0
+          ? thickness
+          : DEFAULT_THICKNESS_BY_KIND[owner.kind],
       damageable: owner.damageable ?? null,
       object: nearest.object,
     };

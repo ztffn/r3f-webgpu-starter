@@ -1,16 +1,15 @@
 import type { WeaponDefinition } from "./WeaponDefinition";
+import { DEFAULT_AMMUNITION } from "./AmmunitionDefinition.ts";
 
 export const SNIPER_DEFINITION: WeaponDefinition = {
   id: "prototype-sniper",
   displayName: "Prototype Sniper",
   shot: {
     type: "ballistic",
-    damage: 100,
+    damage: DEFAULT_AMMUNITION.baseDamage,
     range: 2_000,
     roundsPerMinute: 48,
-    // Baseline: 175 gr .308 match profile, 2,600 ft/s and G1 BC 0.505.
-    muzzleVelocityMetresPerSecond: 792.48,
-    ballisticCoefficientG1: 0.505,
+    ammunition: DEFAULT_AMMUNITION,
   },
   ammo: {
     magazineSize: 5,

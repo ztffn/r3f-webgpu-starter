@@ -12,6 +12,7 @@ import {
 } from "../../src/fps/combat/BallisticEnvironment.ts";
 import { HealthDamageable } from "../../src/fps/combat/Damageable.ts";
 import type { WorldQuery } from "../../src/fps/core/WorldQuery.ts";
+import { DEFAULT_AMMUNITION } from "../../src/fps/weapons/AmmunitionDefinition.ts";
 
 const MISS_QUERY: WorldQuery = { raycast: () => null };
 const BASE_SHOT = {
@@ -20,8 +21,7 @@ const BASE_SHOT = {
   origin: new Vector3(0, 100, 0),
   direction: new Vector3(0, 0, -1),
   damage: 100,
-  muzzleVelocityMetresPerSecond: 792.48,
-  ballisticCoefficientG1: 0.505,
+  ammunition: DEFAULT_AMMUNITION,
 } as const;
 
 function environment(windX = 0): BallisticEnvironment {
@@ -117,6 +117,9 @@ test("swept collision delays damage until the projectile reaches a thin target",
         ),
         normal: new Vector3(0, 0, 1),
         kind: "target",
+        objectId: "thin-target",
+        surfaceId: "flesh",
+        penetrationThicknessMetres: 0.24,
         damageable: target,
         object,
       };
@@ -129,12 +132,21 @@ test("swept collision delays damage until the projectile reaches a thin target",
   assert.equal(target.health, 100, "first swept segment has not reached 10 m");
   system.update(1 / 120);
   assert.equal(target.health, 0, "second swept segment crosses and damages the target");
-  let result: BallisticResult | null = null;
-  system.drainResults((next) => {
-    result = next;
+  let impactTarget: string | null = null;
+  system.drainImpactEvents((event) => {
+    impactTarget = event.targetId;
   });
+  assert.equal(impactTarget, "thin-target", "damage contact is reported before the round resolves");
+  let result: BallisticResult | null = null;
+  while (!result) {
+    system.update(1 / 60);
+    system.drainResults((next) => {
+      result = next;
+    });
+  }
   assert.equal(result?.report?.targetId, "thin-target");
-  assert.equal(result?.trace.impact?.targetId, "thin-target");
+  assert.equal(result?.trace.interactions[0]?.targetId, "thin-target");
+  assert.equal(result?.trace.interactions[0]?.outcome, "penetrated");
   assert.ok(result!.trace.flightTimeSeconds > 0);
 });
 
@@ -150,6 +162,8 @@ test("pool exhaustion rejects explicitly without replacing a live projectile", (
     completed: 0,
     fixedSteps: 0,
     segmentQueries: 0,
+    surfaceInteractions: 0,
+    droppedImpactEvents: 0,
   });
 });
 

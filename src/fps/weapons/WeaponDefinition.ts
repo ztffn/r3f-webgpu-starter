@@ -1,3 +1,5 @@
+import type { AmmunitionDefinition } from "./AmmunitionDefinition";
+
 export type WeaponId = string;
 export type WeaponSlotId = "primary" | "secondary" | "sidearm" | string;
 
@@ -9,8 +11,7 @@ export interface WeaponDefinition {
     readonly damage: number;
     readonly range: number;
     readonly roundsPerMinute: number;
-    readonly muzzleVelocityMetresPerSecond: number;
-    readonly ballisticCoefficientG1: number;
+    readonly ammunition: AmmunitionDefinition;
   };
   readonly ammo: {
     readonly magazineSize: number;

@@ -7,13 +7,15 @@
 // is forced to full height everywhere so the march is measured against a known
 // worst case rather than against whatever the map happens to grow underfoot.
 //
-// Dev affordance only: absent the bench parameter every value falls through to the
-// normal config, so nothing here changes how the app behaves for a player.
+// Dev affordance only. Absent the bench parameter every value falls through to the
+// normal config, with two deliberate exceptions that are useful without a fixed
+// vantage and are opt-in by an explicit URL parameter a player never types:
+// `?debug=1` (slider panel) and `?canopyall=1` (force full canopy).
 
 import type { Stance } from "./FlyControls";
 
 export interface BenchConfig {
-  /** True when ?bench=1 — the only switch that changes behaviour. */
+  /** True when ?bench=1 — the fixed vantage and the published sample. */
   enabled: boolean;
   /** Device pixel ratio override; the ray-count axis. */
   dpr?: number;
@@ -38,8 +40,12 @@ export interface BenchConfig {
   /** Longest span a ray searches, metres. Sets step size for grazing rays. */
   maxspan?: number;
   /**
-   * Grow full-height grass everywhere, ignoring the canopy field. ON by default
-   * under `?bench=1`; `?canopyall=0` restores the map's own canopy.
+   * Grow full-height grass everywhere, ignoring the canopy field.
+   *
+   * Two modes, because it serves two jobs. Under `?bench=1` it is ON by default and
+   * `?canopyall=0` opts out — a bench number needs the worst case. Without `?bench=1`
+   * it is OFF unless `?canopyall=1` asks for it, which is the missing-grass hunt in
+   * docs/08 §11 and needs a free camera rather than the bench vantage.
    *
    * Defaulted on because it is the only way to make a bench number MEAN anything on
    * this map. Green Mile's canopy is a colormap-derived stand-in with a median of
@@ -75,7 +81,14 @@ function parse(): BenchConfig {
   const q = new URLSearchParams(window.location.search);
   const debug = q.get("debug") === "1";
   // The slider panel is useful on its own, without the fixed benchmark vantage.
-  if (q.get("bench") !== "1") return { enabled: false, debug };
+  //
+  // So is forcing the canopy, and MORE so: docs/08 §11 makes `?canopyall=1` the first
+  // move on any missing-grass report, and that is a hunt for a specific place and
+  // heading. Reaching it through `?bench=1` pins the camera to the bench vantage, which
+  // is the one place you cannot look from. Opt-in only, so a player never sees it.
+  if (q.get("bench") !== "1") {
+    return { enabled: false, debug, canopyAll: q.get("canopyall") === "1" };
+  }
 
   const num = (k: string): number | undefined => {
     const v = q.get(k);

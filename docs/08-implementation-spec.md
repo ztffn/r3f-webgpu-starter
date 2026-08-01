@@ -762,6 +762,9 @@ way `isCap` is gated would compile it out. **Measure before acting** — it may 
 - **`?canopyall=1` is the first move on any "missing grass" report**, not the last. Absent canopy
   and a broken march look identical in a normal render, and Green Mile's canopy is a patchy
   stand-in (median 0.13 m). If the hole survives full canopy, it is the renderer.
+  It works **on its own**, without `?bench=1` — deliberately, because this is a hunt for a
+  specific place and heading and `?bench=1` pins the camera to the bench vantage. Under
+  `?bench=1` it is instead the default and `?canopyall=0` opts out (`09` §0).
 - **Wireframing the terrain separates occlusion from a march miss** in one click. `wireframe`
   applies only to the terrain material, so grass still renders normally — if the hole fills, the
   terrain was drawing over it.

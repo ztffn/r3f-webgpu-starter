@@ -21,10 +21,24 @@ import { bakeGrassJitter } from "./grassJitter";
 import { buildHeightTexture } from "./heightTexture";
 import { loadTerrain, type LoadedTerrain } from "./loadTerrain";
 import { WeaponPrototype } from "../fps/WeaponPrototype";
+import { CompositeWorldQuery } from "../fps/core/WorldQuery";
+import { FPS_DEBUG } from "../fps/debug/debugConfig";
+import { LookSensitivityController } from "../fps/core/LookSensitivityController";
 // Lazily imported so the three multi-megabyte debug models are code-split out of the
 // main bundle and only fetched when ?targets=1 actually asks for them.
 const TestTargets = lazy(() =>
   import("../fps/TestTargets").then((m) => ({ default: m.TestTargets }))
+);
+const BallisticTestRange = lazy(() =>
+  import("../fps/BallisticTestRange").then((m) => ({ default: m.BallisticTestRange }))
+);
+const ShotTrajectoryDebugView = lazy(() =>
+  import("../fps/presentation/ShotTrajectoryDebugView").then((m) => ({
+    default: m.ShotTrajectoryDebugView,
+  }))
+);
+const ImpactEffects = lazy(() =>
+  import("../fps/presentation/ImpactEffects").then((m) => ({ default: m.ImpactEffects }))
 );
 import { BENCH } from "./bench";
 import {
@@ -122,6 +136,7 @@ export function DF2Scene({
   scopeDemo = false,
   weaponDemo = false,
 }: DF2SceneProps) {
+  const lookSensitivity = useMemo(() => new LookSensitivityController(), []);
   // undefined = still loading, null = no assets (synthetic), object = real map
   const [loaded, setLoaded] = useState<LoadedTerrain | null | undefined>(undefined);
 
@@ -271,6 +286,9 @@ export function DF2Scene({
   useEffect(() => () => waterMaterial.dispose(), [waterMaterial]);
 
   const heightfield = world?.heightfield ?? null;
+  // Gameplay collision reads the canonical CPU heightfield, never Terrain's
+  // transient LOD meshes or shader-only grass proxies.
+  const worldQuery = useMemo(() => new CompositeWorldQuery(heightfield, 0), [heightfield]);
   // .trn water_height is in raw elevation units, same scale as the heightmap.
   const waterLevel = (world?.waterHeight ?? 0) * HEIGHT_SCALE;
   const showWater = !!heightfield && waterLevel > heightfield.minHeight;
@@ -314,24 +332,45 @@ export function DF2Scene({
         />
       )}
 
-      {/* Human-scale contrast reference for judging grass. Debug-only: ?targets=1. */}
-      {BENCH.targets && heightfield && (
+      {/* Scope mode promotes the contrast ladder into resettable shootable targets. */}
+      {(BENCH.targets || (scopeDemo && !FPS_DEBUG.impactTest)) && heightfield && (
         <Suspense fallback={null}>
           <TestTargets
             heightfield={heightfield}
-            originX={BENCH.x ?? 5}
-            originZ={BENCH.z ?? 375}
+            originX={BENCH.targets ? (BENCH.x ?? 5) : 0}
+            originZ={BENCH.targets ? (BENCH.z ?? 375) : 320}
+            worldQuery={worldQuery}
           />
         </Suspense>
       )}
 
+      {scopeDemo && FPS_DEBUG.impactTest && heightfield && (
+        <Suspense fallback={null}>
+          <BallisticTestRange heightfield={heightfield} worldQuery={worldQuery} />
+        </Suspense>
+      )}
+
       {showWater && <Water level={waterLevel} span={waterSpan} material={waterMaterial} />}
+
+      {scopeDemo && FPS_DEBUG.shotTrajectory && (
+        <Suspense fallback={null}>
+          <ShotTrajectoryDebugView />
+        </Suspense>
+      )}
+
+      {scopeDemo && (
+        <Suspense fallback={null}>
+          <ImpactEffects />
+        </Suspense>
+      )}
 
       {heightfield && (
         <FlyControls
           heightfield={heightfield}
           grounded={grounded}
           stance={stance}
+          pointerLock={scopeDemo}
+          lookSensitivity={lookSensitivity}
           onState={onFly}
           onToggleGround={onToggleGround}
           onStance={onStance}
@@ -339,7 +378,15 @@ export function DF2Scene({
       )}
 
       {/* Kept opt-in while the existing terrain visual work remains the default. */}
-      {(scopeDemo || weaponDemo) && <WeaponPrototype scopeDemo={scopeDemo} />}
+      {(scopeDemo || weaponDemo) && (
+        <WeaponPrototype
+          scopeDemo={scopeDemo}
+          worldQuery={worldQuery}
+          stance={stance}
+          grounded={grounded}
+          lookSensitivity={lookSensitivity}
+        />
+      )}
     </>
   );
 }

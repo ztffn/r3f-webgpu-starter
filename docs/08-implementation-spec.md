@@ -85,7 +85,7 @@ Everything below `src/df2/` is the Phase-1 spike. The target layout is `05` §7
 | `GrassMaterial.ts` | TSL columnar grass (march + depth) | geometry, chunk layout |
 | `loadTerrain.ts` | fetch + decode prepared assets, grass provenance | rendering |
 | `Terrain.tsx` | infinite chunk window, LOD selection, geometry cache | what a chunk looks like |
-| `FlyControls.tsx` | camera rig, stance eye heights | scene contents |
+| `FlyControls.tsx` | camera rig, stance eye heights, pointer-lock look | scene contents; `src/fps` beyond an OPTIONAL injected sensitivity curve (type-only import, so the terrain spike still runs with no game layer present) |
 | `PerfMonitor.tsx` | frame time, draw calls, backend | UI |
 | `DF2Scene.tsx` | composition: lights, fog, water, wiring | UI layout |
 | `components/GameCanvas.tsx` | async WebGPU init, camera planes | the scene |
@@ -94,8 +94,7 @@ Everything below `src/df2/` is the Phase-1 spike. The target layout is `05` §7
 | `heightTexture.ts` | elevation texture + **point-decimated** mip chain matching the mesh's LOD lattice | chunk placement |
 | `bench.ts` | `?bench=1` URL overrides, `window.__perf` | anything gameplay |
 | `components/GrassDebug.tsx` | live grass sliders; writes `uniform.value` directly | material internals |
-| `fps/WeaponPrototype.tsx` | first-person rig, weapon animation | terrain, grass |
-| `fps/ScopeRig.tsx` | picture-in-picture optic, reticles | terrain, grass |
+| `fps/WeaponPrototype.tsx` | first-person rig, weapon animation, picture-in-picture optic and reticle | terrain, grass |
 | `fps/TestTargets.tsx` | human-scale contrast ladder, `?targets=1` | anything but the heightfield |
 
 `Heightfield.ts` being Three-free is a **rule, not a preference**. It is the seed of the

@@ -59,6 +59,26 @@ canvas:active {
   -webkit-user-select: none;
 }
 
+.hit-marker {
+  position: fixed;
+  top: calc(50% + 22px);
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+  animation: hit-marker 520ms ease-out forwards;
+}
+
+@keyframes hit-marker {
+  0% { opacity: 0; transform: translate(-50%, 3px) scale(0.92); }
+  18% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+  68% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -3px) scale(1); }
+}
+
 .panel {
   position: fixed;
   display: flex;
@@ -145,6 +165,51 @@ canvas:active {
 .perf .fps {
   color: var(--accent);
   font-size: 13px;
+}
+
+/* --- structured shot reports (bottom centre) --- */
+#combat-log {
+  left: 50%;
+  bottom: 14px;
+  width: min(430px, calc(100vw - 580px));
+  min-width: 330px;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+.shot-log {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-variant-numeric: tabular-nums;
+}
+.shot-log li {
+  display: grid;
+  grid-template-columns: 30px minmax(92px, 1fr) auto;
+  gap: 8px;
+  color: var(--ink-faint);
+}
+.shot-log strong,
+.shot-log em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.shot-log strong {
+  color: var(--ink-dim);
+  font-weight: 500;
+}
+.shot-log em {
+  font-style: normal;
+  text-align: right;
+}
+.shot-log li.hit em {
+  color: var(--accent);
+}
+.shot-log li.down em {
+  color: var(--warn);
 }
 
 /* --- controls (bottom left) --- */
@@ -272,7 +337,8 @@ button:disabled {
     display: block;
   }
   #telem,
-  #legend {
+  #legend,
+  #combat-log {
     display: none;
   }
   #ident {

@@ -19,6 +19,12 @@ fallback path). The legacy Create React App / react-scripts setup has been remov
 columnar grass. With prepared assets present it renders a real DF-era map; without them it
 falls back to synthetic fBm and needs no game data at all.
 
+A local-first FPS combat slice is also available at `?scene=scope`: pointer-lock
+long-range aiming, authoritative stance/breath sway, scope zero and windage,
+fixed-step gravity/drag/wind ballistics, material penetration, resettable targets,
+spatial impact audio, and opt-in trajectory diagnostics. Its as-built contract and
+honest performance boundary are in [`docs/10`](./docs/10-fps-combat-implementation-spec.md).
+
 - Chunked heightfield mesh with distance-based per-chunk LOD and a geometry cache.
 - **Infinite tiling** — the window of chunks re-centres on the camera and geometry is cached
   by *wrapped* chunk index, so the map repeats forever with no edge (as DF2's did).
@@ -62,6 +68,7 @@ See [`docs/`](./docs) for the full design:
 | [`06`](./docs/06-asset-extraction-findings.md) | **Asset extraction findings (ground truth)** |
 | [`07`](./docs/07-grass-visual-reference.md) | Grass measurement methodology & open artifacts |
 | [`08`](./docs/08-implementation-spec.md) | **Implementation spec (as-built)** — start here to change code |
+| [`10`](./docs/10-fps-combat-implementation-spec.md) | **FPS combat implementation spec (as-built)** — controls, contracts, performance, handoff |
 
 ## Source layout
 
@@ -82,6 +89,7 @@ src/components/
   GameCanvas.tsx     WebGPU + R3F canvas bootstrap (async WebGPU init)
   Hud.tsx            instrument-panel HUD
 src/main.tsx         entry
+src/fps/             local player, weapons, ballistics, world queries, combat presentation
 ```
 
 `src/df2/` is the current Phase-1 spike. The **target** module layout is the one in
@@ -101,6 +109,7 @@ npm run dev        # Vite dev server at localhost:3000
 npm run build      # typecheck + production build to /dist
 npm run preview    # serve the production build
 npm run typecheck  # tsc --noEmit
+npm test           # deterministic FPS systems and load tests
 ```
 
 A WebGPU-capable browser is recommended; Three.js falls back to WebGL2 automatically where
@@ -118,6 +127,11 @@ before drawing any conclusion from the frame times next to it.
 | `Shift` | ×4 boost |
 | `G` | toggle on-foot / fly |
 | `X` `C` `Z` | stand / crouch / prone (drops you to the ground) |
+
+For the FPS test slice, open `?scene=scope`, press the canvas once to capture the
+pointer, then use left click to fire, right click for ADS, Shift while ADS for
+breath/precision, R to reload, and the arrow keys for zero/windage. The complete
+control and diagnostic URL table is in [`docs/10`](./docs/10-fps-combat-implementation-spec.md#7-controls-and-diagnostic-urls).
 
 ## Deploying a test build
 
@@ -158,7 +172,8 @@ that distinction, not "assets" as a blanket category, is what the policy turns o
   (it is still flatter than the real thing, `docs/07` §7), then compute-instanced near-field
   blades.
 - **Phase 3** — concealment / line-of-sight, reading the same `grassHeightField`.
-- **Phase 4** — first-person controller, physics, ECS, AI/objectives.
+- **Phase 4** — the local combat slice is built; next are a Rapier player motor,
+  real sidearm/loadout presentation, third-person characters, then AI/objectives.
 
 ## Credits
 

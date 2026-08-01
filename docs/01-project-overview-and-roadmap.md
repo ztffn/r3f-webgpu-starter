@@ -237,11 +237,32 @@ and immediately answers "does this feel like DF2?".
   distances from measured deviation against a stated bound instead. LOD 0 everywhere is
   exact and measured 17.5 ms against 9 ms, so it is not the answer.
 
-### Phase 4 — Integration (⬜ not started)
-- ⬜ First-person controller, physics (rapier or cannon-es), basic AI/objectives.
+### Phase 4 — Integration (🟡 local FPS combat slice built)
+- ✅ Local-first controller/weapon/loadout contracts, resettable test targets, structured
+  hit reports, and opt-in latest-shot diagnostics are built. The legacy hitscan resolver
+  remains tested as a generic adapter, but the mounted sniper no longer fires hitscan.
+- ✅ **Authoritative fixed-step rifle ballistics**: a pooled 120 Hz projectile system owns
+  muzzle velocity, gravity, wind, drag, time of flight, swept collision, delayed damage,
+  hit reports, HUD telemetry, and debug paths through 1,300 m.
+- ✅ **Scalable gameplay collision seam**: terrain segments traverse the canonical CPU
+  heightfield analytically, simplified object colliders use a spatial index, and both are
+  composed by `WorldQuery`. Render terrain/grass/LOD objects are excluded.
+- ✅ Material surfaces, bounded penetration, resettable damageable prefabs, pooled impact
+  particles, and bounded positional impact audio are present in the diagnostic range.
+- ✅ Scope turrets provide reachable ammunition-calibrated elevation presets up to 1,300 m
+  and manual 0.1 mrad windage with compact-keyboard controls and an in-optic readout.
+- 🟡 Authority-core load tests cover 16/32 shooters at 600 RPM and 32 at 900 RPM. This is
+  not yet a full rendered/networked 32-player browser benchmark; character, networking,
+  remote presentation, audio contention, and GPU cost remain to be measured together.
+- ⬜ A representative 9x19 mm ammunition profile exists, but the requested Glock sidearm
+  definition/view/animations and in-game loadout switching are not yet implemented.
+- ⬜ First-person collision and stance motor using Rapier; basic AI/objectives.
   *(What exists today is a camera rig only — `FlyControls.tsx` clamps to the surface at a
   stance eye height. No physics, no collision.)*
 - ⬜ ECS (bitECS) as entity count grows (`05-...md` §3).
+
+The as-built FPS contracts, controls, performance claims, and remaining gaps are in
+`10-fps-combat-implementation-spec.md`.
 
 ### Phase 5 — Polish (⬜ not started)
 - ⬜ Wind animation tuning, LOD blend tuning, color-matching at draw distance, audio.

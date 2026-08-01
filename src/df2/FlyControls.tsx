@@ -11,6 +11,7 @@ import { useEffect, useMemo } from "react";
 import * as THREE from "three/webgpu";
 import type { Heightfield } from "./Heightfield";
 import { BENCH } from "./bench";
+import type { LookSensitivityController } from "../fps/core/LookSensitivityController";
 
 /** Eye height above ground, metres. Matches docs/04 §4.2. */
 export const STANCE_EYE = { stand: 1.7, crouch: 0.95, prone: 0.35 } as const;
@@ -28,6 +29,18 @@ export interface FlyControlsProps {
   heightfield: Heightfield;
   grounded: boolean;
   stance: Stance;
+  /** Use FPS-style captured mouse deltas instead of hold-to-drag look. */
+  pointerLock?: boolean;
+  /**
+   * FPS look-sensitivity curve, supplied by the game layer.
+   *
+   * OPTIONAL ON PURPOSE, and the seam is one-way. This module is the terrain
+   * spike's camera rig (docs/08 §3); it must keep working with no `src/fps`
+   * present, which is why the type is imported as a type only and why absence
+   * simply falls back to the drag constant. Only consulted when `pointerLock`
+   * is set, which is the game layer's own mode.
+   */
+  lookSensitivity?: LookSensitivityController;
   /** Called at most a few times a second with the current rig state. */
   onState?: (s: FlyState) => void;
   onToggleGround?: () => void;
@@ -37,10 +50,15 @@ export interface FlyControlsProps {
 
 const UP = new THREE.Vector3(0, 1, 0);
 
+/** Hold-to-drag look rate. Also the fallback when no sensitivity curve is injected. */
+const DRAG_RADIANS_PER_PIXEL = 0.0032;
+
 export function FlyControls({
   heightfield,
   grounded,
   stance,
+  pointerLock = false,
+  lookSensitivity,
   onState,
   onToggleGround,
   onStance,
@@ -71,6 +89,7 @@ export function FlyControls({
 
   useEffect(() => {
     const el = gl.domElement;
+    let alive = true;
 
     const down = (e: KeyboardEvent) => {
       // Don't fight the browser over scroll/zoom keys while flying.
@@ -86,9 +105,55 @@ export function FlyControls({
       if (e.code === "KeyZ") onStance?.("prone");
     };
     const up = (e: KeyboardEvent) => rig.keys.delete(e.code);
-    const blur = () => rig.keys.clear();
+    const blur = () => {
+      rig.keys.clear();
+      rig.dragging = false;
+    };
+
+    const rotate = (movementX: number, movementY: number) => {
+      const radiansPerCount =
+        pointerLock && lookSensitivity
+          ? lookSensitivity.radiansPerCountForMovement(movementX, movementY)
+          : DRAG_RADIANS_PER_PIXEL;
+      rig.yaw -= movementX * radiansPerCount;
+      rig.pitch -= movementY * radiansPerCount;
+      rig.pitch = Math.max(-1.5, Math.min(1.5, rig.pitch));
+    };
+
+    const requestLock = () => {
+      try {
+        const request = el.requestPointerLock({ unadjustedMovement: true });
+        if (request) {
+          void request.catch(() => {
+            if (!alive) return;
+            if (document.pointerLockElement === el) return;
+            try {
+              void el.requestPointerLock();
+            } catch {
+              /* normal pointer lock was also unavailable */
+            }
+          });
+        }
+      } catch {
+        try {
+          void el.requestPointerLock();
+        } catch {
+          /* unsupported or denied; the next user gesture can retry */
+        }
+      }
+    };
 
     const pdown = (e: PointerEvent) => {
+      if (pointerLock) {
+        rig.dragging = false;
+        if (
+          (e.button === 0 || e.button === 2) &&
+          document.pointerLockElement !== el
+        ) {
+          requestLock();
+        }
+        return;
+      }
       // WeaponPrototype owns right click for ADS. It must not also start a look-drag.
       if (e.button !== 0) return;
       rig.dragging = true;
@@ -97,6 +162,7 @@ export function FlyControls({
       el.setPointerCapture(e.pointerId);
     };
     const pup = (e: PointerEvent) => {
+      if (pointerLock) return;
       rig.dragging = false;
       try {
         el.releasePointerCapture(e.pointerId);
@@ -106,11 +172,13 @@ export function FlyControls({
     };
     const pmove = (e: PointerEvent) => {
       if (!rig.dragging) return;
-      rig.yaw -= (e.clientX - rig.lastX) * 0.0032;
-      rig.pitch -= (e.clientY - rig.lastY) * 0.0032;
-      rig.pitch = Math.max(-1.5, Math.min(1.5, rig.pitch));
+      rotate(e.clientX - rig.lastX, e.clientY - rig.lastY);
       rig.lastX = e.clientX;
       rig.lastY = e.clientY;
+    };
+    const lockedMove = (e: MouseEvent) => {
+      if (!pointerLock || document.pointerLockElement !== el) return;
+      rotate(e.movementX, e.movementY);
     };
     // Wheel adjusts flight speed rather than dollying — there is no pivot to
     // dolly toward, and speed is what you actually want to change mid-flight.
@@ -126,7 +194,9 @@ export function FlyControls({
     el.addEventListener("pointerup", pup);
     el.addEventListener("pointermove", pmove);
     el.addEventListener("wheel", wheel, { passive: false });
+    document.addEventListener("mousemove", lockedMove);
     return () => {
+      alive = false;
       removeEventListener("keydown", down);
       removeEventListener("keyup", up);
       removeEventListener("blur", blur);
@@ -134,8 +204,10 @@ export function FlyControls({
       el.removeEventListener("pointerup", pup);
       el.removeEventListener("pointermove", pmove);
       el.removeEventListener("wheel", wheel);
+      document.removeEventListener("mousemove", lockedMove);
+      if (pointerLock && document.pointerLockElement === el) document.exitPointerLock();
     };
-  }, [gl, rig, onToggleGround, onStance]);
+  }, [gl, rig, lookSensitivity, onToggleGround, onStance, pointerLock]);
 
   useFrame((_, delta) => {
     const dt = Math.min(delta, 0.1);

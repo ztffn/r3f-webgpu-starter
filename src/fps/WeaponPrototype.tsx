@@ -3,12 +3,35 @@
 // interpolates, so terrain controls and the main view remain stable.
 
 import { useFrame, useThree } from "@react-three/fiber";
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import * as THREE from "three/webgpu";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { float, mix, positionGeometry, smoothstep, texture, uniform, vec2, vec3 } from "three/tsl";
-import { CAMERA_FAR, CAMERA_NEAR } from "../df2/config";
+import { CAMERA_FAR, CAMERA_FOV, CAMERA_NEAR } from "../df2/config";
 import { publishRange, type RangeSample } from "./rangeTelemetry";
+import { LocalPlayerController, type LocalPlayerCommands } from "./core/LocalPlayerController";
+import type { PlayerStance } from "./core/PlayerMotor";
+import type { RegisteredWorldQuery } from "./core/WorldQuery";
+import { BallisticProjectileSystem, type BallisticResult } from "./combat/BallisticProjectileSystem";
+import { readBallisticEnvironment } from "./combat/BallisticEnvironment";
+import { LoadoutSystem } from "./weapons/LoadoutSystem";
+import { WeaponSystem, type WeaponEvent } from "./weapons/WeaponSystem";
+import { SNIPER_DEFINITION } from "./weapons/weaponDefinitions";
+import { ammunitionFromSearch } from "./weapons/AmmunitionDefinition";
+import { combatTelemetry } from "./ui/CombatTelemetry";
+import { shotDebugStore } from "./debug/ShotDebugStore";
+import { impactEffectBus } from "./presentation/ImpactEffectBus";
+import { FPS_DEBUG } from "./debug/debugConfig";
+import {
+  AIM_DIAGNOSTIC_RANGE_METRES,
+  type LookSensitivityController,
+} from "./core/LookSensitivityController";
+import { AimSwayController } from "./core/AimSwayController";
+import {
+  ScopeAdjustmentController,
+  scopeAdjustmentActionForKey,
+  type ScopeAdjustmentSnapshot,
+} from "./core/ScopeAdjustmentController";
 
 const WORLD_LAYER = 0;
 const WEAPON_LAYER = 1;
@@ -16,6 +39,7 @@ const MODEL_URL = new URL("../../testmodels/fps_rig.glb", import.meta.url).href;
 const RETICLE_URL = "/assets/reticles/default-mildot.png";
 const MODEL_SCALE = 3;
 const SCOPE_TARGET_SIZE = 512;
+const SCOPE_STATUS_SIZE = 512;
 const SCOPE_FOV = 5.5;
 const SCOPE_FOV_MIN = 2.5;
 const SCOPE_FOV_MAX = 9;
@@ -24,12 +48,6 @@ const WEAPON_FOV = 40;
 const WEAPON_NEAR = 0.01;
 const WEAPON_FAR = 10;
 const AIM_RESPONSE = 18;
-const HIP_SWAY_RADIANS = 0.012;
-const AIM_SWAY_RADIANS = 0.0032;
-const HIP_SWAY_METRES = 0.009;
-const AIM_SWAY_METRES = 0.0018;
-const HOLD_BREATH_MULTIPLIER = 0.24;
-const HOLD_BREATH_RESPONSE = 14;
 const EYEBOX_RADIUS_METRES = 0.02;
 const EYEBOX_MAX_OFFSET = 0.32;
 const FAKE_PARALLAX_STRENGTH = 0.04;
@@ -37,7 +55,11 @@ const LOOK_LAG_METRES_PER_RADIAN = 0.045;
 const LOOK_LAG_MAX_METRES = 0.006;
 const LOOK_LAG_RETURN = 12;
 const RANGE_SAMPLE_INTERVAL_MS = 160;
+const PERFORMANCE_SAMPLE_SECONDS = 0.25;
 const HIP_OFFSET = new THREE.Vector3(0.24, -0.37, -0.56);
+const OPTIC_EYE_OFFSET = new THREE.Vector3(0, 0, -0.075);
+const LOCAL_X = new THREE.Vector3(1, 0, 0);
+const LOCAL_Y = new THREE.Vector3(0, 1, 0);
 // The circular lens mesh is authored in this local X/Y square. Use geometry
 // coordinates for its optical screen space—the texture-atlas UV island is
 // rotated relative to the physical glass.
@@ -66,6 +88,10 @@ const ANIMATION_SEGMENTS = [
 export interface WeaponPrototypeProps {
   /** Mount PiP display to the animated rifle's actual scope mesh. */
   scopeDemo?: boolean;
+  worldQuery: RegisteredWorldQuery;
+  stance?: PlayerStance;
+  grounded?: boolean;
+  lookSensitivity: LookSensitivityController;
 }
 
 function disposeObject(root: THREE.Object3D) {
@@ -80,7 +106,46 @@ function disposeObject(root: THREE.Object3D) {
 
 // TSL's uniform node generic is erased when passed across a helper boundary.
 // Keep it loose here; the graph is validated by the WebGPU shader compilation.
-function createLensMaterial(target: THREE.RenderTarget, eyeOffset: any, scopeActive: any, reticleMap: THREE.Texture) {
+function drawScopeStatus(textureMap: THREE.CanvasTexture, snapshot: ScopeAdjustmentSnapshot) {
+  const canvas = textureMap.image as HTMLCanvasElement;
+  const context = canvas.getContext("2d");
+  if (!context) return;
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.font = "600 13px ui-monospace, SFMono-Regular, Menlo, monospace";
+  context.textBaseline = "middle";
+  context.textAlign = "right";
+  context.fillStyle = "rgba(7, 8, 7, 0.88)";
+  context.fillText(`ZERO ${snapshot.zeroDistanceMetres} M`, 390, 350);
+  const windage = snapshot.windageMilliradians;
+  const windageLabel =
+    windage === 0
+      ? "WIND 0.0"
+      : `WIND ${windage < 0 ? "L" : "R"} ${Math.abs(windage).toFixed(1)}`;
+  context.fillText(windageLabel, 390, 368);
+  textureMap.needsUpdate = true;
+}
+
+function createScopeStatusTexture(snapshot: ScopeAdjustmentSnapshot): THREE.CanvasTexture {
+  const canvas = document.createElement("canvas");
+  canvas.width = SCOPE_STATUS_SIZE;
+  canvas.height = SCOPE_STATUS_SIZE;
+  const textureMap = new THREE.CanvasTexture(canvas);
+  textureMap.flipY = false;
+  textureMap.colorSpace = THREE.SRGBColorSpace;
+  textureMap.generateMipmaps = false;
+  textureMap.minFilter = THREE.LinearFilter;
+  textureMap.magFilter = THREE.LinearFilter;
+  drawScopeStatus(textureMap, snapshot);
+  return textureMap;
+}
+
+function createLensMaterial(
+  target: THREE.RenderTarget,
+  eyeOffset: any,
+  scopeActive: any,
+  reticleMap: THREE.Texture,
+  scopeStatusMap: THREE.Texture
+) {
   const material = new THREE.MeshBasicNodeMaterial();
   // `SCOPE_Lens` uses a rotated atlas UV island. Its raw geometry coordinates
   // describe the actual circular glass, so they keep the capture and reticle
@@ -101,7 +166,9 @@ function createLensMaterial(target: THREE.RenderTarget, eyeOffset: any, scopeAct
   // the magnified render target coordinates, so Z/X changes only the world.
   const reticle = texture(reticleMap, lensUv);
   const withReticle = mix(world, reticle.rgb, reticle.a);
-  const activeDisplay = mix(withReticle, vec3(0), opticEdge.max(shadow));
+  const scopeStatus = texture(scopeStatusMap, uprightUv);
+  const withScopeStatus = mix(withReticle, scopeStatus.rgb, scopeStatus.a);
+  const activeDisplay = mix(withScopeStatus, vec3(0), opticEdge.max(shadow));
 
   // Hip-fire never updates the PiP target, so do not show its old frame on the
   // visible glass. This is deliberately a coated-glass approximation rather
@@ -129,8 +196,76 @@ function createLensMaterial(target: THREE.RenderTarget, eyeOffset: any, scopeAct
  * `?scene=scope`: smoothly move that same rig into ADS and capture the world
  * from its mounted optic. The supplied 27-second clip keeps playing in both.
  */
-export function WeaponPrototype({ scopeDemo = false }: WeaponPrototypeProps) {
+export function WeaponPrototype({
+  scopeDemo = false,
+  worldQuery,
+  stance = "stand",
+  grounded = false,
+  lookSensitivity,
+}: WeaponPrototypeProps) {
   const { camera, gl, scene, size } = useThree();
+  const player = useMemo(() => new LocalPlayerController(), []);
+  const ammunition = useMemo(
+    () => ammunitionFromSearch(typeof window === "undefined" ? "" : window.location.search),
+    []
+  );
+  const weaponDefinition = useMemo(
+    () => ({
+      ...SNIPER_DEFINITION,
+      displayName:
+        ammunition.id === "308"
+          ? SNIPER_DEFINITION.displayName
+          : `${SNIPER_DEFINITION.displayName} · ${ammunition.displayName} test`,
+      shot: {
+        ...SNIPER_DEFINITION.shot,
+        damage: ammunition.baseDamage,
+        ammunition,
+      },
+    }),
+    [ammunition]
+  );
+  const weapon = useMemo(() => new WeaponSystem(weaponDefinition), [weaponDefinition]);
+  const loadout = useMemo(
+    () => new LoadoutSystem([{ id: "primary", weapon }], "primary"),
+    [weapon]
+  );
+  const ballisticEnvironment = useMemo(
+    () => readBallisticEnvironment(typeof window === "undefined" ? "" : window.location.search),
+    []
+  );
+  const captureShotTrace = FPS_DEBUG.shotTrajectory;
+  const ballistics = useMemo(
+    () => new BallisticProjectileSystem(worldQuery, ballisticEnvironment),
+    [ballisticEnvironment, worldQuery]
+  );
+  const ballisticPerformance = useMemo(
+    () => ({
+      elapsedSeconds: 0,
+      simulationMilliseconds: 0,
+      maxSimulationMilliseconds: 0,
+      frames: 0,
+      segmentQueries: 0,
+      terrainCellTests: 0,
+      colliderCandidates: 0,
+    }),
+    [ballistics, worldQuery]
+  );
+  const scopeAdjustments = useMemo(
+    () =>
+      new ScopeAdjustmentController(
+        {
+          muzzleVelocityMetresPerSecond: ammunition.muzzleVelocityMetresPerSecond,
+          ballisticCoefficientG1: ammunition.ballisticCoefficientG1,
+        },
+        ballisticEnvironment,
+        weaponDefinition.shot.maxFlightSeconds
+      ),
+    [ammunition, ballisticEnvironment, weaponDefinition.shot.maxFlightSeconds]
+  );
+  const commands = useMemo<LocalPlayerCommands>(
+    () => ({ triggerPresses: 0, reloadRequested: false, adsWanted: false, holdingBreath: false }),
+    []
+  );
   const rig = useMemo(() => {
     const group = new THREE.Group();
     group.name = "animated-weapon-rig";
@@ -148,11 +283,8 @@ export function WeaponPrototype({ scopeDemo = false }: WeaponPrototypeProps) {
   const mixer = useRef<THREE.AnimationMixer | null>(null);
   const segmentActions = useRef<THREE.AnimationAction[]>([]);
   const activeAction = useRef<THREE.AnimationAction | null>(null);
-  const aiming = useRef(false);
-  const holdingBreath = useRef(false);
-  const breathHold = useRef(0);
   const aim = useRef(0);
-  const swayTime = useRef(0);
+  const aimSway = useMemo(() => new AimSwayController(), []);
   const cameraMotionReady = useRef(false);
   const optic = useRef<THREE.Object3D | null>(null);
   const opticLocal = useMemo(() => new THREE.Vector3(), []);
@@ -164,13 +296,19 @@ export function WeaponPrototype({ scopeDemo = false }: WeaponPrototypeProps) {
   const lookLag = useMemo(() => new THREE.Vector2(), []);
   const previousCameraQuaternion = useMemo(() => new THREE.Quaternion(), []);
   const cameraDeltaQuaternion = useMemo(() => new THREE.Quaternion(), []);
-  const rangeRaycaster = useMemo(() => {
-    const raycaster = new THREE.Raycaster();
-    raycaster.layers.set(WORLD_LAYER);
-    return raycaster;
-  }, []);
   const rangeOrigin = useMemo(() => new THREE.Vector3(), []);
   const rangeDirection = useMemo(() => new THREE.Vector3(), []);
+  const authoritativeDirection = useMemo(() => new THREE.Vector3(), []);
+  const boreDirection = useMemo(() => new THREE.Vector3(), []);
+  const authoritativeAimQuaternion = useMemo(() => new THREE.Quaternion(), []);
+  const aimYawQuaternion = useMemo(() => new THREE.Quaternion(), []);
+  const aimPitchQuaternion = useMemo(() => new THREE.Quaternion(), []);
+  const playerPose = useMemo(
+    () => ({ position: camera.position, stance, grounded }),
+    [camera]
+  );
+  const recoilPitch = useRef(0);
+  const recoilYaw = useRef(0);
   const nextRangeSampleAt = useRef(0);
   const target = useMemo(
     () => new THREE.RenderTarget(SCOPE_TARGET_SIZE, SCOPE_TARGET_SIZE, { depthBuffer: true }),
@@ -197,44 +335,118 @@ export function WeaponPrototype({ scopeDemo = false }: WeaponPrototypeProps) {
     map.generateMipmaps = true;
     return map;
   }, []);
+  const scopeStatusMap = useMemo(
+    () => createScopeStatusTexture(scopeAdjustments.getSnapshot()),
+    [scopeAdjustments]
+  );
   const lensMaterial = useMemo(
-    () => createLensMaterial(target, eyeOffset, scopeActive, reticleMap),
-    [eyeOffset, reticleMap, scopeActive, target]
+    () => createLensMaterial(target, eyeOffset, scopeActive, reticleMap, scopeStatusMap),
+    [eyeOffset, reticleMap, scopeActive, scopeStatusMap, target]
   );
 
-  useEffect(() => () => publishRange(null), []);
+  const playSegment = useCallback((segmentNumber: number) => {
+    const next = segmentActions.current[segmentNumber - 1];
+    if (!next) return;
+    // A clamped action must be stopped before another authored action takes over.
+    if (activeAction.current?.paused) activeAction.current.stop();
+    else activeAction.current?.fadeOut(0.1);
+    next.reset();
+    next.paused = false;
+    next.setLoop(THREE.LoopOnce, 1);
+    next.clampWhenFinished = true;
+    next.fadeIn(0.1).play();
+    activeAction.current = next;
+  }, []);
+
+  const handleWeaponEvent = useCallback(
+    (event: WeaponEvent) => {
+      if (event.type === "shot") {
+        const spawned = ballistics.spawn({
+          sourceId: weaponDefinition.id,
+          sequence: event.sequence,
+          origin: player.aim.origin,
+          direction: boreDirection,
+          sightDirection: player.aim.direction,
+          maxDistance: event.range,
+          maxFlightSeconds: event.maxFlightSeconds,
+          damage: event.damage,
+          ammunition: event.ammunition,
+          captureTrace: captureShotTrace,
+        });
+        if (!spawned) combatTelemetry.publishProjectileRejected();
+        recoilPitch.current += event.recoilPitch;
+        recoilYaw.current += event.sequence % 2 === 0 ? -event.recoilYaw : event.recoilYaw;
+        if (event.animationSegment !== undefined) playSegment(event.animationSegment);
+        return;
+      }
+      if (event.type === "dry-fire") {
+        combatTelemetry.publishDryFire();
+        if (event.animationSegment !== undefined) playSegment(event.animationSegment);
+        return;
+      }
+      if (event.type === "reload-started" && event.animationSegment !== undefined) {
+        playSegment(event.animationSegment);
+      }
+    },
+    [ballistics, boreDirection, captureShotTrace, playSegment, player, weaponDefinition]
+  );
+
+  const handleBallisticResult = useCallback((result: BallisticResult) => {
+    combatTelemetry.publishShot(result);
+    shotDebugStore.publish(result.trace);
+  }, []);
+
+  const handleImpact = useCallback((event: Parameters<typeof impactEffectBus.publish>[0]) => {
+    combatTelemetry.publishImpact(event);
+    impactEffectBus.publish(event);
+  }, []);
+
+  useEffect(
+    () => () => {
+      publishRange(null);
+      combatTelemetry.clear();
+      shotDebugStore.clear();
+      lookSensitivity.reset();
+      aimSway.reset();
+      ballistics.clear();
+    },
+    [aimSway, ballistics, lookSensitivity]
+  );
 
   useEffect(() => {
-    const playSegment = (event: KeyboardEvent) => {
+    combatTelemetry.publishBallisticEnvironment(ballisticEnvironment);
+  }, [ballisticEnvironment]);
+
+  useEffect(() => {
+    const publish = () => {
+      const snapshot = scopeAdjustments.getSnapshot();
+      drawScopeStatus(scopeStatusMap, snapshot);
+      combatTelemetry.publishScopeAdjustment(snapshot);
+    };
+    publish();
+    return scopeAdjustments.subscribe(publish);
+  }, [scopeAdjustments, scopeStatusMap]);
+
+  useEffect(() => {
+    const playDebugSegment = (event: KeyboardEvent) => {
       const match = /^Digit([1-8])$/.exec(event.code);
       if (!match || event.repeat) return;
-      const next = segmentActions.current[Number(match[1]) - 1];
-      if (!next) return;
-      // The entry action can be clamped after finishing; a clamped action must
-      // be removed before an authored action takes over.
-      if (activeAction.current?.paused) activeAction.current.stop();
-      else activeAction.current?.fadeOut(0.1);
-      next.reset();
-      next.paused = false;
-      next.setLoop(THREE.LoopOnce, 1);
-      next.clampWhenFinished = true;
-      next.fadeIn(0.1).play();
-      activeAction.current = next;
+      playSegment(Number(match[1]));
     };
-    addEventListener("keydown", playSegment);
-    return () => removeEventListener("keydown", playSegment);
-  }, []);
+    addEventListener("keydown", playDebugSegment);
+    return () => removeEventListener("keydown", playDebugSegment);
+  }, [playSegment]);
 
   useEffect(() => {
     if (!scopeDemo) return;
-    const toggleKeyboard = (event: KeyboardEvent) => {
+    const requestReload = (event: KeyboardEvent) => {
       if (event.code !== "KeyR" || event.repeat) return;
-      aiming.current = !aiming.current;
-      if (!aiming.current) holdingBreath.current = false;
+      player.setAdsWanted(false);
+      player.requestReload();
     };
     const holdBreath = (event: KeyboardEvent) => {
-      if ((event.code !== "ShiftLeft" && event.code !== "ShiftRight") || !aiming.current) return;
-      holdingBreath.current = event.type === "keydown";
+      if ((event.code !== "ShiftLeft" && event.code !== "ShiftRight") || !player.wantsAds) return;
+      player.setHoldingBreath(event.type === "keydown");
       // While scoped, Shift belongs to breath hold rather than the fly/sprint
       // modifier. Outside ADS it remains entirely under FlyControls.
       event.preventDefault();
@@ -243,7 +455,7 @@ export function WeaponPrototype({ scopeDemo = false }: WeaponPrototypeProps) {
     const adjustMagnification = (event: KeyboardEvent) => {
       // Z/X retain their normal stance bindings except while looking through
       // the optic, where they are dedicated to variable magnification.
-      if (!aiming.current || (event.code !== "KeyZ" && event.code !== "KeyX") || event.repeat) return;
+      if (!player.wantsAds || (event.code !== "KeyZ" && event.code !== "KeyX") || event.repeat) return;
       const direction = event.code === "KeyZ" ? -1 : 1;
       scopeFov.current = THREE.MathUtils.clamp(
         scopeFov.current + direction * SCOPE_FOV_STEP,
@@ -255,28 +467,54 @@ export function WeaponPrototype({ scopeDemo = false }: WeaponPrototypeProps) {
       event.preventDefault();
       event.stopImmediatePropagation();
     };
-    const togglePointer = (event: PointerEvent) => {
-      if (event.button !== 2) return;
+    const adjustTurrets = (event: KeyboardEvent) => {
+      const action = scopeAdjustmentActionForKey(event);
+      if (
+        !action ||
+        !player.wantsAds ||
+        document.pointerLockElement !== gl.domElement
+      ) {
+        return;
+      }
+      // Consume matching keydown even when held, but apply one exact click only
+      // on the initial press. Keyup is deliberately not intercepted so the
+      // movement controller can always clear an earlier arrow-key press.
       event.preventDefault();
-      aiming.current = !aiming.current;
-      if (!aiming.current) holdingBreath.current = false;
+      event.stopImmediatePropagation();
+      if (!event.repeat) scopeAdjustments.apply(action);
     };
+    const togglePointer = (event: PointerEvent) => {
+      // The browser requires a user gesture before pointer lock. Do not also
+      // turn that first capture click into an accidental shot.
+      if (event.button === 0 && document.pointerLockElement === gl.domElement) {
+        player.pressTrigger();
+      }
+      if (event.button === 2) {
+        event.preventDefault();
+        player.toggleAds();
+      }
+    };
+    const clearInput = () => player.resetInput();
     const preventMenu = (event: MouseEvent) => event.preventDefault();
-    addEventListener("keydown", toggleKeyboard);
+    addEventListener("keydown", requestReload);
     addEventListener("keydown", adjustMagnification, true);
+    addEventListener("keydown", adjustTurrets, true);
     addEventListener("keydown", holdBreath, true);
     addEventListener("keyup", holdBreath, true);
+    addEventListener("blur", clearInput);
     gl.domElement.addEventListener("pointerdown", togglePointer);
     gl.domElement.addEventListener("contextmenu", preventMenu);
     return () => {
-      removeEventListener("keydown", toggleKeyboard);
+      removeEventListener("keydown", requestReload);
       removeEventListener("keydown", adjustMagnification, true);
+      removeEventListener("keydown", adjustTurrets, true);
       removeEventListener("keydown", holdBreath, true);
       removeEventListener("keyup", holdBreath, true);
+      removeEventListener("blur", clearInput);
       gl.domElement.removeEventListener("pointerdown", togglePointer);
       gl.domElement.removeEventListener("contextmenu", preventMenu);
     };
-  }, [gl, scopeCamera, scopeDemo]);
+  }, [gl, player, scopeAdjustments, scopeCamera, scopeDemo]);
 
   useEffect(() => {
     let alive = true;
@@ -314,10 +552,8 @@ export function WeaponPrototype({ scopeDemo = false }: WeaponPrototypeProps) {
             // root while only its vertices follow the weapon bones. The target
             // is bone-parented and therefore is the actual physical reference
             // point for both ADS placement and the PiP camera.
-            rig.updateMatrixWorld(true);
-            scopeCameraTarget.getWorldPosition(opticLocal);
-            rig.worldToLocal(opticLocal);
-            aimOffset.copy(opticLocal).negate().add(new THREE.Vector3(0, 0, -0.075));
+            // The frame loop recomputes aimOffset from this locator immediately
+            // before every use, so a load-time copy would be dead state.
             hasOptic.current = true;
           }
         }
@@ -390,31 +626,94 @@ export function WeaponPrototype({ scopeDemo = false }: WeaponPrototypeProps) {
   // before the near-plane weapon overlay, preserving a future single final
   // composite/grade stage instead of grading every camera independently.
   useFrame((_, delta) => {
-    mixer.current?.update(delta);
-    swayTime.current += delta;
-    const aimTarget = scopeDemo && aiming.current && hasOptic.current ? 1 : 0;
-    aim.current = THREE.MathUtils.damp(aim.current, aimTarget, AIM_RESPONSE, delta);
-    scopeActive.value = scopeDemo ? aim.current : 0;
-    const holdingScopeBreath = scopeDemo && aiming.current && holdingBreath.current;
-    // Blend the transition so holding Shift never snaps the weapon or sight
-    // picture to a different point in its breathing cycle.
-    breathHold.current = THREE.MathUtils.damp(
-      breathHold.current,
-      holdingScopeBreath ? 1 : 0,
-      HOLD_BREATH_RESPONSE,
-      delta
+    // Existing rounds advance before this frame's input can spawn another one,
+    // so a newly accepted shot never receives time that elapsed before firing.
+    const ballisticStartedAt = performance.now();
+    ballistics.update(delta);
+    const ballisticMilliseconds = performance.now() - ballisticStartedAt;
+    ballisticPerformance.elapsedSeconds += delta;
+    ballisticPerformance.simulationMilliseconds += ballisticMilliseconds;
+    ballisticPerformance.maxSimulationMilliseconds = Math.max(
+      ballisticPerformance.maxSimulationMilliseconds,
+      ballisticMilliseconds
     );
-    const swayMultiplier = THREE.MathUtils.lerp(1, HOLD_BREATH_MULTIPLIER, breathHold.current);
-    const swayRadians = THREE.MathUtils.lerp(HIP_SWAY_RADIANS, AIM_SWAY_RADIANS, aim.current) * swayMultiplier;
-    const swayMetres = THREE.MathUtils.lerp(HIP_SWAY_METRES, AIM_SWAY_METRES, aim.current) * swayMultiplier;
-    const swayYaw =
-      (Math.sin(swayTime.current * 1.15) + Math.sin(swayTime.current * 0.41) * 0.35) * swayRadians;
-    const swayPitch =
-      (Math.cos(swayTime.current * 1.43) + Math.sin(swayTime.current * 0.57) * 0.25) * swayRadians * 0.72;
-    const swayX = Math.sin(swayTime.current * 1.15) * swayMetres;
-    const swayY = Math.cos(swayTime.current * 1.43) * swayMetres * 0.55;
+    ballisticPerformance.frames += 1;
+    if (ballisticPerformance.elapsedSeconds >= PERFORMANCE_SAMPLE_SECONDS) {
+      const projectileMetrics = ballistics.getMetrics();
+      const queryMetrics = worldQuery.getMetrics();
+      const elapsed = ballisticPerformance.elapsedSeconds;
+      combatTelemetry.publishProjectilePerformance({
+        activeProjectiles: projectileMetrics.active,
+        peakActiveProjectiles: projectileMetrics.peakActive,
+        simulationMillisecondsPerFrame:
+          ballisticPerformance.simulationMilliseconds / ballisticPerformance.frames,
+        maxSimulationMilliseconds: ballisticPerformance.maxSimulationMilliseconds,
+        segmentQueriesPerSecond:
+          (projectileMetrics.segmentQueries - ballisticPerformance.segmentQueries) / elapsed,
+        terrainCellTestsPerSecond:
+          (queryMetrics.terrainCellTests - ballisticPerformance.terrainCellTests) / elapsed,
+        colliderCandidatesPerSecond:
+          (queryMetrics.colliderCandidates - ballisticPerformance.colliderCandidates) / elapsed,
+        expiredProjectiles: projectileMetrics.expiredProjectiles,
+      });
+      ballisticPerformance.elapsedSeconds = 0;
+      ballisticPerformance.simulationMilliseconds = 0;
+      ballisticPerformance.maxSimulationMilliseconds = 0;
+      ballisticPerformance.frames = 0;
+      ballisticPerformance.segmentQueries = projectileMetrics.segmentQueries;
+      ballisticPerformance.terrainCellTests = queryMetrics.terrainCellTests;
+      ballisticPerformance.colliderCandidates = queryMetrics.colliderCandidates;
+    }
+    ballistics.drainImpactEvents(handleImpact);
+    ballistics.drainResults(handleBallisticResult);
 
     camera.updateMatrixWorld();
+    playerPose.stance = stance;
+    playerPose.grounded = grounded;
+    player.consumeCommands(commands);
+    weapon.setAdsWanted(commands.adsWanted);
+    if (commands.reloadRequested) weapon.requestReload();
+    for (let i = 0; i < commands.triggerPresses; i += 1) weapon.pressTrigger();
+    loadout.update(delta);
+    const aimTarget = scopeDemo && hasOptic.current ? weapon.adsProgress : 0;
+    aim.current = THREE.MathUtils.damp(aim.current, aimTarget, AIM_RESPONSE, delta);
+    const holdingScopeBreath = scopeDemo && commands.holdingBreath;
+    aimSway.update(delta, {
+      stance,
+      adsBlend: aim.current,
+      holdingBreath: holdingScopeBreath,
+  });
+    if (scopeDemo) {
+      lookSensitivity.setOpticState(
+        aim.current,
+        aimSway.breathStabilization,
+        CAMERA_FOV,
+        scopeFov.current
+      );
+    } else lookSensitivity.reset();
+    combatTelemetry.publishAimDiagnostics(
+      lookSensitivity.centimetresPerCountAt(AIM_DIAGNOSTIC_RANGE_METRES),
+      AIM_DIAGNOSTIC_RANGE_METRES,
+      Math.tan(aimSway.angularAmplitudeRadians) * AIM_DIAGNOSTIC_RANGE_METRES,
+      aimSway.breathStabilization,
+      stance
+    );
+
+    authoritativeAimQuaternion.copy(camera.quaternion);
+    aimYawQuaternion.setFromAxisAngle(LOCAL_Y, aimSway.yawRadians);
+    aimPitchQuaternion.setFromAxisAngle(LOCAL_X, aimSway.pitchRadians);
+    authoritativeAimQuaternion.multiply(aimYawQuaternion).multiply(aimPitchQuaternion);
+    authoritativeDirection.set(0, 0, -1).applyQuaternion(authoritativeAimQuaternion).normalize();
+    scopeAdjustments.applyToSightDirection(authoritativeDirection, boreDirection);
+    player.syncPresentationPose(playerPose, authoritativeDirection);
+    // Shot events are drained only after the exact swayed aim shown this frame
+    // has become authoritative gameplay state.
+    loadout.drainEvents(handleWeaponEvent);
+    combatTelemetry.publishWeapon(weapon.getSnapshot());
+
+    mixer.current?.update(delta);
+    scopeActive.value = scopeDemo ? aim.current : 0;
+
     // Mouse-look rotates the camera immediately, but a held rifle has a small
     // positional lag. Feed that physical lag into the eyebox rather than
     // magnifying the constant breathing motion.
@@ -452,16 +751,18 @@ export function WeaponPrototype({ scopeDemo = false }: WeaponPrototypeProps) {
     if (hasOptic.current && optic.current) {
       optic.current.getWorldPosition(opticLocal);
       rig.worldToLocal(opticLocal);
-      aimOffset.copy(opticLocal).negate().add(new THREE.Vector3(0, 0, -0.075));
+      aimOffset.copy(opticLocal).negate().add(OPTIC_EYE_OFFSET);
     }
 
     offset.copy(HIP_OFFSET);
     if (hasOptic.current) offset.lerp(aimOffset, aim.current);
-    rig.translateX(offset.x + swayX + lookLag.x);
-    rig.translateY(offset.y + swayY + lookLag.y);
+    rig.translateX(offset.x + aimSway.positionXMetres + lookLag.x);
+    rig.translateY(offset.y + aimSway.positionYMetres + lookLag.y);
     rig.translateZ(offset.z);
-    rig.rotateY(swayYaw);
-    rig.rotateX(swayPitch);
+    recoilPitch.current = THREE.MathUtils.damp(recoilPitch.current, 0, 8, delta);
+    recoilYaw.current = THREE.MathUtils.damp(recoilYaw.current, 0, 10, delta);
+    rig.rotateY(aimSway.yawRadians + recoilYaw.current);
+    rig.rotateX(aimSway.pitchRadians + recoilPitch.current);
     rig.updateMatrixWorld(true);
 
     weaponCamera.position.copy(camera.position);
@@ -481,11 +782,9 @@ export function WeaponPrototype({ scopeDemo = false }: WeaponPrototypeProps) {
         THREE.MathUtils.clamp(-opticInEyeSpace.y / EYEBOX_RADIUS_METRES, -EYEBOX_MAX_OFFSET, EYEBOX_MAX_OFFSET)
       );
       scopeCamera.position.copy(opticWorld);
-      // ScopeCam_Target's local rotation is an authoring-space correction, but
-      // the camera-space rig rotation includes our controlled breathing sway.
-      // Copy it so both the physical scope and its captured sight picture move
-      // together, without inheriting the target's backwards local rotation.
-      scopeCamera.quaternion.copy(rig.quaternion);
+      // Scope picture, rangefinder, shot resolver and trajectory debug all use
+      // the same authoritative aim, including stance/breath gameplay sway.
+      scopeCamera.quaternion.copy(authoritativeAimQuaternion);
       scopeCamera.updateMatrixWorld();
       renderer.setRenderTarget(target);
       renderer.clear();
@@ -500,21 +799,15 @@ export function WeaponPrototype({ scopeDemo = false }: WeaponPrototypeProps) {
       let range: RangeSample | null = null;
       if (scopeDemo && aim.current > 0.02) {
         // The ray starts at the player eye, but uses the scope capture camera's
-        // centre direction. This reports the range the player is actually
-        // aiming at, including the small optical lag/parallax currently shown.
+        // centre direction. Its orientation is the same authoritative direction
+        // used by ballistic spawn; only its origin retains the tiny physical optic offset.
         camera.getWorldPosition(rangeOrigin);
         scopeCamera.getWorldDirection(rangeDirection);
-        rangeRaycaster.set(rangeOrigin, rangeDirection);
-
-        const terrain = scene.getObjectByName("terrain");
-        const targets = scene.getObjectByName("test-targets");
-        const terrainHit = terrain ? rangeRaycaster.intersectObject(terrain, true)[0] : undefined;
-        const targetHit = targets ? rangeRaycaster.intersectObject(targets, true)[0] : undefined;
-        const hit = !terrainHit || (targetHit && targetHit.distance < terrainHit.distance) ? targetHit : terrainHit;
+        const hit = worldQuery.raycast(rangeOrigin, rangeDirection, CAMERA_FAR);
         if (hit) {
           range = {
             metres: hit.distance,
-            kind: hit === targetHit ? "target" : "terrain",
+            kind: hit.kind,
           };
         }
       }
@@ -543,8 +836,9 @@ export function WeaponPrototype({ scopeDemo = false }: WeaponPrototypeProps) {
       target.dispose();
       lensMaterial.dispose();
       reticleMap.dispose();
+      scopeStatusMap.dispose();
     },
-    [lensMaterial, reticleMap, target]
+    [lensMaterial, reticleMap, scopeStatusMap, target]
   );
 
   return null;

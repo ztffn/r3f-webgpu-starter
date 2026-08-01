@@ -8,7 +8,10 @@ Revision of v1 following technical review. Changes are substantive; treat this d
 
 Three.js multiplayer shooter. Existing: GLB character, multiple `AnimationClip`s driven by `AnimationMixer`. Add a procedural post-mixer rig that rotates spine/chest/neck/head toward look and aim directions, so players can read when another player is looking at or aiming at them.
 
-Built and validated against local bots. Architected so that swapping bot-driven input for network-driven input later is a data-plumbing change with zero edits inside the rig.
+The core rig and presentation adapter are implemented and unit tested. They are
+not yet mounted on a live third-person character or local-bot harness. They are
+architected so that adding bot- or network-driven input is a data-plumbing
+change with zero edits inside the rig.
 
 **In scope:** procedural look/aim offsets, channel blending, weight gating, debug harness, benchmark.
 
@@ -245,13 +248,21 @@ Live controls (lil-gui or similar): per-bone yaw/pitch limits, yaw and pitch dis
 
 ---
 
-## 11. Deliverables
+## 11. Deliverables and current status
 
-1. **`AimRig` module** — `beginFrame()`, `setLook()`, `setAim()`, `update(dt)`, `residualYaw`. Constructed from an `AimRigProfile` and a skeleton. Implements §2, §3, §4, §7.
-2. **Presentation adapter** — `AuthoritativeAimState` → `AimRigRenderInput`. Currently fed by bot AI; documented as the sole future insertion point for network deserialization.
-3. **Bot harness** — N bots with waypoint or scripted targets, feeding the rig through the setters only.
-4. **Debug harness and benchmark** — §9 and §10.
-5. **README** — coordinate contract (§5) stated in full; note that both channels are currently fed related values by bots and where they will diverge.
+1. ✅ **`CharacterAimRig` module** — `beginFrame()`, `setLook()`, `setAim()`,
+   `update(dt)`, `residualYaw`; implemented in
+   `src/fps/presentation/CharacterAimRig.ts` with drift/clamp unit coverage.
+2. ✅ **Presentation adapter** — `AuthoritativeAimState` → `AimRigRenderInput`,
+   implemented in `CharacterAimPresentationAdapter.ts`. It is the sole future
+   insertion point for bot or network presentation input.
+3. ⬜ **Bot/character harness** — N mounted characters with waypoint or scripted
+   targets, feeding the rig through setters only.
+4. ⬜ **Visual debug harness and browser benchmark** — §9 and §10. Pure rig
+   behavior is tested, but 32/64 mounted-character median/p95 and allocation
+   profiling have not been performed.
+5. ✅ **README/implementation contract** — the coordinate and lifecycle contract
+   is recorded in `src/fps/README.md` and `docs/10-fps-combat-implementation-spec.md`.
 
 ---
 

@@ -210,11 +210,14 @@ field; blades are visual only and must never be sampled for gameplay.
 
 | | [penev.tech/labs/grass](https://penev.tech/labs/grass) | [aleksandargjoreski.dev](https://aleksandargjoreski.dev/blog/growing-my-grass-shader/) |
 |---|---|---|
-| Primitive | curved 3-edge blade, real geometry | camera-facing sprite, single-faced |
-| Count | ~200k `InstancedMesh` | 1.18M, one draw call |
-| Detail falloff | device-tier instance scaling | **stochastic thinning** — full to ~10 units, 10% by 60 |
-| Culling | — | GPU-side frustum cull by pushing culled vertices out of view |
-| Interaction | **trail render target**, WebGPU compute variant with spring physics | — |
+| Primitive | curved 3-edge blade (left/centre/right converging to the tip), real geometry, width tapered `w*(1-t)` per ring | camera-facing sprite, single-faced, 4 segments |
+| Count | up to 200k `InstancedMesh`, 50k default | 1.18M over ~130×130 m — about **70 blades/m²** — one draw call, 8.2M tris at 120 fps on an M2 |
+| Per-instance data | packed attribute: static bend angle, height scale, colour seed | bit-packed traits, compute-generated |
+| Detail falloff | device tier only: mobile 35% capped at 20k, low-end GPU a further 45% | **stochastic thinning**, full to 10 units, 10% by 60 |
+| Culling | — | GPU frustum cull by pushing culled vertices out of view, not `discard`; ~1/3 visible |
+| Wind | vertex-stage 2-octave simplex, weighted by `uv.y^k` so the root is anchored, per-instance phase | noise-driven world-space offset; "the wind vector lives in the world, not the blade's local orientation" |
+| Lighting | wrapped diffuse, subsurface, sheen + fresnel glint, sepia grade | `MeshBasicNodeMaterial`, unlit, AO only near the base |
+| Interaction | **trail render target** at a fixed 512², WebGL dual-pass (decay + additive brush), WebGPU compute variant with rise-fast/fall-slow spring physics | — |
 
 The load-bearing lesson is Gjoreski's framing: **the bottleneck is how many times you shade the
 same pixel, not triangle count.** Overlapping thin geometry is overdraw. That is precisely the
@@ -228,39 +231,113 @@ should flatten grass behind you, which is both a tell for other players and a re
 consequence of the concealment mechanic. Blades sample displacement by world XZ from a small
 render target (512² is enough). Defer it, but do not design it out.
 
-#### Perf: state the structural win, do not assume blades are cheap
+#### Reject Penev's shading wholesale — it is the one thing that would break the look
 
-The saving is **not** that blades are cheap. It is that they let the relief layer stop doing
-near-field work entirely — and the near field is where the march is most expensive, because
-prone it is the whole screen. That is a real, bankable saving.
+Everything in his fragment shader is built for a lit, stylised, standalone field: wrapped
+diffuse, subsurface translucency, specular sheen, fresnel glint, a fresh-green-to-dry-brown
+random palette, sepia grade and a contrast boost. **None of it applies here.** Our colormap is
+PRE-SHADED — it already bakes lighting and shadow (`06` §6) — and every material in this
+renderer is unlit `MeshBasicNodeMaterial` because the original applied no lighting at all.
+Blades lit that way would match neither the terrain under them nor the relief columns beside
+them. Gjoreski reaches the same place from the other direction and also ships
+`MeshBasicNodeMaterial`; follow him, not Penev, on shading.
 
-Against it: prone you are inside the canopy, so blades fill the frame, which is exactly the
-overdraw case Gjoreski spends his effort on. His 120 fps is a flat patch with no terrain march
-underneath; we would have both layers plus terrain. **Measure it, do not claim it.**
+The random green-to-brown palette is doubly wrong: blade colour has to come FROM the colormap,
+which is the whole point of following the vegetation. A private palette would fight the map.
+
+Take from Penev: the tapered 3-edge geometry, the packed per-instance attribute, the
+vertex-stage wind with an anchored root, the device-tier scaling, and the trail target.
+
+#### The spec, settled 2026-08-01
+
+Small and canopy-driven, NOT a full grass field. The relief march still draws the dense canopy
+underneath; blades only add silhouette where columns are too wide to read (`08` §9).
+
+- **A few thousand blades**, order 4,000, live on a slider. That is 12x smaller than Penev's
+  default and ~300x smaller than Gjoreski, because neither of them had a march underneath doing
+  the covering. Sparse-but-visible is the target; coverage is not.
+- **Fewer and fewer with distance**, by stochastic thinning. This is not merely preferred, it is
+  FORCED: opacity feeds an alpha test at 0.5, and the recorded lesson is that a crossfade through
+  a binary test collapses into a hard ring (`GrassMaterial`, the fade note). Thinning is the only
+  falloff a binary test can express.
+- **Height, density and colour all follow the canopy field**, from the same textures the march
+  reads:
+  - *height* — `canopyBase(xz) * (mix(jitter, strandHash) * 0.62 + 0.38)`, literally
+    `columnTopAt`'s `top`, so a blade stands exactly as tall as the columns around it;
+  - *density* — the canopy value IS the existence probability, so the 11.2% of Green Mile with
+    no canopy grows no blades and short canopy grows sparse ones;
+  - *colour* — `colorMap` at the blade's own cell plus the same per-column tone hash and the same
+    `GRASS_SHADE_BASE` base-to-tip ramp.
+
+  One stable per-instance random tests against `p(distance) * canopyDensity`, so distance falloff
+  and canopy density are the SAME test rather than two.
+
+**Do the placement in the vertex stage, not on the CPU.** A fixed instance pool sits on a
+camera-following wrapped grid; each instance samples `grassMap`/`jitterMap`/`heightMap` itself
+and collapses to a degenerate triangle when rejected — Gjoreski's trick, and it costs no
+fragments. The reason is not performance at these counts, it is agreement: sampling the same
+textures the march samples makes the two layers agree BY CONSTRUCTION rather than by a CPU copy
+that can drift. That is the third-representation constraint above, discharged structurally.
+
+`heightMap` has a mip chain matched to the mesh LOD and needs the half-texel correction
+(`08` §11). A blade that skips it floats or sinks exactly as the shell did.
+
+#### Wind: the reason this earns its frame time
+
+`BallisticEnvironment.windVelocity` already exists on the FPS side, defaults to 4 m/s, is
+settable with `?windx`/`?windz`, and is AUTHORITATIVE — it drifts bullets. Bend blades to that
+same world vector and grass stops being decoration: it becomes the instrument the player reads
+to judge their windage correction, which at the Barrett's 800 m is the difference between a hit
+and a miss. The scope already has manual windage to dial against it.
+
+Penev's shape is right for this — noise-driven displacement weighted by height so the root stays
+planted — but the DIRECTION and STRENGTH must come from the gameplay vector, not a free
+parameter, or the instrument lies. One caveat to carry: wind is currently a single global vector,
+so grass at your feet honestly reports the whole flight path. That stops being true the day wind
+becomes positional.
+
+#### Perf: what blades do and do not buy
+
+They do NOT delete the camera cap, which was the hope. The cap sits 0.2 m from the eye and writes
+depth from the march hit with early-Z disabled by `depthNode`, so no amount of geometry in front
+can depth-reject it; and a level ray from inside the canopy still needs it beyond the blade
+radius. What blades plausibly buy is a shorter `GRASS_INSIDE_SPAN` or a lower step count for the
+cap. Measure that, do not assume it — the cap's own cost was invisible for a whole session
+(`09` §0.1).
+
+Triangles are not the constraint. 4,000 blades at ~20 triangles is 80k against terrain's measured
+415k. The constraint is overdraw, prone, where blades fill the frame — the case Gjoreski spends
+his whole effort on, and his 120 fps is a flat patch with no march or terrain underneath.
 
 #### Measurement protocol, because the traps here are known
 
-- Bench with `?bench=1` (forces full canopy) and compare **prone** as the primary case, not
-  standing — prone is where this layer earns its place.
+- Bench with `?bench=1` (forces full canopy) and compare **prone**, where the near field is the
+  whole screen.
 - `8.3 ms` is the 120 Hz cap and `16.7`/`33.3 ms` are the 60/30 Hz steps. A frame anywhere
   between 16.7 and 33.3 reports as 33.3, so halving resolution can look like a no-op. Escape the
-  cap with `?dpr=0.25` or `?steps=1` before concluding where a cost lives (`09` §0).
-- Give the layer its own `?` toggle from the start, so it can be measured against its own
-  absence at the same pose. That is why `?grasscap=` exists.
+  cap with `?dpr=2 &steps=` high, or `?dpr=0.25`, before concluding where a cost lives (`09` §0).
+  This is not theoretical: it hid a 9.7 ms cost until it was deliberately unmasked.
+- Give the layer its own `?` toggle in the FIRST commit, so it can be measured against its own
+  absence at the same pose. That is why `?grasscap=` exists, and it is what made `09` §0.1
+  possible.
 
-#### Open decisions, listed so they are made deliberately
+#### Still open, and deliberately so
 
-1. **Sprite or real blade geometry.** Sprites are cheaper and Gjoreski's argument is strong.
-   But DF2's look has *no* blade silhouettes at all (`07` §4), so this layer is already a
-   departure — decide how far to take it against `00`'s recognisability test before building.
-2. **Radius and handover.** §4.2 proposes 0–15 m. The relief layer's columns become
-   sub-pixel around 28 m, which is a more principled boundary. Stochastic thinning across the
-   band is likely better than an alpha crossfade, and matches the existing distance fade's
-   intent.
-3. **Whether blades replace the march in their radius or overlay it.** Replacing is cheaper and
-   avoids double-shading; overlaying is safer for coverage. Note the march must still run for
-   concealment-relevant depth even where blades draw.
-4. **WebGL2 fallback** (§4.2 already flags this). The relief layer is confirmed on WebGL2; this
+1. **How far the primitive goes.** Penev's 3-edge curved blade is affordable at a few thousand
+   and avoids billboard swim, so "cheap" no longer forces a sprite. But DF2's look has *no* blade
+   silhouettes at all (`07` §4). The middle path worth trying first is a TAPERED, near-flat,
+   world-anchored blade: DF2's vertical columnar identity, plus a real edge against the sky.
+   Settle it by looking, in the rig, against `00`'s recognisability test.
+2. **Radius and handover.** §4.2 proposes 0–15 m; columns go sub-pixel around 28 m, which is the
+   more principled boundary. At 4,000 blades, 8 m gives ~20/m² and 15 m gives ~6/m².
+3. **Scoped targets as a second application.** At 800 m the march has already faded to flat
+   colormap, so a scoped view shows bare ground where the field counts a target concealed — the
+   remaining invariant-6 gap. A blade patch at the point of aim closes it, and 10x magnification
+   means a small world patch buys a large angular payoff. Different justification, same system.
+4. **Trail displacement.** Crawling should flatten grass behind you — a tell for other players
+   and a readable consequence of the mechanic. Penev's 512² target and rise-fast/fall-slow spring
+   are the recipe. Defer, but do not design it out.
+5. **WebGL2 fallback** (§4.2 already flags this). The relief layer is confirmed on WebGL2; this
    layer needs a reduced path or none.
 
 ## 5. Terrain base mesh (context for the grass layers above)

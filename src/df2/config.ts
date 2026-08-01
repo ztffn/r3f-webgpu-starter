@@ -348,10 +348,12 @@ export const GRASS_BLADE_SHADE_BASE = 0.55;
 // so a blade tip held above the canopy is genuinely lit more than the texel it grows
 // from. Lifting blades above the map is closer to correct than matching it.
 //
-// Still bounded by taste: past about 1.6 bright colormap patches clip to white and the
-// layer starts to look like a light source the rest of this unlit renderer does not
-// have. Sweep it with `?bladelift=`.
-export const GRASS_BLADE_LIFT = 1.35;
+// 2.0 was settled by looking, against a predicted ceiling of about 1.6 where bright
+// colormap patches were expected to clip to white. They do not, because the ramp above
+// multiplies in: a blade's ROOT sits at 0.55 x 2.0 = 1.1 and only its tip reaches
+// 1.45 x 2.0 = 2.9, and tips are a small fraction of the covered pixels. Read the two
+// constants together or neither means anything. Sweep it with `?bladelift=`.
+export const GRASS_BLADE_LIFT = 2.0;
 // Rings minus one along the blade. 3 segments is 4 rings, 10 vertices, 10 triangles;
 // the reference uses 5, but its blades are a metre tall in isolation while ours are
 // ankle height over most of this map and cannot show that much curvature.

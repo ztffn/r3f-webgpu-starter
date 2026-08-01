@@ -787,7 +787,82 @@ way `isCap` is gated would compile it out. **Measure before acting** — it may 
 
 ---
 
-## 12. Build, run, deploy
+## 12. URL parameters — the whole set
+
+Every dev affordance in this renderer is a query parameter; there is no settings file and no
+in-game menu beyond the stance buttons. They are listed here because they were previously only
+discoverable by reading `bench.ts`, and half of them exist specifically to make a defect
+visible that is otherwise invisible.
+
+**Gate.** Most are read only under `?bench=1`, which also pins the camera to a fixed vantage
+and publishes each frame to `window.__perf`. Four work without it, deliberately, because each
+answers a question you need a camera you can steer to ask: `?debug=`, `?canopyall=`,
+`?blades=`, and the blade tuning dials.
+
+### Measurement
+
+| Parameter | Effect |
+|---|---|
+| `?bench=1` | Fixed vantage, on foot, `window.__perf` published, canopy forced full |
+| `?dpr=` | Device pixel ratio. The ray-count axis; raise it to escape the vsync cap |
+| `?steps=` | Coarse march samples per ray — the dominant cost axis, and the compiled ceiling |
+| `?refine=` | Bisections inside the bracket. Baked into the graph, so reload to change |
+| `?maxspan=` | Longest span a ray searches, metres |
+| `?strand=` | Per-texel share of the baked height field. Bake-time, so reload to change |
+| `?grass=0` | Whole grass system off — isolates it from terrain cost |
+| `?grasscap=0` | Grass volume's cap proxy off. Worth 9.7 ms at crouch (`09` §0.1) |
+| `?blades=0` | Near-field blade layer off. Works without `?bench=1` |
+
+**Read frame times only after the terrain settles.** The chunk build budget spends several
+seconds after any navigation, and a frame sampled inside that window reports hundreds of
+milliseconds that mean nothing (`09` §0.2).
+
+### Making the invisible visible
+
+| Parameter | Effect |
+|---|---|
+| `?canopyall=1` | Full-height canopy everywhere, ignoring the field. **First move on any missing-grass report** — absent canopy and a broken shader look identical otherwise. Default ON under `?bench=1`; `?canopyall=0` opts out |
+| `?debug=1` | Live slider panel for the grass uniforms. Independent of `?bench=1` |
+| `?bladedebug=1` | Blade keep mask: draws EVERY instance, green where the existence test kept it, magenta where canopy or distance rejected it. The only way to see a pool being wasted, since a rejected blade collapses to zero area and vanishes |
+| `?bladedebug=2` | Blade distance: red at the eye through blue at the field edge |
+| `?targets=1` | Human-scale figures as a contrast reference. Needs the untracked `testmodels/` |
+| `?shotdebug=1` | Shot trajectory overlay |
+| `?impacttest=1` | Impact effect test harness |
+
+### Camera
+
+| Parameter | Effect |
+|---|---|
+| `?x=` `?z=` | World position, metres |
+| `?yaw=` `?pitch=` | Heading and pitch, radians |
+| `?stance=` | `stand`, `crouch` or `prone` |
+| `?scene=scope` | First-person optic prototype |
+| `?scene=weapon` | Weapon prototype |
+
+### Blade layer tuning
+
+All four sweep by eye and none needs `?bench=1`. Settled defaults live in `config.ts`.
+
+| Parameter | Default | Effect |
+|---|---|---|
+| `?bladecount=` | 30000 | Instance pool. Rounded to a square lattice. ~0.04 ms per thousand |
+| `?bladeradius=` | 6 | Half-extent of the field, metres. **Raising it lowers density** at a fixed count, and density is what reads — 100k over 20 m looks thinner than 30k over 6 m |
+| `?bladeshade=` | 0.55 | Root brightness; the tip gets `2 - this`. Contrast along ONE blade |
+| `?bladelift=` | 2.0 | Brightness of the whole layer against the march behind it. The dial that decides whether blades read at standing height at all |
+
+`?bladeshade=` and `?bladelift=` are not interchangeable and neither works alone. Widening the
+ramp darkens roots as much as it brightens tips, so the layer stays exactly as dark as the
+canopy behind it and reads as texture; the lift is what separates the two layers.
+
+### Ballistics and input
+
+| Parameter | Effect |
+|---|---|
+| `?windx=` `?windz=` | Wind, m/s. **Authoritative** — drifts bullets AND bends the grass, from one read |
+| `?ammo=` | Ammunition definition id |
+| `?mousesens=` `?scopesens=` `?aimcurve=` | Look sensitivity, scoped sensitivity, aim curve |
+
+## 13. Build, run, deploy
 
 ```sh
 npm run dev        # Vite dev server :3000
@@ -812,7 +887,7 @@ Bundle is ~1.77 MB (490 kB gzip), dominated by Three. Not yet code-split.
 
 ---
 
-## 13. Open questions carried forward
+## 14. Open questions carried forward
 
 - **Scale calibration** — `HEIGHT_SCALE`, `METERS_PER_TEXEL`. Blocks every "does it feel right"
   judgement. Re-derive the other metre-valued constants with it, not after (§7).

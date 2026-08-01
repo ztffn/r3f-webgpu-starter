@@ -354,8 +354,8 @@ export function Hud({
           <dd>stand / crouch / prone</dd>
           {fpsMode && (
             <>
-              <dt>1 / 2 / 3</dt>
-              <dd>sniper / M4 / Glock</dd>
+              <dt>1 / 2 / 3 / 4</dt>
+              <dd>sniper / M4 / Glock / SAW</dd>
               <dt>B</dt>
               <dd>select fire mode</dd>
               <dt>Z / X (ADS)</dt>

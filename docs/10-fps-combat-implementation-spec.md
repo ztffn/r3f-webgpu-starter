@@ -31,11 +31,10 @@ existing animated sniper presentation. It currently provides:
 - deterministic unit/load coverage for the gameplay systems.
 
 This is not yet a complete player, weapon library, or multiplayer match. There
-is one proxy FPS rig shared by the selectable sniper, M4, and Glock, no physical
+is one proxy FPS rig shared by the selectable sniper, M4, Glock, and SAW, no physical
 character controller, no network authority, no remote-character presentation,
-and no in-game loadout or settings screen. The SAW is a complete
-semi/automatic gameplay and load-test definition but is not in the development
-loadout. Authored per-weapon models and animations have not been added.
+and no in-game loadout or settings screen. Authored per-weapon models and
+animations have not been added.
 
 ## 2. Ownership and data flow
 
@@ -236,7 +235,7 @@ capture click does not fire. Escape releases the pointer.
 | Shift | sprint; while ADS, also stabilize breath and blend to precision sensitivity |
 | R | leave ADS and reload |
 | T | reset targets and husks |
-| 1 / 2 / 3 | equip sniper / M4 / Glock |
+| 1 / 2 / 3 / 4 | equip sniper / M4 / Glock / SAW (900 RPM automatic default) |
 | B | cycle the equipped weapon's supported fire modes |
 | Z / X while ADS | increase / decrease magnification |
 | Arrow Up / Down | increase / decrease elevation zero |
@@ -255,8 +254,8 @@ Useful URLs:
 
 | Query | Purpose |
 | --- | --- |
-| `?scene=scope` | playable sniper/M4/Glock proxy loadout and target slice |
-| `&shotdebug=1` | white sightline, yellow bore, cyan curved path, material contacts |
+| `?scene=scope` | playable sniper/M4/Glock/SAW proxy loadout and target slice |
+| `&shotdebug=1` | white sightline, yellow bore, wide cyan curved path, material contacts |
 | `&impacttest=1` | cloth/wood/metal/glass/stone/dirt/water cover lanes |
 | `&ammo=9mm\|556\|308\|50bmg` | select diagnostic ballistic profile (`308` default) |
 | `&windx=<m/s>&windz=<m/s>` | controlled horizontal wind |
@@ -313,8 +312,8 @@ npm run build
 Then test `?scene=scope&shotdebug=1` at 600, 1,000, and 1,300 m:
 
 1. first click captures the pointer without firing;
-2. 1/2/3 switch the proxy between sniper/M4/Glock gameplay definitions and B
-   cycles only supported modes;
+2. 1/2/3/4 switch the proxy between sniper/M4/Glock/SAW gameplay definitions,
+   the SAW starts in automatic, and B cycles only supported modes;
 3. normal ADS can scan while Shift gives finer movement and visibly less sway;
 4. stationary crouch and prone contract the hipfire crosshair while movement
    expands it; sustained fire blooms it and a pause recovers it;

@@ -14,13 +14,14 @@ import type { PlayerStance } from "./core/PlayerMotor";
 import type { RegisteredWorldQuery } from "./core/WorldQuery";
 import { BallisticProjectileSystem, type BallisticResult } from "./combat/BallisticProjectileSystem";
 import { readBallisticEnvironment } from "./combat/BallisticEnvironment";
-import { LoadoutSystem, type LoadoutEvent } from "./weapons/LoadoutSystem";
-import { WeaponSystem } from "./weapons/WeaponSystem";
+import { type LoadoutEvent } from "./weapons/LoadoutSystem";
 import {
   GLOCK_DEFINITION,
   M4_DEFINITION,
+  SAW_DEFINITION,
   SNIPER_DEFINITION,
 } from "./weapons/weaponDefinitions";
+import { createDevelopmentLoadout } from "./weapons/developmentLoadout";
 import { ammunitionFromSearch } from "./weapons/AmmunitionDefinition";
 import { combatTelemetry } from "./ui/CombatTelemetry";
 import { shotDebugStore } from "./debug/ShotDebugStore";
@@ -214,18 +215,7 @@ export function WeaponPrototype({
     }),
     [ammunition]
   );
-  const loadout = useMemo(
-    () =>
-      new LoadoutSystem(
-        [
-          { inputSlot: 1, id: "primary", weapon: new WeaponSystem(sniperDefinition) },
-          { inputSlot: 2, id: "secondary", weapon: new WeaponSystem(M4_DEFINITION) },
-          { inputSlot: 3, id: "sidearm", weapon: new WeaponSystem(GLOCK_DEFINITION) },
-        ],
-        "primary"
-      ),
-    [sniperDefinition]
-  );
+  const loadout = useMemo(() => createDevelopmentLoadout(sniperDefinition), [sniperDefinition]);
   const [presentationWeaponId, setPresentationWeaponId] = useState(sniperDefinition.id);
   const presentation = weaponPresentationFor(presentationWeaponId);
   const ballisticEnvironment = useMemo(
@@ -252,7 +242,12 @@ export function WeaponPrototype({
   const scopeAdjustments = useMemo(
     () => {
       const controllers = new Map<string, ScopeAdjustmentController>();
-      for (const definition of [sniperDefinition, M4_DEFINITION, GLOCK_DEFINITION]) {
+      for (const definition of [
+        sniperDefinition,
+        M4_DEFINITION,
+        GLOCK_DEFINITION,
+        SAW_DEFINITION,
+      ]) {
         const shot = definition.shot;
         controllers.set(
           definition.id,
@@ -523,7 +518,7 @@ export function WeaponPrototype({
         player.selectFireMode();
         return;
       }
-      const equipMatch = /^Digit([1-3])$/.exec(event.code);
+      const equipMatch = /^Digit([1-4])$/.exec(event.code);
       if (equipMatch) {
         player.setAdsWanted(false);
         player.equipSlot(Number(equipMatch[1]));

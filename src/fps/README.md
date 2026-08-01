@@ -87,9 +87,9 @@ request. It is never applied to gameplay aim by the rig.
 ## Current playable slice
 
 `?scene=scope` mounts a development loadout: 1 equips the semi-auto sniper, 2
-equips the semi/burst M4, and 3 equips the semi-auto 9 mm Glock. The SAW remains
-a gameplay/test definition with semi and automatic modes. B cycles each
-definition's authored mode order. Click the canvas once to capture the pointer;
+equips the semi/burst M4, 3 equips the semi-auto 9 mm Glock, and 4 equips the
+semi/automatic 900 RPM SAW. B cycles each definition's authored mode order.
+Click the canvas once to capture the pointer;
 that capture click does not fire. Mouse movement then aims without holding a
 button, Escape releases it, left mouse down/up sends trigger edges, and right
 click toggles ADS. Shift boosts movement and, while ADS is active, also holds
@@ -155,8 +155,10 @@ Sway is authoritative gameplay aim. Stand, crouch, and prone use multipliers
 sensitivity. The scope picture, rangefinder, shot, and trace share that result.
 
 Add `&shotdebug=1` to draw the latest resolved shot in world space. The cyan
-line is the shot path, the white segment is initial authoritative aim, and red
-marks the impact and surface normal. The HUD retains a short recent-shot log.
+screen-space-width line is the shot path, the white segment is initial
+authoritative aim, and red marks the impact and surface normal. The wider debug
+line remains legible when viewed nearly end-on at gameplay ranges. The HUD
+retains a short recent-shot log.
 Press L to clear the current debug trace.
 
 Accepted weapon events use active 120 Hz ballistic projectiles. The sniper's

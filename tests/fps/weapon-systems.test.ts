@@ -15,6 +15,7 @@ import {
   SAW_DEFINITION,
   SNIPER_DEFINITION,
 } from "../../src/fps/weapons/weaponDefinitions.ts";
+import { createDevelopmentLoadout } from "../../src/fps/weapons/developmentLoadout.ts";
 
 const weaponCommand = (
   weapon: WeaponSystem,
@@ -393,6 +394,20 @@ test("numeric loadout switching cancels source actions and drains accepted sourc
   assert.equal(afterSwitch.some((event) => event.type === "reload-completed"), false);
   assert.equal(primary.magazine, 29);
   assert.equal(primary.reserve, 120, "switching cancels rather than pausing or completing reload");
+});
+
+test("development slot 4 equips the automatic SAW definition", () => {
+  const loadout = createDevelopmentLoadout();
+  assert.equal(loadout.requestEquipInputSlot(4, 0), true);
+  assert.equal(loadout.getSnapshot().equippedSlot, "support");
+  assert.equal(loadout.equippedWeapon.definition.id, SAW_DEFINITION.id);
+  assert.equal(loadout.equippedWeapon.getSnapshot().fireMode, "auto");
+
+  loadout.handleCommand({ type: "triggerDown" });
+  loadout.update(0.1);
+  loadout.update(0.1);
+  const events = drainLoadout(loadout);
+  assert.equal(events.filter((event) => event.type === "shot").length, 4);
 });
 
 test("local player preserves ordered serializable weapon commands and reset emits trigger up", () => {

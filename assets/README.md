@@ -59,3 +59,23 @@ node tools/df2-extract/prepare-terrain.mjs \
 
 **Extract installers statically — never run them.** `innoextract` for Inno Setup wrappers,
 `unzip` for WinZip SFX. No Wine, no VM.
+
+## Skies — third-party, CC0
+
+`public/assets/sky/<preset>/` holds cubemap faces from the **Retro Skyboxes Pack** by
+Vladislav Zhukov (https://vladislavzh.net), released under **CC0**: usable in personal and
+commercial work with no attribution required. Credited here anyway, and committed on that
+basis — unlike most asset-pack material, which this project could not ship.
+
+**Why third-party at all.** Every `.trn` names `clouds01` / `skygrd01` as its sky bitmap and
+palette, and neither is in the extracted expansion pack: they live in the retail base-game
+archive, which is personal-use-only and never committed (`01` §3). So there is no DF2 sky to
+extract, and the alternative to substituting one is no sky at all — which is what shipped
+until now, a flat background colour.
+
+Only the PNG faces are copied in. The pack's `.dds` cubemaps are for Unreal and account for
+120 MB of its 147 MB; one preset's six faces is about 1.3 MB.
+
+512x512 and visibly banded is the RIGHT resolution here, not a compromise — a modern HDRI
+sky above a 1024-texel pre-shaded colormap and 3 cm grass columns would read as two different
+games. See `docs/03` on the recognisability test.

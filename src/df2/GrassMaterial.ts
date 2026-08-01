@@ -50,6 +50,7 @@ import {
   struct,
 } from "three/tsl";
 import { createGrassField, type GrassField } from "./grassField";
+import type { ColorGrade } from "./colorGrade";
 
 /**
  * Margin the shell is lifted above the smooth canopy envelope.
@@ -105,6 +106,8 @@ export interface GrassMaterialOptions {
   lodDistances: number[];
   /** Colormap — the source of each column's colour. */
   colorMap: THREE.Texture;
+  /** Shared weather grade, applied BEFORE fog — see colorGrade.ts. */
+  grade: ColorGrade;
   /** Metres spanned by one tile of the maps. */
   worldSize: number;
   /** Metres per raw canopy unit — how tall "255" grass stands. */
@@ -316,6 +319,7 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     finestVertexSpacing,
     lodDistances,
     colorMap,
+    grade,
     worldSize,
     grassScale,
     steps: coarseSteps = 12,
@@ -994,7 +998,10 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     // explains why pushing the fog range to 1e6 changed nothing: that only drives
     // fogFactor, which in the rotated form is the far end of the blend, weighted
     // by `faded` — a dark grass colour — so it barely contributes.
-    const shaded: NodeArg = fogFactor.mix(faded, uFogColor);
+    // GRADED BEFORE FOG. The fog colour is part of the weather preset and already
+    // carries the hour; grading it again would drag the horizon away from the sky it
+    // has to meet, which is the seam that makes a sky swap look like a mistake.
+    const shaded: NodeArg = fogFactor.mix(grade.apply(faded), uFogColor);
 
     // Debug views are selected by a uniform rather than baked in, so they can be
     // switched without rebuilding the material — which would also throw away the

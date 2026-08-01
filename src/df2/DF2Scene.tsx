@@ -17,6 +17,8 @@ import { Heightfield } from "./Heightfield";
 import { createTerrainMaterial } from "./TerrainMaterial";
 import { createGrassMaterial, type GrassUniforms } from "./GrassMaterial";
 import { createBladeMaterial, createBladeMesh } from "./BladeMaterial";
+import { createColorGrade } from "./colorGrade";
+import { readWeather } from "./weather";
 import { buildBladeGeometry } from "./bladeGeometry";
 import { readBallisticEnvironment } from "../fps/combat/BallisticEnvironment";
 import { bakeSyntheticMaps } from "./syntheticMaps";
@@ -85,10 +87,6 @@ import {
   GRASS_BLADE_GUST_RATE,
   WATER_COLOR,
   SUN_DIRECTION,
-  SKY_COLOR,
-  FOG_COLOR,
-  FOG_NEAR,
-  FOG_FAR,
   REFERENCE_P11,
 } from "./config";
 
@@ -215,9 +213,52 @@ export function DF2Scene({
     };
   }, [loaded]);
 
+  // --- weather ---------------------------------------------------------------
+  // ONE grade object for the three materials that sample the colormap, so a preset
+  // moves ground, columns and blades together. Applying it per material is what made
+  // the .trn `filter` a terrain-only tint — invisible while every extracted map ships
+  // the neutral 128, and a visible seam the moment one does not.
+  const weather = useMemo(
+    () => readWeather(typeof window === "undefined" ? "" : window.location.search),
+    []
+  );
+  const grade = useMemo(
+    () =>
+      createColorGrade(
+        // A real map's own .trn values win over the preset's, since they are what the
+        // author graded the colormap for; the preset supplies them only where the map
+        // is neutral, which on this pack is everywhere.
+        world?.filter && weather.id === "day"
+          ? { filter: world.filter, gamma: 128, saturation: 128 }
+          : weather
+      ),
+    [weather, world]
+  );
+
+  /**
+   * The preset's sky, as a cubemap.
+   *
+   * Loaded rather than awaited: three swaps it in when the six faces arrive, and until
+   * then the flat background colour stands in. A sky is the one thing in this scene
+   * that can afford to appear a frame late.
+   *
+   * Face order is three's own — +X, -X, +Y, -Y, +Z, -Z — against the pack's naming.
+   */
+  const skyBox = useMemo(() => {
+    if (!weather.sky) return null;
+    return new THREE.CubeTextureLoader()
+      .setPath(`${import.meta.env.BASE_URL}assets/sky/${weather.sky}/`)
+      .load(
+        ["right", "left", "up", "down", "front", "back"].map(
+          (face) => `vz_${weather.sky}_${face}.png`
+        )
+      );
+  }, [weather]);
+  useEffect(() => () => skyBox?.dispose(), [skyBox]);
+
   const material = useMemo(
-    () => (world?.colorMap ? createTerrainMaterial({ colorMap: world.colorMap, filter: world.filter }) : null),
-    [world]
+    () => (world?.colorMap ? createTerrainMaterial({ colorMap: world.colorMap, grade }) : null),
+    [grade, world]
   );
   useEffect(() => () => material?.dispose(), [material]);
 
@@ -245,6 +286,7 @@ export function DF2Scene({
       ...lodSchedule(world.heightfield.worldSize),
       texelSize: world.heightfield.cellSize,
       colorMap: world.colorMap,
+      grade,
       worldSize: world.heightfield.worldSize,
       grassScale: GRASS_SCALE,
       // ?steps= raises the compiled CEILING as well as the running value, so asking for
@@ -268,12 +310,12 @@ export function DF2Scene({
       referenceP11: REFERENCE_P11,
       // Fog is applied by the material from the hit distance, not by three from the
       // shell depth, so it needs the scene's fog values.
-      fogColor: FOG_COLOR,
-      fogNear: FOG_NEAR,
-      fogFar: FOG_FAR,
+      fogColor: weather.fogColor,
+      fogNear: weather.fogNear,
+      fogFar: weather.fogFar,
     });
     return { ...kit, heightTex, jitterTex: jitter };
-  }, [world]);
+  }, [grade, weather, world]);
 
   useEffect(
     () => () => {
@@ -299,6 +341,7 @@ export function DF2Scene({
     const blade = createBladeMaterial({
       field: grassKit.field,
       colorMap: world.colorMap,
+      grade,
       count: BENCH.bladeCount ?? GRASS_BLADE_COUNT,
       radius: BENCH.bladeRadius ?? GRASS_BLADE_RADIUS,
       thinStart: GRASS_BLADE_THIN_START,
@@ -337,7 +380,7 @@ export function DF2Scene({
       blade.count
     );
     return createBladeMesh(geometry, blade);
-  }, [grassKit, world]);
+  }, [grade, grassKit, world]);
 
   useEffect(
     () => () => {
@@ -375,15 +418,20 @@ export function DF2Scene({
   // .trn water_height is in raw elevation units, same scale as the heightmap.
   const waterLevel = (world?.waterHeight ?? 0) * HEIGHT_SCALE;
   const showWater = !!heightfield && waterLevel > heightfield.minHeight;
-  // Follows the camera, so it only has to out-reach the fog, not the world.
-  const waterSpan = FOG_FAR * 3;
+  // Follows the camera, so it only has to out-reach the fog, not the world — and the
+  // preset's fog, since a weather preset can pull the far distance in.
+  const waterSpan = weather.fogFar * 3;
 
   return (
     <>
       {onPerf && <PerfMonitor onSample={onPerf} />}
 
-      <color attach="background" args={[SKY_COLOR]} />
-      <fog attach="fog" args={[FOG_COLOR, FOG_NEAR, FOG_FAR]} />
+      {skyBox ? (
+        <primitive attach="background" object={skyBox} />
+      ) : (
+        <color attach="background" args={[weather.skyColor]} />
+      )}
+      <fog attach="fog" args={[weather.fogColor, weather.fogNear, weather.fogFar]} />
 
       {/* Sun. The terrain is unlit (its colormap is pre-shaded); this lights the
           water and anything else added to the scene later. */}
@@ -397,7 +445,7 @@ export function DF2Scene({
         color={"#fff4e0"}
       />
       {/* Sky/ground fill */}
-      <hemisphereLight args={[SKY_COLOR, "#5a5340", 0.75]} position={[0, 400, 0]} />
+      <hemisphereLight args={[weather.skyColor, "#5a5340", 0.75]} position={[0, 400, 0]} />
 
       {heightfield && material && (
         <Terrain

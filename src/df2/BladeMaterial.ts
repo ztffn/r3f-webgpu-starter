@@ -21,12 +21,15 @@ import {
   mx_noise_float,
 } from "three/tsl";
 import type { GrassField } from "./grassField";
+import type { ColorGrade } from "./colorGrade";
 
 export interface BladeMaterialOptions {
   /** The canopy samplers the MARCH was built from. Not a copy — the same object. */
   field: GrassField;
   /** Colormap — the source of each blade's colour, exactly as for a column. */
   colorMap: THREE.Texture;
+  /** Shared weather grade — the same object the terrain and the march apply. */
+  grade: ColorGrade;
   /** Requested instance pool. Rounded to a square so the lattice is regular. */
   count: number;
   /** Half-extent of the square field, metres. */
@@ -95,6 +98,7 @@ export function createBladeMaterial(opts: BladeMaterialOptions): BladeMaterial {
   const {
     field,
     colorMap,
+    grade,
     count,
     radius,
     thinStart,
@@ -391,7 +395,7 @@ export function createBladeMaterial(opts: BladeMaterialOptions): BladeMaterial {
         ? vAlive.greaterThan(float(0.5)).select(V3(0.15, 1, 0.25), V3(1, 0, 0.75))
         : V3(near.oneMinus(), near.mul(near.oneMinus()).mul(4), near);
   } else {
-    material.colorNode = vColour.mul(shade);
+    material.colorNode = grade.apply(vColour.mul(shade));
   }
   // DOUBLE-SIDED. Single-sided is the right call for camera-facing sprites, where the
   // back is never seen; for world-anchored geometry backface culling does not save

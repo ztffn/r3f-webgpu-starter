@@ -42,3 +42,23 @@ test("holding breath smoothly reduces sway rather than snapping", () => {
   assert.ok(sway.breathStabilization > 0.99);
   assert.ok(sway.angularAmplitudeRadians < initial * 0.25);
 });
+
+test("weapon handling modifiers scale authoritative sway without changing its phase", () => {
+  const normal = new AimSwayController();
+  const stabilized = new AimSwayController();
+  normal.update(1 / 60, {
+    stance: "stand",
+    adsBlend: 0,
+    holdingBreath: false,
+    handlingMultiplier: 1,
+  });
+  stabilized.update(1 / 60, {
+    stance: "stand",
+    adsBlend: 0,
+    holdingBreath: false,
+    handlingMultiplier: 0.5,
+  });
+  assert.equal(stabilized.phaseSeconds, normal.phaseSeconds);
+  assert.ok(Math.abs(stabilized.yawRadians - normal.yawRadians * 0.5) < 1e-12);
+  assert.ok(Math.abs(stabilized.pitchRadians - normal.pitchRadians * 0.5) < 1e-12);
+});

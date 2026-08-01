@@ -131,6 +131,7 @@ export class CombatTelemetry {
       previous.magazine === weapon.magazine &&
       previous.reserve === weapon.reserve &&
       previous.phase === weapon.phase &&
+      previous.fireMode === weapon.fireMode &&
       Math.abs(previous.reloadProgress - weapon.reloadProgress) < 0.02 &&
       Math.abs(previous.adsProgress - weapon.adsProgress) < 0.02
     ) {

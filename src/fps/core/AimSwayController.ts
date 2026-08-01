@@ -18,6 +18,7 @@ export interface AimSwayInput {
   readonly stance: PlayerStance;
   readonly adsBlend: number;
   readonly holdingBreath: boolean;
+  readonly handlingMultiplier?: number;
 }
 
 const clamp01 = (value: number): number =>
@@ -54,7 +55,10 @@ export class AimSwayController {
     const stanceMultiplier = STANCE_SWAY_MULTIPLIER[input.stance] ?? STANCE_SWAY_MULTIPLIER.stand;
     const breathMultiplier =
       1 + (HELD_BREATH_MULTIPLIER - 1) * this.breathStabilization;
-    const combinedMultiplier = stanceMultiplier * breathMultiplier;
+    const handlingMultiplier = Number.isFinite(input.handlingMultiplier)
+      ? Math.max(0, input.handlingMultiplier ?? 1)
+      : 1;
+    const combinedMultiplier = stanceMultiplier * breathMultiplier * handlingMultiplier;
     this.angularAmplitudeRadians =
       (HIP_ANGULAR_AMPLITUDE +
         (ADS_ANGULAR_AMPLITUDE - HIP_ANGULAR_AMPLITUDE) * adsBlend) *

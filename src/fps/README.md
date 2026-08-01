@@ -12,7 +12,7 @@ truth to cameras, GLBs, mixers, materials, and HUD snapshots.
 
 ```text
 DOM input
-  -> LocalPlayerController
+  -> LocalPlayerController ordered WeaponCommand edges
   -> LoadoutSystem / WeaponSystem
   -> accepted shot event
   -> BallisticProjectileSystem (120 Hz gravity / drag / wind)
@@ -86,11 +86,30 @@ request. It is never applied to gameplay aim by the rig.
 
 ## Current playable slice
 
-`?scene=scope` mounts one primary semi-auto sniper. Click the canvas once to
-capture the pointer; mouse movement then aims without holding a button, Escape
-releases it, left click fires, and right click toggles ADS. Shift holds breath
-while ADS is active, R reloads, and T resets targets. The numbered keys remain
-direct authored-animation inspection.
+`?scene=scope` mounts a development loadout: 1 equips the semi-auto sniper, 2
+equips the semi/burst M4, and 3 equips the semi-auto 9 mm Glock. The SAW remains
+a gameplay/test definition with semi and automatic modes. B cycles each
+definition's authored mode order. Click the canvas once to capture the pointer;
+that capture click does not fire. Mouse movement then aims without holding a
+button, Escape releases it, left mouse down/up sends trigger edges, and right
+click toggles ADS. Shift holds breath while ADS is active, R reloads, and T
+resets targets. Blur, pointer-lock loss, and teardown release held-trigger state.
+
+All selectable weapons currently use the same clearly labelled
+`testmodels/fps_rig.glb` proxy. Gameplay definitions contain no asset URL or
+GLTF animation indices; `presentation/WeaponPresentationDefinition.ts` owns
+model selection and maps fire/reload to source segments 5/4. Replacing a proxy
+is therefore presentation configuration rather than a gameplay schema change.
+Use `&weaponanim=1` with `?scene=weapon` to enable direct segment inspection on
+keys 1–8 without conflicting with scope-scene equipment controls.
+
+Weapon commands are plain serializable data: trigger down/up, select fire mode,
+reload, and numeric equip slot. Semi fires only on a down edge, an accepted
+three-round burst completes after release, and automatic fire advances every
+cadence boundary crossed by the bounded simulation interval. Reload, switching,
+and mode changes cancel incomplete bursts; switching also cancels reload rather
+than pausing it on an unequipped weapon. Mode changes preserve cooldown, and an
+empty automatic weapon emits one dry-fire event per press.
 
 While pointer-locked and ADS, Arrow Up/Down select an ammunition-calibrated
 elevation zero, Arrow Left/Right apply manual 0.1 mrad windage clicks, and 0
@@ -140,6 +159,12 @@ match; character, network, audio, and GPU acceptance still requires a browser
 benchmark on target hardware. Each weapon also authors a finite maximum flight
 lifetime, so a slow missed round cannot occupy a slot indefinitely.
 
+Weapon-layer coverage separately instantiates 32 complete loadouts, depletes
+automatic magazines, drains all real weapon events, completes reloads, and
+resumes fire at both 600 and 900 RPM. Equivalent timelines at 30, 60, and 144 Hz
+must produce identical shot, ammo, dry-fire, and reload counts. The test reports
+CPU time but deliberately has no machine-specific millisecond assertion.
+
 ## Surface penetration and impacts
 
 World-query registrations now carry an explicit gameplay surface and authored
@@ -165,10 +190,11 @@ Open `?scene=scope&impacttest=1&shotdebug=1` for eight cover lanes, ordered left
 to right: cloth, wood, sheet metal, armored metal, glass, stone, dirt, and water.
 Each has a resettable flesh target behind it. Choose representative diagnostic
 ammunition with `ammo=9mm`, `ammo=556`, `ammo=308` (default), or `ammo=50bmg`.
-The current sniper GLB remains mounted for all four because only its presentation
-exists; the URL changes authoritative ammunition data, not the displayed gun.
-In particular, `ammo=9mm` is not yet a Glock: the sidearm definition, model,
-animations, equip controls, and first-person view remain future work.
+The proxy sniper GLB remains mounted for all four because authored per-weapon
+presentation does not exist; the URL changes the sniper slot's diagnostic
+ammunition data, not the displayed gun. The selectable Glock definition uses
+9 mm by default, while `ammo=9mm` still overrides the sniper slot for ballistic
+diagnostics.
 The first canvas press also unlocks spatial audio. T resets the target husks.
 
 Shot debug keeps the cyan gameplay path, white sightline, and yellow bore.

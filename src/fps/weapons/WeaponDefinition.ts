@@ -2,6 +2,32 @@ import type { AmmunitionDefinition } from "./AmmunitionDefinition";
 
 export type WeaponId = string;
 export type WeaponSlotId = "primary" | "secondary" | "sidearm" | string;
+export type FireMode = "semi" | "burst" | "auto";
+
+export type WeaponCommand =
+  | { readonly type: "triggerDown" }
+  | { readonly type: "triggerUp" }
+  | { readonly type: "selectFireMode" }
+  | { readonly type: "reload" }
+  | { readonly type: "equipSlot"; readonly slot: number };
+
+export interface WeaponAccuracyDefinition {
+  readonly mechanicalDispersionRadians: number;
+  readonly hipDispersionRadians: number;
+  readonly movementDispersionRadians: number;
+  readonly airborneDispersionRadians: number;
+  readonly bloomPerShotRadians: number;
+  readonly maxBloomRadians: number;
+  readonly bloomRecoveryPerSecond: number;
+}
+
+export interface WeaponRecoilDefinition {
+  readonly pitchRadians: number;
+  readonly yawRadians: number;
+  readonly recoveryPerSecond: number;
+  readonly maxPitchRadians: number;
+  readonly maxYawRadians: number;
+}
 
 export interface WeaponDefinition {
   readonly id: WeaponId;
@@ -21,17 +47,15 @@ export interface WeaponDefinition {
   readonly reload: {
     readonly durationSeconds: number;
   };
+  readonly fireModes: {
+    readonly supported: readonly FireMode[];
+    readonly default: FireMode;
+    readonly burstSize?: number;
+  };
   readonly ads: {
     readonly enterSeconds: number;
     readonly exitSeconds: number;
   };
-  readonly recoil: {
-    readonly pitchRadians: number;
-    readonly yawRadians: number;
-  };
-  readonly animations: {
-    readonly fireSegment?: number;
-    readonly reloadSegment?: number;
-    readonly dryFireSegment?: number;
-  };
+  readonly accuracy: WeaponAccuracyDefinition;
+  readonly recoil: WeaponRecoilDefinition;
 }

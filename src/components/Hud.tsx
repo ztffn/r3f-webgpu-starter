@@ -230,7 +230,9 @@ export function Hud({
           {combat.weapon && (
             <>
               <dt>Weapon</dt>
-              <dd>{combat.weapon.displayName}</dd>
+              <dd>
+                {combat.weapon.displayName} · {combat.weapon.fireMode.toUpperCase()} · PROXY MODEL
+              </dd>
               <dt>Ammo</dt>
               <dd>
                 {combat.weapon.magazine} / {combat.weapon.reserve}
@@ -350,6 +352,10 @@ export function Hud({
           <dd>stand / crouch / prone</dd>
           {fpsMode && (
             <>
+              <dt>1 / 2 / 3</dt>
+              <dd>sniper / M4 / Glock</dd>
+              <dt>B</dt>
+              <dd>select fire mode</dd>
               <dt>Z / X (ADS)</dt>
               <dd>zoom in / out</dd>
               <dt>↑ ↓ (ADS)</dt>
@@ -366,8 +372,12 @@ export function Hud({
           <dd>scope aim</dd>
           <dt>R / T</dt>
           <dd>reload / reset targets</dd>
-          <dt>1–8</dt>
-          <dd>play weapon action</dd>
+          {!fpsMode && (
+            <>
+              <dt>1–8</dt>
+              <dd>weapon action (weaponanim=1)</dd>
+            </>
+          )}
         </dl>
       </section>
     </div>

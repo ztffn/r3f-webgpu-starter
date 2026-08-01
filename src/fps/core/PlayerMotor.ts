@@ -10,4 +10,5 @@ export interface PlayerMotorSnapshot {
   readonly position: THREE.Vector3Like;
   readonly stance: PlayerStance;
   readonly grounded: boolean;
+  readonly planarSpeedMetresPerSecond: number;
 }

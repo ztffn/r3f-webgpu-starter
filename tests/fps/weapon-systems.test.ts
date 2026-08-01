@@ -45,8 +45,14 @@ test("dry fire and reload are explicit state transitions", () => {
   weapon.requestReload();
   weapon.update(0);
   assert.equal(weapon.phase, "reloading");
-  assert.equal(drain(weapon)[0]?.type, "reload-started");
-  for (let i = 0; i < 25; i += 1) weapon.update(0.1);
+  const reloadStarted = drain(weapon)[0];
+  assert.equal(reloadStarted?.type, "reload-started");
+  if (reloadStarted?.type === "reload-started") {
+    assert.equal(reloadStarted.animationSegment, 4);
+  }
+  for (let i = 0; i < 41; i += 1) weapon.update(0.1);
+  assert.equal(weapon.phase, "reloading", "weapon remains locked through the authored clip");
+  weapon.update(0.1);
   assert.equal(weapon.magazine, 5);
   assert.equal(weapon.reserve, 15);
   assert.equal(drain(weapon).at(-1)?.type, "reload-completed");

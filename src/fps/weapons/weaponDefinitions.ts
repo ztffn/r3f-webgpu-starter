@@ -17,7 +17,9 @@ export const SNIPER_DEFINITION: WeaponDefinition = {
     initialReserve: 20,
   },
   reload: {
-    durationSeconds: 2.4,
+    // Authored segment 4 spans 10.833333–15.0 s (4.167 s). Keep gameplay
+    // locked slightly longer so a newly accepted shot cannot cut the clip.
+    durationSeconds: 4.2,
   },
   ads: {
     enterSeconds: 0.22,
@@ -31,7 +33,7 @@ export const SNIPER_DEFINITION: WeaponDefinition = {
   // mapping data-driven even though the exact authored labels are unavailable.
   animations: {
     fireSegment: 5,
-    reloadSegment: 2,
+    reloadSegment: 4,
   },
 };
 

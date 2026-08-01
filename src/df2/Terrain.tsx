@@ -202,6 +202,10 @@ export function Terrain({
       // camera: R3F's camera is not part of the scene graph, so a child of it is never
       // traversed and simply never draws.
       cap.frustumCulled = false;
+      // EXCLUDED FROM RAYCASTS. three's Raycaster does not test Object3D.visible, so a
+      // quad 0.2 m in front of the camera, inside the group named "terrain", is hit by
+      // every rangefinder sample — reporting 0.2 m whether the cap is drawn or not.
+      cap.raycast = () => {};
       cap.renderOrder = 1;
       cap.visible = false;
       group.add(cap);
@@ -253,7 +257,11 @@ export function Terrain({
     // The shader stretches its distance fade by the same zoom factor, so the cull
     // has to move with it or the mesh disappears while the fade is still running.
     const p11 = (camera as THREE.PerspectiveCamera).projectionMatrix.elements[5];
-    const grassCull = grassDistance * Math.max(1, p11 / REFERENCE_P11);
+    // Half-diagonal added because `dist` below is to the chunk CENTRE: without it a
+    // chunk centred just past the fade end is dropped while its near corner is still
+    // rendering grass at ~40% strength, which pops as a ring at the draw boundary.
+    const grassCull =
+      grassDistance * Math.max(1, p11 / REFERENCE_P11) + chunkSize * Math.SQRT1_2;
 
     // Height of the grass volume's ceiling, for the cap test below.
     const canopyMax = grassCanopyMax ? grassCanopyMax() * CANOPY_MARGIN : 0;

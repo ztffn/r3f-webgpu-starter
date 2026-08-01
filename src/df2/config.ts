@@ -84,9 +84,16 @@ export const LOD_DISTANCE_CHUNKS: number[] = [1.2, 2.5, 4.5, 8, Infinity];
 export function lodSchedule(worldSize: number): {
   chunkSize: number;
   lodDistances: number[];
+  finestVertexSpacing: number;
 } {
   const chunkSize = worldSize / CHUNK_COUNT;
-  return { chunkSize, lodDistances: LOD_DISTANCE_CHUNKS.map((c) => c * chunkSize) };
+  return {
+    chunkSize,
+    lodDistances: LOD_DISTANCE_CHUNKS.map((c) => c * chunkSize),
+    // What LOD 0 actually samples at. NOT necessarily METERS_PER_TEXEL — the synthetic
+    // fallback's 512-sample grid over 2048 m gives a 4 m texel against 2 m vertices.
+    finestVertexSpacing: chunkSize / LOD_SEGMENTS[0],
+  };
 }
 
 // Perimeter skirt depth used to hide cracks between differing-LOD chunks

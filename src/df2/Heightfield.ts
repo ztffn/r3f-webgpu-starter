@@ -45,7 +45,6 @@ export interface HeightmapSource {
   size: number;
   metersPerTexel?: number;
   heightScale?: number;
-  /** Overrides HEIGHT_SMOOTH_PASSES. 0 keeps the raw quantised surface. */
 }
 
 /**

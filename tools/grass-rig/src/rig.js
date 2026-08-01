@@ -126,7 +126,16 @@ export async function run(opts) {
   const N = opts.meshRes ?? Math.min(900, Math.round((SPAN * 2) / TARGET_QUAD));
   const pos = [], nor = [], uvs = [], idx = [];
   const half = (size * MPT) / 2;
-  const groundAt = (x, z) => sampleField(heights, size, (x + half) / MPT, (z + half) / MPT) * HS;
+  // The SAME reconstruction the march reads. Sampling the raw bytes here while the
+  // material marched a smoothed, decimated Heightfield put the rig's terrain and its
+  // grass on different surfaces — the exact drift the rig exists to prevent.
+  const rigField = Heightfield.fromHeightmap({
+    data: heights,
+    size,
+    metersPerTexel: MPT,
+    heightScale: HS,
+  });
+  const groundAt = (x, z) => rigField.sample(x, z);
   for (let j = 0; j <= N; j++) {
     for (let i = 0; i <= N; i++) {
       const x = camX - SPAN + (i / N) * SPAN * 2;
@@ -173,17 +182,15 @@ export async function run(opts) {
     // measured shader cannot drift from the shipped one, and hand-maintaining this
     // wiring is exactly how it drifted before: the material grew four required inputs
     // and only the app was updated, so the rig threw on construction.
-    const heightfield = Heightfield.fromHeightmap({
-      data: heights,
-      size,
-      metersPerTexel: MPT,
-      heightScale: HS,
-    });
+    const heightfield = rigField;
     const kit = createGrassMaterial({
       grassMap: dataTex(grassData, grassSize, false),
       heightMap: buildHeightTexture(heightfield),
       jitterMap: bakeGrassJitter(opts.hashPeriod ?? GRASS_HASH_PERIOD, GRASS_STRAND_JITTER),
       ...lodSchedule(heightfield.worldSize),
+      // The rig's patch is ONE uniform grid with no LOD, so the march must stay on mip 0
+      // rather than coarsening with distance against a mesh that never does.
+      lodDistances: [Infinity],
       texelSize: heightfield.cellSize,
       colorMap: cTex,
       worldSize: heightfield.worldSize,

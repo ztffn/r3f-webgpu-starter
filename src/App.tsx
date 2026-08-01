@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { GameCanvas } from "./components/GameCanvas";
 import { Hud } from "./components/Hud";
 import { GrassDebug } from "./components/GrassDebug";
@@ -37,9 +37,12 @@ export default function App() {
   const [grassUniforms, setGrassUniforms] = useState<GrassUniforms | null>(null);
   const onGrassReady = useCallback((u: GrassUniforms | null) => setGrassUniforms(u), []);
 
-  // Publish exact numbers for the benchmark driver rather than making it read the
-  // HUD. Kept out of the render path; runs only under ?bench=1.
-  if (BENCH.enabled && perf && fly) {
+  // Publish exact numbers for the benchmark driver rather than making it read the HUD.
+  // In an EFFECT, not the render body: written during render it fires twice per commit
+  // under StrictMode, and a render that is thrown away would still publish a sample the
+  // driver could read as presented. Runs only under ?bench=1.
+  useEffect(() => {
+    if (!BENCH.enabled || !perf || !fly) return;
     publish({
       ms: perf.ms,
       fps: perf.fps,
@@ -53,7 +56,7 @@ export default function App() {
       stance,
       agl: fly.agl,
     });
-  }
+  }, [perf, fly, grass, stance]);
   const onStatus = useCallback(
     (s: { loading: boolean; terrain: LoadedTerrain | null }) => setStatus(s),
     []

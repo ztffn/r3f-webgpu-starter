@@ -10,6 +10,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { GrassUniforms } from "../df2/GrassMaterial";
+import { GRASS_STEPS } from "../df2/config";
+import { BENCH } from "../df2/bench";
 
 export interface GrassDebugProps {
   uniforms: GrassUniforms | null;
@@ -27,6 +29,14 @@ interface Dial {
 // The canopy height is ONE uniform in metres — it both scales the canopy field and
 // bounds the march span. It used to be two holding the same number, written in
 // lockstep from here; the slider now writes the one.
+/**
+ * The compiled loop ceiling. The march runs to the live `steps` uniform but the loop
+ * is COMPILED at this count, so dragging past it changes the readout and nothing else.
+ * Derived rather than a literal — it was 64 against a ceiling of 32, so the top half of
+ * the one dial that sets frame time did nothing.
+ */
+const STEP_CEILING = Math.max(GRASS_STEPS, BENCH.steps ?? 0);
+
 const DIALS: Dial[] = [
   {
     key: "canopyMax",
@@ -51,7 +61,7 @@ const DIALS: Dial[] = [
     key: "steps",
     label: "March steps",
     min: 1,
-    max: 64,
+    max: STEP_CEILING,
     step: 1,
     // Capped by the COMPILED count — ?steps=N at load sets the ceiling, and this cannot
     // go above it. Load with ?steps=32 to sweep the whole range.

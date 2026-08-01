@@ -79,6 +79,14 @@ export interface GrassMaterialOptions {
   /** Chunk width in metres — the unit LOD switch distances are expressed in. */
   chunkSize: number;
   /**
+   * Metres between adjacent MESH vertices at LOD 0 (`chunkSize / LOD_SEGMENTS[0]`).
+   *
+   * Only equals `texelSize` when the finest mesh happens to sample every texel. The
+   * march needs both to work out which mip corresponds to which mesh LOD — see
+   * `meshMipAt`.
+   */
+  finestVertexSpacing: number;
+  /**
    * Metres between adjacent heightfield samples (`Heightfield.cellSize`).
    *
    * Needed to undo the half-texel offset between the two interpolation conventions:
@@ -290,6 +298,7 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     heightMap,
     chunkSize,
     texelSize,
+    finestVertexSpacing,
     lodDistances,
     colorMap,
     worldSize,
@@ -371,6 +380,8 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
   const uChunkSize = uniform(chunkSize);
   // Finite switch distances only; the CPU's trailing Infinity catches the rest.
   const lodEdges = lodDistances.filter((d) => Number.isFinite(d));
+  // See meshMipAt. 0 for the real map, -1 for the synthetic fallback.
+  const mipOffset = Math.round(Math.log2(finestVertexSpacing / texelSize));
 
   /**
    * Which mip level the terrain MESH is drawing at this world position.
@@ -393,7 +404,14 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     // reorderings catalogued in docs/08 §11.
     let lod: NodeArg = float(0);
     for (const edge of lodEdges) lod = lod.add(d.step(float(edge)));
-    return lod;
+    // MESH LOD IS NOT ALWAYS MIP LEVEL. Mip k has spacing `texelSize * 2^k`; mesh LOD k
+    // has spacing `chunkSize / LOD_SEGMENTS[0] * 2^k`. Those are equal only when the
+    // chunk's finest vertex spacing IS one texel — true for the 1024-texel real map
+    // (256/128 = 2 m = METERS_PER_TEXEL) and FALSE for the synthetic fallback, where a
+    // 512-sample grid over 2048 m gives a 4 m texel against 2 m vertices. Deriving the
+    // offset keeps the pairing honest instead of leaving it a coincidence between three
+    // constants that fails silently when any of them moves.
+    return lod.add(float(mipOffset)).max(float(0));
   };
 
   // The height texture carries METRES directly (half-float), already reconstructed to
@@ -821,7 +839,13 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
       // time that moved without an edit.
       const dy = ds.mul(vy);
       const yEnter = cameraPosition.y.add(V.y.mul(sEnter));
-      const phase = yEnter.div(dy).fract().mul(ds);
+      // Correct for BOTH directions. Descending, sample heights land on
+      // floor(yEnter/dy)*dy - k*dy, exact multiples of dy. Ascending with the same
+      // phase they land on (floor + 2*fract)*dy + k*dy, which still slides with the
+      // camera — so the anti-swim fix did nothing when looking up, which is the
+      // walking-toward-a-crest case it was written for.
+      const frac = yEnter.div(dy).fract();
+      const phase = V.y.lessThan(0).select(frac, frac.oneMinus()).mul(ds);
 
       const bracketLo = sEnter.toVar();
       const bracketHi = float(0).toVar();
@@ -847,17 +871,26 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
         });
         k.addAssign(1);
         const P = cameraPosition.add(V.mul(s));
-        const { ground, top } = columnTopAt(P);
+        const { top } = columnTopAt(P);
 
         If(P.y.lessThan(top), () => {
           bracketHi.assign(s);
           bracketed.assign(1);
           Break();
         });
-        // Below the terrain surface: nothing ahead can occlude.
-        If(P.y.lessThan(ground), () => {
-          Break();
-        });
+        // NO below-terrain early-out here, and do not add one back.
+        //
+        // `top` is `ground + canopy * m` with m >= 0.38 and canopy >= 0, so top is never
+        // below ground: reaching this line means P.y >= top, which already implies
+        // P.y >= ground. Any such test is dead.
+        //
+        // It USED to sit here and it was reordered above the column test on exactly that
+        // reasoning. That is a regression, not a fix. The column test firing first is
+        // load-bearing: a sample that starts marginally below the reconstructed ground —
+        // routine, since mesh and march agree only to within the LOD reconstruction —
+        // still brackets the column and resolves a hit. Breaking instead turns it into a
+        // miss, and whether it trips flips from one sample plane to the next, which drew
+        // concentric rings of missing grass across every hillside.
         bracketLo.assign(s);
         s.addAssign(ds);
       });
@@ -1068,7 +1101,13 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     // front of everything including sky. A distant miss painted itself over the whole
     // upper frame, so "the shell covers this pixel" and "some far fragment missed" were
     // indistinguishable — which is exactly the question those views exist to answer.
-    const depthS = hit.equal(1).select(hitS.max(float(0)), fragDist) as NodeArg;
+    // The CAP cannot use its own fragDist as the miss fallback: it sits 0.2 m in front
+    // of the camera, so that is the near plane — the very defect this line fixes for the
+    // shell. Debug views force opacity to 1, and the cap covers the whole screen while
+    // the eye is in the canopy, so every missed fragment would paint the frame at the
+    // near plane exactly when the inside-canopy case is what you are inspecting.
+    const missS = (isCap ? cameraFar : fragDist) as NodeArg;
+    const depthS = hit.equal(1).select(hitS.max(float(0)), missS) as NodeArg;
     const hitWorld = cameraPosition.add(V.mul(depthS));
     const viewZ = cameraViewMatrix.mul(vec4(hitWorld, 1)).z;
     const hitDepth = viewZToPerspectiveDepth(viewZ, cameraNear, cameraFar);

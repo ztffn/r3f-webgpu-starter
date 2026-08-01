@@ -404,7 +404,9 @@ that the test script fails in a way that does not name the version as the cause.
   reading it;
 - authored per-weapon GLBs, animations, sounds, and final tuning;
 - in-game ammunition/loadout selection and saved/rebindable controls;
-- Rapier-backed player collision, slopes, stance clearance, and vehicles;
+- the bounded ecctrl/Rapier player-and-vehicle controller spike, followed by the selected
+  controller implementation; see
+  `plans/2026-08-01-ecctrl-player-vehicle-controller-spike-design.md`;
 - third-person character host, bot harness, and 32/64-rig browser benchmark;
 - network authority, prediction/reconciliation, replication, and remote tracers;
 - full piecewise drag/weather model, moving target lead aids, and wind estimation;

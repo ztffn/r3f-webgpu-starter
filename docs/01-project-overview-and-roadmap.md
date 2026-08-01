@@ -262,9 +262,16 @@ and immediately answers "does this feel like DF2?".
   perks, and live statuses are intentionally deferred behind a typed deterministic resolver;
   see `11-weapon-ballistics-and-modifier-system-spec.md` and
   `plans/2026-08-02-weapon-ballistics-modifier-roadmap.md`.
-- ⬜ First-person collision and stance motor using Rapier; basic AI/objectives.
-  *(What exists today is a camera rig only — `FlyControls.tsx` clamps to the surface at a
-  stance eye height. No physics, no collision.)*
+- ⬜ Run the bounded **ecctrl player/vehicle controller spike** before committing to a
+  custom Rapier motor. Use primitive/proxy meshes rather than waiting for character or
+  vehicle assets, and measure three outcomes: adopt ecctrl behind project-owned adapters,
+  reuse only its Rapier techniques, or continue with custom Rapier controllers. The spike
+  must cover stance/terrain behavior, fixed-tick command input, serializable correction
+  state, headless-authority feasibility, and 32/64-entity performance; see
+  `plans/2026-08-01-ecctrl-player-vehicle-controller-spike-design.md`.
+- ⬜ First-person collision and stance motor plus a representative vehicle controller;
+  basic AI/objectives. *(What exists today is a camera rig only — `FlyControls.tsx` clamps
+  to the surface at a stance eye height. No physics, no collision.)*
 - ⬜ ECS (bitECS) as entity count grows (`05-...md` §3).
 
 The as-built FPS contracts, controls, performance claims, and remaining gaps are in

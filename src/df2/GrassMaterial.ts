@@ -47,6 +47,7 @@ import {
   cameraProjectionMatrix,
   screenSize,
   viewZToPerspectiveDepth,
+  frontFacing,
   struct,
 } from "three/tsl";
 
@@ -119,6 +120,12 @@ export interface GrassMaterialOptions {
    * want an unbounded span, so it is clamped here and gives up beyond it.
    */
   maxSpan?: number;
+  /**
+   * Reach, metres, for a ray that starts INSIDE the canopy — the eye is already in
+   * the volume, so grass here is struck within a couple of metres and the full
+   * `maxSpan` only buys repeated marches over the same near column.
+   */
+  insideSpan?: number;
   /** Width of one tone stripe in pixels, when toneMode is 1. */
   stripePixels?: number;
   /** 0 = tone keyed on the world cell (shipped), 1 = keyed on ray bearing. */
@@ -284,6 +291,7 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     stepsRun,
     refineSteps = 4,
     maxSpan = 48,
+    insideSpan = 12,
     stripePixels = 3,
     toneMode = 0,
     fogColor = "#aac2d6",
@@ -313,6 +321,8 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
   const uCell = uniform(cellSize); // metres per grass column
   const uNearClip = uniform(nearClip);
   const uMaxSpan = uniform(maxSpan);
+  /** Reach for a ray that starts inside the canopy. See the note beside `span`. */
+  const uInsideSpan = uniform(insideSpan);
   const uStripePixels = uniform(stripePixels);
   const uHashPeriod = uniform(hashPeriod);
   /** Per-strand HEIGHT from the hash vs the texture. The one dial that costs. */
@@ -548,7 +558,19 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     // fine sampling; a grazing ray gets a long span sampled coarsely.
     // Vertical rate along the ray, floored so a horizontal ray gets a finite span.
     const vy = V.y.abs().max(float(0.02));
-    const span = uCanopyMax.add(1.0).div(vy).min(uMaxSpan).toVar();
+    const spanFull = uCanopyMax.add(1.0).div(vy).min(uMaxSpan) as NodeArg;
+    // A ray that starts INSIDE the canopy (the back-facing case below) does not need
+    // the full reach: it is already in the volume, so if grass is growing here it is
+    // struck within a couple of metres. Giving it the full span made every ceiling
+    // fragment the ray passes under repeat a long march for the same near column —
+    // one pixel marching several times over, which measured 33.7 ms against 8.5 ms.
+    //
+    // Shortening it also SHARPENS that case, since the sample spacing is span/steps.
+    // Rays that genuinely need to reach far grass are the ones entering from above,
+    // and those keep the full span.
+    const span = (
+      isFloor ? spanFull : frontFacing.select(spanFull, spanFull.min(uInsideSpan))
+    ).toVar();
     // Divided by the LIVE count, not the compiled one — see uSteps.
     const ds = span.div(uSteps.max(float(1)));
 
@@ -614,8 +636,41 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     // so a ray that entered the slab behind the eye starts at the eye, not before it.
     const slabEntry = fragDist.sub(span).max(float(0)) as NodeArg;
     const clipCap = slabEntry.add(fragDist).mul(0.5) as NodeArg;
+    const nearEntry = slabEntry.max(uNearClip.min(clipCap)) as NodeArg;
+
+    // --- ENTERING the volume, or EXITING it? --------------------------------
+    // `sEnter = fragDist` is right only when the ray comes from OUTSIDE and crosses
+    // the canopy top on its way in. Inside the canopy — prone, crouched, or anywhere
+    // the eye is under the ceiling — the ray is already in the volume at s = 0, and
+    // the ceiling fragment it reaches is where it LEAVES through the roof. Taking that
+    // as the entry starts the march at the exit: measured prone on flat ground looking
+    // level, the hit-distance view read 120-300 m across the upper frame. The grass
+    // being drawn was grass a couple of hundred metres away, and the metre of canopy
+    // the player was lying in was stepped straight over. That is why raising the canopy
+    // to 1.2 m changed nothing, and why prone and crouch were never blinded.
+    //
+    // FRONT/BACK FACING is exactly this distinction and costs nothing: the ceiling's
+    // top face is front-facing to a ray entering from above, its underside is
+    // back-facing to a ray leaving from below. The material is already DoubleSide, so
+    // both fragments exist.
+    //
+    // PER PIXEL, deliberately. docs/08 §8 invariant 6 records `inside ? nearClip :
+    // fragDist` as a shape that has already been wrong once: keyed on the CAMERA it
+    // applies to every fragment on screen, so with a clamped span it put a hard ceiling
+    // on hit distance and switched off distant grass the moment the eye entered the
+    // canopy. Facing is a property of the fragment, so a distant shell crossed from
+    // above still enters at its own distance and still resolves far grass, while the
+    // near ceiling overhead correctly marches from the eye.
+    // The back-facing case takes the near clip FLAT, not the floor's midpoint-capped
+    // version. That cap exists because a floor fragment's own ground point is at
+    // `fragDist`, so the clip must not start the march past it. A back-facing ceiling
+    // fragment is the opposite: `fragDist` is where the ray LEAVES through the roof,
+    // hundreds of metres away for a level ray, so the midpoint of that is meaningless
+    // and collapsed the entry to a few centimetres. At that range one 0.03 m column
+    // subtends about 90 px, which drew the canopy as huge floating slabs — the exact
+    // degeneracy `nearClip` was introduced to prevent.
     const sEnter = (
-      isFloor ? slabEntry.max(uNearClip.min(clipCap)) : fragDist
+      isFloor ? nearEntry : frontFacing.select(fragDist, uNearClip)
     ) as NodeArg;
 
     // --- and the floor yields to the ceiling, PER PIXEL ------------------------

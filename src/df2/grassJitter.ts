@@ -40,13 +40,6 @@ import { fbm, hash2 } from "./noise";
 const RESOLUTION = 1024;
 
 /**
- * Bake the jitter/tone fields over a `period`-metre tile.
- *
- * Both fields are two octaves plus a grain term, matching the shape of the shader's
- * clump(): a broad tuft scale, a medium scale, and fine variation. Frequencies are
- * expressed in cycles per tile so the result is seamless.
- */
-/**
  * Map a field onto the full 0-1 range by standardising it, mean ± 2σ -> 0..1.
  *
  * fbm returns a normalised weighted AVERAGE of value-noise samples, so it clusters
@@ -72,6 +65,12 @@ function standardise(field: Float32Array): void {
 }
 
 /**
+ * Bake the jitter/tone fields over a `period`-metre tile.
+ *
+ * Both fields are two octaves plus a grain term, matching the shape of the shader's
+ * clump(): a broad tuft scale, a medium scale, and fine variation. Frequencies are
+ * expressed in cycles per tile so the result is seamless.
+ *
  * @param period Metres the pattern repeats over.
  * @param strandJitter Share of the HEIGHT field carried by per-texel noise, 0-1.
  *

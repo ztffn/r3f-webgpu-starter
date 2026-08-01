@@ -129,8 +129,9 @@ export function GrassDebug({ uniforms }: GrassDebugProps) {
     if (!uniforms || seeded.current) return;
     const next: Record<string, number> = {};
     for (const d of DIALS) next[d.key] = Number(uniforms[d.key].value);
-    // Shown in metres; the uniform holds metres x 255.
-    next.canopyMax = Number(uniforms.canopyMax.value);
+    // canopyMax is a DIAL now, so the loop above already has it — it used to need a
+    // second read here because the slider showed metres while the uniform held metres
+    // x 255. One uniform, one unit, no special case.
     next.toneMode = Number(uniforms.toneMode.value);
     next.canopyForce = Number(uniforms.canopyForce.value);
     next.debugMode = Number(uniforms.debugMode.value);

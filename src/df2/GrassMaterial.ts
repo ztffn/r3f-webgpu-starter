@@ -245,7 +245,14 @@ export interface GrassMaterialOptions {
  * from cellSize. Those need a reload, so they come from the URL instead.
  */
 export interface GrassUniforms {
-  /** Tallest possible canopy, metres. Keep in step with grassScale. */
+  /**
+   * Tallest possible canopy, metres — `grassScale * 255`.
+   *
+   * The ONE canopy-height uniform: it scales the 0-1 canopy field into metres and it
+   * sets how far a ray must travel to cross the volume. There is no `grassScale`
+   * uniform to keep it in step with any more; that pairing was two nodes holding the
+   * same number, kept equal by hand from the debug panel.
+   */
   canopyMax: ReturnType<typeof uniform>;
   cell: ReturnType<typeof uniform>;
   tone: ReturnType<typeof uniform>;
@@ -667,20 +674,46 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     // the player was lying in was stepped straight over. That is why raising the canopy
     // to 1.2 m changed nothing, and why prone and crouch were never blinded.
     //
-    // The CAP answers that case instead, with one fragment per pixel, and it takes the
-    // near clip FLAT. The midpoint cap above is for a proxy whose own ground point is
-    // at `fragDist`; the cap sits at the camera, so `fragDist` is a fraction of a metre
-    // and half of that would start the march centimetres from the eye. At that range a
-    // 0.03 m column subtends about 90 px and the canopy draws as huge floating slabs —
-    // measured, and the exact degeneracy `nearClip` exists to prevent.
+    // The CAP answers that case instead, with one fragment per pixel, entering at
+    // `capEntry` above: the near clip, clamped to the midpoint of the ray's own crossing
+    // to the ground. Note what that clamp is keyed on — the EYE's height above ground,
+    // not `fragDist`. For the cap `fragDist` is just CAP_DISTANCE, 0.2 m, and says
+    // nothing about where the slab ends; the floor proxy this replaced was the one whose
+    // `fragDist` measured its own ground point.
+    //
+    // THE RESIDUAL, accepted knowingly. On a steeply descending ray the clamp wins and
+    // the march starts a fraction of a metre out — prone at 0.35 m AGL looking down 45°
+    // it starts at 0.25 m. A 0.03 m column subtends about 90 px there, so the canopy
+    // draws as large flat slabs. That is precisely the degeneracy `nearClip` exists to
+    // prevent, and it is taken deliberately: applying the clip flat instead blanks the
+    // near field entirely (§8 invariant 6), and a fairness bug outranks a cosmetic one.
+    // The real answer is the docs/03 §4.4 blade layer, not a number here.
     const sEnter = (isCap ? (capEntry as NodeArg) : fragDist) as NodeArg;
 
     // The per-pixel cede test that used to live here is gone with the floor proxy. It
     // existed because ceiling and floor could both cover a pixel and search different
     // intervals, so they bracketed different columns and the texture of distant grass
-    // shifted as you went prone. Ceiling and cap cannot overlap that way: the ceiling
-    // draws front faces only, so while the eye is inside the canopy the surface above
-    // it contributes nothing and the cap owns the pixel outright.
+    // shifted as you went prone.
+    //
+    // WHAT REPLACED IT, AND EXACTLY HOW FAR THAT GOES. The ceiling draws front faces
+    // only, so while the eye is under the LOCAL canopy the ceiling above it is
+    // back-facing, contributes nothing, and the cap owns the pixel outright.
+    //
+    // That is narrower than "they cannot overlap". Terrain.tsx gates the cap on the
+    // map-GLOBAL canopyMax, deliberately — it has the terrain heightfield but not the
+    // canopy field, so it cannot know the LOCAL height and errs toward drawing. Wherever
+    // local canopy < eye < global max the eye is above the local ceiling: its top face is
+    // front-facing, it rasterises, and BOTH proxies march that pixel. On Green Mile that
+    // is not an edge case — the canopy is a stand-in with a 0.13 m median against a
+    // 1.199 m maximum (docs/06 §7.1), so crouched or prone it is most of the map.
+    //
+    // Bounded, not free: the cap searches the near interval, so its hit is normally the
+    // nearer one and wins the depth test, and the picture stays right. The cost is a
+    // second march on those pixels. NOT YET MEASURED — the frame times in docs/09 §0 are
+    // both at the vsync cap, which is exactly where a cost like this hides. Measure with
+    // `?grasscap=0` crouched on the real canopy (`?canopyall=0`) before assuming it is
+    // small, and check the picture too: two intervals bracketing different columns is the
+    // artifact the cede test existed to kill.
 
     // --- which mesh LOD this ray marches against ------------------------------
     // Sampled at BOTH ENDS of the interval the ray will search, and the COARSER of the

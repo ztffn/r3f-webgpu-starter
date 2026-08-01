@@ -393,6 +393,16 @@ coverage, gaps and how far you see through the canopy are all still decided per 
 march. It lives in the terrain group and is moved onto the camera each frame — NOT parented to
 the camera, because R3F's camera is not in the scene graph and a child of it never draws.
 
+**They are not strictly exclusive, and the gap is bigger than it sounds.** "Drawn when the eye
+is inside the canopy" means the map-GLOBAL `canopyMax`: `Terrain.tsx` has the terrain
+heightfield but not the canopy field, so it cannot know the LOCAL height and errs toward
+drawing. Wherever local canopy < eye < global max, the eye is above the local ceiling, that
+ceiling is front-facing, and BOTH proxies march the pixel. With Green Mile's 0.13 m median
+against a 1.199 m maximum (`06` §7.1) that is most of the map at crouch and prone. The picture
+stays right — the cap searches the near interval and wins the depth test — but the second march
+is real and **has not been measured**; both numbers in `09` §0 are at the vsync cap, which is
+where a cost like this hides. `?grasscap=0` at a crouched pose on the real canopy is the A/B.
+
 `heightTexture.ts` builds the elevation texture with a point-decimated mip chain so the march
 can follow the surface the mesh drew. See §11's "three surfaces" trap.
 

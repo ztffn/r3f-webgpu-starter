@@ -46,10 +46,12 @@ must always be able to clear a held movement key. Bindings use
 
 A small transparent scope-status texture is composited with the existing lens
 capture and reticle. It displays the selected elevation zero and signed
-windage, for example:
+windage as unboxed black text on two rows at the lower-right of the optic, for
+example:
 
 ```text
-ZERO 600 M                 W L 1.2
+ZERO 600 M
+WIND L 1.2
 ```
 
 The texture redraws only when a turret changes. It does not enter React state or
@@ -79,4 +81,3 @@ sway, or collision without recomputing gameplay in presentation.
   the same keydown, and keyup remains available to movement cleanup.
 - Scope readout, debug sight/bore lines, projectile launch, impact, and HUD
   telemetry all report the same controller state.
-

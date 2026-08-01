@@ -108,20 +108,17 @@ function drawScopeStatus(textureMap: THREE.CanvasTexture, snapshot: ScopeAdjustm
   const context = canvas.getContext("2d");
   if (!context) return;
   context.clearRect(0, 0, canvas.width, canvas.height);
-  context.font = "600 18px ui-monospace, SFMono-Regular, Menlo, monospace";
+  context.font = "600 13px ui-monospace, SFMono-Regular, Menlo, monospace";
   context.textBaseline = "middle";
-  context.fillStyle = "rgba(8, 14, 10, 0.68)";
-  context.fillRect(100, 360, 312, 38);
-  context.fillStyle = "rgba(211, 239, 205, 0.94)";
-  context.textAlign = "left";
-  context.fillText(`ZERO ${snapshot.zeroDistanceMetres} M`, 116, 379);
+  context.textAlign = "right";
+  context.fillStyle = "rgba(7, 8, 7, 0.88)";
+  context.fillText(`ZERO ${snapshot.zeroDistanceMetres} M`, 390, 350);
   const windage = snapshot.windageMilliradians;
   const windageLabel =
     windage === 0
-      ? "W 0.0"
-      : `W ${windage < 0 ? "L" : "R"} ${Math.abs(windage).toFixed(1)}`;
-  context.textAlign = "right";
-  context.fillText(windageLabel, 396, 379);
+      ? "WIND 0.0"
+      : `WIND ${windage < 0 ? "L" : "R"} ${Math.abs(windage).toFixed(1)}`;
+  context.fillText(windageLabel, 390, 368);
   textureMap.needsUpdate = true;
 }
 
@@ -130,6 +127,7 @@ function createScopeStatusTexture(snapshot: ScopeAdjustmentSnapshot): THREE.Canv
   canvas.width = SCOPE_STATUS_SIZE;
   canvas.height = SCOPE_STATUS_SIZE;
   const textureMap = new THREE.CanvasTexture(canvas);
+  textureMap.flipY = false;
   textureMap.colorSpace = THREE.SRGBColorSpace;
   textureMap.generateMipmaps = false;
   textureMap.minFilter = THREE.LinearFilter;
@@ -165,7 +163,7 @@ function createLensMaterial(
   // the magnified render target coordinates, so Z/X changes only the world.
   const reticle = texture(reticleMap, lensUv);
   const withReticle = mix(world, reticle.rgb, reticle.a);
-  const scopeStatus = texture(scopeStatusMap, lensUv);
+  const scopeStatus = texture(scopeStatusMap, uprightUv);
   const withScopeStatus = mix(withReticle, scopeStatus.rgb, scopeStatus.a);
   const activeDisplay = mix(withScopeStatus, vec3(0), opticEdge.max(shadow));
 

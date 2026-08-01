@@ -245,8 +245,10 @@ this project authors shaders in **TSL** so one graph serves both the WebGPU and 
 | | value / shape |
 |---|---|
 | Blade defaults | width 0.12 m, height 1.0 m — note that is ~4 `GRASS_CELL` columns wide and about our full canopy height, so blades are COARSER than columns, which is why they overlay rather than replace |
-| Geometry | 3 verts per ring × (segments+1) rings, 4 tris per segment. Width tapers `w*(1-t)`; the centre vert is pushed to `z = w*0.5`, giving the V cross-section that reads as volume |
+| Geometry | 3 verts per ring × (segments+1) rings, 4 tris per segment, **5 segments** by default. Width tapers `w*(1-t)`; the centre vert is pushed to `z = w*(1-t)*0.5` — half the ring's OWN width, so the V closes to nothing at the tip rather than staying a constant depth |
 | Per-instance attribute | ONE `vec3`: `(staticBend, heightScale, signedSeed)`. The seed is reused for twist, curve power, wind speed, trail rotation and colour — one number, five jobs |
+| Per-instance ranges | `staticBend = (rand-0.5)*2.5`, `heightScale = 0.5 + rand^1.5`, `seed = (rand-0.5)*2`. The `^1.5` is the interesting one: it biases heights SHORT, so a field is mostly low blades with a few tall ones rather than an even spread. Placement is uniform over a 15 m square with a random Y rotation |
+| Height/width coupling | `pos.y *= heightScale` but `pos.x *= heightScale*0.8`, so width grows slower than height and tall blades read as thinner. `pos.z` — the V depth — is NOT scaled at all |
 | Twist | `angle = seed * 2.5 * uv.y`, rotating the section about Y so the blade turns along its length |
 | Static bend | `pow(uv.y, curvePower) * staticBend`, with `curvePower` per instance in [2.0, 3.5] |
 | Wind noise | 2 octaves of simplex at `0.48 * uNoiseScale` and double that, weighted 0.8 / 0.2 |
@@ -254,6 +256,7 @@ this project authors shaders in **TSL** so one graph serves both the WebGPU and 
 | Wind lag | `uv.y * 1.2 + staticBend * 0.5`, SUBTRACTED from time, so the gust travels root to tip |
 | Root anchor | `windBend = wind * pow(uv.y, 2.8) * 1.4` |
 | Trail masks | root `smoothstep(0, 0.15, uv.y)`, tip `pow(uv.y, 1.8)`, push ≤ 12.2, Y drop 0.3 × push |
+| Trail field | 512² `rgba16float`, ping-ponged. R holds displacement, BA the bend direction encoded `*0.5+0.5`. Brush radius 2.5 m in a 15 m field, gaussian `sigma = radius*0.45`, and the spring is rise 14 / fall 11 per second — so grass flattens in ~0.07 s and stands back up in ~0.09 s. Both are far too fast for a trail meant to be TRACKABLE; treat the fall rate as the balance dial (V2 task 15) rather than as a recovered constant to keep |
 | Colour | `mix(base, tip, smoothstep(0,1,uv.y))` then 15% desaturation; base `#051105`, tip `#88cc00` |
 
 Three details that are not in his write-up and are worth taking:
@@ -265,6 +268,28 @@ Three details that are not in his write-up and are worth taking:
    wind look like moving air rather than synchronised wobble. It costs one subtraction.
 3. **Normals are synthesised, never derived from the geometry** — assembled analytically from the
    bend directions. We need none of this: unlit means no normal at all, which is a straight saving.
+
+Read again from a local copy of the bundle, four more things that only matter once code exists:
+
+4. **The instanced mesh sets `frustumCulled = false`.** Not an optimisation — a correctness fix,
+   and one we need for a different reason. Three computes the bounding sphere from the instance
+   matrices once; our field is camera-following, so a stale sphere would cull the whole layer as
+   soon as the player walked away from wherever it was first built. Same conclusion the cap
+   reached (`Terrain.tsx`), for the same reason.
+5. **The trail stamps a CAPSULE, not a point** — `sdSegment(world, prevBrushPos, brushPos)`,
+   the distance to the segment swept since the last frame. A point stamp leaves a dotted line as
+   soon as the thing moving is faster than the brush is wide, which for a crawling player at
+   1 m/s and a 512² field is immediately. This is V2's single most important detail and it is
+   nowhere in the write-up.
+6. **The stamped direction blends radial into movement by speed**:
+   `mix(radialDir, brushDir, clamp(speed*2, 0, 1))`. Standing still pushes grass outward in a
+   ring; moving lays it down along the path. That is exactly the read a crawl trail needs.
+7. **Do NOT copy his per-blade trail direction scatter.** The vertex stage rotates the sampled
+   bend direction by a full random angle and then adds `staticBend * 10.3` of per-instance bias —
+   which at that magnitude swamps the stamped direction entirely, so blades lean essentially at
+   random inside the trail. For decoration that reads as chaos and is fine; for a tell another
+   player is meant to READ as a direction of travel it destroys the signal. Scatter by a few
+   degrees, not by a full turn.
 
 **The one place we must diverge: he displaces X only**, i.e. wind blows along world +X forever.
 Ours has to displace along the XZ direction of `BallisticEnvironment.windVelocity`, or the

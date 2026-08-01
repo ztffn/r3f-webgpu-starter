@@ -74,6 +74,8 @@ export interface BenchConfig {
   bladePush?: number;
   /** Radius of that lean, metres. */
   bladePushRadius?: number;
+  /** Sun-facing brightness modulation on blades, either side of 1.0. */
+  bladeSun?: number;
   /** Per-texel share of the baked height field. Baked, so reload to change. */
   strand?: number;
   /** Longest span a ray searches, metres. Sets step size for grazing rays. */
@@ -146,6 +148,7 @@ function parse(): BenchConfig {
     bladeLift: num("bladelift"),
     bladePush: num("bladepush"),
     bladePushRadius: num("bladepushradius"),
+    bladeSun: num("bladesun"),
   };
 
   if (q.get("bench") !== "1") {

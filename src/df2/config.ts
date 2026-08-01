@@ -365,6 +365,25 @@ export const GRASS_BLADE_SHADE_BASE = 0.55;
 // 1.45 x 2.0 = 2.9, and tips are a small fraction of the covered pixels. Read the two
 // constants together or neither means anything. Sweep it with `?bladelift=`.
 export const GRASS_BLADE_LIFT = 2.0;
+// How much a blade brightens facing the sun and darkens edge-on to it, either side of
+// 1.0. Not illumination — a MODULATION, for the same reason as GRASS_BLADE_LIFT: the
+// colormap already carries the ground's lighting, so anything that multiplies it by a
+// diffuse term shades it twice and crushes the baked ravine shadows to black.
+//
+// What the map cannot know is a blade's own ORIENTATION, and that is the whole cue
+// being bought here: across a field of randomly-turned blades, the ones edge-on to the
+// sun going dark is the strongest signal that grass is geometry rather than texture.
+//
+// The direction is SUN_DIRECTION, which is a GUESS — nobody has measured the azimuth
+// the original artists baked into the colormap, so blades may be lit from one side
+// while the ground beneath them is shadowed from another. Recoverable by correlating
+// colormap luminance against heightmap slope; until then keep the amount modest enough
+// that a wrong azimuth reads as variation rather than as contradiction.
+//
+// The normal this needs is SYNTHESISED in the vertex stage from the twist and yaw the
+// blade already carries — there is no normal attribute and there should not be one.
+export const GRASS_BLADE_SUN = 0.25;
+
 // --- blades pushed aside by the player ---------------------------------------
 // Grass within this radius of the eye leans away from it, metres.
 //

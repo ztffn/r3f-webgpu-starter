@@ -77,6 +77,7 @@ import {
   GRASS_BLADE_LIFT,
   GRASS_BLADE_BEND,
   GRASS_BLADE_TWIST,
+  GRASS_BLADE_SUN,
   GRASS_BLADE_WIND_GAIN,
   GRASS_BLADE_PUSH_RADIUS,
   GRASS_BLADE_PUSH_STRENGTH,
@@ -305,6 +306,11 @@ export function DF2Scene({
       heightScale: GRASS_BLADE_HEIGHT_SCALE,
       bend: GRASS_BLADE_BEND,
       twist: GRASS_BLADE_TWIST,
+      // The same V depth the geometry below is built with — the normal is synthesised
+      // from it, so the two cannot be allowed to disagree.
+      vDepth: GRASS_BLADE_V_DEPTH,
+      sun: BENCH.bladeSun ?? GRASS_BLADE_SUN,
+      sunDirection: SUN_DIRECTION,
       windGain: GRASS_BLADE_WIND_GAIN,
       pushRadius: BENCH.bladePushRadius ?? GRASS_BLADE_PUSH_RADIUS,
       pushStrength: BENCH.bladePush ?? GRASS_BLADE_PUSH_STRENGTH,

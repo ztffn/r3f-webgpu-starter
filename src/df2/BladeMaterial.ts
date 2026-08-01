@@ -41,6 +41,13 @@ export interface BladeMaterialOptions {
   bend: number;
   /** Twist of the section about the blade axis, radians at the tip, peak to peak. */
   twist: number;
+  /** Centre-vertex depth as a fraction of ring width — the same value the geometry
+   * was built with. Needed here to synthesise the facet normal. */
+  vDepth: number;
+  /** Sun-facing brightness modulation, either side of 1.0. See GRASS_BLADE_SUN. */
+  sun: number;
+  /** World sun direction. Only its horizontal part matters to a vertical blade. */
+  sunDirection: [number, number, number];
   /** Tip displacement per metre of height per m/s of wind. */
   windGain: number;
   /** Radius within which blades lean away from the player, metres. */
@@ -95,6 +102,9 @@ export function createBladeMaterial(opts: BladeMaterialOptions): BladeMaterial {
     heightScale,
     bend,
     twist,
+    vDepth,
+    sun,
+    sunDirection,
     windGain,
     pushRadius,
     pushStrength,
@@ -137,6 +147,14 @@ export function createBladeMaterial(opts: BladeMaterialOptions): BladeMaterial {
   );
   const uWindSpeed = uniform(windSpeedValue);
   const uWindGain = uniform(windGain);
+  const uSun = uniform(sun);
+  // Horizontal component only, normalised on the CPU. A blade is vertical and its
+  // synthesised normal is horizontal, so the sun's elevation contributes nothing to
+  // this term — and normalising here keeps a sqrt out of the vertex stage.
+  const sunHorizontal = Math.hypot(sunDirection[0], sunDirection[2]) || 1;
+  const uSunDir = uniform(
+    new THREE.Vector2(sunDirection[0] / sunHorizontal, sunDirection[2] / sunHorizontal)
+  );
   const uPushRadius = uniform(pushRadius);
   const uPushStrength = uniform(pushStrength);
   const uNoiseScale = uniform(noiseScale);
@@ -254,6 +272,29 @@ export function createBladeMaterial(opts: BladeMaterialOptions): BladeMaterial {
     leaned.x.mul(ys).add(leaned.z.mul(yc))
   );
 
+  // --- which way this facet faces, without a normal attribute ------------------
+  // The blade is a shallow V: its left and right halves are separate facets whose
+  // normals splay by the V's own depth. In blade-local space that is
+  // `normalize(vec3(facet * vDepth * 2, 0, -1))`, where `facet` is -1 on the left edge,
+  // 0 at the crease and +1 on the right — which `uv.x` already encodes.
+  //
+  // Twist and yaw are BOTH rotations about Y, so they compose into one angle and the
+  // cosines already computed above can be combined rather than recomputed. The normal
+  // stays horizontal throughout, which is what makes the dot product below a 2D one.
+  const facet = uv().x.sub(0.5).mul(2);
+  const nLocal = V2(facet.mul(vDepth * 2), float(-1));
+  const nLen = nLocal.length().max(float(1e-4));
+  const ca = tc.mul(yc).sub(ts.mul(ys));
+  const sa = ts.mul(yc).add(tc.mul(ys));
+  const nx = nLocal.x.mul(ca).sub(nLocal.y.mul(sa)).div(nLen);
+  const nz = nLocal.x.mul(sa).add(nLocal.y.mul(ca)).div(nLen);
+  // ABSOLUTE value, because a blade is thin and drawn double-sided: face-on to the sun
+  // is bright and edge-on is dark whichever way round the facet happens to point.
+  const facing = nx.mul(uSunDir.x).add(nz.mul(uSunDir.y)).abs();
+  // Modulation around 1.0, so the field keeps the average brightness of the map under
+  // it and only the VARIATION between differently-turned blades is added.
+  const sunShade = facing.mix(uSun.oneMinus(), uSun.add(1));
+
   // --- wind: the reason this layer earns its frame time -----------------------
   // The DIRECTION is BallisticEnvironment.windVelocity, which drifts bullets, so the
   // grass a shooter reads for windage cannot disagree with the ballistics. The
@@ -329,7 +370,7 @@ export function createBladeMaterial(opts: BladeMaterialOptions): BladeMaterial {
   // is pre-shaded, so a raw multiply crushes its baked shadows to black.
   const swing = swingRaw.sub(0.5).mul(uTone);
   const tone = swing.max(swing.mul(0.35)).add(1);
-  const vColour = varying(colour.rgb.mul(tone));
+  const vColour = varying(colour.rgb.mul(tone).mul(sunShade));
 
   const material = new THREE.MeshBasicNodeMaterial();
   material.positionNode = world;

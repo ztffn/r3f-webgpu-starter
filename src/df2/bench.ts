@@ -68,6 +68,8 @@ export interface BenchConfig {
   bladeDebug?: number;
   /** Blade base-to-tip contrast; the tip gets 2 - this. Sweeps how much they read. */
   bladeShade?: number;
+  /** Blade brightness against the march behind them. The "do they read" dial. */
+  bladeLift?: number;
   /** Per-texel share of the baked height field. Baked, so reload to change. */
   strand?: number;
   /** Longest span a ray searches, metres. Sets step size for grazing rays. */
@@ -138,6 +140,7 @@ function parse(): BenchConfig {
       bladeRadius: num("bladeradius"),
       bladeDebug: num("bladedebug"),
       bladeShade: num("bladeshade"),
+      bladeLift: num("bladelift"),
     };
   }
 
@@ -156,6 +159,7 @@ function parse(): BenchConfig {
     bladeRadius: num("bladeradius"),
     bladeDebug: num("bladedebug"),
     bladeShade: num("bladeshade"),
+    bladeLift: num("bladelift"),
     strand: num("strand"),
     maxspan: num("maxspan"),
     // Default ON under bench — see the field's note. `?canopyall=0` opts out.

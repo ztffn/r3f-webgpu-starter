@@ -75,6 +75,7 @@ import {
   GRASS_BLADE_SEGMENTS,
   GRASS_BLADE_V_DEPTH,
   GRASS_BLADE_SHADE_BASE,
+  GRASS_BLADE_LIFT,
   GRASS_BLADE_BEND,
   GRASS_BLADE_TWIST,
   GRASS_BLADE_WIND_GAIN,
@@ -317,6 +318,7 @@ export function DF2Scene({
       gustRate: GRASS_BLADE_GUST_RATE,
       toneVariation: GRASS_TONE_VARIATION,
       shadeBase: BENCH.bladeShade ?? GRASS_BLADE_SHADE_BASE,
+      lift: BENCH.bladeLift ?? GRASS_BLADE_LIFT,
       // The SAME function the ballistics reads, so the grass a shooter judges windage
       // from cannot disagree with the drift the bullet actually takes.
       wind: readBallisticEnvironment(

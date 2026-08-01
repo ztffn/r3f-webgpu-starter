@@ -51,8 +51,10 @@ export interface BladeMaterialOptions {
   gustRate: number;
   /** Peak-to-peak per-column tone variation. Shared with the march. */
   toneVariation: number;
-  /** Brightness at the blade's base; the tip gets 2 - this. Shared with the march. */
+  /** Brightness at the blade's base; the tip gets 2 - this. Contrast along one blade. */
   shadeBase: number;
+  /** Brightness of the layer against the march behind it. See GRASS_BLADE_LIFT. */
+  lift: number;
   /** Initial horizontal wind, m/s. Authoritative — it is what drifts bullets. */
   wind: { x: number; z: number };
   /** Debug view: 0 normal, 1 keep mask, 2 distance. See `?bladedebug=`. */
@@ -78,6 +80,8 @@ export interface BladeMaterial {
     keepMin: NodeArg;
     densityGamma: NodeArg;
     heightScale: NodeArg;
+    shadeBase: NodeArg;
+    lift: NodeArg;
     /** Horizontal wind in m/s. Assign from BallisticEnvironment, never from taste. */
     wind: NodeArg;
     windGain: NodeArg;
@@ -101,6 +105,7 @@ export function createBladeMaterial(opts: BladeMaterialOptions): BladeMaterial {
     gustRate,
     toneVariation,
     shadeBase,
+    lift,
     wind,
     debug = 0,
   } = opts;
@@ -131,6 +136,7 @@ export function createBladeMaterial(opts: BladeMaterialOptions): BladeMaterial {
   const uGustRate = uniform(gustRate);
   const uTone = uniform(toneVariation);
   const uShadeBase = uniform(shadeBase);
+  const uLift = uniform(lift);
   /** 0 normal, 1 keep mask, 2 distance. Live, so the debug panel could drive it. */
   const uDebug = uniform(debug);
 
@@ -305,7 +311,7 @@ export function createBladeMaterial(opts: BladeMaterialOptions): BladeMaterial {
   material.positionNode = world;
   // Base-to-tip ramp centred on 1.0, the same one the march applies up a column, so
   // blades and columns shade alike. Interpolant is the receiver.
-  const shade = t.clamp(0, 1).mix(uShadeBase, uShadeBase.oneMinus().add(1));
+  const shade = t.clamp(0, 1).mix(uShadeBase, uShadeBase.oneMinus().add(1)).mul(uLift);
   // 0 normal. 1 keep mask: green where the blade survived the canopy and distance test,
   // magenta where it was rejected — magenta filling the frame means the pool is being
   // spent on ground that grows nothing. 2 distance: red at the eye through to blue at
@@ -337,6 +343,8 @@ export function createBladeMaterial(opts: BladeMaterialOptions): BladeMaterial {
       keepMin: uKeepMin,
       densityGamma: uGamma,
       heightScale: uHeightScale,
+      shadeBase: uShadeBase,
+      lift: uLift,
       wind: uWind,
       windGain: uWindGain,
     },

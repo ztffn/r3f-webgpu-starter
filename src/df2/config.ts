@@ -336,6 +336,22 @@ export const GRASS_BLADE_HEIGHT_SCALE = 1.0;
 // rest of this renderer does not have — every material here is unlit because the
 // colormap is pre-shaded. Sweep it with `?bladeshade=`.
 export const GRASS_BLADE_SHADE_BASE = 0.55;
+// Brightness multiplier on a blade's colour, on top of the ramp above.
+//
+// The ramp is CONTRAST along one blade; this is the blade layer against the march
+// behind it. Both are needed and they are not the same dial: widening the ramp alone
+// darkens roots as much as it brightens tips, so the layer as a whole stays as dark as
+// the canopy and reads as texture rather than as blades.
+//
+// Physically the right sign, which is why it is not a cheat. The colormap is
+// pre-shaded GROUND, and ground under grass is shadowed by the grass standing on it —
+// so a blade tip held above the canopy is genuinely lit more than the texel it grows
+// from. Lifting blades above the map is closer to correct than matching it.
+//
+// Still bounded by taste: past about 1.6 bright colormap patches clip to white and the
+// layer starts to look like a light source the rest of this unlit renderer does not
+// have. Sweep it with `?bladelift=`.
+export const GRASS_BLADE_LIFT = 1.35;
 // Rings minus one along the blade. 3 segments is 4 rings, 10 vertices, 10 triangles;
 // the reference uses 5, but its blades are a metre tall in isolation while ours are
 // ankle height over most of this map and cannot show that much curvature.

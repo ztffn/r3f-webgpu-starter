@@ -54,11 +54,12 @@ samples use preallocated numeric storage and are converted to Three.js vectors
 only when a completed trace is published.
 
 The projectile system makes at most one swept query per active projectile per
-tick. `WorldQuery` remains the collision seam, but the present Three.js adapter
-is explicitly a local prototype fallback. A production 16–32-player authority
-must provide a spatially indexed/batched implementation (Rapier scene queries,
-analytic heightfield queries, or equivalent); multiplying Three.js recursive
-raycasts by every registered root is not an accepted production path.
+tick. `WorldQuery` remains the collision seam. Terrain queries traverse the
+canonical CPU heightfield analytically, while explicitly registered simplified
+colliders are indexed in a uniform X/Z grid before Three.js performs narrow
+phase intersection. Visual terrain, grass proxies, and unrelated scene roots
+are never query candidates. A future authority may replace either backend
+without changing the projectile system.
 
 Network presentation is separate from authority. A client predicts its own
 shots. It does not re-simulate every remote bullet as gameplay truth; the
@@ -104,4 +105,3 @@ frame sequences produce the same completed path and impact.
   elapsed CPU time rather than asserting a machine-specific millisecond limit.
 - Debug points, impact marker, HUD range/time/drop/drift, and target hit report
   all come from the resolved ballistic result.
-

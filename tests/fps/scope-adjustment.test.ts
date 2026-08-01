@@ -36,7 +36,7 @@ test("every 100–1300 m elevation preset crosses the sightline", () => {
   }
 });
 
-test("low-velocity ammunition uses only reachable scope zero presets", () => {
+test("low-velocity ammunition uses only zeros reachable within weapon lifetime", () => {
   const pistolProfile = AMMUNITION_DEFINITIONS["9mm"];
   const elevation800 = solveElevationZeroRadians(pistolProfile, STILL_AIR, 800);
   const prediction800 = predictBallisticAtSightRange(
@@ -47,11 +47,11 @@ test("low-velocity ammunition uses only reachable scope zero presets", () => {
   );
   assert.ok(Math.abs(prediction800.verticalOffsetMetres) < 0.001);
 
-  const controller = new ScopeAdjustmentController(pistolProfile, STILL_AIR);
+  const controller = new ScopeAdjustmentController(pistolProfile, STILL_AIR, 3.5);
   for (let step = 0; step < SCOPE_ZERO_DISTANCES_METRES.length; step += 1) {
     controller.apply("elevation-up");
   }
-  assert.equal(controller.getSnapshot().zeroDistanceMetres, 900);
+  assert.equal(controller.getSnapshot().zeroDistanceMetres, 500);
 });
 
 test("turret clicks are bounded, symmetric, and resettable", () => {

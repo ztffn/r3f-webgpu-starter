@@ -11,7 +11,7 @@ import * as THREE from "three/webgpu";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import type { Heightfield } from "../df2/Heightfield";
 import { HealthDamageable } from "./combat/Damageable";
-import type { ThreeWorldQuery } from "./core/WorldQuery";
+import type { RegisteredWorldQuery } from "./core/WorldQuery";
 
 /**
  * Third-party models, loaded from the untracked `testmodels/` directory by the same
@@ -68,7 +68,7 @@ export interface TestTargetsProps {
    */
   heading?: number;
   /** Optional gameplay query registry; rendering remains useful without one. */
-  worldQuery?: Pick<ThreeWorldQuery, "register">;
+  worldQuery?: Pick<RegisteredWorldQuery, "register">;
 }
 
 interface TargetRuntime {

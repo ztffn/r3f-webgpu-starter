@@ -20,6 +20,7 @@ export type WeaponEvent =
       readonly sequence: number;
       readonly damage: number;
       readonly range: number;
+      readonly maxFlightSeconds: number;
       readonly ammunition: AmmunitionDefinition;
       readonly recoilPitch: number;
       readonly recoilYaw: number;
@@ -137,6 +138,7 @@ export class WeaponSystem {
       sequence: this.shotSequence,
       damage: this.definition.shot.damage,
       range: this.definition.shot.range,
+      maxFlightSeconds: this.definition.shot.maxFlightSeconds,
       ammunition: this.definition.shot.ammunition,
       recoilPitch: this.definition.recoil.pitchRadians,
       recoilYaw: this.definition.recoil.yawRadians,

@@ -11,7 +11,7 @@ import { CAMERA_FAR, CAMERA_FOV, CAMERA_NEAR } from "../df2/config";
 import { publishRange, type RangeSample } from "./rangeTelemetry";
 import { LocalPlayerController, type LocalPlayerCommands } from "./core/LocalPlayerController";
 import type { PlayerStance } from "./core/PlayerMotor";
-import type { ThreeWorldQuery } from "./core/WorldQuery";
+import type { RegisteredWorldQuery } from "./core/WorldQuery";
 import { BallisticProjectileSystem, type BallisticResult } from "./combat/BallisticProjectileSystem";
 import { readBallisticEnvironment } from "./combat/BallisticEnvironment";
 import { LoadoutSystem } from "./weapons/LoadoutSystem";
@@ -55,6 +55,7 @@ const LOOK_LAG_METRES_PER_RADIAN = 0.045;
 const LOOK_LAG_MAX_METRES = 0.006;
 const LOOK_LAG_RETURN = 12;
 const RANGE_SAMPLE_INTERVAL_MS = 160;
+const PERFORMANCE_SAMPLE_SECONDS = 0.25;
 const HIP_OFFSET = new THREE.Vector3(0.24, -0.37, -0.56);
 const OPTIC_EYE_OFFSET = new THREE.Vector3(0, 0, -0.075);
 const LOCAL_X = new THREE.Vector3(1, 0, 0);
@@ -87,7 +88,7 @@ const ANIMATION_SEGMENTS = [
 export interface WeaponPrototypeProps {
   /** Mount PiP display to the animated rifle's actual scope mesh. */
   scopeDemo?: boolean;
-  worldQuery: ThreeWorldQuery;
+  worldQuery: RegisteredWorldQuery;
   stance?: PlayerStance;
   grounded?: boolean;
   lookSensitivity: LookSensitivityController;
@@ -237,6 +238,18 @@ export function WeaponPrototype({
     () => new BallisticProjectileSystem(worldQuery, ballisticEnvironment),
     [ballisticEnvironment, worldQuery]
   );
+  const ballisticPerformance = useMemo(
+    () => ({
+      elapsedSeconds: 0,
+      simulationMilliseconds: 0,
+      maxSimulationMilliseconds: 0,
+      frames: 0,
+      segmentQueries: 0,
+      terrainCellTests: 0,
+      colliderCandidates: 0,
+    }),
+    [ballistics, worldQuery]
+  );
   const scopeAdjustments = useMemo(
     () =>
       new ScopeAdjustmentController(
@@ -244,9 +257,10 @@ export function WeaponPrototype({
           muzzleVelocityMetresPerSecond: ammunition.muzzleVelocityMetresPerSecond,
           ballisticCoefficientG1: ammunition.ballisticCoefficientG1,
         },
-        ballisticEnvironment
+        ballisticEnvironment,
+        weaponDefinition.shot.maxFlightSeconds
       ),
-    [ammunition, ballisticEnvironment]
+    [ammunition, ballisticEnvironment, weaponDefinition.shot.maxFlightSeconds]
   );
   const commands = useMemo<LocalPlayerCommands>(
     () => ({ triggerPresses: 0, reloadRequested: false, adsWanted: false, holdingBreath: false }),
@@ -295,8 +309,6 @@ export function WeaponPrototype({
   );
   const recoilPitch = useRef(0);
   const recoilYaw = useRef(0);
-  const terrainRoot = useRef<THREE.Object3D | null>(null);
-  const unregisterTerrain = useRef<(() => void) | null>(null);
   const nextRangeSampleAt = useRef(0);
   const target = useMemo(
     () => new THREE.RenderTarget(SCOPE_TARGET_SIZE, SCOPE_TARGET_SIZE, { depthBuffer: true }),
@@ -356,6 +368,7 @@ export function WeaponPrototype({
           direction: boreDirection,
           sightDirection: player.aim.direction,
           maxDistance: event.range,
+          maxFlightSeconds: event.maxFlightSeconds,
           damage: event.damage,
           ammunition: event.ammunition,
           captureTrace: captureShotTrace,
@@ -396,8 +409,6 @@ export function WeaponPrototype({
       lookSensitivity.reset();
       aimSway.reset();
       ballistics.clear();
-      unregisterTerrain.current?.();
-      unregisterTerrain.current = null;
     },
     [aimSway, ballistics, lookSensitivity]
   );
@@ -617,18 +628,44 @@ export function WeaponPrototype({
   // before the near-plane weapon overlay, preserving a future single final
   // composite/grade stage instead of grading every camera independently.
   useFrame((_, delta) => {
-    const nextTerrain = scene.getObjectByName("terrain") ?? null;
-    if (terrainRoot.current !== nextTerrain) {
-      unregisterTerrain.current?.();
-      terrainRoot.current = nextTerrain;
-      unregisterTerrain.current = nextTerrain
-        ? worldQuery.register({ root: nextTerrain, kind: "terrain" })
-        : null;
-    }
-
     // Existing rounds advance before this frame's input can spawn another one,
     // so a newly accepted shot never receives time that elapsed before firing.
+    const ballisticStartedAt = performance.now();
     ballistics.update(delta);
+    const ballisticMilliseconds = performance.now() - ballisticStartedAt;
+    ballisticPerformance.elapsedSeconds += delta;
+    ballisticPerformance.simulationMilliseconds += ballisticMilliseconds;
+    ballisticPerformance.maxSimulationMilliseconds = Math.max(
+      ballisticPerformance.maxSimulationMilliseconds,
+      ballisticMilliseconds
+    );
+    ballisticPerformance.frames += 1;
+    if (ballisticPerformance.elapsedSeconds >= PERFORMANCE_SAMPLE_SECONDS) {
+      const projectileMetrics = ballistics.getMetrics();
+      const queryMetrics = worldQuery.getMetrics();
+      const elapsed = ballisticPerformance.elapsedSeconds;
+      combatTelemetry.publishProjectilePerformance({
+        activeProjectiles: projectileMetrics.active,
+        peakActiveProjectiles: projectileMetrics.peakActive,
+        simulationMillisecondsPerFrame:
+          ballisticPerformance.simulationMilliseconds / ballisticPerformance.frames,
+        maxSimulationMilliseconds: ballisticPerformance.maxSimulationMilliseconds,
+        segmentQueriesPerSecond:
+          (projectileMetrics.segmentQueries - ballisticPerformance.segmentQueries) / elapsed,
+        terrainCellTestsPerSecond:
+          (queryMetrics.terrainCellTests - ballisticPerformance.terrainCellTests) / elapsed,
+        colliderCandidatesPerSecond:
+          (queryMetrics.colliderCandidates - ballisticPerformance.colliderCandidates) / elapsed,
+        expiredProjectiles: projectileMetrics.expiredProjectiles,
+      });
+      ballisticPerformance.elapsedSeconds = 0;
+      ballisticPerformance.simulationMilliseconds = 0;
+      ballisticPerformance.maxSimulationMilliseconds = 0;
+      ballisticPerformance.frames = 0;
+      ballisticPerformance.segmentQueries = projectileMetrics.segmentQueries;
+      ballisticPerformance.terrainCellTests = queryMetrics.terrainCellTests;
+      ballisticPerformance.colliderCandidates = queryMetrics.colliderCandidates;
+    }
     ballistics.drainImpactEvents(handleImpact);
     ballistics.drainResults(handleBallisticResult);
 

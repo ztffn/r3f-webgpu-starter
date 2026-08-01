@@ -1,7 +1,7 @@
 import { useEffect, useMemo } from "react";
 import * as THREE from "three/webgpu";
 import type { Heightfield } from "../df2/Heightfield";
-import type { ThreeWorldQuery } from "./core/WorldQuery";
+import type { RegisteredWorldQuery } from "./core/WorldQuery";
 import {
   createWorldObjectInstance,
   type WorldObjectDefinition,
@@ -65,7 +65,7 @@ const COVER: readonly Omit<WorldObjectDefinition, "id">[] = [
 
 export interface BallisticTestRangeProps {
   readonly heightfield: Heightfield;
-  readonly worldQuery: ThreeWorldQuery;
+  readonly worldQuery: RegisteredWorldQuery;
   readonly originX?: number;
   readonly originZ?: number;
 }

@@ -8,6 +8,8 @@ export const SNIPER_DEFINITION: WeaponDefinition = {
     type: "ballistic",
     damage: DEFAULT_AMMUNITION.baseDamage,
     range: 2_000,
+    // Covers the current 1,300 m profiles while bounding missed rounds.
+    maxFlightSeconds: 3.5,
     roundsPerMinute: 48,
     ammunition: DEFAULT_AMMUNITION,
   },

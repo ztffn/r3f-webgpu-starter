@@ -194,10 +194,27 @@ export class ScopeAdjustmentController {
   private snapshot: ScopeAdjustmentSnapshot;
   private readonly right = new THREE.Vector3();
 
-  constructor(profile: BallisticSightProfile, environment: BallisticEnvironment) {
+  constructor(
+    profile: BallisticSightProfile,
+    environment: BallisticEnvironment,
+    maxFlightSeconds = Infinity
+  ) {
+    const stillAir: BallisticEnvironment = {
+      ...environment,
+      windVelocity: { x: 0, y: 0, z: 0 },
+    };
     this.elevationPresets = SCOPE_ZERO_DISTANCES_METRES.flatMap((rangeMetres) => {
       const elevationRadians = trySolveElevationZeroRadians(profile, environment, rangeMetres);
-      return elevationRadians === null ? [] : [{ rangeMetres, elevationRadians }];
+      if (elevationRadians === null) return [];
+      const prediction = predictBallisticAtSightRange(
+        profile,
+        stillAir,
+        rangeMetres,
+        elevationRadians
+      );
+      return prediction.flightTimeSeconds <= maxFlightSeconds
+        ? [{ rangeMetres, elevationRadians }]
+        : [];
     });
     if (this.elevationPresets.length === 0) {
       this.elevationPresets = [{ rangeMetres: SCOPE_ZERO_DISTANCES_METRES[0], elevationRadians: 0 }];

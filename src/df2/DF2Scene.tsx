@@ -20,7 +20,7 @@ import { bakeSyntheticMaps } from "./syntheticMaps";
 import { bakeGrassJitter } from "./grassJitter";
 import { loadTerrain, type LoadedTerrain } from "./loadTerrain";
 import { WeaponPrototype } from "../fps/WeaponPrototype";
-import { ThreeWorldQuery } from "../fps/core/WorldQuery";
+import { CompositeWorldQuery } from "../fps/core/WorldQuery";
 import { FPS_DEBUG } from "../fps/debug/debugConfig";
 import { LookSensitivityController } from "../fps/core/LookSensitivityController";
 // Lazily imported so the three multi-megabyte debug models are code-split out of the
@@ -133,7 +133,6 @@ export function DF2Scene({
   scopeDemo = false,
   weaponDemo = false,
 }: DF2SceneProps) {
-  const worldQuery = useMemo(() => new ThreeWorldQuery(0), []);
   const lookSensitivity = useMemo(() => new LookSensitivityController(), []);
   // undefined = still loading, null = no assets (synthetic), object = real map
   const [loaded, setLoaded] = useState<LoadedTerrain | null | undefined>(undefined);
@@ -304,6 +303,9 @@ export function DF2Scene({
   useEffect(() => () => waterMaterial.dispose(), [waterMaterial]);
 
   const heightfield = world?.heightfield ?? null;
+  // Gameplay collision reads the canonical CPU heightfield, never Terrain's
+  // transient LOD meshes or shader-only grass proxies.
+  const worldQuery = useMemo(() => new CompositeWorldQuery(heightfield, 0), [heightfield]);
   // .trn water_height is in raw elevation units, same scale as the heightmap.
   const waterLevel = (world?.waterHeight ?? 0) * HEIGHT_SCALE;
   const showWater = !!heightfield && waterLevel > heightfield.minHeight;

@@ -10,6 +10,7 @@ export interface WeaponDefinition {
     readonly type: "ballistic";
     readonly damage: number;
     readonly range: number;
+    readonly maxFlightSeconds: number;
     readonly roundsPerMinute: number;
     readonly ammunition: AmmunitionDefinition;
   };

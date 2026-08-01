@@ -22,6 +22,7 @@ export interface BallisticShot {
   readonly direction: THREE.Vector3Like;
   readonly sightDirection?: THREE.Vector3Like;
   readonly maxDistance: number;
+  readonly maxFlightSeconds: number;
   readonly damage: number;
   readonly ammunition: AmmunitionDefinition;
   /** False is intended for authority load tests/remote rounds, not local debug. */
@@ -54,6 +55,7 @@ export interface BallisticMetrics {
   readonly segmentQueries: number;
   readonly surfaceInteractions: number;
   readonly droppedImpactEvents: number;
+  readonly expiredProjectiles: number;
 }
 
 const DEFAULT_CAPACITY = 2_048;
@@ -121,6 +123,7 @@ export class BallisticProjectileSystem {
   private segmentQueries = 0;
   private surfaceInteractions = 0;
   private droppedImpactEvents = 0;
+  private expiredProjectiles = 0;
 
   constructor(
     worldQuery: WorldQuery,
@@ -209,6 +212,8 @@ export class BallisticProjectileSystem {
       !Number.isFinite(input.origin.z) ||
       !Number.isFinite(input.maxDistance) ||
       !(input.maxDistance > 0) ||
+      !Number.isFinite(input.maxFlightSeconds) ||
+      !(input.maxFlightSeconds > 0) ||
       !Number.isFinite(input.damage) ||
       !(input.damage >= 0) ||
       !Number.isFinite(input.ammunition.muzzleVelocityMetresPerSecond) ||
@@ -307,6 +312,7 @@ export class BallisticProjectileSystem {
       segmentQueries: this.segmentQueries,
       surfaceInteractions: this.surfaceInteractions,
       droppedImpactEvents: this.droppedImpactEvents,
+      expiredProjectiles: this.expiredProjectiles,
     };
   }
 
@@ -325,6 +331,20 @@ export class BallisticProjectileSystem {
       const slot = this.activeSlots[activeIndex];
       const shot = this.shots[slot];
       if (!shot) continue;
+
+      const remainingLifetime = shot.maxFlightSeconds - this.elapsed[slot];
+      if (!(remainingLifetime > EPSILON)) {
+        this.resolve(
+          activeIndex,
+          slot,
+          null,
+          this.vx[slot],
+          this.vy[slot],
+          this.vz[slot],
+          true
+        );
+        continue;
+      }
 
       const oldVx = this.vx[slot];
       const oldVy = this.vy[slot];
@@ -348,13 +368,14 @@ export class BallisticProjectileSystem {
       let stepZ = (oldVz + nextVz) * 0.5 * dt;
       let segmentLength = Math.hypot(stepX, stepY, stepZ);
       const remaining = shot.maxDistance - this.distance[slot];
-      let stepFraction = 1;
-      if (segmentLength > remaining) {
-        stepFraction = remaining / segmentLength;
+      const distanceFraction = segmentLength > remaining ? remaining / segmentLength : 1;
+      const lifetimeFraction = Math.min(1, remainingLifetime / dt);
+      const stepFraction = Math.max(0, Math.min(distanceFraction, lifetimeFraction));
+      if (stepFraction < 1) {
         stepX *= stepFraction;
         stepY *= stepFraction;
         stepZ *= stepFraction;
-        segmentLength = remaining;
+        segmentLength *= stepFraction;
       }
 
       if (!(segmentLength > EPSILON)) {
@@ -396,9 +417,18 @@ export class BallisticProjectileSystem {
       if (shot.captureTrace !== false) {
         this.appendTracePoint(slot, this.px[slot], this.py[slot], this.pz[slot]);
       }
-      if (this.distance[slot] + EPSILON >= shot.maxDistance) {
+      const expired = this.elapsed[slot] + EPSILON >= shot.maxFlightSeconds;
+      if (this.distance[slot] + EPSILON >= shot.maxDistance || expired) {
         this.appendTracePoint(slot, this.px[slot], this.py[slot], this.pz[slot]);
-        this.resolve(activeIndex, slot, null, this.vx[slot], this.vy[slot], this.vz[slot]);
+        this.resolve(
+          activeIndex,
+          slot,
+          null,
+          this.vx[slot],
+          this.vy[slot],
+          this.vz[slot],
+          expired
+        );
       }
     }
   }
@@ -536,8 +566,17 @@ export class BallisticProjectileSystem {
     this.vz[slot] = this.impactDirection.z * response.speedAfterMetresPerSecond;
     this.appendTracePoint(slot, exitPoint.x, exitPoint.y, exitPoint.z);
 
-    if (this.distance[slot] + EPSILON >= shot.maxDistance) {
-      this.resolve(activeIndex, slot, null, this.vx[slot], this.vy[slot], this.vz[slot]);
+    const expired = this.elapsed[slot] + EPSILON >= shot.maxFlightSeconds;
+    if (this.distance[slot] + EPSILON >= shot.maxDistance || expired) {
+      this.resolve(
+        activeIndex,
+        slot,
+        null,
+        this.vx[slot],
+        this.vy[slot],
+        this.vz[slot],
+        expired
+      );
     }
   }
 
@@ -547,7 +586,8 @@ export class BallisticProjectileSystem {
     segmentHit: WorldHit | null,
     impactVx: number,
     impactVy: number,
-    impactVz: number
+    impactVz: number,
+    expired = false
   ): void {
     const shot = this.shots[slot];
     if (!shot) return;
@@ -602,6 +642,7 @@ export class BallisticProjectileSystem {
       impactSpeedMetresPerSecond: impactSpeed,
     };
     this.results.push({ shot, hit, damageApplied, destroyed, report, reports, trace });
+    if (expired) this.expiredProjectiles += 1;
     this.completed += 1;
     this.removeActive(activeIndex, slot);
   }

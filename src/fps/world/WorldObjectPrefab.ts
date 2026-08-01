@@ -1,7 +1,7 @@
 import * as THREE from "three/webgpu";
 import { HealthDamageable } from "../combat/Damageable.ts";
 import type { SurfaceId } from "../combat/SurfaceProfile";
-import type { ThreeWorldQuery, WorldHitKind } from "../core/WorldQuery";
+import type { RegisteredWorldQuery, WorldHitKind } from "../core/WorldQuery";
 
 export interface WorldObjectDefinition {
   readonly id: string;
@@ -30,7 +30,7 @@ export interface WorldObjectInstance {
   readonly root: THREE.Group;
   readonly collider: THREE.Mesh;
   readonly damageable: HealthDamageable | null;
-  register(worldQuery: Pick<ThreeWorldQuery, "register">): () => void;
+  register(worldQuery: Pick<RegisteredWorldQuery, "register">): () => void;
   dispose(): void;
 }
 

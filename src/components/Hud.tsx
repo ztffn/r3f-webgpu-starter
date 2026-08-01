@@ -239,6 +239,28 @@ export function Hud({
               <dd>{combat.weapon.phase}</dd>
             </>
           )}
+          {combat.projectilePerformance && (
+            <>
+              <dt>Projectiles</dt>
+              <dd>
+                {combat.projectilePerformance.activeProjectiles} active ·{" "}
+                {combat.projectilePerformance.peakActiveProjectiles} peak ·{" "}
+                {combat.projectilePerformance.expiredProjectiles} expired
+              </dd>
+              <dt>Ballistic CPU</dt>
+              <dd>
+                {fmt(combat.projectilePerformance.simulationMillisecondsPerFrame, 2)} ms ·{" "}
+                {fmt(combat.projectilePerformance.maxSimulationMilliseconds, 2)} peak
+              </dd>
+              <dt>Collision rate</dt>
+              <dd>
+                {fmt(combat.projectilePerformance.segmentQueriesPerSecond)} rays/s ·{" "}
+                {fmt(combat.projectilePerformance.terrainCellTestsPerSecond)} cells/s
+              </dd>
+              <dt>Collider candidates</dt>
+              <dd>{fmt(combat.projectilePerformance.colliderCandidatesPerSecond)}/s</dd>
+            </>
+          )}
           {combat.projectileRejectSequence > 0 && (
             <>
               <dt>Ballistic rejects</dt>

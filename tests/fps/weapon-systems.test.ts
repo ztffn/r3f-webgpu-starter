@@ -19,6 +19,7 @@ test("semi-auto accepts one click, consumes ammo, and enforces cadence", () => {
   assert.equal(firstShot?.type, "shot");
   if (firstShot?.type === "shot") {
     assert.equal(firstShot.range, 2_000);
+    assert.equal(firstShot.maxFlightSeconds, 3.5);
     assert.equal(firstShot.ammunition.muzzleVelocityMetresPerSecond, 792.48);
     assert.equal(firstShot.ammunition.ballisticCoefficientG1, 0.505);
   }

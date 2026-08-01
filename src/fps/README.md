@@ -22,10 +22,13 @@ The existing `FlyControls` remains the temporary camera motor. Each frame its
 camera pose is copied into `LocalPlayerController`; gameplay code does not read
 the weapon mesh, optic, or character bones.
 
-`ThreeWorldQuery` raycasts only explicitly registered roots. Terrain is an
-optional registration, so targets continue to work while the world renderer is
-being changed. The scope rangefinder and ballistic system share this contract,
-but the rangefinder remains a straight optical measurement.
+`CompositeWorldQuery` keeps gameplay collision independent of rendering. Terrain
+segments are solved analytically against the canonical CPU heightfield;
+`ThreeWorldQuery` spatially indexes only explicitly registered simplified
+colliders. Terrain meshes, grass shells, LODs, materials, and camera-facing
+shader proxies are never raycast. The scope rangefinder and ballistic system
+share the composite contract, but the rangefinder remains a straight optical
+measurement.
 
 Every accepted shot produces a `ShotTrace`. Damageable hits additionally produce
 a `TargetHitReport` containing target identity, world-space impact data, range,
@@ -125,9 +128,10 @@ the bore direction yellow before the cyan resolved path.
 
 The projectile core uses a 2,048-slot typed-array pool and performs no
 per-projectile allocations inside a fixed step. Automated loads cover 16/32
-shooters at 600 RPM and 32 shooters at 900 RPM. The current Three.js world-query
-adapter is still a local fallback; a production multiplayer authority requires
-spatially indexed collision behind the same contract.
+shooters at 600 RPM and 32 shooters at 900 RPM using the analytic heightfield,
+spatially indexed colliders, hits, and misses. Each weapon also authors a finite
+maximum flight lifetime, so a slow missed round cannot occupy a slot
+indefinitely.
 
 ## Surface penetration and impacts
 

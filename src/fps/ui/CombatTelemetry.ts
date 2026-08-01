@@ -71,6 +71,17 @@ export interface ImpactTelemetry {
   readonly speedAfterMetresPerSecond: number;
 }
 
+export interface ProjectilePerformanceTelemetry {
+  readonly activeProjectiles: number;
+  readonly peakActiveProjectiles: number;
+  readonly simulationMillisecondsPerFrame: number;
+  readonly maxSimulationMilliseconds: number;
+  readonly segmentQueriesPerSecond: number;
+  readonly terrainCellTestsPerSecond: number;
+  readonly colliderCandidatesPerSecond: number;
+  readonly expiredProjectiles: number;
+}
+
 export interface CombatSnapshot {
   readonly weapon: WeaponSnapshot | null;
   readonly range: CombatRangeSample | null;
@@ -80,6 +91,7 @@ export interface CombatSnapshot {
   readonly ballistics: BallisticEnvironmentTelemetry | null;
   readonly scopeAdjustment: ScopeAdjustmentSnapshot | null;
   readonly lastImpact: ImpactTelemetry | null;
+  readonly projectilePerformance: ProjectilePerformanceTelemetry | null;
   readonly dryFireSequence: number;
   readonly projectileRejectSequence: number;
 }
@@ -95,6 +107,7 @@ const EMPTY: CombatSnapshot = {
   ballistics: null,
   scopeAdjustment: null,
   lastImpact: null,
+  projectilePerformance: null,
   dryFireSequence: 0,
   projectileRejectSequence: 0,
 };
@@ -260,6 +273,10 @@ export class CombatTelemetry {
       ...this.snapshot,
       projectileRejectSequence: this.snapshot.projectileRejectSequence + 1,
     });
+  }
+
+  publishProjectilePerformance(projectilePerformance: ProjectilePerformanceTelemetry): void {
+    this.replace({ ...this.snapshot, projectilePerformance });
   }
 
   clear(): void {

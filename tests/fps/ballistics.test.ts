@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { performance } from "node:perf_hooks";
 import test from "node:test";
-import { Object3D, Vector3 } from "three/webgpu";
+import { BoxGeometry, Mesh, MeshBasicMaterial, Object3D, Vector3 } from "three/webgpu";
 import {
   BallisticProjectileSystem,
   type BallisticResult,
@@ -11,8 +11,15 @@ import {
   type BallisticEnvironment,
 } from "../../src/fps/combat/BallisticEnvironment.ts";
 import { HealthDamageable } from "../../src/fps/combat/Damageable.ts";
-import type { WorldQuery } from "../../src/fps/core/WorldQuery.ts";
-import { DEFAULT_AMMUNITION } from "../../src/fps/weapons/AmmunitionDefinition.ts";
+import {
+  CompositeWorldQuery,
+  type HeightfieldQuerySource,
+  type WorldQuery,
+} from "../../src/fps/core/WorldQuery.ts";
+import {
+  AMMUNITION_DEFINITIONS,
+  DEFAULT_AMMUNITION,
+} from "../../src/fps/weapons/AmmunitionDefinition.ts";
 
 const MISS_QUERY: WorldQuery = { raycast: () => null };
 const BASE_SHOT = {
@@ -20,6 +27,7 @@ const BASE_SHOT = {
   sequence: 1,
   origin: new Vector3(0, 100, 0),
   direction: new Vector3(0, 0, -1),
+  maxFlightSeconds: 3.5,
   damage: 100,
   ammunition: DEFAULT_AMMUNITION,
 } as const;
@@ -164,6 +172,7 @@ test("pool exhaustion rejects explicitly without replacing a live projectile", (
     segmentQueries: 0,
     surfaceInteractions: 0,
     droppedImpactEvents: 0,
+    expiredProjectiles: 0,
   });
 });
 
@@ -178,8 +187,63 @@ test("invalid projectile data is rejected and wind query overrides stay finite",
   assert.equal(readBallisticEnvironment("?windx=nope").windVelocity.x, 4);
 });
 
+test("authored flight lifetime retires a low-velocity miss", () => {
+  const system = new BallisticProjectileSystem(MISS_QUERY, environment(), { capacity: 1 });
+  assert.equal(
+    system.spawn({
+      ...BASE_SHOT,
+      ammunition: AMMUNITION_DEFINITIONS["9mm"],
+      maxDistance: 2_000,
+      maxFlightSeconds: 0.5,
+    }),
+    true
+  );
+  let result: BallisticResult | null = null;
+  while (!result) {
+    system.update(1 / 60);
+    system.drainResults((next) => {
+      result = next;
+    });
+  }
+  assert.ok(Math.abs(result.trace.flightTimeSeconds - 0.5) < 1e-9);
+  assert.ok(result.trace.pathLengthMetres < 2_000);
+  assert.equal(system.getMetrics().expiredProjectiles, 1);
+});
+
+const LOAD_HEIGHTFIELD: HeightfieldQuerySource = {
+  cellSize: 2,
+  halfWorld: 1_024,
+  minHeight: 0,
+  // Keep the shot inside global bounds so the benchmark exercises cell traversal.
+  maxHeight: 200,
+  sample: () => 0,
+  normal: (_x, _z, out = [0, 1, 0]) => {
+    out[0] = 0;
+    out[1] = 1;
+    out[2] = 0;
+    return out;
+  },
+};
+
 function runAutomaticLoad(shooters: number, rpm: number) {
-  const system = new BallisticProjectileSystem(MISS_QUERY, environment(), {
+  const worldQuery = new CompositeWorldQuery(LOAD_HEIGHTFIELD);
+  const colliderGeometry = new BoxGeometry(1.5, 300, 2);
+  const colliderMaterial = new MeshBasicMaterial();
+  const unregisterColliders: Array<() => void> = [];
+  for (let shooter = 0; shooter < shooters; shooter += 2) {
+    const collider = new Mesh(colliderGeometry, colliderMaterial);
+    collider.position.set((shooter - (shooters - 1) * 0.5) * 4, 100, -1_200);
+    unregisterColliders.push(
+      worldQuery.register({
+        root: collider,
+        kind: "world",
+        objectId: `load-collider-${shooter}`,
+        surfaceId: "stone",
+        penetrationThicknessMetres: 1,
+      })
+    );
+  }
+  const system = new BallisticProjectileSystem(worldQuery, environment(), {
     capacity: 2_048,
     maxTracePoints: 2,
   });
@@ -196,18 +260,38 @@ function runAutomaticLoad(shooters: number, rpm: number) {
       spawnAccumulator -= 1;
       sequence += 1;
       assert.equal(
-        system.spawn({ ...BASE_SHOT, sequence, maxDistance: 1_300, captureTrace: false }),
+        system.spawn({
+          ...BASE_SHOT,
+          sequence,
+          origin: {
+            x: ((sequence % shooters) - (shooters - 1) * 0.5) * 4,
+            y: 100,
+            z: 0,
+          },
+          maxDistance: 1_300,
+          captureTrace: false,
+        }),
         true
       );
     }
     system.update(frameDelta);
+    system.drainImpactEvents(() => {});
     system.drainResults(() => {});
   }
   while (system.getMetrics().active > 0) {
     system.update(frameDelta);
+    system.drainImpactEvents(() => {});
     system.drainResults(() => {});
   }
-  return { ...system.getMetrics(), cpuMilliseconds: performance.now() - started };
+  const result = {
+    ...system.getMetrics(),
+    worldQuery: worldQuery.getMetrics(),
+    cpuMilliseconds: performance.now() - started,
+  };
+  for (const unregister of unregisterColliders) unregister();
+  colliderGeometry.dispose();
+  colliderMaterial.dispose();
+  return result;
 }
 
 test("pooled solver sustains 16/32-player automatic-fire acceptance loads", () => {
@@ -218,13 +302,21 @@ test("pooled solver sustains 16/32-player automatic-fire acceptance loads", () =
     assert.equal(load.completed, load.spawned);
     assert.ok(load.peakActive < 2_048);
     assert.ok(load.segmentQueries > load.spawned);
+    assert.equal(load.worldQuery.raycasts, load.segmentQueries);
+    assert.equal(load.worldQuery.terrainQueries, load.segmentQueries);
+    assert.ok(load.worldQuery.terrainCellTests >= load.segmentQueries);
+    assert.ok(load.worldQuery.terrainCellTests < load.segmentQueries * 4);
+    assert.ok(load.worldQuery.colliderCandidates > 0);
+    assert.ok(load.worldQuery.colliderCandidates < load.segmentQueries);
   }
   console.info(
     "ballistic load metrics",
-    loads.map(({ spawned, peakActive, segmentQueries, cpuMilliseconds }) => ({
+    loads.map(({ spawned, peakActive, segmentQueries, worldQuery, cpuMilliseconds }) => ({
       spawned,
       peakActive,
       segmentQueries,
+      terrainCellTests: worldQuery.terrainCellTests,
+      terrainSamples: worldQuery.terrainSamples,
       cpuMilliseconds: Number(cpuMilliseconds.toFixed(1)),
     }))
   );

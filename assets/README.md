@@ -73,8 +73,16 @@ archive, which is personal-use-only and never committed (`01` §3). So there is 
 extract, and the alternative to substituting one is no sky at all — which is what shipped
 until now, a flat background colour.
 
-Only the PNG faces are copied in. The pack's `.dds` cubemaps are for Unreal and account for
-120 MB of its 147 MB; one preset's six faces is about 1.3 MB.
+Only the PNG faces are copied in — twelve skies, about 12 MB. The pack's `.dds` cubemaps are
+for Unreal and account for 120 MB of its 147 MB. Faces are stored as `px/nx/py/ny/pz/nz`,
+three's own axis order, so a preset folder says nothing about which pack it came from and
+swapping packs touches no code.
+
+The pack's `Land` and `Ocean` variants are deliberately absent: they differ only in the lower
+hemisphere, which our terrain covers completely, and their baked ground fights the real one at
+the horizon. Preset ids follow what a sky IS rather than what the pack calls it — `Sunshine` is
+a black starry sky above a sea of plasma, which makes it our night sky, and its name would have
+misled anyone authoring from the folder list rather than from the pixels.
 
 512x512 and visibly banded is the RIGHT resolution here, not a compromise — a modern HDRI
 sky above a 1024-texel pre-shaded colormap and 3 cm grass columns would read as two different

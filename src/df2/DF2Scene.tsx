@@ -248,11 +248,10 @@ export function DF2Scene({
     if (!weather.sky) return null;
     return new THREE.CubeTextureLoader()
       .setPath(`${import.meta.env.BASE_URL}assets/sky/${weather.sky}/`)
-      .load(
-        ["right", "left", "up", "down", "front", "back"].map(
-          (face) => `vz_${weather.sky}_${face}.png`
-        )
-      );
+      // three's own axis order. The faces are stored under these names rather than the
+      // source pack's directional ones, so a preset's folder says nothing about where
+      // its images came from and swapping the pack touches no code.
+      .load(["px.png", "nx.png", "py.png", "ny.png", "pz.png", "nz.png"]);
   }, [weather]);
   useEffect(() => () => skyBox?.dispose(), [skyBox]);
 

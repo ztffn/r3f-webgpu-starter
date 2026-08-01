@@ -1,4 +1,5 @@
-import type { HitscanResult } from "../combat/HitscanResolver";
+import type { BallisticEnvironment } from "../combat/BallisticEnvironment";
+import type { ShotResult } from "../combat/ShotResult";
 import type { ShotTraceMode } from "../combat/ShotTrace";
 import type { PlayerStance } from "../core/PlayerMotor";
 import type { WeaponSnapshot } from "../weapons/WeaponSystem";
@@ -32,6 +33,16 @@ export interface ShotTelemetry {
   readonly destroyed: boolean;
   readonly metres: number | null;
   readonly point: readonly [number, number, number] | null;
+  readonly flightTimeSeconds: number;
+  readonly verticalDropMetres: number;
+  readonly lateralDriftMetres: number;
+  readonly impactSpeedMetresPerSecond: number | null;
+}
+
+export interface BallisticEnvironmentTelemetry {
+  readonly gravityMetresPerSecondSquared: number;
+  readonly windXMetresPerSecond: number;
+  readonly windZMetresPerSecond: number;
 }
 
 export interface CombatSnapshot {
@@ -40,7 +51,9 @@ export interface CombatSnapshot {
   readonly lastShot: ShotTelemetry | null;
   readonly recentShots: readonly ShotTelemetry[];
   readonly aimResolution: AimResolutionSample | null;
+  readonly ballistics: BallisticEnvironmentTelemetry | null;
   readonly dryFireSequence: number;
+  readonly projectileRejectSequence: number;
 }
 
 type Listener = () => void;
@@ -51,7 +64,9 @@ const EMPTY: CombatSnapshot = {
   lastShot: null,
   recentShots: [],
   aimResolution: null,
+  ballistics: null,
   dryFireSequence: 0,
+  projectileRejectSequence: 0,
 };
 
 export class CombatTelemetry {
@@ -92,7 +107,7 @@ export class CombatTelemetry {
     this.replace({ ...this.snapshot, range });
   }
 
-  publishShot(result: HitscanResult): void {
+  publishShot(result: ShotResult): void {
     const report = result.report;
     const impact = result.trace.impact;
     const lastShot: ShotTelemetry = {
@@ -109,12 +124,38 @@ export class CombatTelemetry {
       destroyed: result.destroyed,
       metres: result.hit?.distance ?? null,
       point: impact ? [impact.point.x, impact.point.y, impact.point.z] : null,
+      flightTimeSeconds: result.trace.flightTimeSeconds,
+      verticalDropMetres: result.trace.verticalDropMetres,
+      lateralDriftMetres: result.trace.lateralDriftMetres,
+      impactSpeedMetresPerSecond: result.trace.impactSpeedMetresPerSecond,
     };
     this.replace({
       ...this.snapshot,
       lastShot,
       recentShots: [lastShot, ...this.snapshot.recentShots].slice(0, 5),
     });
+  }
+
+  publishBallisticEnvironment(environment: BallisticEnvironment): void {
+    const ballistics = {
+      gravityMetresPerSecondSquared: Math.hypot(
+        environment.gravity.x,
+        environment.gravity.y,
+        environment.gravity.z
+      ),
+      windXMetresPerSecond: environment.windVelocity.x,
+      windZMetresPerSecond: environment.windVelocity.z,
+    };
+    const previous = this.snapshot.ballistics;
+    if (
+      previous &&
+      previous.gravityMetresPerSecondSquared === ballistics.gravityMetresPerSecondSquared &&
+      previous.windXMetresPerSecond === ballistics.windXMetresPerSecond &&
+      previous.windZMetresPerSecond === ballistics.windZMetresPerSecond
+    ) {
+      return;
+    }
+    this.replace({ ...this.snapshot, ballistics });
   }
 
   publishAimDiagnostics(
@@ -149,6 +190,13 @@ export class CombatTelemetry {
 
   publishDryFire(): void {
     this.replace({ ...this.snapshot, dryFireSequence: this.snapshot.dryFireSequence + 1 });
+  }
+
+  publishProjectileRejected(): void {
+    this.replace({
+      ...this.snapshot,
+      projectileRejectSequence: this.snapshot.projectileRejectSequence + 1,
+    });
   }
 
   clear(): void {

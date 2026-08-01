@@ -28,6 +28,8 @@ export class ThreeWorldQuery implements WorldQuery {
   private readonly origin = new THREE.Vector3();
   private readonly direction = new THREE.Vector3();
   private readonly registrations = new Set<WorldQueryRegistration>();
+  private readonly roots: THREE.Object3D[] = [];
+  private readonly ownerByRoot = new Map<THREE.Object3D, WorldQueryRegistration>();
 
   constructor(layer = 0) {
     this.raycaster.layers.set(layer);
@@ -35,7 +37,14 @@ export class ThreeWorldQuery implements WorldQuery {
 
   register(registration: WorldQueryRegistration): () => void {
     this.registrations.add(registration);
-    return () => this.registrations.delete(registration);
+    this.roots.push(registration.root);
+    this.ownerByRoot.set(registration.root, registration);
+    return () => {
+      if (!this.registrations.delete(registration)) return;
+      this.ownerByRoot.delete(registration.root);
+      const index = this.roots.indexOf(registration.root);
+      if (index >= 0) this.roots.splice(index, 1);
+    };
   }
 
   raycast(origin: THREE.Vector3Like, direction: THREE.Vector3Like, maxDistance: number): WorldHit | null {
@@ -48,16 +57,15 @@ export class ThreeWorldQuery implements WorldQuery {
     this.origin.set(origin.x, origin.y, origin.z);
     this.raycaster.set(this.origin, this.direction);
 
-    let nearest: THREE.Intersection | null = null;
-    let owner: WorldQueryRegistration | null = null;
-    for (const registration of this.registrations) {
-      const hit = this.raycaster.intersectObject(registration.root, true)[0];
-      if (hit && (!nearest || hit.distance < nearest.distance)) {
-        nearest = hit;
-        owner = registration;
-      }
+    const nearest = this.raycaster.intersectObjects(this.roots, true)[0];
+    if (!nearest) return null;
+    let owner: WorldQueryRegistration | undefined;
+    let candidate: THREE.Object3D | null = nearest.object;
+    while (candidate && !owner) {
+      owner = this.ownerByRoot.get(candidate);
+      candidate = candidate.parent;
     }
-    if (!nearest || !owner) return null;
+    if (!owner) return null;
 
     return {
       distance: nearest.distance,

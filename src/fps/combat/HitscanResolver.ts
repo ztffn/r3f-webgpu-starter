@@ -1,7 +1,7 @@
 import * as THREE from "three/webgpu";
-import type { WorldHit, WorldQuery } from "../core/WorldQuery";
+import type { WorldQuery } from "../core/WorldQuery";
 import type { ShotTrace } from "./ShotTrace";
-import type { TargetHitReport } from "./TargetHitReport";
+import type { ShotResult } from "./ShotResult";
 
 export interface HitscanShot {
   readonly sourceId: string;
@@ -12,14 +12,7 @@ export interface HitscanShot {
   readonly damage: number;
 }
 
-export interface HitscanResult {
-  readonly shot: HitscanShot;
-  readonly hit: WorldHit | null;
-  readonly damageApplied: number;
-  readonly destroyed: boolean;
-  readonly report: TargetHitReport | null;
-  readonly trace: ShotTrace;
-}
+export interface HitscanResult extends ShotResult<HitscanShot> {}
 
 export class HitscanResolver {
   private readonly worldQuery: WorldQuery;
@@ -38,6 +31,7 @@ export class HitscanResolver {
       shotSequence: shot.sequence,
       sourceId: shot.sourceId,
       mode: "hitscan",
+      initialDirection: direction.clone(),
       points: [origin, end],
       impact: hit
         ? {
@@ -51,6 +45,8 @@ export class HitscanResolver {
       flightTimeSeconds: 0,
       verticalDropMetres: 0,
       lateralDriftMetres: 0,
+      pathLengthMetres: hit?.distance ?? shot.maxDistance,
+      impactSpeedMetresPerSecond: null,
     };
     if (!hit?.damageable) {
       return { shot, hit, damageApplied: 0, destroyed: false, report: null, trace };

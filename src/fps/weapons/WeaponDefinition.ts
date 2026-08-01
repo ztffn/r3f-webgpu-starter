@@ -5,10 +5,12 @@ export interface WeaponDefinition {
   readonly id: WeaponId;
   readonly displayName: string;
   readonly shot: {
-    readonly type: "hitscan";
+    readonly type: "ballistic";
     readonly damage: number;
     readonly range: number;
     readonly roundsPerMinute: number;
+    readonly muzzleVelocityMetresPerSecond: number;
+    readonly ballisticCoefficientG1: number;
   };
   readonly ammo: {
     readonly magazineSize: number;

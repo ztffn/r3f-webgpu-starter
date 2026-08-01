@@ -225,11 +225,12 @@ and immediately answers "does this feel like DF2?".
   structured hit reports, and opt-in latest-shot trajectory diagnostics are built for
   human validation before projectile ballistics. Hitscan is an integration harness, not
   the intended sniper mechanic.
-- ⬜ **Authoritative fixed-step rifle ballistics** (muzzle velocity, gravity, wind, drag,
-  time of flight, and swept world-query collision) validated through 1,300 m. This is a
-  gameplay requirement for the first credible long-range DF2 slice: damage and hit
-  reports must come from the simulated path. Do not model fast rounds as Rapier dynamic
-  rigid bodies and do not substitute a visual-only curved trace.
+- 🟡 **Authoritative fixed-step rifle ballistics**: a pooled 120 Hz projectile system now
+  owns muzzle velocity, gravity, wind, drag, time of flight, swept collision, delayed
+  damage, hit reports, HUD telemetry, and debug paths through 1,300 m. Integrator load
+  tests cover 16/32 shooters at 600 RPM and 32 at 900 RPM. The remaining production gap
+  is a spatially indexed multiplayer `WorldQuery`; the current Three.js scene adapter is
+  a local fallback, not the final authority collision path.
 - ⬜ First-person collision and stance motor using Rapier; basic AI/objectives.
   *(What exists today is a camera rig only — `FlyControls.tsx` clamps to the surface at a
   stance eye height. No physics, no collision.)*

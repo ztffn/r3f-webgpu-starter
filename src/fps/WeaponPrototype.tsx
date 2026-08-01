@@ -12,12 +12,14 @@ import { publishRange, type RangeSample } from "./rangeTelemetry";
 import { LocalPlayerController, type LocalPlayerCommands } from "./core/LocalPlayerController";
 import type { PlayerStance } from "./core/PlayerMotor";
 import type { ThreeWorldQuery } from "./core/WorldQuery";
-import { HitscanResolver } from "./combat/HitscanResolver";
+import { BallisticProjectileSystem, type BallisticResult } from "./combat/BallisticProjectileSystem";
+import { readBallisticEnvironment } from "./combat/BallisticEnvironment";
 import { LoadoutSystem } from "./weapons/LoadoutSystem";
 import { WeaponSystem, type WeaponEvent } from "./weapons/WeaponSystem";
 import { SNIPER_DEFINITION } from "./weapons/weaponDefinitions";
 import { combatTelemetry } from "./ui/CombatTelemetry";
 import { shotDebugStore } from "./debug/ShotDebugStore";
+import { FPS_DEBUG } from "./debug/debugConfig";
 import {
   AIM_DIAGNOSTIC_RANGE_METRES,
   type LookSensitivityController,
@@ -158,7 +160,15 @@ export function WeaponPrototype({
     () => new LoadoutSystem([{ id: "primary", weapon }], "primary"),
     [weapon]
   );
-  const hitscan = useMemo(() => new HitscanResolver(worldQuery), [worldQuery]);
+  const ballisticEnvironment = useMemo(
+    () => readBallisticEnvironment(typeof window === "undefined" ? "" : window.location.search),
+    []
+  );
+  const captureShotTrace = FPS_DEBUG.shotTrajectory;
+  const ballistics = useMemo(
+    () => new BallisticProjectileSystem(worldQuery, ballisticEnvironment),
+    [ballisticEnvironment, worldQuery]
+  );
   const commands = useMemo<LocalPlayerCommands>(
     () => ({ triggerPresses: 0, reloadRequested: false, adsWanted: false, holdingBreath: false }),
     []
@@ -255,16 +265,18 @@ export function WeaponPrototype({
   const handleWeaponEvent = useCallback(
     (event: WeaponEvent) => {
       if (event.type === "shot") {
-        const result = hitscan.resolve({
+        const spawned = ballistics.spawn({
           sourceId: SNIPER_DEFINITION.id,
           sequence: event.sequence,
           origin: player.aim.origin,
           direction: player.aim.direction,
           maxDistance: event.range,
           damage: event.damage,
+          muzzleVelocityMetresPerSecond: event.muzzleVelocityMetresPerSecond,
+          ballisticCoefficientG1: event.ballisticCoefficientG1,
+          captureTrace: captureShotTrace,
         });
-        combatTelemetry.publishShot(result);
-        shotDebugStore.publish(result.trace);
+        if (!spawned) combatTelemetry.publishProjectileRejected();
         recoilPitch.current += event.recoilPitch;
         recoilYaw.current += event.sequence % 2 === 0 ? -event.recoilYaw : event.recoilYaw;
         if (event.animationSegment !== undefined) playSegment(event.animationSegment);
@@ -279,8 +291,13 @@ export function WeaponPrototype({
         playSegment(event.animationSegment);
       }
     },
-    [hitscan, playSegment, player]
+    [ballistics, captureShotTrace, playSegment, player]
   );
+
+  const handleBallisticResult = useCallback((result: BallisticResult) => {
+    combatTelemetry.publishShot(result);
+    shotDebugStore.publish(result.trace);
+  }, []);
 
   useEffect(
     () => () => {
@@ -289,11 +306,16 @@ export function WeaponPrototype({
       shotDebugStore.clear();
       lookSensitivity.reset();
       aimSway.reset();
+      ballistics.clear();
       unregisterTerrain.current?.();
       unregisterTerrain.current = null;
     },
-    [aimSway, lookSensitivity]
+    [aimSway, ballistics, lookSensitivity]
   );
+
+  useEffect(() => {
+    combatTelemetry.publishBallisticEnvironment(ballisticEnvironment);
+  }, [ballisticEnvironment]);
 
   useEffect(() => {
     const playDebugSegment = (event: KeyboardEvent) => {
@@ -487,6 +509,11 @@ export function WeaponPrototype({
         : null;
     }
 
+    // Existing rounds advance before this frame's input can spawn another one,
+    // so a newly accepted shot never receives time that elapsed before firing.
+    ballistics.update(delta);
+    ballistics.drainResults(handleBallisticResult);
+
     camera.updateMatrixWorld();
     playerPose.stance = stance;
     playerPose.grounded = grounded;
@@ -619,7 +646,7 @@ export function WeaponPrototype({
       if (scopeDemo && aim.current > 0.02) {
         // The ray starts at the player eye, but uses the scope capture camera's
         // centre direction. Its orientation is the same authoritative direction
-        // used by hitscan; only its origin retains the tiny physical optic offset.
+        // used by ballistic spawn; only its origin retains the tiny physical optic offset.
         camera.getWorldPosition(rangeOrigin);
         scopeCamera.getWorldDirection(rangeDirection);
         const hit = worldQuery.raycast(rangeOrigin, rangeDirection, CAMERA_FAR);

@@ -78,12 +78,12 @@ export function Hud({
             {combat.recentShots.map((shot) => {
               const subject = shot.targetId ?? shot.kind ?? "miss";
               const detail = shot.targetId
-                ? `${shot.metres === null ? "—" : fmt(shot.metres, 1)} m · ${fmt(shot.damage)} dmg · ${
+                ? `${shot.metres === null ? "—" : fmt(shot.metres, 1)} m · ${fmt(shot.flightTimeSeconds, 2)} s · ${fmt(shot.damage)} dmg · ${
                     shot.destroyed ? "down" : `${fmt(shot.healthAfter ?? 0)} hp`
                   }`
                 : shot.hit
-                  ? `${shot.metres === null ? "—" : fmt(shot.metres, 1)} m`
-                  : "no impact";
+                  ? `${shot.metres === null ? "—" : fmt(shot.metres, 1)} m · ${fmt(shot.flightTimeSeconds, 2)} s`
+                  : `no impact · ${fmt(shot.flightTimeSeconds, 2)} s`;
               const status = shot.destroyed ? "down" : shot.damage > 0 ? "hit" : undefined;
               return (
                 <li key={shot.sequence} className={status}>
@@ -148,6 +148,32 @@ export function Hud({
           <dd>{combat.range ? fmt(combat.range.metres, 1) : "—"} m</dd>
           <dt>Hit</dt>
           <dd>{combat.range ? combat.range.kind : "—"}</dd>
+          {combat.ballistics && (
+            <>
+              <dt>Wind</dt>
+              <dd>
+                X {fmt(combat.ballistics.windXMetresPerSecond, 1)} · Z{" "}
+                {fmt(combat.ballistics.windZMetresPerSecond, 1)} m/s
+              </dd>
+            </>
+          )}
+          {combat.lastShot?.mode === "ballistic" && (
+            <>
+              <dt>Flight</dt>
+              <dd>{fmt(combat.lastShot.flightTimeSeconds, 3)} s</dd>
+              <dt>Drop / drift</dt>
+              <dd>
+                {fmt(combat.lastShot.verticalDropMetres, 2)} /{" "}
+                {fmt(combat.lastShot.lateralDriftMetres, 2)} m
+              </dd>
+              <dt>Impact speed</dt>
+              <dd>
+                {combat.lastShot.impactSpeedMetresPerSecond === null
+                  ? "—"
+                  : `${fmt(combat.lastShot.impactSpeedMetresPerSecond)} m/s`}
+              </dd>
+            </>
+          )}
           {combat.aimResolution && (
             <>
               <dt>Aim step</dt>
@@ -174,6 +200,12 @@ export function Hud({
               </dd>
               <dt>State</dt>
               <dd>{combat.weapon.phase}</dd>
+            </>
+          )}
+          {combat.projectileRejectSequence > 0 && (
+            <>
+              <dt>Ballistic rejects</dt>
+              <dd className="warn">{combat.projectileRejectSequence}</dd>
             </>
           )}
         </dl>

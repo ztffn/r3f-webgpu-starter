@@ -72,11 +72,7 @@ export function ShotTrajectoryDebugView() {
     path.geometry.setFromPoints([...trace.points]);
 
     const start = trace.points[0];
-    const next = trace.points[1];
-    const distance = start.distanceTo(next);
-    const aimEnd = start
-      .clone()
-      .lerp(next, distance > 0 ? Math.min(1, INITIAL_AIM_LENGTH / distance) : 0);
+    const aimEnd = start.clone().addScaledVector(trace.initialDirection, INITIAL_AIM_LENGTH);
     initialAim.geometry.setFromPoints([start, aimEnd]);
 
     const resolvedImpact = trace.impact;

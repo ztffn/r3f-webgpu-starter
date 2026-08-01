@@ -11,8 +11,8 @@ DOM input
   -> LocalPlayerController
   -> LoadoutSystem / WeaponSystem
   -> accepted shot event
-  -> HitscanResolver
-  -> WorldQuery
+  -> BallisticProjectileSystem (120 Hz gravity / drag / wind)
+  -> swept WorldQuery segments
   -> Damageable + TargetHitReport + ShotTrace
   -> CombatTelemetry + shot debug presentation
   -> weapon presentation / target presentation / HUD
@@ -24,7 +24,8 @@ the weapon mesh, optic, or character bones.
 
 `ThreeWorldQuery` raycasts only explicitly registered roots. Terrain is an
 optional registration, so targets continue to work while the world renderer is
-being changed. The scope rangefinder and hitscan resolver share this query.
+being changed. The scope rangefinder and ballistic system share this contract,
+but the rangefinder remains a straight optical measurement.
 
 Every accepted shot produces a `ShotTrace`. Damageable hits additionally produce
 a `TargetHitReport` containing target identity, world-space impact data, range,
@@ -103,17 +104,20 @@ line is the shot path, the white segment is initial authoritative aim, and red
 marks the impact and surface normal. The HUD retains a short recent-shot log.
 Press L to clear the current debug trace.
 
-This temporary integration slice remains hitscan. It validates aim, collision,
-damage reporting, and diagnostics, but it is not the intended sniper gameplay
-model. The required rifle solver will integrate muzzle velocity, gravity, wind,
-and drag at a fixed step, use swept `WorldQuery` segments for authoritative
-collision, and emit the same `ShotTrace`/`TargetHitReport` contracts. Damage,
-impact, flight time, drop, drift, HUD telemetry, and the debug trajectory must
-all come from that simulated path. Rapier remains reserved for world/player
-physics and may back queries; bullets will not be dynamic rigid bodies.
+The sniper now uses an active 120 Hz ballistic projectile. Its 792.48 m/s,
+G1-0.505 prototype ammunition is affected by gravity, drag, and world-space
+wind; damage is delayed until a swept path segment actually reaches a target.
+The default wind is +4 m/s on world X. Use `windx` and `windz` query parameters
+for controlled tests, including `&windx=0` for still air and `&windx=-4` for an
+equal opposite crosswind. Flight time, drop, signed drift, impact speed, damage,
+HUD telemetry, and trajectory debug all come from the resolved simulation.
 
-Out of scope for the already-committed integration scaffold: the authoritative
-ballistic solver, spread, decals, physics movement, stamina, attachments,
-networking, bot presentation, and the 32/64-character browser benchmark
-harness. Ballistics is the next gameplay milestone defined in the
-shot-reporting design, not deferred presentation polish.
+The projectile core uses a 2,048-slot typed-array pool and performs no
+per-projectile allocations inside a fixed step. Automated loads cover 16/32
+shooters at 600 RPM and 32 shooters at 900 RPM. The current Three.js world-query
+adapter is still a local fallback; a production multiplayer authority requires
+spatially indexed collision behind the same contract.
+
+Out of scope here: scope zeroing, ammunition selection, spread, decals, physics
+movement, stamina, attachments, networking, bot presentation, and remote tracer
+presentation.

@@ -19,6 +19,8 @@ export type WeaponEvent =
       readonly sequence: number;
       readonly damage: number;
       readonly range: number;
+      readonly muzzleVelocityMetresPerSecond: number;
+      readonly ballisticCoefficientG1: number;
       readonly recoilPitch: number;
       readonly recoilYaw: number;
       readonly animationSegment?: number;
@@ -135,6 +137,8 @@ export class WeaponSystem {
       sequence: this.shotSequence,
       damage: this.definition.shot.damage,
       range: this.definition.shot.range,
+      muzzleVelocityMetresPerSecond: this.definition.shot.muzzleVelocityMetresPerSecond,
+      ballisticCoefficientG1: this.definition.shot.ballisticCoefficientG1,
       recoilPitch: this.definition.recoil.pitchRadians,
       recoilYaw: this.definition.recoil.yawRadians,
       animationSegment: this.definition.animations.fireSegment,

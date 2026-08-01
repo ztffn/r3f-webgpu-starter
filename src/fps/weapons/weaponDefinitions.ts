@@ -4,10 +4,13 @@ export const SNIPER_DEFINITION: WeaponDefinition = {
   id: "prototype-sniper",
   displayName: "Prototype Sniper",
   shot: {
-    type: "hitscan",
+    type: "ballistic",
     damage: 100,
     range: 2_000,
     roundsPerMinute: 48,
+    // Baseline: 175 gr .308 match profile, 2,600 ft/s and G1 BC 0.505.
+    muzzleVelocityMetresPerSecond: 792.48,
+    ballisticCoefficientG1: 0.505,
   },
   ammo: {
     magazineSize: 5,

@@ -27,7 +27,7 @@ import {
   CHUNK_COUNT,
   VIEW_RADIUS_MAX_CHUNKS,
   LOD_SEGMENTS,
-  LOD_DISTANCE_CHUNKS,
+  lodSchedule,
   FOG_FAR,
   REFERENCE_P11,
 } from "./config";
@@ -57,7 +57,6 @@ const capForward = new THREE.Vector3();
 interface Slot {
   mesh: THREE.Mesh;
   grass: THREE.Mesh | null;
-  /** Floor proxy for the grass volume; only drawn while the eye is in the canopy. */
   /** Absolute chunk indices currently displayed (can be negative / unbounded). */
   cx: number;
   cz: number;
@@ -80,12 +79,10 @@ export interface TerrainProps {
    */
   grassMaterial?: THREE.Material | null;
   /**
-   * Floor proxy for the grass volume — the same march against the un-lifted
-   * terrain surface. Drawn only while the eye is inside the canopy, because the
-   * lifted shell is a ceiling that downward rays never cross (see GrassMaterial's
-   * `floorPositionNode`). Must be as stable as `grassMaterial`.
+   * Screen-covering cap, drawn only while the eye is inside the canopy — it gives a
+   * ray that is ALREADY inside the volume a fragment to march from, which no surface
+   * of that volume can mark. Must be as stable as `grassMaterial`.
    */
-  /** Material for the screen-covering cap drawn while the eye is inside the canopy. */
   grassCapMaterial?: THREE.Material | null;
   /** Draw the grass shell at all. Free to toggle; affects visibility only. */
   grassEnabled?: boolean;
@@ -94,7 +91,7 @@ export interface TerrainProps {
   /**
    * Live tallest-canopy height, metres. Read every frame rather than passed as a
    * value because the debug panel writes the canopy uniform directly without a
-   * React render — the floor pass has to switch on the height actually in effect.
+   * React render — the cap has to switch on the height actually in effect.
    */
   grassCanopyMax?: () => number;
   wireframe?: boolean;
@@ -117,8 +114,7 @@ export function Terrain({
     const group = new THREE.Group();
     group.name = "terrain";
 
-    const chunkSize = heightfield.worldSize / CHUNK_COUNT;
-    const lodDistances = LOD_DISTANCE_CHUNKS.map((c) => c * chunkSize);
+    const { chunkSize, lodDistances } = lodSchedule(heightfield.worldSize);
 
     // Reach far enough that the fog, not the window edge, is what ends the view.
     const radius = Math.min(

@@ -11,6 +11,27 @@ import { createGrassMaterial } from "../../../src/df2/GrassMaterial";
 // The app's own stand-in canopy, not a copy of it. The rig had reimplemented this,
 // so the thing being measured could drift from the thing that ships.
 import { grassFromColormap } from "../../../src/df2/loadTerrain";
+import { Heightfield } from "../../../src/df2/Heightfield";
+import { buildHeightTexture } from "../../../src/df2/heightTexture";
+import { bakeGrassJitter } from "../../../src/df2/grassJitter";
+// Defaults come from the shipped config, never from literals repeated here.
+import {
+  lodSchedule,
+  GRASS_STEPS,
+  GRASS_STEPS_RUN,
+  GRASS_CELL,
+  GRASS_NEAR_CLIP,
+  GRASS_REFINE_STEPS,
+  GRASS_MAX_SPAN,
+  GRASS_INSIDE_SPAN,
+  GRASS_HASH_PERIOD,
+  GRASS_TONE_VARIATION,
+  GRASS_SHADE_BASE,
+  GRASS_STRAND_JITTER,
+  GRASS_STRAND_MIX,
+  GRASS_FADE_START,
+  GRASS_FADE_END,
+} from "../../../src/df2/config";
 
 // Teal-leaning camo green. Deliberately not a saturated marker colour: a target
 // that reads clearly against grass would flatter the concealment test.
@@ -147,28 +168,42 @@ export async function run(opts) {
   scene.add(new THREE.Mesh(geo, terrainMat));
 
   if (grass) {
+    // The heightfield, the jitter bake and the decimated height texture all come from
+    // the app's own modules rather than from rig-local copies. The rig exists so the
+    // measured shader cannot drift from the shipped one, and hand-maintaining this
+    // wiring is exactly how it drifted before: the material grew four required inputs
+    // and only the app was updated, so the rig threw on construction.
+    const heightfield = Heightfield.fromHeightmap({
+      data: heights,
+      size,
+      metersPerTexel: MPT,
+      heightScale: HS,
+    });
     const kit = createGrassMaterial({
       grassMap: dataTex(grassData, grassSize, false),
-      heightMap: dataTex(heights, size, false),
+      heightMap: buildHeightTexture(heightfield),
+      jitterMap: bakeGrassJitter(opts.hashPeriod ?? GRASS_HASH_PERIOD, GRASS_STRAND_JITTER),
+      ...lodSchedule(heightfield.worldSize),
+      texelSize: heightfield.cellSize,
       colorMap: cTex,
-      worldSize: size * MPT,
-      mapSize: size,
-      heightScale: HS,
+      worldSize: heightfield.worldSize,
       grassScale,
       // Defaults track src/df2/config.ts so an un-parameterised run measures what
       // actually ships. They had drifted apart: the rig's own README documented
       // cellSize 0.03 and nearClip 1.2 while these defaults said 0.35 and 0.45.
-      steps: opts.steps ?? 12,
-      cellSize: opts.cellSize ?? 0.03,
-      debugHit: opts.debugHit ?? false,
-      debugDistance: opts.debugDistance ?? false,
-      toneVariation: opts.toneVariation ?? 0.85,
-      refineSteps: opts.refineSteps ?? 4,
-      maxSpan: opts.maxSpan ?? 48,
-      nearClip: opts.nearClip ?? 1.2,
-      hashPeriod: opts.hashPeriod ?? 120,
-      fadeStart: opts.fadeStart ?? 700,
-      fadeEnd: opts.fadeEnd ?? 1100,
+      steps: opts.steps ?? GRASS_STEPS,
+      stepsRun: opts.steps ?? GRASS_STEPS_RUN,
+      cellSize: opts.cellSize ?? GRASS_CELL,
+      toneVariation: opts.toneVariation ?? GRASS_TONE_VARIATION,
+      shadeBase: GRASS_SHADE_BASE,
+      strandMix: GRASS_STRAND_MIX,
+      refineSteps: opts.refineSteps ?? GRASS_REFINE_STEPS,
+      maxSpan: opts.maxSpan ?? GRASS_MAX_SPAN,
+      insideSpan: GRASS_INSIDE_SPAN,
+      nearClip: opts.nearClip ?? GRASS_NEAR_CLIP,
+      hashPeriod: opts.hashPeriod ?? GRASS_HASH_PERIOD,
+      fadeStart: opts.fadeStart ?? GRASS_FADE_START,
+      fadeEnd: opts.fadeEnd ?? GRASS_FADE_END,
       // The rig sets its own FOV per variant, so the zoom reference must follow it
       // rather than assume the app's default.
       referenceP11: 1 / Math.tan(((fov ?? 60) * Math.PI) / 180 / 2),

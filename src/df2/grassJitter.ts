@@ -47,21 +47,6 @@ const RESOLUTION = 1024;
  * expressed in cycles per tile so the result is seamless.
  */
 /**
- * Per-texel white noise that tiles over `size`.
- *
- * The tone field's finest fbm lattice is 0.35 m, which at 0.03 m columns is about twelve
- * columns wide — so NEIGHBOURING columns shared a tone and there was no corduroy at all,
- * only broad patches. Corduroy is by definition variation between adjacent columns, so it
- * has to come from a term at texel resolution.
- *
- * Uses the project's own `hash2` rather than a private copy: it is the hash `fbm` is built
- * on, and noise.ts records that its determinism is load-bearing for the concealment field.
- * Two copies could drift.
- */
-const texelNoise = (i: number, j: number, seed: number, size: number): number =>
-  hash2(i, j, seed, size);
-
-/**
  * Map a field onto the full 0-1 range by standardising it, mean ± 2σ -> 0..1.
  *
  * fbm returns a normalised weighted AVERAGE of value-noise samples, so it clusters
@@ -131,16 +116,22 @@ export function bakeGrassJitter(period: number, strandJitter = 0): THREE.DataTex
           fbm(u * medium, v * medium, { seed: 2207, octaves: 2, period: medium }) * 0.3 +
           fbm(u * grain, v * grain, { seed: 3313, octaves: 1, period: grain }) * 0.15) *
           fbmWeight +
-        texelNoise(i, j, 4409, size) * strandJitter;
+        hash2(i, j, 4409, size) * strandJitter;
 
       // Tone field, independent of height so a tall column is not always a bright
       // one — that correlation reads as embossing rather than as grass.
-      // The clump octaves give tufting; the per-texel term gives the corduroy.
+      //
+      // The clump octaves give tufting; the per-texel `hash2` term gives the corduroy,
+      // and it has to be per texel: the finest fbm lattice here is 0.35 m, about twelve
+      // columns at 0.03 m, so without it neighbouring columns share a tone and there is
+      // no corduroy at all. Corduroy is by definition variation between ADJACENT columns.
+      // `hash2` is the same hash `fbm` is built on — noise.ts records that its
+      // determinism is load-bearing for the concealment field, so do not copy it.
       tones[k] =
         fbm(u * broad, v * broad, { seed: 5417, octaves: 2, period: broad }) * 0.42 +
         fbm(u * medium, v * medium, { seed: 6521, octaves: 2, period: medium }) * 0.24 +
         fbm(u * grain, v * grain, { seed: 7621, octaves: 1, period: grain }) * 0.12 +
-        texelNoise(i, j, 8731, size) * 0.22;
+        hash2(i, j, 8731, size) * 0.22;
     }
   }
 

@@ -31,8 +31,7 @@ import {
   TERRAIN_SLUG,
   HEIGHT_SCALE,
   METERS_PER_TEXEL,
-  CHUNK_COUNT,
-  LOD_DISTANCE_CHUNKS,
+  lodSchedule,
   GRASS_SCALE,
   GRASS_STEPS,
   GRASS_STEPS_RUN,
@@ -40,6 +39,7 @@ import {
   GRASS_NEAR_CLIP,
   GRASS_REFINE_STEPS,
   GRASS_MAX_SPAN,
+  GRASS_INSIDE_SPAN,
   GRASS_STRIPE_PIXELS,
   GRASS_HASH_PERIOD,
   GRASS_TONE_VARIATION,
@@ -204,14 +204,10 @@ export function DF2Scene({
       grassMap: world.grassMap,
       jitterMap: jitter,
       heightMap: heightTex,
-      // The march selects its mip with the SAME rule Terrain.tsx picks chunk LOD with,
-      // from the same constants. Passing them rather than re-deriving them is what keeps
-      // the mesh and the march on one surface.
-      chunkSize: world.heightfield.worldSize / CHUNK_COUNT,
+      // The march selects its mip with the SAME schedule Terrain.tsx picks chunk LOD
+      // with, from one shared derivation — see config.lodSchedule.
+      ...lodSchedule(world.heightfield.worldSize),
       texelSize: world.heightfield.cellSize,
-      lodDistances: LOD_DISTANCE_CHUNKS.map(
-        (c) => c * (world.heightfield.worldSize / CHUNK_COUNT)
-      ),
       colorMap: world.colorMap,
       worldSize: world.heightfield.worldSize,
       grassScale: GRASS_SCALE,
@@ -224,6 +220,7 @@ export function DF2Scene({
       nearClip: GRASS_NEAR_CLIP,
       refineSteps: BENCH.refine ?? GRASS_REFINE_STEPS,
       maxSpan: BENCH.maxspan ?? GRASS_MAX_SPAN,
+      insideSpan: GRASS_INSIDE_SPAN,
       stripePixels: GRASS_STRIPE_PIXELS,
       hashPeriod: GRASS_HASH_PERIOD,
       toneVariation: GRASS_TONE_VARIATION,

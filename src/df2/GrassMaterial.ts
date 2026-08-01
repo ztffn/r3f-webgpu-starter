@@ -54,8 +54,9 @@ import {
  * Margin the shell is lifted above the smooth canopy envelope.
  *
  * Load-bearing in TWO places that must agree: the vertex lift here, and Terrain.tsx's
- * test for whether the eye is inside the canopy (which decides if the floor proxy is
- * drawn). Drifting them apart silently drops the floor pass where it is needed.
+ * test for whether the eye is inside the canopy (which decides if the cap is drawn).
+ * Drifting them apart silently drops the cap where it is needed, and with it every
+ * ray that starts inside the volume.
  */
 export const CANOPY_MARGIN = 1.04;
 
@@ -124,7 +125,7 @@ export interface GrassMaterialOptions {
    * the volume, so grass here is struck within a couple of metres and the full
    * `maxSpan` only buys repeated marches over the same near column.
    */
-  insideSpan?: number;
+  insideSpan: number;
   /** Width of one tone stripe in pixels, when toneMode is 1. */
   stripePixels?: number;
   /** 0 = tone keyed on the world cell (shipped), 1 = keyed on ray bearing. */
@@ -236,8 +237,6 @@ export interface GrassMaterialOptions {
  * from cellSize. Those need a reload, so they come from the URL instead.
  */
 export interface GrassUniforms {
-  /** Metres per raw canopy unit, i.e. how tall a 255 canopy stands. */
-  grassScale: ReturnType<typeof uniform>;
   /** Tallest possible canopy, metres. Keep in step with grassScale. */
   canopyMax: ReturnType<typeof uniform>;
   cell: ReturnType<typeof uniform>;
@@ -281,8 +280,6 @@ export interface GrassMaterial {
    * the canopy are all still resolved per pixel by the march itself.
    */
   capMaterial: THREE.MeshBasicNodeMaterial;
-  /** Metres the shell is lifted above the terrain — also the tallest canopy. */
-  canopyMax: number;
   uniforms: GrassUniforms;
 }
 
@@ -301,7 +298,7 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     stepsRun,
     refineSteps = 4,
     maxSpan = 48,
-    insideSpan = 12,
+    insideSpan,
     stripePixels = 3,
     toneMode = 0,
     fogColor = "#aac2d6",
@@ -344,8 +341,15 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
   const uToneMode = uniform(toneMode);
   /** 0 = normal, 1 = hit mask, 2 = hit distance, 3 = height up the column. */
   const uDebugMode = uniform(0);
-  const uGrassScale = uniform(grassScale * 255);
-  // Tallest possible canopy: sets how far a ray must travel to cross the volume.
+  /**
+   * Tallest possible canopy in METRES, i.e. `grassScale * 255`.
+   *
+   * ONE uniform, used for two jobs that are the same number: it scales the 0-1 canopy
+   * field into metres, and it sets how far a ray must travel to cross the volume. It
+   * used to be two (`grassScale` and `canopyMax`) holding identical values, kept equal
+   * by hand from the debug panel — a duplication with no upside and a silent-drift
+   * failure mode.
+   */
   const uCanopyMax = uniform(canopyMax);
   const uTone = uniform(toneVariation);
   const uShadeBase = uniform(shadeBase);
@@ -445,7 +449,7 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
    * case for the march and not what the map says.
    */
   const canopyBase = (xz: NodeArg): NodeArg =>
-    uCanopyForce.mix(texture(grassMap, toUv(xz)).r, float(1)).mul(uGrassScale);
+    uCanopyForce.mix(texture(grassMap, toUv(xz)).r, float(1)).mul(uCanopyMax);
 
   /**
    * Stable per-column hash, keyed on the grass cell.
@@ -1228,9 +1232,7 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
   return {
     material,
     capMaterial,
-    canopyMax,
     uniforms: {
-      grassScale: uGrassScale,
       canopyMax: uCanopyMax,
       cell: uCell,
       tone: uTone,

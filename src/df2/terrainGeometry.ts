@@ -136,8 +136,8 @@ export function buildChunkGeometry({
   geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
   geometry.setIndex(indices);
   geometry.computeBoundingSphere();
-  // The box is load-bearing beyond culling: Terrain.tsx compares this chunk's maximum
-  // elevation against the eye to decide whether the grass volume needs its floor proxy.
+  // The box is load-bearing beyond frustum culling: three's Mesh.raycast uses it as the
+  // early-out for the scope rangefinder, which would otherwise triangle-test every chunk.
   // Set directly from the extent tracked in the vertex loop rather than by
   // computeBoundingBox(), which would be a third full pass over positions inside the
   // per-frame build budget. y is absolute; chunks are offset in x/z only.

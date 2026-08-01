@@ -21,22 +21,19 @@ interface Dial {
   min: number;
   max: number;
   step: number;
-  /** Written to a second uniform in lockstep — canopyMax tracks grassScale. */
-  also?: keyof GrassUniforms;
   hint?: string;
 }
 
-// grassScale and canopyMax are the same quantity at two scalings: the shader
-// stores grassScale pre-multiplied by 255 (metres per raw unit x 255) while
-// canopyMax is the resulting metres for a raw 255. Slide metres, write both.
+// The canopy height is ONE uniform in metres — it both scales the canopy field and
+// bounds the march span. It used to be two holding the same number, written in
+// lockstep from here; the slider now writes the one.
 const DIALS: Dial[] = [
   {
-    key: "grassScale",
+    key: "canopyMax",
     label: "Canopy height",
     min: 0.2,
     max: 12,
     step: 0.1,
-    also: "canopyMax",
     hint: "metres for the tallest canopy — the 'length' dial",
   },
   {
@@ -123,7 +120,7 @@ export function GrassDebug({ uniforms }: GrassDebugProps) {
     const next: Record<string, number> = {};
     for (const d of DIALS) next[d.key] = Number(uniforms[d.key].value);
     // Shown in metres; the uniform holds metres x 255.
-    next.grassScale = Number(uniforms.canopyMax.value);
+    next.canopyMax = Number(uniforms.canopyMax.value);
     next.toneMode = Number(uniforms.toneMode.value);
     next.canopyForce = Number(uniforms.canopyForce.value);
     next.debugMode = Number(uniforms.debugMode.value);
@@ -135,13 +132,7 @@ export function GrassDebug({ uniforms }: GrassDebugProps) {
 
   const write = (key: string, v: number) => {
     const dial = DIALS.find((d) => d.key === key);
-    if (dial?.key === "grassScale") {
-      // metres -> the shader's pre-multiplied form, and the span bound alongside.
-      uniforms.grassScale.value = v;
-      uniforms.canopyMax.value = v;
-    } else if (dial) {
-      uniforms[dial.key].value = v;
-    }
+    if (dial) uniforms[dial.key].value = v;
     setVals((p) => ({ ...p, [key]: v }));
   };
 

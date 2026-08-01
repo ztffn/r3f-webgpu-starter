@@ -46,7 +46,6 @@ export interface HeightmapSource {
   metersPerTexel?: number;
   heightScale?: number;
   /** Overrides HEIGHT_SMOOTH_PASSES. 0 keeps the raw quantised surface. */
-  smoothPasses?: number;
 }
 
 /**
@@ -163,7 +162,6 @@ export class Heightfield {
       heightScale: TERRAIN_HEIGHT / 255,
       // The synthetic field is continuous fBm quantised to bytes on the way out, so it
       // terraces for the same reason the extracted map does.
-      smoothPasses: HEIGHT_SMOOTH_PASSES,
     };
   }
 
@@ -186,7 +184,7 @@ export class Heightfield {
     }
     const grid = new Float32Array(size * size);
     for (let i = 0; i < size * size; i++) grid[i] = data[i] * scale;
-    smoothTerracing(grid, size, src.smoothPasses ?? HEIGHT_SMOOTH_PASSES);
+    smoothTerracing(grid, size, HEIGHT_SMOOTH_PASSES);
     return new Heightfield(size, cellSize, grid, scale);
   }
 

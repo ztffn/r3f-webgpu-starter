@@ -1,5 +1,9 @@
 # FPS module contracts
 
+For the full as-built module map, performance boundaries, human acceptance
+checklist, and deliberately deferred work, start with
+[`docs/10-fps-combat-implementation-spec.md`](../../docs/10-fps-combat-implementation-spec.md).
+
 `src/fps` is a local-first gameplay slice, not a general ECS or game framework.
 Mutable systems own gameplay truth; React Three Fiber components adapt that
 truth to cameras, GLBs, mixers, materials, and HUD snapshots.
@@ -88,12 +92,13 @@ releases it, left click fires, and right click toggles ADS. Shift holds breath
 while ADS is active, R reloads, and T resets targets. The numbered keys remain
 direct authored-animation inspection.
 
-While pointer-locked and ADS, Arrow Up/Down select a 100–1,300 m ammunition-
-calibrated elevation zero, Arrow Left/Right apply manual 0.1 mrad windage
-clicks, and 0 resets both turrets. Page Up/Down mirror elevation on full
-keyboards. Matching keydown events are consumed only in that scope context;
-keyup remains available to clear the arrow-key movement fallback. Z/X continue
-to control magnification.
+While pointer-locked and ADS, Arrow Up/Down select an ammunition-calibrated
+elevation zero, Arrow Left/Right apply manual 0.1 mrad windage clicks, and 0
+resets both turrets. The default .308 profile spans 100–1,300 m; slower
+diagnostic profiles expose only zeros they can reach within the weapon's flight
+lifetime. Page Up/Down mirror elevation on full keyboards. Matching keydown
+events are consumed only in that scope context; keyup remains available to
+clear the arrow-key movement fallback. Z/X continue to control magnification.
 
 Pointer-lock sensitivity is FOV-scaled through the live ADS transition and
 variable optic zoom. At 1,300 m the default optic resolves to roughly 6.5 cm per
@@ -127,11 +132,13 @@ along the turret-adjusted bore direction. Debug draws the sightline white and
 the bore direction yellow before the cyan resolved path.
 
 The projectile core uses a 2,048-slot typed-array pool and performs no
-per-projectile allocations inside a fixed step. Automated loads cover 16/32
-shooters at 600 RPM and 32 shooters at 900 RPM using the analytic heightfield,
-spatially indexed colliders, hits, and misses. Each weapon also authors a finite
-maximum flight lifetime, so a slow missed round cannot occupy a slot
-indefinitely.
+per-projectile allocations inside a fixed step. Automated authority-core loads
+cover 16/32 shooters at 600 RPM and 32 shooters at 900 RPM using the analytic
+heightfield, spatially indexed colliders, hits, and misses. This proves the
+bounded projectile/query workload, not an entire 32-player rendered/networked
+match; character, network, audio, and GPU acceptance still requires a browser
+benchmark on target hardware. Each weapon also authors a finite maximum flight
+lifetime, so a slow missed round cannot occupy a slot indefinitely.
 
 ## Surface penetration and impacts
 
@@ -160,6 +167,8 @@ Each has a resettable flesh target behind it. Choose representative diagnostic
 ammunition with `ammo=9mm`, `ammo=556`, `ammo=308` (default), or `ammo=50bmg`.
 The current sniper GLB remains mounted for all four because only its presentation
 exists; the URL changes authoritative ammunition data, not the displayed gun.
+In particular, `ammo=9mm` is not yet a Glock: the sidearm definition, model,
+animations, equip controls, and first-person view remain future work.
 The first canvas press also unlocks spatial audio. T resets the target husks.
 
 Shot debug keeps the cyan gameplay path, white sightline, and yellow bore.

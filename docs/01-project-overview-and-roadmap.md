@@ -220,24 +220,32 @@ and immediately answers "does this feel like DF2?".
   standing reads 525 px. That is a rendered-pixel measurement, not the analytic query this
   phase specifies — the query API itself does not exist yet.
 
-### Phase 4 — Integration (🟡 local FPS slice started)
-- 🟡 Local-first controller/weapon/loadout/hitscan contracts, resettable test targets,
-  structured hit reports, and opt-in latest-shot trajectory diagnostics are built for
-  human validation before projectile ballistics. Hitscan is an integration harness, not
-  the intended sniper mechanic.
-- 🟡 **Authoritative fixed-step rifle ballistics**: a pooled 120 Hz projectile system now
-  owns muzzle velocity, gravity, wind, drag, time of flight, swept collision, delayed
-  damage, hit reports, HUD telemetry, and debug paths through 1,300 m. Integrator load
-  tests cover 16/32 shooters at 600 RPM and 32 at 900 RPM. The remaining production gap
-  is a spatially indexed multiplayer `WorldQuery`; the current Three.js scene adapter is
-  a local fallback, not the final authority collision path.
-- 🟡 Scope turrets provide ammunition-calibrated 100–1,300 m elevation zeroing and manual
-  0.1 mrad windage with compact-keyboard ADS controls and an in-optic readout. Saved user
-  rebinding remains to be built.
+### Phase 4 — Integration (🟡 local FPS combat slice built)
+- ✅ Local-first controller/weapon/loadout contracts, resettable test targets, structured
+  hit reports, and opt-in latest-shot diagnostics are built. The legacy hitscan resolver
+  remains tested as a generic adapter, but the mounted sniper no longer fires hitscan.
+- ✅ **Authoritative fixed-step rifle ballistics**: a pooled 120 Hz projectile system owns
+  muzzle velocity, gravity, wind, drag, time of flight, swept collision, delayed damage,
+  hit reports, HUD telemetry, and debug paths through 1,300 m.
+- ✅ **Scalable gameplay collision seam**: terrain segments traverse the canonical CPU
+  heightfield analytically, simplified object colliders use a spatial index, and both are
+  composed by `WorldQuery`. Render terrain/grass/LOD objects are excluded.
+- ✅ Material surfaces, bounded penetration, resettable damageable prefabs, pooled impact
+  particles, and bounded positional impact audio are present in the diagnostic range.
+- ✅ Scope turrets provide reachable ammunition-calibrated elevation presets up to 1,300 m
+  and manual 0.1 mrad windage with compact-keyboard controls and an in-optic readout.
+- 🟡 Authority-core load tests cover 16/32 shooters at 600 RPM and 32 at 900 RPM. This is
+  not yet a full rendered/networked 32-player browser benchmark; character, networking,
+  remote presentation, audio contention, and GPU cost remain to be measured together.
+- ⬜ A representative 9x19 mm ammunition profile exists, but the requested Glock sidearm
+  definition/view/animations and in-game loadout switching are not yet implemented.
 - ⬜ First-person collision and stance motor using Rapier; basic AI/objectives.
   *(What exists today is a camera rig only — `FlyControls.tsx` clamps to the surface at a
   stance eye height. No physics, no collision.)*
 - ⬜ ECS (bitECS) as entity count grows (`05-...md` §3).
+
+The as-built FPS contracts, controls, performance claims, and remaining gaps are in
+`10-fps-combat-implementation-spec.md`.
 
 ### Phase 5 — Polish (⬜ not started)
 - ⬜ Wind animation tuning, LOD blend tuning, color-matching at draw distance, audio.

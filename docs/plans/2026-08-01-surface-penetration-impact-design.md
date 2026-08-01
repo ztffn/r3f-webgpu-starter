@@ -78,8 +78,10 @@ audio is a silent presentation failure and cannot affect the shot result.
 - Use one instanced particle draw, a fixed particle count, and a fixed audio
   voice count; distant events may be culled visually or audibly but never from
   gameplay.
-- Keep `WorldQuery` as the adapter seam. A production server can replace the
-  current Three.js root scan with a spatial index without changing ballistics.
+- Keep `WorldQuery` as the adapter seam. The local adapter now spatially indexes
+  explicit simplified colliders and composes them with analytic heightfield
+  traversal. A production server can replace either backend without changing
+  ballistics.
 
 ## Diagnostic range and controls
 
@@ -97,8 +99,9 @@ stops, entries, and exits.
 ## Acceptance
 
 - Cloth is visually opaque but all four profiles pass through it.
-- The Glock 9 mm profile stops in representative wood and sheet metal while
-  rifle profiles remain cartridge-dependent.
+- The diagnostic 9x19 mm profile stops in representative wood and sheet metal
+  while rifle profiles remain cartridge-dependent. This is ammunition tuning,
+  not an implemented Glock weapon/view.
 - Ordinary rifle profiles stop on armored metal; .50 BMG can pass the authored
   diagnostic plate.
 - A penetrated target receives damage only when the live projectile reaches it.

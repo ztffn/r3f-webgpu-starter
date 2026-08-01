@@ -52,8 +52,8 @@
   (feeds directly into the concealment system's stance-to-height mapping — see
   `04-concealment-system-design.md` §4.2), vehicles, rigid bodies, and scene queries.
   Not started; stance heights currently exist only as `STANCE_EYE` in the camera rig.
-  Fast rifle rounds will use a fixed-step ballistic solver with swept world-query
-  segments rather than one dynamic rigid body per bullet; see the shot-reporting design.
+  Fast rifle rounds already use a custom pooled 120 Hz fixed-step solver with swept
+  world-query segments rather than one dynamic rigid body per bullet; see `docs/10`.
 - **First-person controller**: custom, built against the physics engine's character
   controller primitives. ⬜ Not started. What exists today is a camera rig only —
   `FlyControls.tsx`, free-fly plus an on-foot mode that clamps to the surface at a stance
@@ -61,6 +61,20 @@
 - No networking in v1 (see project overview, non-goals) — **but** the intended end state is
   a 64+ player shooter, deliberately on hold. Don't build for it; don't foreclose it
   either (`01-...md` §2).
+
+### Local FPS/combat slice — as built
+
+`src/fps/` is intentionally a small mutable-system architecture, not an ECS. Weapon and
+loadout state, authoritative sway, ballistics, penetration, and target health live outside
+React. R3F mounts the current first-person presentation and publishes throttled HUD
+snapshots.
+
+Terrain collision is already renderer-independent: `HeightfieldWorldQuery` traverses the
+canonical CPU field, `ThreeWorldQuery` spatially indexes explicit simplified colliders, and
+`CompositeWorldQuery` returns the nearer hit. Rapier remains selected for later character,
+vehicle, and rigid-body work; it is not required for fast bullets or static terrain shots.
+
+The detailed as-built contract is `10-fps-combat-implementation-spec.md`.
 
 ## 4. Terrain rendering module
 
@@ -98,8 +112,9 @@ color/density textures) from the asset pipeline:
 
 ## 7. Directory/module layout (proposed)
 
-> **AS BUILT — nothing has moved here yet.** All engine code currently lives in the
-> Phase-1 spike directory `src/df2/` (module map: `08-...md` §3). The layout below is still
+> **AS BUILT — terrain has not moved, and FPS is now a separate bounded module.** Terrain
+> engine code remains in the Phase-1 spike directory `src/df2/` (module map: `08-...md`
+> §3), while local combat is under `src/fps/` (module map: `10-...md` §8). The layout below is still
 > the target; migrate toward it as Phase 2+ lands. One rename to carry over when you do:
 > `relief-slab.ts` should become something like `columnar-march.ts`, since that is what the
 > shader actually is (rendering design doc §4.1, AS BUILT).
@@ -121,6 +136,7 @@ color/density textures) from the asset pipeline:
   physics/
   controller/
 /src/game/                   # ECS components/systems, entities
+/src/fps/                    # current local-first mutable combat slice (as built)
 /assets/converted/           # pipeline output (PNG/glTF/JSON), gitignored if sourced
                               # from non-redistributable retail data
 ```

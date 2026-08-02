@@ -24,6 +24,7 @@ import {
   MotorInput,
   eyeHeightFor,
   type PlayerCommand,
+  type MotorTuning,
   type PlayerStance,
 } from "../motor/MotorTypes.ts";
 
@@ -34,6 +35,43 @@ export interface MotorControlsProps {
   onState?: (state: FlyState) => void;
   /** Fired when the motor's own stance changes, so the HUD and grass follow it. */
   onStance?: (stance: Stance) => void;
+}
+
+/**
+ * Live tuning overrides, following the diagnostic-URL convention in
+ * `docs/10-...md` §7. Slope limits especially: what counts as a climbable hill
+ * is a feel judgement that cannot be settled by measurement, so it needs to be
+ * dialled while walking rather than rebuilt between guesses.
+ *
+ * `?scene=motor&climb=70&slide=78&walk=6&jump=5`
+ */
+function readTuning(): MotorTuning {
+  const params = new URLSearchParams(window.location.search);
+  const degrees = (key: string, fallback: number): number => {
+    const raw = Number(params.get(key));
+    return Number.isFinite(raw) && raw > 0 && raw < 90 ? (raw * Math.PI) / 180 : fallback;
+  };
+  const positive = (key: string, fallback: number): number => {
+    const raw = Number(params.get(key));
+    return Number.isFinite(raw) && raw > 0 ? raw : fallback;
+  };
+
+  const base = DEFAULT_MOTOR_TUNING;
+  const walk = positive("walk", base.stances.stand.speed);
+  const climb = degrees("climb", base.maxSlopeClimbRadians);
+  return {
+    ...base,
+    maxSlopeClimbRadians: climb,
+    // Sliding must begin above where climbing stops, or the character is
+    // refused the slope and then slid back down it in the same tick.
+    minSlopeSlideRadians: Math.max(degrees("slide", base.minSlopeSlideRadians), climb + 0.05),
+    jumpSpeedMetresPerSecond: positive("jump", base.jumpSpeedMetresPerSecond),
+    maxStepHeightMetres: positive("step", base.maxStepHeightMetres),
+    stances: {
+      ...base.stances,
+      stand: { ...base.stances.stand, speed: walk },
+    },
+  };
 }
 
 const DRAG_RADIANS_PER_PIXEL = 0.0032;
@@ -90,12 +128,16 @@ export function MotorControls({
     };
   }, []);
 
+  const tuning = useMemo(readTuning, []);
+
   const room = useMemo(() => {
     if (rapier === null) return null;
-    const created = new MotorRoom(rapier, createMotorWorld(rapier), heightfield);
+    const created = new MotorRoom(rapier, createMotorWorld(rapier, tuning), heightfield, {
+      tuning,
+    });
     created.add(LOCAL_ID, { x: 0, z: 0 });
     return created;
-  }, [rapier, heightfield]);
+  }, [rapier, heightfield, tuning]);
 
   useEffect(() => () => room?.dispose(), [room]);
 
@@ -215,7 +257,7 @@ export function MotorControls({
 
     const state = motor.state;
     eye.x = state.position.x;
-    eye.y = state.position.y + eyeHeightFor(state, DEFAULT_MOTOR_TUNING);
+    eye.y = state.position.y + eyeHeightFor(state, tuning);
     eye.z = state.position.z;
     camera.position.set(eye.x, eye.y, eye.z);
     // Yaw 0 faces -Z, matching the motor's movement basis.

@@ -312,6 +312,53 @@ test("walks up a gentle slope and is stopped by a steep one", () => {
   assert.ok(scaled < 2, `walked ${scaled.toFixed(2)} m into a slope past the climb limit`);
 });
 
+test("climbing speed falls off smoothly instead of hitting a dead stop", () => {
+  // The bug this pins: recovering horizontal velocity from the solved movement
+  // collapses it to zero on any rise, because the solver redirects the request
+  // upward and returns almost no horizontal motion. Everything between 20 and
+  // 60 degrees became impassable while the configured limit still read 65.
+  //
+  // A single gentle gradient does not catch it — the old test used one and
+  // passed throughout — so this sweeps the range and requires the profile to
+  // stay monotonic and non-zero.
+  const walk = DEFAULT_MOTOR_TUNING.stances.stand.speed;
+  const measured: Array<{ degrees: number; fraction: number }> = [];
+
+  for (const degrees of [10, 20, 30, 40, 50]) {
+    const gradient = Math.tan((degrees * Math.PI) / 180);
+    const ramp: MotorHeightSource = { cellSize: 2, sample: (_x, z) => -z * gradient };
+    const rig = makeMotor(ramp, { terrain: { windowCells: 128 } });
+    settle(rig);
+
+    const from = { y: rig.motor.state.position.y, z: rig.motor.state.position.z };
+    const ticks = 240;
+    for (let tick = 0; tick < ticks; tick += 1) {
+      rig.step(command({ tick, buttons: MotorInput.Forward }));
+    }
+    const climbed = rig.motor.state.position.y - from.y;
+    const travelled = Math.abs(rig.motor.state.position.z - from.z);
+    const alongSlope = Math.hypot(climbed, travelled) / (ticks / 60);
+    measured.push({ degrees, fraction: alongSlope / walk });
+
+    assert.ok(climbed > 1, `${degrees} deg: climbed only ${climbed.toFixed(2)} m in 4 s`);
+  }
+
+  // A walkable slope must never cost more than the slope itself justifies.
+  for (const { degrees, fraction } of measured) {
+    assert.ok(
+      fraction > 0.15,
+      `${degrees} deg: moving at ${(fraction * 100).toFixed(0)}% of walk speed, effectively stuck`
+    );
+  }
+  // Steeper must never be faster; that inversion was the symptom.
+  for (let index = 1; index < measured.length; index += 1) {
+    assert.ok(
+      measured[index]!.fraction <= measured[index - 1]!.fraction + 0.02,
+      `speed rose from ${measured[index - 1]!.degrees} to ${measured[index]!.degrees} deg`
+    );
+  }
+});
+
 test("a wall stops horizontal travel and sets WallContact", () => {
   const rig = makeMotor();
   settle(rig);

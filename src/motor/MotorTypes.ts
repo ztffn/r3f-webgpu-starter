@@ -126,8 +126,22 @@ export const DEFAULT_MOTOR_TUNING: MotorTuning = {
   acceleration: 45,
   deceleration: 60,
   airControl: 0.25,
-  maxSlopeClimbRadians: (50 * Math.PI) / 180,
-  minSlopeSlideRadians: (58 * Math.PI) / 180,
+  // Green Mile's MEDIAN slope is 26.6 degrees, its 90th percentile is 45.9 and
+  // its steepest point is 74.2, so nothing on that map is refused at 75. DF2
+  // let you walk terrain, and this restores that.
+  //
+  // Note the limit is SOFT, not a hard gate. Speed falls off with steepness —
+  // 91% of walk at 10 degrees, 67% at 30, 36% at 50, 19% at 60 — and slopes
+  // slightly past the limit are still crawlable rather than impassable. That is
+  // the intended feel; do not read this number as a cliff the player cannot
+  // pass.
+  //
+  // It also compensates for something unresolved: a median terrain slope of
+  // 26.6 degrees is far too steep for real landscape, and it comes from the
+  // uncalibrated vertical scale (`HEIGHT_SCALE` and `METERS_PER_TEXEL` are
+  // still placeholders). REVISIT THIS DOWNWARD once the scale is calibrated.
+  maxSlopeClimbRadians: (75 * Math.PI) / 180,
+  minSlopeSlideRadians: (82 * Math.PI) / 180,
   maxStepHeightMetres: 0.45,
   snapToGroundMetres: 0.35,
   contactOffsetMetres: 0.02,

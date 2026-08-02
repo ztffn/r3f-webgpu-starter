@@ -192,21 +192,21 @@ export class CharacterMotor {
     const grounded = this.controller.computedGrounded();
     state.grounded = grounded;
     if (grounded) contacts |= MotorContact.Grounded;
-    if (this.isOnSteepGround()) contacts |= MotorContact.SteepSlope;
 
-    // Recovering horizontal velocity from the solved movement is what makes a
-    // wall actually stop the player: the requested velocity is unchanged, but
-    // the achieved one is not, and prediction must carry the achieved one.
-    state.velocity.x = moved.x / dt;
-    state.velocity.z = moved.z / dt;
-    if (blocked(this.desired.x, moved.x) || blocked(this.desired.z, moved.z)) {
-      contacts |= MotorContact.WallContact;
-    }
-    if (grounded) {
-      state.velocity.y = 0;
-    } else {
-      state.velocity.y = moved.y / dt;
-    }
+    // Velocity is NOT recovered from the solved movement.
+    //
+    // Doing that looks right — a wall reduces the achieved motion, so carry the
+    // achieved motion — and it silently makes slopes unclimbable. Walking into
+    // a rise, the solver redirects most of the request upward and returns very
+    // little HORIZONTAL movement, so horizontal velocity collapses to zero, the
+    // next tick asks for almost nothing, and the character is pinned after a
+    // single tick of acceleration. Measured: everything between 20 and 60
+    // degrees was completely impassable regardless of the configured limit.
+    //
+    // Instead the integrated velocity stands, and only genuine obstructions
+    // remove the component pushing into them.
+    contacts |= this.applyContactConstraints();
+    if (grounded) state.velocity.y = 0;
 
     state.position.x = this.nextTranslation.x;
     state.position.y = this.nextTranslation.y - this.currentHalfHeightOffset();
@@ -327,16 +327,45 @@ export class CharacterMotor {
     return hit === null;
   }
 
-  private isOnSteepGround(): boolean {
-    const limit = Math.cos(this.tuning.maxSlopeClimbRadians);
+  /**
+   * Cancels the velocity pushing into anything the character cannot walk up,
+   * and reports what it touched.
+   *
+   * `computedCollision().normal2` points FROM the character INTO the surface,
+   * so a floor reports a normal with negative Y. Reading it as the surface
+   * normal — the obvious assumption — makes every test of "is this ground too
+   * steep" silently never fire. It is negated here once, deliberately.
+   */
+  private applyContactConstraints(): number {
+    const state = this.state;
+    const walkableY = Math.cos(this.tuning.maxSlopeClimbRadians);
     const count = this.controller.numComputedCollisions();
+    let flags = 0;
+
     for (let index = 0; index < count; index += 1) {
-      const collision = this.controller.computedCollision(index);
-      const normal = collision?.normal2;
-      if (normal === undefined || normal.y <= 0) continue;
-      if (normal.y < limit) return true;
+      const contact = this.controller.computedCollision(index);
+      const raw = contact?.normal2;
+      if (raw === undefined) continue;
+      const normalX = -raw.x;
+      const normalY = -raw.y;
+      const normalZ = -raw.z;
+
+      // Ground the character can walk on redirects motion; it never blocks it.
+      if (normalY >= walkableY) continue;
+      // A ceiling is handled by the vertical axis, not the horizontal one.
+      if (normalY <= -walkableY) continue;
+      flags |= normalY > 0.05 ? MotorContact.SteepSlope : MotorContact.WallContact;
+
+      const horizontal = Math.hypot(normalX, normalZ);
+      if (horizontal < 1e-6) continue;
+      const intoX = normalX / horizontal;
+      const intoZ = normalZ / horizontal;
+      const into = state.velocity.x * intoX + state.velocity.z * intoZ;
+      if (into >= 0) continue;
+      state.velocity.x -= into * intoX;
+      state.velocity.z -= into * intoZ;
     }
-    return false;
+    return flags;
   }
 
   private integrateVelocity(buttons: number, maxSpeed: number, dt: number): number {
@@ -394,6 +423,3 @@ function approach(current: number, target: number, maxDelta: number): number {
   return current + Math.sign(difference) * maxDelta;
 }
 
-function blocked(requested: number, achieved: number): boolean {
-  return Math.abs(requested) > 1e-4 && Math.abs(achieved) < Math.abs(requested) * 0.5;
-}

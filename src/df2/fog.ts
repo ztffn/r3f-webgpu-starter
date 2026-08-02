@@ -5,7 +5,16 @@
 // the colour grade went through. Ground fog is height-based and pools in hollows, which
 // is why it is here at all: a valley you can crawl along unseen is cover, not decoration.
 
-import { cameraViewMatrix, float, mx_noise_float, time, uniform, vec3, vec4 } from "three/tsl";
+import {
+  cameraPosition,
+  cameraViewMatrix,
+  float,
+  mx_noise_float,
+  time,
+  uniform,
+  vec3,
+  vec4,
+} from "three/tsl";
 import * as THREE from "three/webgpu";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -18,15 +27,16 @@ export interface FogSettings {
   near: number;
   far: number;
   /**
-   * World height, metres, below which the ground layer is at full strength. Above
-   * `groundTop` there is none, and it fades between the two.
+   * World height, metres, where the ground layer is thickest. Density falls off
+   * exponentially above it over `groundScale` metres.
    *
    * ABSOLUTE, not relative to the terrain under you — that is the whole point. Fog
    * settles to a level, so it fills hollows and leaves ridges clear, and a player
    * dropping into a gully genuinely disappears into it.
    */
-  groundBase: number;
-  groundTop: number;
+  groundLevel: number;
+  /** Metres over which density falls by 1/e above the level. The layer's softness. */
+  groundScale: number;
   /** Extinction per metre travelled through the layer. 0 disables it entirely. */
   groundDensity: number;
   /** Metres per unit of the noise lattice that breaks up the layer's edge. */
@@ -42,8 +52,8 @@ export interface Fog {
     color: NodeArg;
     near: NodeArg;
     far: NodeArg;
-    groundBase: NodeArg;
-    groundTop: NodeArg;
+    groundLevel: NodeArg;
+    groundScale: NodeArg;
     groundDensity: NodeArg;
   };
   /**
@@ -62,8 +72,8 @@ export function createFog(settings: FogSettings): Fog {
   const uColor = uniform(new THREE.Color(settings.color));
   const uNear = uniform(settings.near);
   const uFar = uniform(settings.far);
-  const uBase = uniform(settings.groundBase);
-  const uTop = uniform(settings.groundTop);
+  const uLevel = uniform(settings.groundLevel);
+  const uScale = uniform(Math.max(0.5, settings.groundScale));
   const uDensity = uniform(settings.groundDensity);
   const uNoiseScale = uniform(settings.groundNoiseScale);
   const uNoiseAmount = uniform(settings.groundNoiseAmount);
@@ -75,24 +85,45 @@ export function createFog(settings: FogSettings): Fog {
     const viewZ = cameraViewMatrix.mul(vec4(worldPos, 1)).z.negate();
     const distance = viewZ.smoothstep(uNear, uFar);
 
-    // Ground layer. Height gives the fraction of the layer this point sits inside —
-    // 1 below the base, 0 above the top — and the extinction integrates that over the
-    // distance travelled, so a distant point low in a valley fogs far more than a near
-    // one at the same height. `exp` rather than a ramp because that is what extinction
-    // through a medium actually does, and it never quite reaches opaque.
-    const height = worldPos.y.smoothstep(uTop, uBase);
+    // Ground layer, INTEGRATED ALONG THE VIEW RAY rather than evaluated at the point.
+    //
+    // Sampling the endpoint's own height was the obvious thing and it draws a hard line
+    // across the terrain: ground a metre below the level is fully fogged and a metre
+    // above it is not, so the layer's edge appears as a contour traced on the hillside
+    // rather than as air. What matters is how much fog the ray PASSED THROUGH, which
+    // varies continuously even where the surface height jumps — a point just above the
+    // level still fogs, because the ray reaching it crossed the layer to get there.
+    //
+    // Density falls exponentially with height, `D * exp(-(y - level) / scale)`, so there
+    // is no top at all to cut off against. Its integral along a ray has a closed form:
+    //
+    //   fog = D * scale / dirY * exp(-(yCam - level)/scale) * (1 - exp(-dist * dirY / scale))
+    //
+    // and the awkward case is a level ray, where dirY is 0 and both the division and the
+    // bracket vanish together. `(1 - exp(-x)) / x` tends to 1 there, so substituting that
+    // limit gives `D * dist * exp(...)`, which is just uniform density over the path.
+    const dy = worldPos.y.sub(cameraPosition.y);
+    const heightFall = cameraPosition.y.sub(uLevel).div(uScale).negate().exp();
+    const x = dy.div(uScale);
+    // The limit form, guarded: `expm1(-x)/-x` is 1 at x = 0 and TSL has no expm1, so the
+    // series is used inside a hair of zero where the direct form loses all its bits.
+    const tiny = x.abs().lessThan(float(1e-3));
+    const pathFactor = tiny.select(
+      float(1).sub(x.mul(0.5)),
+      x.negate().exp().oneMinus().div(x.add(float(1e-9)))
+    );
     const drift = time.mul(uDrift);
     const noise = mx_noise_float(
       V3(worldPos.x.mul(uNoiseScale).add(drift), worldPos.z.mul(uNoiseScale), drift.mul(0.6))
     );
     const modulated = noise.mul(uNoiseAmount).add(1).max(float(0));
-    const ground = uDensity
+    const optical = uDensity
       .mul(viewZ)
-      .mul(height)
+      .mul(heightFall)
+      .mul(pathFactor)
       .mul(modulated)
-      .negate()
-      .exp()
-      .oneMinus();
+      .max(float(0));
+    const ground = optical.negate().exp().oneMinus();
 
     // Combined as two independent extinctions rather than added, so heavy ground fog at
     // range cannot push the total past opaque and clip.
@@ -107,8 +138,8 @@ export function createFog(settings: FogSettings): Fog {
       color: uColor,
       near: uNear,
       far: uFar,
-      groundBase: uBase,
-      groundTop: uTop,
+      groundLevel: uLevel,
+      groundScale: uScale,
       groundDensity: uDensity,
     },
     apply,
@@ -116,8 +147,8 @@ export function createFog(settings: FogSettings): Fog {
       uColor.value.set(next.color);
       uNear.value = next.near;
       uFar.value = next.far;
-      uBase.value = next.groundBase;
-      uTop.value = next.groundTop;
+      uLevel.value = next.groundLevel;
+      uScale.value = Math.max(0.5, next.groundScale);
       uDensity.value = next.groundDensity;
       uNoiseScale.value = next.groundNoiseScale;
       uNoiseAmount.value = next.groundNoiseAmount;

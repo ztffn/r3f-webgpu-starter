@@ -94,19 +94,17 @@ import {
 
 const SUN_DISTANCE = 2000;
 
-/**
- * A preset's fog, in the shape `createFog` takes.
- *
- * The layer's TOP comes from the preset and its base sits a little below, so the fade
- * happens over a few metres rather than as a plane edge you can see from the side.
- */
+/** A preset's fog, in the shape `createFog` takes. */
 function fogSettings(w: WeatherPreset) {
   return {
     color: w.fogColor,
     near: w.fogNear,
     far: w.fogFar,
-    groundBase: w.groundFogTop - 8,
-    groundTop: w.groundFogTop,
+    groundLevel: w.groundFogTop,
+    // Generous by default. A short scale height is a lid you can see the underside of;
+    // 25 m puts the layer's own gradient well below the size of the terrain features it
+    // is filling, which is what makes it read as air rather than as a surface.
+    groundScale: 25,
     groundDensity: w.groundFogDensity,
     groundNoiseScale: 0.02,
     groundNoiseAmount: 0.35,
@@ -526,7 +524,10 @@ export function DF2Scene({
   // transient LOD meshes or shader-only grass proxies.
   const worldQuery = useMemo(() => new CompositeWorldQuery(heightfield, 0), [heightfield]);
   // .trn water_height is in raw elevation units, same scale as the heightmap.
-  const waterLevel = (world?.waterHeight ?? 0) * HEIGHT_SCALE;
+  // `?water=` forces a level, because no map in this pack has one — every .trn ships
+  // water_height 0, which is below the terrain's own minimum, so the plane never draws
+  // and the submerged path has never been exercised.
+  const waterLevel = BENCH.water ?? (world?.waterHeight ?? 0) * HEIGHT_SCALE;
   const showWater = !!heightfield && waterLevel > heightfield.minHeight;
   // Follows the camera, so it only has to out-reach the fog, not the world — and the
   // preset's fog, since a weather preset can pull the far distance in.

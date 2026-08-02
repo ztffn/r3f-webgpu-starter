@@ -41,18 +41,22 @@ const ATMOSPHERE: Dial[] = [
     set: (s, v) => (s.fog.uniforms.far.value = v),
   },
   {
-    label: "Ground fog height",
+    label: "Ground fog level",
     min: 0,
     max: 220,
     step: 1,
-    get: (s) => Number(s.fog.uniforms.groundTop.value),
-    set: (s, v) => {
-      s.fog.uniforms.groundTop.value = v;
-      // The base trails the top so the layer keeps a soft edge instead of becoming a
-      // plane you can see from the side.
-      s.fog.uniforms.groundBase.value = v - 8;
-    },
-    hint: "ABSOLUTE world height — fog fills hollows below this and leaves ridges clear",
+    get: (s) => Number(s.fog.uniforms.groundLevel.value),
+    set: (s, v) => (s.fog.uniforms.groundLevel.value = v),
+    hint: "ABSOLUTE world height where the layer is thickest — it fills hollows below",
+  },
+  {
+    label: "Ground fog softness",
+    min: 1,
+    max: 80,
+    step: 1,
+    get: (s) => Number(s.fog.uniforms.groundScale.value),
+    set: (s, v) => (s.fog.uniforms.groundScale.value = v),
+    hint: "metres for density to fall by 1/e above the level — small is a sharp lid",
   },
   {
     label: "Ground fog density",

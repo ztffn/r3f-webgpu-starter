@@ -76,6 +76,15 @@ export interface BenchConfig {
   bladePushRadius?: number;
   /** Sun-facing brightness modulation on blades, either side of 1.0. */
   bladeSun?: number;
+  /**
+   * Force a water level in world metres — `?water=120`.
+   *
+   * Every .trn in this pack ships `water_height` 0, which sits below the terrain's own
+   * minimum, so the water plane never draws and nothing downstream of it has ever run.
+   * That includes the ground fog's underwater use, which is the same term with its level
+   * set to the surface, and the precipitation system's submerged morph.
+   */
+  water?: number;
   /** Per-texel share of the baked height field. Baked, so reload to change. */
   strand?: number;
   /** Longest span a ray searches, metres. Sets step size for grazing rays. */
@@ -149,6 +158,7 @@ function parse(): BenchConfig {
     bladePush: num("bladepush"),
     bladePushRadius: num("bladepushradius"),
     bladeSun: num("bladesun"),
+    water: num("water"),
   };
 
   if (q.get("bench") !== "1") {

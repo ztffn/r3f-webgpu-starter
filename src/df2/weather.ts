@@ -33,11 +33,11 @@ export interface WeatherPreset extends ColorGradeSettings {
   /** Flat background, used only when `sky` is null, and the hemisphere light's colour. */
   skyColor: string;
   /**
-   * Ground fog: the world height it fills to, and how thick it is per metre.
+   * Ground fog: the world height where it is thickest, and how thick it is per metre.
    *
-   * ABSOLUTE heights, so the layer settles into hollows and leaves ridges standing out
-   * of it. Green Mile's terrain runs about 5-174 m raw, so a base near 100 puts fog in
-   * the valleys of this map; a preset for another map wants its own.
+   * ABSOLUTE height, so the layer settles into hollows and leaves ridges standing out of
+   * it. Green Mile's terrain runs about 5-174 m, so a level near 100 puts fog in this
+   * map's valleys; a preset for another map wants its own.
    *
    * Density 0 means no ground layer, which is most presets — this is weather, not a
    * permanent feature.

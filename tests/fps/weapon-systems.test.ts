@@ -14,6 +14,7 @@ import {
   M4_DEFINITION,
   SAW_DEFINITION,
   SNIPER_DEFINITION,
+  WEAPON_DEFINITIONS,
 } from "../../src/fps/weapons/weaponDefinitions.ts";
 import { createDevelopmentLoadout } from "../../src/fps/weapons/developmentLoadout.ts";
 
@@ -116,6 +117,41 @@ test("weapon handling definitions reject invalid bloom and recoil capacity", () 
       }),
     /finite non-negative recoil/
   );
+});
+
+test("definition validation rejects hostile authored runtime values", () => {
+  const build = (patch: Partial<WeaponDefinition>) => () =>
+    new WeaponSystem({ ...M4_DEFINITION, ...patch });
+  const shot = (patch: Partial<WeaponDefinition["shot"]>) => ({
+    shot: { ...M4_DEFINITION.shot, ...patch },
+  });
+
+  assert.throws(build(shot({ roundsPerMinute: Number.POSITIVE_INFINITY })), /firing cadence/);
+  assert.throws(build(shot({ roundsPerMinute: Number.NaN })), /firing cadence/);
+  assert.throws(build(shot({ range: 0 })), /shot range/);
+  assert.throws(build(shot({ maxFlightSeconds: -1 })), /shot lifetime/);
+  assert.throws(build(shot({ damage: Number.NaN })), /shot damage/);
+  assert.throws(
+    build(shot({ ammunition: { ...M4_DEFINITION.shot.ammunition, muzzleVelocityMetresPerSecond: 0 } })),
+    /muzzle velocity/
+  );
+  assert.throws(
+    build(shot({ ammunition: { ...M4_DEFINITION.shot.ammunition, penetrationMultiplier: Number.NaN } })),
+    /penetration multiplier/
+  );
+  assert.throws(build({ ammo: { magazineSize: 0, initialReserve: 10 } }), /magazine size/);
+  assert.throws(build({ ammo: { magazineSize: 30.5, initialReserve: 10 } }), /magazine size/);
+  assert.throws(build({ ammo: { magazineSize: 30, initialReserve: -1 } }), /initial reserve/);
+  assert.throws(build({ reload: { durationSeconds: 0 } }), /reload duration/);
+  assert.throws(build({ reload: { durationSeconds: Number.NaN } }), /reload duration/);
+  assert.throws(build({ ads: { enterSeconds: Number.NaN, exitSeconds: 0.1 } }), /ADS enter/);
+  assert.throws(build({ ads: { enterSeconds: 0.1, exitSeconds: -0.1 } }), /ADS exit/);
+
+  // Zero ADS durations remain legal: they mean an instant transition.
+  assert.doesNotThrow(build({ ads: { enterSeconds: 0, exitSeconds: 0 } }));
+  for (const definition of WEAPON_DEFINITIONS) {
+    assert.doesNotThrow(() => new WeaponSystem(definition, 1));
+  }
 });
 
 test("dispersion sampling is deterministic per weapon instance and shot sequence", () => {

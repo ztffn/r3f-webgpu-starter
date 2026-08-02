@@ -90,6 +90,30 @@ function hashString32(value: string): number {
   return hash >>> 0;
 }
 
+function assertFinitePositive(value: number, label: string, weaponId: string): void {
+  if (!Number.isFinite(value) || !(value > 0)) {
+    throw new Error(`Weapon ${weaponId} needs a finite positive ${label}`);
+  }
+}
+
+function assertFiniteNonNegative(value: number, label: string, weaponId: string): void {
+  if (!Number.isFinite(value) || !(value >= 0)) {
+    throw new Error(`Weapon ${weaponId} needs a finite non-negative ${label}`);
+  }
+}
+
+function assertPositiveInteger(value: number, label: string, weaponId: string): void {
+  if (!Number.isInteger(value) || value < 1) {
+    throw new Error(`Weapon ${weaponId} needs a positive whole ${label}`);
+  }
+}
+
+function assertNonNegativeInteger(value: number, label: string, weaponId: string): void {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`Weapon ${weaponId} needs a non-negative whole ${label}`);
+  }
+}
+
 function mix32(value: number): number {
   let mixed = value >>> 0;
   mixed ^= mixed >>> 16;
@@ -468,9 +492,28 @@ export class WeaponSystem {
     ) {
       throw new Error(`Weapon ${definition.id} needs a burst size of at least two`);
     }
-    if (!(definition.shot.roundsPerMinute > 0)) {
-      throw new Error(`Weapon ${definition.id} needs a positive firing cadence`);
-    }
+    // Every authored runtime number is checked before any state is built.
+    // An infinite cadence empties a magazine inside one millisecond update, a
+    // zero-duration reload starts and never completes, and an invalid range or
+    // lifetime consumes a cartridge that projectile spawn then rejects.
+    const id = definition.id;
+    assertFinitePositive(definition.shot.roundsPerMinute, "firing cadence", id);
+    assertFinitePositive(definition.shot.range, "shot range", id);
+    assertFinitePositive(definition.shot.maxFlightSeconds, "shot lifetime", id);
+    assertFiniteNonNegative(definition.shot.damage, "shot damage", id);
+    assertPositiveInteger(definition.ammo.magazineSize, "magazine size", id);
+    assertNonNegativeInteger(definition.ammo.initialReserve, "initial reserve", id);
+    assertFinitePositive(definition.reload.durationSeconds, "reload duration", id);
+    assertFiniteNonNegative(definition.ads.enterSeconds, "ADS enter duration", id);
+    assertFiniteNonNegative(definition.ads.exitSeconds, "ADS exit duration", id);
+
+    const ammunition = definition.shot.ammunition;
+    assertFinitePositive(ammunition.projectileMassKilograms, "projectile mass", id);
+    assertFinitePositive(ammunition.muzzleVelocityMetresPerSecond, "muzzle velocity", id);
+    assertFinitePositive(ammunition.ballisticCoefficientG1, "ballistic coefficient", id);
+    assertFinitePositive(ammunition.penetrationMultiplier, "penetration multiplier", id);
+    assertFiniteNonNegative(ammunition.baseDamage, "ammunition base damage", id);
+
     const accuracyValues = Object.values(definition.accuracy);
     if (accuracyValues.some((value) => !Number.isFinite(value) || value < 0)) {
       throw new Error(`Weapon ${definition.id} needs finite non-negative accuracy values`);

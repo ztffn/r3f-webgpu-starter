@@ -65,6 +65,19 @@ export interface Fog {
    * same formula or the two disagree along every skyline.
    */
   apply: (rgb: NodeArg, worldPos: NodeArg) => NodeArg;
+  /**
+   * The same layer, applied to the SKY.
+   *
+   * Standing inside ground fog and seeing clear sky above it is the tell that the fog is
+   * painted on the terrain rather than filling the air: the ray to the sky crosses the
+   * layer too. It carries a finite amount of fog looking straight up — the layer has a
+   * top — and an unbounded amount along the horizon, which is why a fogged horizon goes
+   * opaque and hides the seam where terrain would otherwise end against open sky.
+   *
+   * `direction` is the outward view ray; three renders the background on a sphere and
+   * offers `normalWorldGeometry` for exactly this.
+   */
+  applySky: (rgb: NodeArg, direction: NodeArg) => NodeArg;
   set: (settings: FogSettings) => void;
 }
 
@@ -83,7 +96,11 @@ export function createFog(settings: FogSettings): Fog {
     // Planar view depth, matching three's own linear fog, so anything still using the
     // automatic path agrees with anything using this one.
     const viewZ = cameraViewMatrix.mul(vec4(worldPos, 1)).z.negate();
-    const distance = viewZ.smoothstep(uNear, uFar);
+    // ORDERED, because the panel can drag near past far and a descending pair is left
+    // INDETERMINATE by both the GLSL ES and WGSL specs — it happens to give the intended
+    // ramp on drivers using the naive formula and can clamp to a constant on drivers that
+    // assume e0 < e1. The same trap is already recorded against the grass fade.
+    const distance = viewZ.smoothstep(uNear.min(uFar), uNear.max(uFar));
 
     // Ground layer, INTEGRATED ALONG THE VIEW RAY rather than evaluated at the point.
     //
@@ -143,6 +160,30 @@ export function createFog(settings: FogSettings): Fog {
     return total.mix(rgb, uColor);
   };
 
+  // Shared with `apply`, and the reason the profile is written as an antiderivative:
+  // the sky's ray runs to infinity, where F tends to the level itself, so the whole
+  // column above the eye has a closed form rather than needing a far point invented for
+  // it. Below the level that column grows as you sink into the layer; above it, it decays.
+  const columnAbove = (): NodeArg => {
+    const F = (y: NodeArg): NodeArg =>
+      y.min(uLevel).sub(uScale.mul(y.max(uLevel).sub(uLevel).div(uScale).negate().exp()));
+    return uLevel.sub(F(cameraPosition.y)).max(float(0));
+  };
+
+  const applySky = (rgb: NodeArg, direction: NodeArg): NodeArg => {
+    // Path length through the layer for a ray leaving at this pitch. Looking level, the
+    // divisor vanishes and the optical depth runs away — which is correct, and is what
+    // closes the horizon.
+    //
+    // The LINEAR distance term is deliberately not applied here. At infinity it saturates,
+    // so including it would flood the entire sky with fog colour on every preset; the
+    // skybox already meets the terrain because each preset's fog colour was sampled from
+    // that sky's own horizon band.
+    const optical = uDensity.mul(columnAbove()).div(direction.y.max(float(1e-3)));
+    const amount: NodeArg = optical.negate().exp().oneMinus().clamp(0, 1);
+    return amount.mix(rgb, uColor);
+  };
+
   return {
     uniforms: {
       color: uColor,
@@ -153,6 +194,7 @@ export function createFog(settings: FogSettings): Fog {
       groundDensity: uDensity,
     },
     apply,
+    applySky,
     set: (next) => {
       uColor.value.set(next.color);
       uNear.value = next.near;

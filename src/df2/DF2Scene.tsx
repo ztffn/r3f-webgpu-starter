@@ -19,6 +19,7 @@ import { createGrassMaterial, type GrassUniforms } from "./GrassMaterial";
 import { createBladeMaterial, createBladeMesh, type BladeUniforms } from "./BladeMaterial";
 import { createColorGrade } from "./colorGrade";
 import { createFog } from "./fog";
+import { cubeTexture, normalWorldGeometry } from "three/tsl";
 import { WEATHER_PRESETS, readWeather, type WeatherPreset } from "./weather";
 import { createPrecipitation } from "./Precipitation";
 import { buildBladeGeometry } from "./bladeGeometry";
@@ -343,6 +344,19 @@ export function DF2Scene({
     precipitation.uniforms.mode.value = weather.snow;
   }, [precipitation, weather]);
 
+  // The sky as a NODE, not a texture, so the ground fog can reach it. Standing inside a
+  // fog bank and seeing clear sky overhead is the tell that fog is painted on the terrain
+  // rather than filling the air — the ray to the sky crosses the layer too, and along the
+  // horizon it crosses an unbounded amount of it.
+  const scene = useThree((s) => s.scene);
+  useEffect(() => {
+    if (!skyBox) {
+      scene.background = new THREE.Color(weather.skyColor);
+      return;
+    }
+    scene.background = fog.applySky(cubeTexture(skyBox), normalWorldGeometry);
+  }, [fog, scene, skyBox, weather]);
+
   const material = useMemo(
     () =>
       world?.colorMap
@@ -537,11 +551,8 @@ export function DF2Scene({
     <>
       {onPerf && <PerfMonitor onSample={onPerf} />}
 
-      {skyBox ? (
-        <primitive attach="background" object={skyBox} />
-      ) : (
-        <color attach="background" args={[weather.skyColor]} />
-      )}
+      {/* The background is set imperatively in an effect above, because it is a NODE
+          rather than a texture — it has to be fogged, and a plain cubemap cannot be. */}
       {/* Scene fog stays declared for anything using three's automatic path — the
           water, and any object added later. Terrain and grass take the shared term
           instead, which the scene fog cannot express. */}

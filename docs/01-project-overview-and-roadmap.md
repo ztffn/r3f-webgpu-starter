@@ -49,11 +49,16 @@ This is a hobby/personal reconstruction project, not a commercial release.
 > state is a multiplayer shooter, ideally 64+ players — `00` Pillar 12 names it as
 > identity-critical, so this is a **scheduling** decision, not a judgement that multiplayer
 > is optional. It stays out of v1 scope and **must not be designed for speculatively** —
-> world rendering has to be good first, and the plan has not been laid out yet. Two
-> practical consequences for anyone working now:
+> world rendering has to be good first. Two practical consequences for anyone working now:
 > **(a)** don't build networking, prediction or authority models; **(b)** don't make choices
 > that foreclose it either — in particular `Heightfield.ts` and the concealment field must
 > stay renderer-free so they can be sampled server-side (`08` §3).
+>
+> **The motor layer of the plan is now laid out**, acting on (b) only:
+> `plans/2026-08-02-multiplayer-motor-and-transport-decisions.md`. It settles the authority
+> model (client prediction plus snapshot reconciliation, never bitwise lockstep) and commits
+> to one shared headless character motor. Session framework and transport stay deferred
+> behind an interface until the measurements in its §7 exist. (a) still holds for the rest.
 
 ## 3. Legal / asset-sourcing posture
 

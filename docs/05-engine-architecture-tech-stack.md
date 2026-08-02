@@ -54,14 +54,17 @@
   Not started; stance heights currently exist only as `STANCE_EYE` in the camera rig.
   Fast rifle rounds already use a custom pooled 120 Hz fixed-step solver with swept
   world-query segments rather than one dynamic rigid body per bullet; see `docs/10`.
-- **Player and vehicle controllers**: decision pending a bounded ecctrl spike. Rapier
-  remains the selected physics engine; the baseline fallback is project-owned controllers
-  built against Rapier primitives. Ecctrl may be adopted only behind project-owned motor
-  adapters, with input, camera, GLTF/animation, and React state kept out of gameplay truth.
-  The decision gate measures stance and terrain behavior, representative vehicle handling,
-  fixed-tick command/replay support, serializable reconciliation state, headless-authority
-  feasibility, and 32/64-entity cost. Primitive proxy meshes are sufficient. See
-  `plans/2026-08-01-ecctrl-player-vehicle-controller-spike-design.md`.
+- **Player and vehicle controllers**: one project-owned shared headless motor over Rapier,
+  usable unchanged by browser prediction and Node authority. Ecctrl is **not** the
+  authoritative implementation — it is React render-loop shaped and cannot run headless
+  without a fork — so the spike narrowed to harvesting its slope, step, floating-body and
+  stability techniques. The decision gate measures stance and terrain behavior,
+  representative vehicle handling, fixed-tick command/replay support, serializable
+  reconciliation state, headless-authority feasibility, and 32/64-entity cost. Primitive
+  proxy meshes are sufficient. See
+  `plans/2026-08-02-multiplayer-motor-and-transport-decisions.md` for the authority model
+  and what stays deferred, and
+  `plans/2026-08-01-ecctrl-player-vehicle-controller-spike-design.md` for the spike itself.
   ⬜ Not started. What exists today is a camera rig only — `FlyControls.tsx`, free-fly
   plus an on-foot mode that clamps to the surface at a stance eye height. No physics or
   collision exists beyond that clamp.

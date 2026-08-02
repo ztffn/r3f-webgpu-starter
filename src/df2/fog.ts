@@ -24,19 +24,29 @@ type NodeArg = any;
 
 const V3 = vec3 as unknown as (x: NodeArg, y: NodeArg, z: NodeArg) => NodeArg;
 
-/** Metres. A grenade's initial puff, before it billows. */
-const SMOKE_START_RADIUS = 2.5;
-const SMOKE_MAX_RADIUS = 13;
-const SMOKE_GROW_SECONDS = 4;
+/** Metres. One puff at birth, at the canister — small, because many will overlap. */
+const SMOKE_START_RADIUS = 1.2;
+const SMOKE_MAX_RADIUS = 7;
+const SMOKE_GROW_SECONDS = 5;
+/**
+ * Seconds between puffs, and how long the canister burns.
+ *
+ * Together with the slot count these decide the plume: a puff must expire before its slot
+ * is needed again, or the newest one stomps the oldest still-visible one and the plume
+ * flickers at its tail. Slots x interval is the budget — 12 x 1.1 s here, against a puff
+ * life of 11 s, which leaves one slot of headroom.
+ */
+const SMOKE_EMIT_SECONDS = 1.1;
+const SMOKE_EMIT_SECONDS_TOTAL = 30;
 /**
  * Extinction per metre at the centre — thick enough to break a sightline.
  *
  * Lowered as the radius grew, because the two multiply: optical depth is density times
  * the chord, so a wider puff at the same density is not just bigger but far more opaque.
  */
-const SMOKE_DENSITY = 0.4;
+const SMOKE_DENSITY = 0.22;
 /** Long enough to cross a road under, which is the only reason to throw one. */
-const SMOKE_LIFE_SECONDS = 22;
+const SMOKE_LIFE_SECONDS = 11;
 /** Metres per second the column climbs at first, decaying as it mixes. */
 const SMOKE_RISE = 1.6;
 /**
@@ -104,8 +114,15 @@ export interface FogSettings {
   groundDrift: number;
 }
 
-/** How many smoke volumes can exist at once. Unrolled in the graph, so it is baked. */
-export const SMOKE_SLOTS = 4;
+/**
+ * How many puffs can exist at once. Unrolled in the graph, so it is baked at build.
+ *
+ * A grenade is not one of these — it is an EMITTER that fills several. A single volume
+ * that drifts downwind takes the whole cloud with it and leaves the canister smoking
+ * nothing, which is exactly backwards: the source stays put and the plume streams off it.
+ * So the slot count sets how long a plume can be, not how many grenades there are.
+ */
+export const SMOKE_SLOTS = 12;
 
 export interface Fog {
   /**
@@ -172,6 +189,27 @@ export function createFog(settings: FogSettings): Fog {
   const uSmokeColor = Array.from({ length: SMOKE_SLOTS }, () => uniform(new THREE.Color(1, 1, 1)));
   const smokeAge = new Array<number>(SMOKE_SLOTS).fill(Infinity);
   const smokeOrigin = Array.from({ length: SMOKE_SLOTS }, () => new THREE.Vector3());
+
+  /** A canister on the ground, emitting puffs until it burns out. */
+  interface Emitter {
+    x: number;
+    y: number;
+    z: number;
+    color: string;
+    age: number;
+    sinceEmit: number;
+  }
+  const emitters: Emitter[] = [];
+
+  const emitPuff = (x: number, y: number, z: number, color: string): void => {
+    let slot = 0;
+    for (let i = 1; i < SMOKE_SLOTS; i++) if (smokeAge[i] > smokeAge[slot]) slot = i;
+    smokeAge[slot] = 0;
+    smokeOrigin[slot].set(x, y, z);
+    uSmoke[slot].value.set(x, y, z, SMOKE_START_RADIUS);
+    uSmokeDensity[slot].value = SMOKE_DENSITY;
+    uSmokeColor[slot].value.set(color);
+  };
 
   // Sampled with an EXPLICIT level 0: the coordinates come from world positions that can
   // jump metres between neighbouring pixels, and derivative-selected mips would pick one
@@ -404,17 +442,27 @@ export function createFog(settings: FogSettings): Fog {
       groundScale: uScale,
       groundDensity: uDensity,
     },
+    // A GRENADE, not a puff: it sits where it landed and emits until it burns out.
     spawnSmoke: (x, y, z, color) => {
-      // Oldest slot, so a fifth grenade replaces the first rather than being dropped.
-      let slot = 0;
-      for (let i = 1; i < SMOKE_SLOTS; i++) if (smokeAge[i] > smokeAge[slot]) slot = i;
-      smokeAge[slot] = 0;
-      smokeOrigin[slot].set(x, y, z);
-      uSmoke[slot].value.set(x, y, z, SMOKE_START_RADIUS);
-      uSmokeDensity[slot].value = SMOKE_DENSITY;
-      if (color) uSmokeColor[slot].value.set(color);
+      const c = color ?? "#e8e8ea";
+      emitters.push({ x, y, z, color: c, age: 0, sinceEmit: SMOKE_EMIT_SECONDS });
+      // One immediately, so a thrown grenade is not invisible for its first interval.
+      emitPuff(x, y, z, c);
     },
     tickSmoke: (dt) => {
+      for (let e = emitters.length - 1; e >= 0; e--) {
+        const em = emitters[e];
+        em.age += dt;
+        em.sinceEmit += dt;
+        if (em.age > SMOKE_EMIT_SECONDS_TOTAL) {
+          emitters.splice(e, 1);
+          continue;
+        }
+        if (em.sinceEmit >= SMOKE_EMIT_SECONDS) {
+          em.sinceEmit = 0;
+          emitPuff(em.x, em.y, em.z, em.color);
+        }
+      }
       for (let i = 0; i < SMOKE_SLOTS; i++) {
         if (!Number.isFinite(smokeAge[i])) continue;
         smokeAge[i] += dt;

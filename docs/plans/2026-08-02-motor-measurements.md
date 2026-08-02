@@ -144,6 +144,69 @@ merely throttled. A simulation loop driven by animation frames stops dead when b
 and then floods the server on return. The harness drives its fixed tick from a timer and
 abandons any backlog on becoming visible again, letting the hard snap resolve the gap.
 
+## §7.5 Collision-representation disagreement — answered, with a proposed tolerance
+
+§6 accepts two representations of one world: characters collide against Rapier, bullets
+against `CompositeWorldQuery`. This measures the gap using the real `HeightfieldWorldQuery`
+on the bullet side and a real Rapier heightfield collider on the character side, both
+reading one grid at 2 m cells.
+
+**The cause is structural, not a tuning artefact.** The bullet side solves the BILINEAR
+patch over each cell; Rapier's heightfield is two TRIANGLES over the same four corners.
+They agree exactly at the corners and along the shared diagonal, and differ in between by
+the cell's saddle term.
+
+| Sampled where | Mean | p99 | Worst |
+| --- | ---: | ---: | ---: |
+| cell corners | 0.0000 m | 0.0000 m | 0.0000 m |
+| cell centres | 0.0442 m | 0.1250 m | 0.1250 m |
+| uniform random | 0.0147 m | 0.1102 m | 0.1246 m |
+
+Exactly zero at corners is the signature of the bilinear-versus-triangulated explanation
+being the whole story. Over a wider sampled area the worst case reaches 0.195 m.
+
+Consequences measured directly, walking a character 3880 grounded ticks and comparing the
+feet Rapier put them on against the surface a bullet would resolve underneath:
+
+- bullet ground **above** the feet, meaning rounds stop in terrain the player cannot feel:
+  worst 0.089 m
+- bullet ground **below** the feet, meaning the player floats above the bullet surface:
+  worst 0.185 m
+
+And the failure that actually matters — a grazing shot at a prone target over a ridge, 3000
+trials: **8 shots, 0.27%, resolved differently** between the two representations. When they
+disagree the outcome is total rather than marginal: one says blocked, the other says clear.
+
+### Proposed tolerance
+
+**0.20 m of vertical surface disagreement at 2 m cells**, and about one grazing shot in
+four hundred resolving differently at prone height. Anything worse than that is a
+regression, not the known structural gap.
+
+### The mitigation, tested
+
+Sampling the same bilinear field onto a finer Rapier lattice shrinks the gap quadratically,
+as the saddle-term explanation predicts:
+
+| Rapier cell | Mean | Worst | Relative to 2 m |
+| --- | ---: | ---: | ---: |
+| 2.00 m | 0.0145 m | 0.1951 m | 1.000 |
+| 1.00 m | 0.0037 m | 0.0310 m | 0.159 |
+| 0.50 m | 0.0009 m | 0.0076 m | 0.039 |
+| 0.25 m | 0.0002 m | 0.0019 m | 0.010 |
+
+Halving the cell costs four times the terrain memory and buys roughly a fourfold reduction
+in worst-case disagreement. **One subdivision step is the recommended default**: 0.195 m
+down to 0.031 m, which is below the height of a prone silhouette's margin, for a shared
+1024 m server surface growing from about 1 MB of heights to 4 MB.
+
+This has NOT been applied. It is a one-line change to how `TerrainCollider` and
+`StaticTerrainCollider` choose their lattice, and it should be made when the terrain scale
+constants are calibrated, since the cell size is derived from those.
+
+Reproduce with `node --experimental-strip-types --experimental-specifier-resolution=node
+tools/motor-bench/collision-agreement.ts`.
+
 ## Open
 
 - **§7.1 across genuinely different platforms** — the result above is same-machine,
@@ -153,6 +216,8 @@ abandons any backlog on becoming visible again, letting the hard snap resolve th
 - **§7.3 for a full room** — the table above is one player. 64 players correcting at once
   is the case that matters.
 - **§7.4 client cost of 64 remote interpolated entities** — not started.
-- **§7.5 collision-representation disagreement** between the Rapier character world and
-  `CompositeWorldQuery` — not started, and it is the one with a gameplay failure attached
-  (being shot through cover you are standing behind).
+- **§7.5 on real extracted terrain** — the figures above use a synthetic grid, because
+  `src/df2/Heightfield.ts` uses extensionless relative imports that Node will not resolve
+  (`--experimental-specifier-resolution=node` is a no-op on Node 22) and fixing that is a
+  terrain-spike change. Green Mile is rougher per cell than the synthetic field, so its
+  saddle term will be larger; the tolerance above should be re-derived against it.

@@ -335,7 +335,6 @@ export function WeaponPrototype({
   const activeAction = useRef<THREE.AnimationAction | null>(null);
   const aim = useRef(0);
   const aimSway = useMemo(() => new AimSwayController(), []);
-  const cameraMotionReady = useRef(false);
   const optic = useRef<THREE.Object3D | null>(null);
   const opticLocal = useMemo(() => new THREE.Vector3(), []);
   const aimOffset = useMemo(() => new THREE.Vector3(), []);
@@ -344,7 +343,6 @@ export function WeaponPrototype({
   const opticWorld = useMemo(() => new THREE.Vector3(), []);
   const opticInEyeSpace = useMemo(() => new THREE.Vector3(), []);
   const lookLag = useMemo(() => new THREE.Vector2(), []);
-  const previousCameraQuaternion = useMemo(() => new THREE.Quaternion(), []);
   const cameraDeltaQuaternion = useMemo(() => new THREE.Quaternion(), []);
   const rangeOrigin = useMemo(() => new THREE.Vector3(), []);
   const rangeDirection = useMemo(() => new THREE.Vector3(), []);
@@ -354,9 +352,11 @@ export function WeaponPrototype({
   const authoritativeAimQuaternion = useMemo(() => new THREE.Quaternion(), []);
   const currentMeanAimQuaternion = useMemo(() => new THREE.Quaternion(), []);
   const timelineFrame = useMemo(() => createFiringTimelineFrame(), []);
-  const simulationStartPosition = useMemo(() => new THREE.Vector3(), []);
-  const simulationStartQuaternion = useMemo(() => new THREE.Quaternion(), []);
-  const simulationPoseReady = useRef(false);
+  // The previous frame's end pose, and this frame's start pose. One capture
+  // feeds planar speed, sub-frame interpolation, and the weapon-lag impulse.
+  const framePreviousPosition = useMemo(() => new THREE.Vector3(), []);
+  const framePreviousQuaternion = useMemo(() => new THREE.Quaternion(), []);
+  const framePoseReady = useRef(false);
   const firingTimeline = useMemo(
     () =>
       new FiringTimeline({
@@ -382,8 +382,6 @@ export function WeaponPrototype({
     }),
     []
   );
-  const previousPlayerPosition = useMemo(() => new THREE.Vector3(), []);
-  const playerMotionReady = useRef(false);
   const recoilPitch = useRef(0);
   const recoilYaw = useRef(0);
   const nextRangeSampleAt = useRef(0);
@@ -766,21 +764,40 @@ export function WeaponPrototype({
     // must not hand the three systems different amounts of simulation time.
     const simulationDelta = clampSimulationDelta(delta);
     camera.updateMatrixWorld();
-    playerPose.stance = stance;
-    playerPose.grounded = grounded;
-    if (playerMotionReady.current && delta > 0) {
+
+    // The frame's start pose is captured exactly once, here, while the previous
+    // frame's end pose is still intact. Planar speed, the timeline's sub-frame
+    // interpolation, and the weapon-lag impulse all read this one capture, so
+    // no future camera work inside this callback can make them disagree.
+    const hadPreviousFrame = framePoseReady.current;
+    let yawDelta = 0;
+    let pitchDelta = 0;
+    if (hadPreviousFrame && delta > 0) {
       playerPose.planarSpeedMetresPerSecond = Math.min(
         MAX_TRANSITIONAL_SPEED_METRES_PER_SECOND,
         Math.hypot(
-          camera.position.x - previousPlayerPosition.x,
-          camera.position.z - previousPlayerPosition.z
+          camera.position.x - framePreviousPosition.x,
+          camera.position.z - framePreviousPosition.z
         ) / delta
       );
+      cameraDeltaQuaternion.copy(framePreviousQuaternion).invert().multiply(camera.quaternion);
+      // For the tiny per-frame camera deltas here, 2*x/y is the local angular
+      // delta in radians.
+      yawDelta = cameraDeltaQuaternion.y * 2;
+      pitchDelta = cameraDeltaQuaternion.x * 2;
     } else {
       playerPose.planarSpeedMetresPerSecond = 0;
-      playerMotionReady.current = true;
     }
-    previousPlayerPosition.copy(camera.position);
+    timelineFrame.startPosition.copy(hadPreviousFrame ? framePreviousPosition : camera.position);
+    timelineFrame.startOrientation.copy(
+      hadPreviousFrame ? framePreviousQuaternion : camera.quaternion
+    );
+    framePreviousPosition.copy(camera.position);
+    framePreviousQuaternion.copy(camera.quaternion);
+    framePoseReady.current = true;
+
+    playerPose.stance = stance;
+    playerPose.grounded = grounded;
     player.syncMotorPose(playerPose);
     handlingContext.stance = player.stance;
     handlingContext.grounded = player.grounded;
@@ -790,7 +807,8 @@ export function WeaponPrototype({
     player.consumeCommands(commands);
     for (const command of commands.weaponCommands) loadout.handleCommand(command);
     loadout.setAdsWanted(commands.adsWanted);
-    const adsProgressBefore = loadout.equippedWeapon.adsProgress;
+    const weaponBeforeUpdate = loadout.equippedWeapon;
+    const adsProgressBefore = weaponBeforeUpdate.adsProgress;
     loadout.update(simulationDelta);
     const equippedWeapon = loadout.equippedWeapon;
     const weaponSnapshot = equippedWeapon.getSnapshot();
@@ -802,22 +820,18 @@ export function WeaponPrototype({
       combatTelemetry.publishScopeAdjustment(scopeSnapshot);
     }
 
-    if (!simulationPoseReady.current) {
-      simulationStartPosition.copy(camera.position);
-      simulationStartQuaternion.copy(camera.quaternion);
-      simulationPoseReady.current = true;
-    }
     timelineFrame.deltaSeconds = simulationDelta;
-    timelineFrame.startPosition.copy(simulationStartPosition);
     timelineFrame.endPosition.copy(camera.position);
-    timelineFrame.startOrientation.copy(simulationStartQuaternion);
     timelineFrame.endOrientation.copy(camera.quaternion);
     timelineFrame.stance = stance;
     timelineFrame.holdingBreath = scopeDemo && commands.holdingBreath;
     timelineFrame.swayHandlingMultiplier = weaponSnapshot.swayFactor;
     // Gameplay sway follows authoritative ADS progress, not the damped rig
     // blend: sway must not depend on whether the proxy GLTF finished loading.
-    timelineFrame.adsProgressStart = adsProgressBefore;
+    // A switch that completed inside this update changes which weapon owns that
+    // progress, so do not interpolate between two unrelated ADS states.
+    timelineFrame.adsProgressStart =
+      equippedWeapon === weaponBeforeUpdate ? adsProgressBefore : equippedWeapon.adsProgress;
     timelineFrame.adsProgressEnd = equippedWeapon.adsProgress;
     timelineFrame.captureTrace = captureShotTrace;
     // Sway advance, per-boundary shot spawning, and projectile stepping all
@@ -826,8 +840,6 @@ export function WeaponPrototype({
     firingTimeline.runFrame(timelineFrame, loadout, timelineHandlers);
     const simulationMilliseconds = performance.now() - simulationStartedAt;
     ballisticPerformance.projectileMilliseconds += firingTimeline.projectileMilliseconds;
-    simulationStartPosition.copy(camera.position);
-    simulationStartQuaternion.copy(camera.quaternion);
 
     ballisticPerformance.elapsedSeconds += delta;
     ballisticPerformance.simulationMilliseconds += simulationMilliseconds;
@@ -926,19 +938,9 @@ export function WeaponPrototype({
     // Mouse-look rotates the camera immediately, but a held rifle has a small
     // positional lag. Feed that physical lag into the eyebox rather than
     // magnifying the constant breathing motion.
-    let yawDelta = 0;
-    let pitchDelta = 0;
-    if (cameraMotionReady.current && delta > 0) {
-      cameraDeltaQuaternion.copy(previousCameraQuaternion).invert().multiply(camera.quaternion);
-      // For the tiny per-frame camera deltas here, 2*x/y is the local angular
-      // delta in radians. A quick look produces a one-shot weapon-lag impulse;
-      // unlike a velocity target it cannot be filtered away in one frame.
-      yawDelta = cameraDeltaQuaternion.y * 2;
-      pitchDelta = cameraDeltaQuaternion.x * 2;
-    } else {
-      cameraMotionReady.current = true;
-    }
-    previousCameraQuaternion.copy(camera.quaternion);
+    // yawDelta/pitchDelta were measured at the top of the frame against the same
+    // captured start pose the timeline used. A quick look produces a one-shot
+    // impulse; unlike a velocity target it cannot be filtered away in one frame.
     lookLag.x = THREE.MathUtils.clamp(
       lookLag.x + yawDelta * LOOK_LAG_METRES_PER_RADIAN,
       -LOOK_LAG_MAX_METRES,

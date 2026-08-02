@@ -264,11 +264,15 @@ export function Hud({
                 {combat.projectilePerformance.peakActiveProjectiles} peak ·{" "}
                 {combat.projectilePerformance.expiredProjectiles} expired
               </dd>
-              <dt>Ballistic CPU</dt>
+              {/* The timed span is the whole gameplay timeline, so the solver's
+                  own cost is reported beside it rather than hidden inside it. */}
+              <dt>Sim CPU</dt>
               <dd>
                 {fmt(combat.projectilePerformance.simulationMillisecondsPerFrame, 2)} ms ·{" "}
                 {fmt(combat.projectilePerformance.maxSimulationMilliseconds, 2)} peak
               </dd>
+              <dt>Projectile CPU</dt>
+              <dd>{fmt(combat.projectilePerformance.projectileMillisecondsPerFrame, 2)} ms</dd>
               <dt>Collision rate</dt>
               <dd>
                 {fmt(combat.projectilePerformance.segmentQueriesPerSecond)} rays/s ·{" "}

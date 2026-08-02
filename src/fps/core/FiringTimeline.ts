@@ -103,6 +103,13 @@ export function createFiringTimelineFrame(): FiringTimelineFrame {
 }
 
 export class FiringTimeline {
+  /**
+   * Milliseconds the last `runFrame` spent inside the projectile solver alone.
+   * The host times the whole call, so the difference is timeline plus handler
+   * overhead; keeping them apart makes a regression in either attributable.
+   */
+  projectileMilliseconds = 0;
+
   private readonly dependencies: FiringTimelineDependencies;
   private readonly composer = new WeaponAimComposer();
   private readonly pending: LoadoutEvent[] = [];
@@ -140,6 +147,7 @@ export class FiringTimeline {
     handlers: FiringTimelineHandlers = {}
   ): void {
     const delta = clampSimulationDelta(frame.deltaSeconds);
+    this.projectileMilliseconds = 0;
     this.pending.length = 0;
     source.drainEvents((event) => {
       this.pending.push(event);
@@ -186,7 +194,9 @@ export class FiringTimeline {
     this.swayInput.holdingBreath = frame.holdingBreath;
     this.swayInput.handlingMultiplier = frame.swayHandlingMultiplier;
     this.dependencies.sway.update(step, this.swayInput);
+    const startedAt = performance.now();
     this.dependencies.ballistics.update(step);
+    this.projectileMilliseconds += performance.now() - startedAt;
   }
 
   private resolveShot(
@@ -231,6 +241,7 @@ export class FiringTimeline {
     view.weaponId = event.weaponId;
     view.sequence = event.sequence;
     view.acceptedAtOffsetSeconds = atSeconds;
+    const startedAt = performance.now();
     view.spawned = this.dependencies.ballistics.spawn({
       sourceId: event.weaponId,
       sequence: event.sequence,
@@ -244,6 +255,7 @@ export class FiringTimeline {
       ammunition: event.ammunition,
       captureTrace: frame.captureTrace,
     });
+    this.projectileMilliseconds += performance.now() - startedAt;
     handlers.onShot?.(view, event);
   }
 }

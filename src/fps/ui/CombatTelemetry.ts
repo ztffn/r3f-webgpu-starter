@@ -101,7 +101,10 @@ export interface ImpactTelemetry {
 export interface ProjectilePerformanceTelemetry {
   readonly activeProjectiles: number;
   readonly peakActiveProjectiles: number;
+  /** The whole gameplay timeline: sway, composition, spawn, solver, handlers. */
   readonly simulationMillisecondsPerFrame: number;
+  /** The projectile solver alone, so a solver regression stays attributable. */
+  readonly projectileMillisecondsPerFrame: number;
   readonly maxSimulationMilliseconds: number;
   readonly segmentQueriesPerSecond: number;
   readonly terrainCellTestsPerSecond: number;

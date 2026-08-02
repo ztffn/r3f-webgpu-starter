@@ -276,6 +276,7 @@ export function WeaponPrototype({
     () => ({
       elapsedSeconds: 0,
       simulationMilliseconds: 0,
+      projectileMilliseconds: 0,
       maxSimulationMilliseconds: 0,
       frames: 0,
       segmentQueries: 0,
@@ -824,6 +825,7 @@ export function WeaponPrototype({
     const simulationStartedAt = performance.now();
     firingTimeline.runFrame(timelineFrame, loadout, timelineHandlers);
     const simulationMilliseconds = performance.now() - simulationStartedAt;
+    ballisticPerformance.projectileMilliseconds += firingTimeline.projectileMilliseconds;
     simulationStartPosition.copy(camera.position);
     simulationStartQuaternion.copy(camera.quaternion);
 
@@ -843,6 +845,8 @@ export function WeaponPrototype({
         peakActiveProjectiles: projectileMetrics.peakActive,
         simulationMillisecondsPerFrame:
           ballisticPerformance.simulationMilliseconds / ballisticPerformance.frames,
+        projectileMillisecondsPerFrame:
+          ballisticPerformance.projectileMilliseconds / ballisticPerformance.frames,
         maxSimulationMilliseconds: ballisticPerformance.maxSimulationMilliseconds,
         segmentQueriesPerSecond:
           (projectileMetrics.segmentQueries - ballisticPerformance.segmentQueries) / elapsed,
@@ -854,6 +858,7 @@ export function WeaponPrototype({
       });
       ballisticPerformance.elapsedSeconds = 0;
       ballisticPerformance.simulationMilliseconds = 0;
+      ballisticPerformance.projectileMilliseconds = 0;
       ballisticPerformance.maxSimulationMilliseconds = 0;
       ballisticPerformance.frames = 0;
       ballisticPerformance.segmentQueries = projectileMetrics.segmentQueries;

@@ -68,6 +68,11 @@ const ShotTrajectoryDebugView = lazy(() =>
 const ImpactEffects = lazy(() =>
   import("../fps/presentation/ImpactEffects").then((m) => ({ default: m.ImpactEffects }))
 );
+// Code-split for the same reason: the vegetation layer is opt-in, so its geometry
+// builders and texture bake should not sit in the bundle everyone downloads.
+const FoliageLayer = lazy(() =>
+  import("../foliage/FoliageLayer").then((m) => ({ default: m.FoliageLayer }))
+);
 import { BENCH } from "./bench";
 import { DevPlacedObject } from "./DevPlacedObject";
 import { MissionObjects } from "./MissionObjects";
@@ -1013,6 +1018,17 @@ export function DF2Scene({
 
       {heightfield && <DevPlacedObject heightfield={heightfield} />}
       {heightfield && <MissionObjects heightfield={heightfield} />}
+      {/* Vegetation — bushes and trees, opt-in with ?foliage=1 while it is exploratory,
+          so no existing grass measurement changes underneath anyone. */}
+      {BENCH.foliage && heightfield && (
+        <Suspense fallback={null}>
+          <FoliageLayer
+            terrain={heightfield}
+            worldQuery={worldQuery}
+            waterHeight={showWater ? waterLevel : undefined}
+          />
+        </Suspense>
+      )}
 
       {scopeDemo && FPS_DEBUG.shotTrajectory && (
         <Suspense fallback={null}>

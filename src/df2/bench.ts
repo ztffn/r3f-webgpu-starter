@@ -174,6 +174,25 @@ export interface BenchConfig {
    * Loads third-party models from the untracked testmodels/ directory.
    */
   targets?: boolean;
+  /**
+   * Draw the vegetation layer — bushes and trees, not grass.
+   *
+   * OPT-IN and independent of `?bench=1`, following the precedent `?debug=1` and
+   * `?canopyall=1` set: this is an exploratory subsystem, and switching it on by default
+   * would change every existing frame time and every existing screenshot for everyone
+   * looking at grass. The knobs below only mean anything with it on.
+   */
+  foliage?: boolean;
+  /** Card construction under test: A broad / B trimmed / C hybrid / D geometry. */
+  foliageVariant?: string;
+  /** mask | a2c | hash | blend. */
+  foliageAlpha?: string;
+  /** Cell side in metres — the draw-call / culling / LOD-granularity dial. */
+  foliageCell?: number;
+  /** Global density multiplier. */
+  foliageDensity?: number;
+  /** Window reach in METRES. Cells follow from it, so a cell sweep holds the reach. */
+  foliageRadius?: number;
   stance?: Stance;
   /** Fixed camera position, world metres. */
   x?: number;
@@ -231,6 +250,12 @@ function parse(): BenchConfig {
     rainCount: num("raincount"),
     rainArea: num("rainarea"),
     rainHeight: num("rainheight"),
+    foliage: q.get("foliage") === "1",
+    foliageVariant: q.get("foliagevariant") ?? undefined,
+    foliageAlpha: q.get("foliagealpha") ?? undefined,
+    foliageCell: num("foliagecell"),
+    foliageDensity: num("foliagedensity"),
+    foliageRadius: num("foliageradius"),
   };
 
   if (q.get("bench") !== "1") {
@@ -278,12 +303,41 @@ export interface BenchSample {
   agl: number;
 }
 
+/**
+ * Vegetation counters, published whenever the layer is on.
+ *
+ * Separate from `BenchSample` and not gated on `?bench=1`: a foliage number is only
+ * meaningful next to the configuration that produced it, and the configuration is
+ * reachable without the fixed bench vantage — the card-variant comparison in particular
+ * has to be run from several poses, which `?bench=1` pins you out of (docs/08 §11).
+ */
+export interface FoliageBenchSample {
+  variant: string;
+  alphaMode: string;
+  cellSize: number;
+  radiusMetres: number;
+  visibleBuckets: number;
+  visibleInstances: number;
+  trianglesIfAllDrawn: number;
+  cellsCached: number;
+  pendingBuckets: number;
+  /** Texels passing the alpha cutoff at mip 0 — the research memo's cost metric. */
+  alphaOccupancy: number;
+  /** Coverage per mip level; should track level 0, or the silhouette thins with range. */
+  levelCoverage: number[];
+}
+
 declare global {
   interface Window {
     __perf?: BenchSample;
+    __foliage?: FoliageBenchSample;
   }
 }
 
 export function publish(sample: BenchSample): void {
   if (BENCH.enabled) window.__perf = sample;
+}
+
+export function publishFoliage(sample: FoliageBenchSample): void {
+  window.__foliage = sample;
 }

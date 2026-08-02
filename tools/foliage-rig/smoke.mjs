@@ -26,19 +26,37 @@ page.on("console", (m) => {
 await page.goto(url, { waitUntil: "load", timeout: 120000 });
 await page.waitForFunction(() => window.__perf !== undefined, null, { timeout: 180000 });
 
-let previous = null;
+// Settle on DRAW CALLS AND TRIANGLES together, over enough polls to have seen real
+// frames. A fixed wall-clock poll is not enough on its own: a ground-level frame here can
+// take 900 ms, so a 2 s poll observes two or three frames, and chunk building — budgeted
+// at a few ms PER FRAME — advances almost not at all between polls. Two consecutive
+// identical readings then look settled while the world is still filling in, which is how
+// a first pass produced a run reporting 25 draw calls against another run's 103 for the
+// same scene. Triangles move whenever a chunk lands even if the call count happens not to,
+// so requiring both to hold for four polls is what makes a comparison trustworthy.
+let previousDraws = null;
+let previousTriangles = null;
 let stable = 0;
-const deadline = Date.now() + 240000;
-while (Date.now() < deadline && stable < 3) {
+const deadline = Date.now() + 300000;
+while (Date.now() < deadline && stable < 4) {
   await page.waitForTimeout(2000);
-  const draws = await page.evaluate(() => window.__perf?.drawCalls ?? 0);
-  const pending = await page.evaluate(() => window.__foliage?.pendingBuckets ?? 0);
-  stable = draws === previous && pending === 0 ? stable + 1 : 0;
-  previous = draws;
+  const sample = await page.evaluate(() => ({
+    draws: window.__perf?.drawCalls ?? 0,
+    triangles: window.__perf?.triangles ?? 0,
+    pending: window.__foliage?.pendingBuckets ?? 0,
+  }));
+  const held =
+    sample.draws === previousDraws &&
+    sample.triangles === previousTriangles &&
+    sample.pending === 0;
+  stable = held ? stable + 1 : 0;
+  previousDraws = sample.draws;
+  previousTriangles = sample.triangles;
 }
 
 const foliage = await page.evaluate(() => window.__foliage ?? null);
 const perf = await page.evaluate(() => window.__perf ?? null);
-console.log(JSON.stringify({ settled: stable >= 3, foliage, perf, errors: errors.slice(0, 8) }));
+// `settled: false` means the numbers below are a half-built world. Do not compare them.
+console.log(JSON.stringify({ settled: stable >= 4, foliage, perf, errors: errors.slice(0, 8) }));
 if (shot) await page.screenshot({ path: shot });
 await browser.close();

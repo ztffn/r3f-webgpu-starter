@@ -356,6 +356,23 @@ GPU question, and it is the first thing to measure.
 The graph compiles on the WebGL2 fallback with no console errors, which is the other thing
 this rig is for.
 
+**Do not read the fps in a screenshot from this environment as a foliage result.** A
+settled ground-level frame here runs ~800–900 ms with vegetation *and* grass switched off,
+and barely responds to resolution — 641 ms at dpr 1 against 864 ms at dpr 0.5 on separate
+runs, which is noise, not a trend. It is CPU-bound software rasterisation, exactly as
+`docs/08` §10 describes. Repeated runs of the same configuration produce frame times that
+reorder freely (foliage 923 ms then 839 ms; baseline 798 ms then 856 ms) while the draw-call
+and triangle counts reproduce *exactly*. That asymmetry is the whole reason only the counts
+are quoted above.
+
+The rig's own settle check had to be hardened to earn even those. Waiting on a stable
+draw-call count alone is not enough when a frame takes most of a second: a 2 s poll sees
+two or three frames, chunk building is budgeted per FRAME so it advances almost not at all
+between polls, and two identical readings look settled while the world is still filling in.
+One pass produced a run reporting 25 draw calls against another's 103 for the same scene.
+It now requires draw calls *and* triangles to hold for four consecutive polls, and reports
+`settled: false` rather than silently handing back a half-built world.
+
 ### 7.2 The sweep to run
 
 Hold everything but one axis. Prone is the primary case, not standing — it is where the

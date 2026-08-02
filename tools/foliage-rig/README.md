@@ -28,10 +28,20 @@ CHROME_PATH=/path/to/chrome node tools/foliage-rig/smoke.mjs \
 ## It waits for the counts to SETTLE, and that matters
 
 Terrain chunk building and foliage cell building are both budgeted per frame, so the first
-few seconds report a half-built world. An earlier version of this script sampled as soon
-as the foliage counters appeared and produced draw-call numbers that varied by 6x between
-runs of the same configuration — comparisons drawn from them would have been noise. It now
-polls until the draw-call count stops moving and no bucket is still pending.
+few seconds report a half-built world. An earlier version sampled as soon as the foliage counters appeared and produced
+draw-call numbers varying 6x between runs of the same configuration. Waiting on the
+draw-call count alone was not enough either: a ground-level frame here can take 900 ms, so
+a 2 s poll sees two or three frames and chunk building — budgeted per FRAME — barely
+advances between polls, so two identical readings look settled while the world is still
+filling in. One pass reported 25 draw calls against another run's 103 for the same scene.
+
+It now requires draw calls AND triangles to hold for four consecutive polls with no bucket
+pending, and reports `settled: false` rather than hand back a half-built world. With that,
+repeated runs of the same configuration reproduce counts exactly.
+
+Frame times still do not reproduce and never will here — the same configuration reorders
+freely run to run (923 ms then 839 ms), and a settled frame costs ~800 ms with vegetation
+and grass both switched OFF. Quote the counts; ignore the milliseconds.
 
 ## Knobs worth sweeping
 

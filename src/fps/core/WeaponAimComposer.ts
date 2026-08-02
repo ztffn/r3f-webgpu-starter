@@ -39,4 +39,3 @@ export class WeaponAimComposer {
     return this.directionFromQuaternion(this.baseQuaternion, target);
   }
 }
-

@@ -28,4 +28,3 @@ export class WeaponAimIndicator {
 }
 
 export const weaponAimIndicator = new WeaponAimIndicator();
-

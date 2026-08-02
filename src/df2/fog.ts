@@ -91,48 +91,48 @@ export function createFog(settings: FogSettings): Fog {
     // across the terrain: ground a metre below the level is fully fogged and a metre
     // above it is not, so the layer's edge appears as a contour traced on the hillside
     // rather than as air. What matters is how much fog the ray PASSED THROUGH, which
-    // varies continuously even where the surface height jumps — a point just above the
-    // level still fogs, because the ray reaching it crossed the layer to get there.
+    // varies continuously even where the surface height jumps.
     //
-    // Density falls exponentially with height, `D * exp(-(y - level) / scale)`, so there
-    // is no top at all to cut off against. Its integral along a ray has a closed form:
+    // The profile is uniform below the level and falls off exponentially above it — a
+    // well-mixed layer under an inversion — which is what keeps `density` meaning
+    // extinction per metre wherever the camera stands.
     //
-    //   fog = D * scale / dirY * exp(-(yCam - level)/scale) * (1 - exp(-dist * dirY / scale))
+    // INTEGRATED THROUGH AN ANTIDERIVATIVE, and that detail is load-bearing rather than
+    // elegant. Written as `exp(-camHeight) * (1 - exp(-dy))`, which is the same quantity
+    // factored differently, the two terms overflow and underflow together: at a softness
+    // of 1 m a point 100 m below the eye asks for exp(100), which is infinity in float32,
+    // times exp(-100), which is zero — and infinity times zero is NaN. That NaN reached
+    // the frame as a flat grey wall with a razor edge, which reads exactly like a fog bug
+    // and is not one. In this form every exponent is negative by construction, so the
+    // largest intermediate is 1.
     //
-    // and the awkward case is a level ray, where dirY is 0 and both the division and the
-    // bracket vanish together. `(1 - exp(-x)) / x` tends to 1 there, so substituting that
-    // limit gives `D * dist * exp(...)`, which is just uniform density over the path.
+    //   F(y) = min(y, level) - scale * exp(-(max(y, level) - level) / scale)
+    //
+    // differentiates to the profile, so the optical depth over the ray is the difference
+    // of F at its ends, scaled by how much path each metre of height buys.
+    const level = uLevel;
+    const scale = uScale;
+    const antiderivative = (y: NodeArg): NodeArg =>
+      y.min(level).sub(scale.mul(y.max(level).sub(level).div(scale).negate().exp()));
     const dy = worldPos.y.sub(cameraPosition.y);
-    // CAPPED AT 1, which is what makes `density` mean anything. A pure exponential keeps
-    // growing below the level — at a level of 220 m with the camera at 122 the factor is
-    // ~50x — so the same slider value was mild in one valley and opaque in the next, and
-    // the whole usable range collapsed into the bottom of the dial.
-    //
-    // Capping models a well-mixed layer under an inversion: uniform density below the
-    // level, falling off above it. That is also the mental model the dial's label claims
-    // — extinction per metre INSIDE the layer — and it is what makes the number portable
-    // between maps. The integral below is then exact above the level and a smooth
-    // approximation below it, which is the right trade for art-directed fog.
-    const heightFall = cameraPosition.y.sub(uLevel).div(uScale).negate().exp().min(float(1));
-    const x = dy.div(uScale);
-    // The limit form, guarded: `expm1(-x)/-x` is 1 at x = 0 and TSL has no expm1, so the
-    // series is used inside a hair of zero where the direct form loses all its bits.
-    const tiny = x.abs().lessThan(float(1e-3));
-    const pathFactor = tiny.select(
-      float(1).sub(x.mul(0.5)),
-      x.negate().exp().oneMinus().div(x.add(float(1e-9)))
-    );
+    // Metres of path per metre of height. A level ray buys infinite path per metre, which
+    // is the case the limit below covers.
+    const perHeight = viewZ.div(dy.abs().max(float(1e-4)));
+    const integral = antiderivative(worldPos.y).sub(antiderivative(cameraPosition.y)).abs();
+    // The limit for a near-level ray: uniform density at the eye's own height over the
+    // whole path, which is what the integral tends to and what the division cannot express.
+    const profileAtEye = cameraPosition.y.sub(level).max(float(0)).div(scale).negate().exp();
+    const throughLayer = dy
+      .abs()
+      .lessThan(float(1e-3))
+      .select(viewZ.mul(profileAtEye), perHeight.mul(integral));
+
     const drift = time.mul(uDrift);
     const noise = mx_noise_float(
       V3(worldPos.x.mul(uNoiseScale).add(drift), worldPos.z.mul(uNoiseScale), drift.mul(0.6))
     );
     const modulated = noise.mul(uNoiseAmount).add(1).max(float(0));
-    const optical = uDensity
-      .mul(viewZ)
-      .mul(heightFall)
-      .mul(pathFactor)
-      .mul(modulated)
-      .max(float(0));
+    const optical = uDensity.mul(throughLayer).mul(modulated).max(float(0));
     const ground = optical.negate().exp().oneMinus();
 
     // Combined as two independent extinctions rather than added, so heavy ground fog at

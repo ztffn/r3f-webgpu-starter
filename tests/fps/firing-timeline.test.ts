@@ -323,6 +323,67 @@ test("the firing timeline resolves every accepted round at its own cadence bound
   }
 });
 
+test("the resolved trace keeps sight, mean bore, and projectile directions distinct", () => {
+  const weapon = new WeaponSystem(RAPID_DEFINITION, 99);
+  const loadout = new LoadoutSystem([{ inputSlot: 1, id: "primary", weapon }], "primary");
+  const ballistics = new BallisticProjectileSystem(MISS_QUERY, environment(), { capacity: 4 });
+  const timeline = new FiringTimeline({
+    ballistics,
+    sway: new AimSwayController(),
+    sightAdjustmentFor: () => SIGHT_ADJUSTMENT,
+  });
+  const frame = createFiringTimelineFrame();
+  const scratchPosition = new THREE.Vector3();
+  const scratchOrientation = new THREE.Quaternion();
+  const delta = 1 / 60;
+  frame.deltaSeconds = delta;
+  frame.captureTrace = true;
+  frame.startPosition.copy(MOVING_AND_TURNING.position(0, scratchPosition));
+  frame.endPosition.copy(MOVING_AND_TURNING.position(delta, scratchPosition));
+  frame.startOrientation.copy(MOVING_AND_TURNING.orientation(0, scratchOrientation));
+  frame.endOrientation.copy(MOVING_AND_TURNING.orientation(delta, scratchOrientation));
+
+  loadout.handleCommand({ type: "triggerDown" });
+  loadout.setHandlingContext({
+    stance: "stand",
+    grounded: true,
+    planarSpeedMetresPerSecond: MOVING_AND_TURNING.planarSpeedMetresPerSecond,
+    breathStabilization: 0,
+  });
+  loadout.update(delta);
+
+  let spawned: { sight: THREE.Vector3; bore: THREE.Vector3; projectile: THREE.Vector3 } | null =
+    null;
+  timeline.runFrame(frame, loadout, {
+    onShot: (shot) => {
+      spawned = {
+        sight: shot.sightDirection.clone(),
+        bore: shot.boreDirection.clone(),
+        projectile: shot.projectileDirection.clone(),
+      };
+    },
+  });
+  assert.ok(spawned);
+
+  let trace = null;
+  for (let step = 0; step < 240 && !trace; step += 1) {
+    ballistics.update(delta);
+    ballistics.drainResults((result) => {
+      trace = result.trace;
+    });
+  }
+  assert.ok(trace);
+
+  assert.ok(trace.sightDirection.distanceTo(spawned.sight) < 1e-12);
+  assert.ok(trace.boreDirection.distanceTo(spawned.bore) < 1e-12);
+  assert.ok(trace.initialDirection.distanceTo(spawned.projectile) < 1e-12);
+  // The debug view draws all three. Collapsing bore onto the dispersed
+  // direction would report random spread as scope elevation and windage.
+  assert.ok(trace.sightDirection.angleTo(trace.boreDirection) > 1e-4);
+  assert.ok(trace.boreDirection.angleTo(trace.initialDirection) > 1e-6);
+  assert.ok(trace.sightDirection.angleTo(trace.initialDirection) > 1e-4);
+});
+
 test("a stationary shooter's accepted rounds are identical at 30, 60, and 144 Hz", () => {
   // With one fixed pose there is nothing to interpolate, so this isolates the
   // timeline itself: weapon cadence cursor, sliced sway, and sliced projectile

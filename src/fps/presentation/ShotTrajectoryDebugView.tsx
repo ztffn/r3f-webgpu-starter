@@ -130,7 +130,10 @@ export function ShotTrajectoryDebugView() {
       const start = trace.points[0];
       const aimEnd = start.clone().addScaledVector(trace.sightDirection, INITIAL_AIM_LENGTH);
       setLinePoints(initialAim, [start, aimEnd]);
-      const boreEnd = start.clone().addScaledVector(trace.initialDirection, INITIAL_AIM_LENGTH);
+      // The yellow line is the turret-adjusted mean bore, not the dispersed
+      // projectile direction; drawing the latter would report random spread as
+      // scope elevation and windage.
+      const boreEnd = start.clone().addScaledVector(trace.boreDirection, INITIAL_AIM_LENGTH);
       setLinePoints(bore, [start, boreEnd]);
 
       const resolvedImpact = trace.impact;

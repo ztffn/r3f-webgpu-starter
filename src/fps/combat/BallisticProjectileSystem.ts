@@ -21,6 +21,12 @@ export interface BallisticShot {
   readonly origin: THREE.Vector3Like;
   readonly direction: THREE.Vector3Like;
   readonly sightDirection?: THREE.Vector3Like;
+  /**
+   * Turret-adjusted mean bore before this shot's dispersion sample. Diagnostics
+   * need it separately; without it the dispersed direction gets misreported as
+   * scope elevation and windage. Defaults to `direction`.
+   */
+  readonly boreDirection?: THREE.Vector3Like;
   readonly maxDistance: number;
   readonly maxFlightSeconds: number;
   readonly damage: number;
@@ -30,10 +36,11 @@ export interface BallisticShot {
 }
 
 export interface SpawnedBallisticShot
-  extends Omit<BallisticShot, "origin" | "direction" | "sightDirection"> {
+  extends Omit<BallisticShot, "origin" | "direction" | "sightDirection" | "boreDirection"> {
   readonly origin: THREE.Vector3;
   readonly direction: THREE.Vector3;
   readonly sightDirection: THREE.Vector3;
+  readonly boreDirection: THREE.Vector3;
 }
 
 export interface BallisticResult extends ShotResult<SpawnedBallisticShot> {}
@@ -199,14 +206,22 @@ export class BallisticProjectileSystem {
       input.sightDirection?.y ?? direction.y,
       input.sightDirection?.z ?? direction.z
     );
+    const boreDirection = new THREE.Vector3(
+      input.boreDirection?.x ?? direction.x,
+      input.boreDirection?.y ?? direction.y,
+      input.boreDirection?.z ?? direction.z
+    );
     const directionLengthSq = direction.lengthSq();
     const sightDirectionLengthSq = sightDirection.lengthSq();
+    const boreDirectionLengthSq = boreDirection.lengthSq();
     if (
       this.freeCount === 0 ||
       !Number.isFinite(directionLengthSq) ||
       directionLengthSq <= EPSILON ||
       !Number.isFinite(sightDirectionLengthSq) ||
       sightDirectionLengthSq <= EPSILON ||
+      !Number.isFinite(boreDirectionLengthSq) ||
+      boreDirectionLengthSq <= EPSILON ||
       !Number.isFinite(input.origin.x) ||
       !Number.isFinite(input.origin.y) ||
       !Number.isFinite(input.origin.z) ||
@@ -236,6 +251,7 @@ export class BallisticProjectileSystem {
       origin: new THREE.Vector3(input.origin.x, input.origin.y, input.origin.z),
       direction,
       sightDirection: sightDirection.normalize(),
+      boreDirection: boreDirection.normalize(),
     };
     this.shots[slot] = shot;
     this.px[slot] = this.ox[slot] = shot.origin.x;
@@ -622,6 +638,7 @@ export class BallisticProjectileSystem {
       sourceId: shot.sourceId,
       mode: "ballistic",
       sightDirection: shot.sightDirection.clone(),
+      boreDirection: shot.boreDirection.clone(),
       initialDirection: shot.direction.clone(),
       points: this.buildTracePoints(slot, impactPoint),
       interactions: this.interactions[slot] ?? [],

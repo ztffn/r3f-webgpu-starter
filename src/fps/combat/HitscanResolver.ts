@@ -32,6 +32,9 @@ export class HitscanResolver {
       sourceId: shot.sourceId,
       mode: "hitscan",
       sightDirection: direction.clone(),
+      // Hitscan has no turret adjustment or dispersion sample, so all three
+      // direction concepts collapse onto the supplied direction.
+      boreDirection: direction.clone(),
       initialDirection: direction.clone(),
       points: [origin, end],
       interactions: [],

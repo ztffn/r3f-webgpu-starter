@@ -237,6 +237,7 @@ export class FiringTimeline {
       origin: view.origin,
       direction: view.projectileDirection,
       sightDirection: view.sightDirection,
+      boreDirection: view.boreDirection,
       maxDistance: event.range,
       maxFlightSeconds: event.maxFlightSeconds,
       damage: event.damage,

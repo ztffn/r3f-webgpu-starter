@@ -196,13 +196,48 @@ as the saddle-term explanation predicts:
 | 0.25 m | 0.0002 m | 0.0019 m | 0.010 |
 
 Halving the cell costs four times the terrain memory and buys roughly a fourfold reduction
-in worst-case disagreement. **One subdivision step is the recommended default**: 0.195 m
-down to 0.031 m, which is below the height of a prone silhouette's margin, for a shared
-1024 m server surface growing from about 1 MB of heights to 4 MB.
+in worst-case disagreement.
 
-This has NOT been applied. It is a one-line change to how `TerrainCollider` and
-`StaticTerrainCollider` choose their lattice, and it should be made when the terrain scale
-constants are calibrated, since the cell size is derived from those.
+### Applied: `DEFAULT_SUBDIVISION = 2`
+
+Shipped, and re-measured afterwards rather than assumed:
+
+| | Before (1x) | After (2x) |
+| --- | ---: | ---: |
+| surface gap, uniform sampling | 0.195 m worst | **0.031 m** worst |
+| surface gap at cell centres | 0.125 m | 0.000 m — now lattice points |
+| feet above the bullet surface | 0.185 m | **0.094 m** |
+| grazing shots resolving differently | 8 in 3000 | **0 in 3000** |
+
+The gameplay failure this measurement exists to bound does not occur at all in the sample
+after the change. Cost is four times the terrain height memory: a shared 1024 m server
+surface goes from roughly 1 MB to 4 MB.
+
+### The stall this uncovered, and why snap-to-ground is now conditional
+
+Subdividing exposed a **pre-existing** defect rather than causing one. Walking axis-aligned
+across flat ground, the character stops dead for exactly one tick when
+`enableSnapToGround` resolves against a heightfield lattice seam:
+
+| Rapier lattice | Full stops per 2000 ticks |
+| --- | ---: |
+| 1x | 6 |
+| 2x | 30 |
+
+More lattice steps means more seams, so subdivision multiplied an existing stutter fivefold
+and a test caught it. Isolating the cause: autostep is irrelevant, the snap DISTANCE is
+irrelevant, and disabling snap-to-ground removes the stalls entirely at every resolution.
+
+Snap cannot simply be deleted — without it a character walking down a steep slope goes
+ballistic and skips in arcs. But the motor already applies a downward ground-stick each
+grounded tick, and that alone holds contact on gentle descents. `CharacterMotor` therefore
+enables snap only when the ground ahead falls away faster than the ground-stick can follow.
+
+After that change, at 2x lattice: zero stalls on flat ground, zero stalls on rolling
+terrain, and zero airborne ticks walking down a 45 degree ramp with the feet never more
+than 0.17 m off the surface. At 1x the same ramp produced 78 airborne ticks and 2.29 m of
+float, so **2x is now strictly better than 1x on every measured axis**, not merely more
+accurate. `tests/motor/character-motor.test.ts` pins both halves.
 
 Reproduce with `node --experimental-strip-types --experimental-specifier-resolution=node
 tools/motor-bench/collision-agreement.ts`.

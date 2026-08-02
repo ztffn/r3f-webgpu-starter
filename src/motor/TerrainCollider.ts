@@ -34,10 +34,32 @@ export interface TerrainColliderOptions {
    * body, and the edge is never a surface the character can reach.
    */
   readonly recentreFraction?: number;
+  /**
+   * Rapier lattice steps per source cell. See `DEFAULT_SUBDIVISION`.
+   */
+  readonly subdivision?: number;
 }
 
 const DEFAULT_WINDOW_CELLS = 128;
 const DEFAULT_RECENTRE_FRACTION = 0.5;
+
+/**
+ * How finely the Rapier lattice samples the source field, in steps per source
+ * cell.
+ *
+ * This is not a quality knob, it closes a measured gap. Bullets resolve the
+ * BILINEAR surface through `CompositeWorldQuery`; a Rapier heightfield is two
+ * TRIANGLES per cell. The two agree exactly at cell corners and diverge by the
+ * cell's saddle term in between — worst 0.195 m at 2 m cells, which showed up
+ * as roughly one grazing shot in four hundred resolving differently between
+ * "blocked by cover" and "clear".
+ *
+ * Sampling the same bilinear field at half the cell size cuts that to 0.031 m
+ * for four times the height memory, and each further halving buys another
+ * factor of four. Two is the measured sweet spot; see §7.5 of
+ * `docs/plans/2026-08-02-motor-measurements.md`.
+ */
+export const DEFAULT_SUBDIVISION = 2;
 
 /**
  * A re-centring Rapier heightfield tracking a moving subject.
@@ -48,8 +70,10 @@ const DEFAULT_RECENTRE_FRACTION = 0.5;
  * so this comment is checked rather than trusted.
  */
 export class TerrainCollider implements TerrainSurface {
+  /** Source cells the window spans. Not the Rapier lattice resolution. */
   readonly windowCells: number;
   readonly spanMetres: number;
+  readonly subdivision: number;
 
   /** Number of times the window has been rebuilt. Cheap streaming telemetry. */
   rebuildCount = 0;
@@ -59,6 +83,8 @@ export class TerrainCollider implements TerrainSurface {
   private readonly source: MotorHeightSource;
   private readonly heights: Float32Array;
   private readonly samplesPerSide: number;
+  private readonly latticeCells: number;
+  private readonly latticeStep: number;
   private readonly recentreDistance: number;
 
   private body: RAPIER.RigidBody | null = null;
@@ -76,8 +102,11 @@ export class TerrainCollider implements TerrainSurface {
     this.world = world;
     this.source = source;
     this.windowCells = Math.max(2, Math.floor(options.windowCells ?? DEFAULT_WINDOW_CELLS));
-    this.samplesPerSide = this.windowCells + 1;
+    this.subdivision = Math.max(1, Math.floor(options.subdivision ?? DEFAULT_SUBDIVISION));
+    this.latticeCells = this.windowCells * this.subdivision;
+    this.samplesPerSide = this.latticeCells + 1;
     this.spanMetres = this.windowCells * source.cellSize;
+    this.latticeStep = source.cellSize / this.subdivision;
     this.heights = new Float32Array(this.samplesPerSide * this.samplesPerSide);
     this.recentreDistance =
       (this.spanMetres / 2) * (options.recentreFraction ?? DEFAULT_RECENTRE_FRACTION);
@@ -118,11 +147,12 @@ export class TerrainCollider implements TerrainSurface {
 
     const n = this.samplesPerSide;
     const half = this.spanMetres / 2;
+    const step = this.latticeStep;
     for (let col = 0; col < n; col += 1) {
-      const sampleX = this.centreX - half + col * cell;
+      const sampleX = this.centreX - half + col * step;
       const columnBase = col * n;
       for (let row = 0; row < n; row += 1) {
-        const sampleZ = this.centreZ - half + row * cell;
+        const sampleZ = this.centreZ - half + row * step;
         this.heights[columnBase + row] = this.source.sample(sampleX, sampleZ);
       }
     }
@@ -132,7 +162,7 @@ export class TerrainCollider implements TerrainSurface {
       this.rapier.RigidBodyDesc.fixed().setTranslation(this.centreX, 0, this.centreZ)
     );
     this.collider = this.world.createCollider(
-      this.rapier.ColliderDesc.heightfield(this.windowCells, this.windowCells, this.heights, {
+      this.rapier.ColliderDesc.heightfield(this.latticeCells, this.latticeCells, this.heights, {
         x: this.spanMetres,
         y: 1,
         z: this.spanMetres,
@@ -165,11 +195,15 @@ export class StaticTerrainCollider implements TerrainSurface {
     source: MotorHeightSource,
     spanMetres: number,
     centreX = 0,
-    centreZ = 0
+    centreZ = 0,
+    subdivision = DEFAULT_SUBDIVISION
   ) {
     this.world = world;
     this.spanMetres = spanMetres;
-    this.cells = Math.max(2, Math.round(spanMetres / source.cellSize));
+    this.cells = Math.max(
+      2,
+      Math.round(spanMetres / source.cellSize) * Math.max(1, Math.floor(subdivision))
+    );
 
     const n = this.cells + 1;
     const heights = new Float32Array(n * n);

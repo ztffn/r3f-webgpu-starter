@@ -99,6 +99,81 @@ test("terrain collider reproduces the source field, not its transpose", () => {
   }
 });
 
+test("subdividing the lattice narrows the gap to the bilinear surface", () => {
+  // A saddle-shaped cell is the worst case for triangles-versus-bilinear: the
+  // two surfaces agree at all four corners and differ most at the centre.
+  const saddle: MotorHeightSource = {
+    cellSize: 4,
+    sample: (x, z) => Math.sin((x * Math.PI) / 8) * Math.sin((z * Math.PI) / 8) * 6,
+  };
+
+  const worstGapAt = (subdivision: number): number => {
+    const world = createMotorWorld(RAPIER);
+    const terrain = new TerrainCollider(RAPIER, world, saddle, {
+      windowCells: 16,
+      subdivision,
+    });
+    terrain.update(0, 0);
+    world.step();
+
+    let worst = 0;
+    for (let step = 0; step < 400; step += 1) {
+      const x = ((step % 20) - 10) * 1.37;
+      const z = (Math.floor(step / 20) - 10) * 1.41;
+      const hit = world.castRay(new RAPIER.Ray({ x, y: 60, z }, { x: 0, y: -1, z: 0 }), 200, true);
+      if (hit === null) continue;
+      worst = Math.max(worst, Math.abs(60 - hit.timeOfImpact - saddle.sample(x, z)));
+    }
+    return worst;
+  };
+
+  const coarse = worstGapAt(1);
+  const fine = worstGapAt(2);
+  assert.ok(coarse > 0.05, `expected a measurable gap at 1x, got ${coarse.toFixed(4)} m`);
+  assert.ok(
+    fine < coarse * 0.5,
+    `subdivision did not help: ${coarse.toFixed(4)} m -> ${fine.toFixed(4)} m`
+  );
+});
+
+test("walking straight across flat ground never stalls on a lattice seam", () => {
+  // Axis-aligned motion over coplanar heightfield triangles is the case that
+  // exposed this: snap-to-ground resolved against a seam and returned zero
+  // movement for a single tick. Six full stops per 2000 ticks at 1x lattice,
+  // thirty at 2x. Turning while walking hides it, so this walks dead straight.
+  const rig = makeMotor(flatHeightSource(0), { terrain: { windowCells: 64 } });
+  settle(rig);
+
+  let stalls = 0;
+  for (let tick = 0; tick < 1500; tick += 1) {
+    rig.step(command({ tick, buttons: MotorInput.Forward }));
+    if (tick < 80) continue;
+    const speed = Math.hypot(rig.motor.state.velocity.x, rig.motor.state.velocity.z);
+    if (speed < 4) stalls += 1;
+  }
+  assert.equal(stalls, 0, `${stalls} single-tick stalls while walking flat ground`);
+});
+
+test("a steep descent is followed without going ballistic", () => {
+  // The other half of the same trade: snap-to-ground is switched off on level
+  // ground, so it must still engage where it is actually needed.
+  const ramp: MotorHeightSource = { cellSize: 2, sample: (_x, z) => z * 1.0 };
+  const rig = makeMotor(ramp, { terrain: { windowCells: 64 } });
+  settle(rig);
+
+  let airborne = 0;
+  let worstFloat = 0;
+  for (let tick = 0; tick < 900; tick += 1) {
+    rig.step(command({ tick, buttons: MotorInput.Forward }));
+    if (tick < 80) continue;
+    if (!rig.motor.state.grounded) airborne += 1;
+    const { x, y, z } = rig.motor.state.position;
+    worstFloat = Math.max(worstFloat, y - ramp.sample(x, z));
+  }
+  assert.equal(airborne, 0, `left the ground for ${airborne} ticks walking down a 45 degree slope`);
+  assert.ok(worstFloat < 0.4, `feet floated ${worstFloat.toFixed(3)} m above the ramp`);
+});
+
 test("falls onto flat ground and settles with feet at the surface", () => {
   const rig = makeMotor(flatHeightSource(12));
   const state = settle(rig);

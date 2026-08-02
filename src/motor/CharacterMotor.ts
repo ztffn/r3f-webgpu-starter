@@ -74,7 +74,9 @@ export class CharacterMotor {
   private readonly probeRotation = { x: 0, y: 0, z: 0, w: 1 };
   private readonly probeCentre = { x: 0, y: 0, z: 0 };
 
+  private readonly heightSource: MotorHeightSource;
   private stanceBlendRemaining = 0;
+  private snapEnabled = true;
 
   constructor(
     rapier: typeof RAPIER,
@@ -84,6 +86,7 @@ export class CharacterMotor {
   ) {
     this.rapier = rapier;
     this.world = world;
+    this.heightSource = heightSource;
     this.tuning = options.tuning ?? DEFAULT_MOTOR_TUNING;
 
     const spawnX = options.spawn?.x ?? 0;
@@ -177,6 +180,7 @@ export class CharacterMotor {
     this.desired.y = state.velocity.y * dt;
     this.desired.z = state.velocity.z * dt;
 
+    this.setSnapToGround(this.needsGroundSnap(dt));
     this.controller.computeColliderMovement(this.collider, this.desired);
     const moved = this.controller.computedMovement();
     const at = this.body.translation();
@@ -217,6 +221,39 @@ export class CharacterMotor {
 
   private currentHalfHeightOffset(): number {
     return this.tuning.stances[this.state.stance].height / 2;
+  }
+
+  /**
+   * Snap-to-ground is applied only when the ground ahead falls away faster than
+   * the downward ground-stick can follow.
+   *
+   * Leaving it on permanently is the obvious choice and it costs a measurable
+   * stutter: walking axis-aligned across a flat heightfield, the snap resolves
+   * against a lattice seam and returns zero movement for a single tick. That is
+   * 6 complete stops per 2000 ticks at one lattice step per terrain cell, and 30
+   * at two — subdividing the collider multiplies the seams and so multiplies the
+   * stalls. Disabling snap removes them entirely, at both resolutions.
+   *
+   * It cannot simply be removed, though: without it a character walking off a
+   * steep descent goes ballistic and skips down in arcs. The ground-stick covers
+   * gentle descents on its own, so snap is only switched on for the steep ones
+   * it is actually needed for.
+   */
+  private needsGroundSnap(dt: number): boolean {
+    if (!this.state.grounded || this.state.velocity.y > 0) return false;
+    const here = this.state.position;
+    const aheadX = here.x + this.state.velocity.x * dt;
+    const aheadZ = here.z + this.state.velocity.z * dt;
+    const drop = this.heightSource.sample(here.x, here.z) - this.heightSource.sample(aheadX, aheadZ);
+    // What the ground-stick can absorb by itself this tick.
+    return drop > GROUND_STICK_SPEED * dt;
+  }
+
+  private setSnapToGround(enabled: boolean): void {
+    if (enabled === this.snapEnabled) return;
+    this.snapEnabled = enabled;
+    if (enabled) this.controller.enableSnapToGround(this.tuning.snapToGroundMetres);
+    else this.controller.disableSnapToGround();
   }
 
   /**

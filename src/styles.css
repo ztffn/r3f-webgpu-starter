@@ -358,17 +358,25 @@ button:disabled {
 /* --- live grass debug panel (?debug=1) ------------------------------------ */
 /* Right-hand column under the telemetry readout, scrollable because the dial
    list is longer than a short viewport. */
-#grassdebug {
+#grassdebug,
+#weatherdebug {
   /* Rendered outside .hud-root, so it needs its own z-index or the canvas paints
      over it. Above the HUD's 10. */
   z-index: 20;
   /* Clear of #telem, so the frame-time readout stays visible while sliding. */
   top: 218px;
-  right: 14px;
   width: 218px;
   max-height: calc(100vh - 238px);
   overflow-y: auto;
   gap: 2px;
+}
+#grassdebug {
+  right: 14px;
+}
+/* Its own column rather than stacked below: both panels are taller than the viewport
+   already, so sharing a column would put one of them permanently off-screen. */
+#weatherdebug {
+  right: 246px;
 }
 
 .dial {
@@ -396,7 +404,8 @@ button:disabled {
 }
 
 /* Flat slider, sized so it is grabbable without dominating the panel. */
-#grassdebug input[type="range"] {
+#grassdebug input[type="range"],
+#weatherdebug input[type="range"] {
   -webkit-appearance: none;
   appearance: none;
   width: 100%;
@@ -406,7 +415,8 @@ button:disabled {
   border-radius: 2px;
   cursor: ew-resize;
 }
-#grassdebug input[type="range"]::-webkit-slider-thumb {
+#grassdebug input[type="range"]::-webkit-slider-thumb,
+#weatherdebug input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
   width: 11px;
@@ -415,7 +425,8 @@ button:disabled {
   background: var(--accent);
   border: none;
 }
-#grassdebug input[type="range"]::-moz-range-thumb {
+#grassdebug input[type="range"]::-moz-range-thumb,
+#weatherdebug input[type="range"]::-moz-range-thumb {
   width: 11px;
   height: 11px;
   border-radius: 50%;
@@ -423,10 +434,12 @@ button:disabled {
   border: none;
 }
 
-#grassdebug .btns {
+#grassdebug .btns,
+#weatherdebug .btns {
   flex-wrap: wrap;
 }
-#grassdebug code {
+#grassdebug code,
+#weatherdebug code {
   color: var(--olive);
   font-size: 9px;
 }

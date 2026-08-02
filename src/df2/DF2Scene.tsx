@@ -7,7 +7,7 @@
 // elevation grid and a canopy field — so terrain and grass need no mode switch and
 // the grass system is visible with no game data present.
 
-import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three/webgpu";
 import { Terrain } from "./Terrain";
@@ -16,10 +16,10 @@ import { FlyControls, type FlyState, type Stance } from "./FlyControls";
 import { Heightfield } from "./Heightfield";
 import { createTerrainMaterial } from "./TerrainMaterial";
 import { createGrassMaterial, type GrassUniforms } from "./GrassMaterial";
-import { createBladeMaterial, createBladeMesh } from "./BladeMaterial";
+import { createBladeMaterial, createBladeMesh, type BladeUniforms } from "./BladeMaterial";
 import { createColorGrade } from "./colorGrade";
 import { createFog } from "./fog";
-import { readWeather } from "./weather";
+import { WEATHER_PRESETS, readWeather, type WeatherPreset } from "./weather";
 import { createPrecipitation } from "./Precipitation";
 import { buildBladeGeometry } from "./bladeGeometry";
 import { readBallisticEnvironment } from "../fps/combat/BallisticEnvironment";
@@ -95,6 +95,26 @@ import {
 const SUN_DISTANCE = 2000;
 
 /**
+ * A preset's fog, in the shape `createFog` takes.
+ *
+ * The layer's TOP comes from the preset and its base sits a little below, so the fade
+ * happens over a few metres rather than as a plane edge you can see from the side.
+ */
+function fogSettings(w: WeatherPreset) {
+  return {
+    color: w.fogColor,
+    near: w.fogNear,
+    far: w.fogFar,
+    groundBase: w.groundFogTop - 8,
+    groundTop: w.groundFogTop,
+    groundDensity: w.groundFogDensity,
+    groundNoiseScale: 0.02,
+    groundNoiseAmount: 0.35,
+    groundDrift: 0.03,
+  };
+}
+
+/**
  * Keeps the precipitation box on the camera.
  *
  * Its own component so the per-frame follow gets a `useFrame` without adding a hook to
@@ -110,6 +130,23 @@ function PrecipitationRig({
   return <primitive object={precipitation.object3D} />;
 }
 
+/**
+ * Live handles for the debug panel.
+ *
+ * Deliberately the OBJECTS rather than their values: every one of these is driven by
+ * assigning a uniform, which rebuilds nothing. The preset setter is the exception and
+ * still rebuilds nothing, because the grade, the fog and the rain are constructed once
+ * and updated through their setters.
+ */
+export interface SceneHandles {
+  preset: WeatherPreset;
+  setPreset: (id: string) => void;
+  grade: ReturnType<typeof createColorGrade>;
+  fog: ReturnType<typeof createFog>;
+  precipitation: ReturnType<typeof createPrecipitation>;
+  blades: BladeUniforms | null;
+}
+
 export interface DF2SceneProps {
   wireframe?: boolean;
   grass?: boolean;
@@ -122,6 +159,8 @@ export interface DF2SceneProps {
   onStatus?: (status: { loading: boolean; terrain: LoadedTerrain | null }) => void;
   /** Hands the grass shader's live uniforms out so a debug panel can drive them. */
   onGrassReady?: (u: GrassUniforms | null) => void;
+  /** The same, for everything added this session: weather, fog, rain and blades. */
+  onSceneReady?: (s: SceneHandles | null) => void;
   /** Renders the integrated first-person optic prototype on top of this world. */
   scopeDemo?: boolean;
   /** Isolated animated rifle-and-hands test scene. */
@@ -170,6 +209,7 @@ export function DF2Scene({
   onToggleGround,
   onStance,
   onGrassReady,
+  onSceneReady,
   scopeDemo = false,
   weaponDemo = false,
 }: DF2SceneProps) {
@@ -236,22 +276,31 @@ export function DF2Scene({
   // moves ground, columns and blades together. Applying it per material is what made
   // the .trn `filter` a terrain-only tint — invisible while every extracted map ships
   // the neutral 128, and a visible seam the moment one does not.
-  const weather = useMemo(
-    () => readWeather(typeof window === "undefined" ? "" : window.location.search),
-    []
+  // STATE, not a memo of the URL, so the debug panel can switch presets live. The
+  // objects it drives are built once and updated through their setters — rebuilding a
+  // material would discard the terrain geometry cache and stall for about a second,
+  // which is exactly the comparison a preset switch is for.
+  const [weather, setWeather] = useState(() =>
+    readWeather(typeof window === "undefined" ? "" : window.location.search)
   );
-  const grade = useMemo(
-    () =>
-      createColorGrade(
-        // A real map's own .trn values win over the preset's, since they are what the
-        // author graded the colormap for; the preset supplies them only where the map
-        // is neutral, which on this pack is everywhere.
-        world?.filter && weather.id === "day"
-          ? { filter: world.filter, gamma: 128, saturation: 128 }
-          : weather
-      ),
-    [weather, world]
-  );
+  // The initial preset, for the objects that are constructed once. A ref rather than the
+  // state value so those constructions do not list `weather` as a dependency and rebuild
+  // on every switch — which is the whole thing this arrangement exists to avoid.
+  const weatherRef = useRef(weather);
+  // Built once with the initial preset; every later change goes through `.set()` below.
+  // A real map's own .trn values win over a neutral preset's, since they are what the
+  // author graded the colormap for.
+  const grade = useMemo(() => createColorGrade(weatherRef.current), []);
+  const fog = useMemo(() => createFog(fogSettings(weatherRef.current)), []);
+
+  useEffect(() => {
+    grade.set(
+      world?.filter && weather.id === "day"
+        ? { filter: world.filter, gamma: 128, saturation: 128 }
+        : weather
+    );
+    fog.set(fogSettings(weather));
+  }, [fog, grade, world]);
 
   /**
    * The preset's sky, as a cubemap.
@@ -277,38 +326,24 @@ export function DF2Scene({
   // A camera-local box of drops, so a few thousand instances read as weather over an
   // infinite world. Dry presets build nothing at all rather than an idle system.
   const precipitation = useMemo(() => {
-    if (weather.rain <= 0) return null;
     return createPrecipitation({
-      intensity: weather.rain,
-      mode: weather.snow,
+      intensity: weatherRef.current.rain,
+      mode: weatherRef.current.snow,
       // The SAME wind the grass bends to and the ballistics drifts on, read through the
       // same function — so rain, grass and bullets cannot disagree about the weather.
       wind: readBallisticEnvironment(
         typeof window === "undefined" ? "" : window.location.search
       ).windVelocity,
     });
-  }, [weather]);
-  useEffect(() => () => precipitation?.dispose(), [precipitation]);
-
-  // Atmosphere, shared by terrain and the march for the same reason the grade is:
-  // two implementations of one horizon disagree the moment either gains a term.
-  const fog = useMemo(
-    () =>
-      createFog({
-        color: weather.fogColor,
-        near: weather.fogNear,
-        far: weather.fogFar,
-        // The layer's top comes from the preset; its base sits a little below, so the
-        // fade happens over a few metres rather than as a plane you can see.
-        groundBase: weather.groundFogTop - 8,
-        groundTop: weather.groundFogTop,
-        groundDensity: weather.groundFogDensity,
-        groundNoiseScale: 0.02,
-        groundNoiseAmount: 0.35,
-        groundDrift: 0.03,
-      }),
-    [weather]
-  );
+  }, []);
+  useEffect(() => () => precipitation.dispose(), [precipitation]);
+  // Built once and left in the scene at zero intensity when dry: the pool is allocated
+  // either way, and a preset switch that had to construct one would stall the frame it
+  // is being judged on.
+  useEffect(() => {
+    precipitation.uniforms.intensity.value = weather.rain;
+    precipitation.uniforms.mode.value = weather.snow;
+  }, [precipitation, weather]);
 
   const material = useMemo(
     () =>
@@ -373,7 +408,7 @@ export function DF2Scene({
       fogFar: weather.fogFar,
     });
     return { ...kit, heightTex, jitterTex: jitter };
-  }, [fog, grade, weather, world]);
+  }, [fog, grade, world]);
 
   useEffect(
     () => () => {
@@ -393,6 +428,7 @@ export function DF2Scene({
   // position from `cameraPosition` in the vertex stage, so the field follows the player
   // without a per-frame CPU update and without the camera-graph trap the grass cap has
   // to work around (Terrain.tsx).
+  const bladeUniforms = useRef<BladeUniforms | null>(null);
   const bladeMesh = useMemo(() => {
     if (!grassKit || !world?.colorMap) return null;
     if (BENCH.blades === false) return null;
@@ -437,8 +473,9 @@ export function DF2Scene({
       },
       blade.count
     );
+    bladeUniforms.current = blade.uniforms;
     return createBladeMesh(geometry, blade);
-  }, [grade, grassKit, world]);
+  }, [fog, grade, grassKit, world]);
 
   useEffect(
     () => () => {
@@ -451,6 +488,21 @@ export function DF2Scene({
   useEffect(() => {
     onGrassReady?.(grassKit?.uniforms ?? null);
   }, [grassKit, onGrassReady]);
+
+  const setPreset = useCallback((id: string) => {
+    setWeather(WEATHER_PRESETS[id] ?? WEATHER_PRESETS.day);
+  }, []);
+
+  useEffect(() => {
+    onSceneReady?.({
+      preset: weather,
+      setPreset,
+      grade,
+      fog,
+      precipitation,
+      blades: bladeUniforms.current,
+    });
+  }, [fog, grade, onSceneReady, precipitation, setPreset, weather]);
 
   // Stable identity so Terrain's slot memo does not rebuild; reads the uniform at
   // call time so the canopy slider takes effect without a React render.
@@ -530,7 +582,7 @@ export function DF2Scene({
           inside the terrain group because the mesh needs no transform at all. */}
       {bladeMesh && grass && <primitive object={bladeMesh} />}
 
-      {precipitation && <PrecipitationRig precipitation={precipitation} />}
+      <PrecipitationRig precipitation={precipitation} />
 
       {/* Scope mode promotes the contrast ladder into resettable shootable targets. */}
       {(BENCH.targets || (scopeDemo && !FPS_DEBUG.impactTest)) && heightfield && (

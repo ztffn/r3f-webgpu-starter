@@ -82,17 +82,40 @@ type NodeArg = any;
 const V2 = vec2 as unknown as (x: NodeArg, y?: NodeArg) => NodeArg;
 const V3 = vec3 as unknown as (x: NodeArg, y: NodeArg, z: NodeArg) => NodeArg;
 
+export interface BladeUniforms {
+  radius: NodeArg;
+  thinStart: NodeArg;
+  keepMin: NodeArg;
+  heightScale: NodeArg;
+  /** Root brightness; the tip gets 2 - this. Contrast along ONE blade. */
+  shadeBase: NodeArg;
+  /** Brightness of the layer against the march. Whether blades read at all. */
+  lift: NodeArg;
+  /** Sun-facing modulation either side of 1. */
+  sun: NodeArg;
+  /** How far blades lean away from the player, as a fraction of their height. */
+  push: NodeArg;
+  pushRadius: NodeArg;
+  windGain: NodeArg;
+  bend: NodeArg;
+  twist: NodeArg;
+}
+
 export interface BladeMaterial {
   material: THREE.MeshBasicNodeMaterial;
   /** Instances to draw. The square of the lattice side, so not exactly `count`. */
   count: number;
+  /**
+   * Live dials for the debug panel.
+   *
+   * Assigning `.value` costs no material rebuild, which matters more here than the
+   * convenience: rebuilding would discard the terrain geometry cache and stall for about
+   * a second, and every one of these is a judgement call that can only be settled by
+   * dragging it and looking. What is NOT here is baked at construction — the instance
+   * count and the lattice it implies — so those still need a reload.
+   */
+  uniforms: BladeUniforms;
 }
-
-// NO uniforms bag. The march exposes one because GrassDebug drives it live and
-// rebuilding that material would throw away the terrain geometry cache; nothing drives
-// blades live, so every dial here is resolved at construction from the URL. Publishing
-// handles nothing reads would only imply a wiring that does not exist — add them back
-// alongside a panel that uses them, not before.
 
 export function createBladeMaterial(opts: BladeMaterialOptions): BladeMaterial {
   const {
@@ -405,7 +428,24 @@ export function createBladeMaterial(opts: BladeMaterialOptions): BladeMaterial {
   // FOG_NEAR is 300 m, so three's automatic fog would contribute nothing but a term.
   material.fog = false;
 
-  return { material, count: instances };
+  return {
+    material,
+    count: instances,
+    uniforms: {
+      radius: uRadius,
+      thinStart: uThinStart,
+      keepMin: uKeepMin,
+      heightScale: uHeightScale,
+      shadeBase: uShadeBase,
+      lift: uLift,
+      sun: uSun,
+      push: uPushStrength,
+      pushRadius: uPushRadius,
+      windGain: uWindGain,
+      bend: uBend,
+      twist: uTwist,
+    },
+  };
 }
 
 /**

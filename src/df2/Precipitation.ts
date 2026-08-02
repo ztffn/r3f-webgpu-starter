@@ -49,8 +49,19 @@ export interface PrecipitationOptions {
   wind?: { x: number; z: number };
 }
 
+export interface PrecipitationUniforms {
+  /** Fraction of the pool drawn, 0-1. The density dial. */
+  intensity: NodeArg;
+  /** 0 rain, 1 snow; between them, sleet. */
+  mode: NodeArg;
+  opacity: NodeArg;
+  fallSpeedRain: NodeArg;
+}
+
 export interface Precipitation {
   object3D: THREE.Object3D;
+  /** Live dials — assigning `.value` rebuilds nothing. */
+  uniforms: PrecipitationUniforms;
   /** Move the field onto the camera. Call every frame. */
   update: (camera: THREE.Camera) => void;
   /** 1 while the eye is under water — drops become slow rising specks. */
@@ -204,6 +215,12 @@ export function createPrecipitation(opts: PrecipitationOptions = {}): Precipitat
   const position = new THREE.Vector3();
   return {
     object3D: mesh,
+    uniforms: {
+      intensity: u.intensity,
+      mode: u.mode,
+      opacity: u.opacity,
+      fallSpeedRain: u.fallSpeedRain,
+    },
     update: (camera) => {
       camera.getWorldPosition(position);
       mesh.position.copy(position);

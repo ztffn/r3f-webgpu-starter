@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { GameCanvas } from "./components/GameCanvas";
 import { Hud } from "./components/Hud";
 import { GrassDebug } from "./components/GrassDebug";
-import { DF2Scene } from "./df2/DF2Scene";
+import { WeatherDebug } from "./components/WeatherDebug";
+import { DF2Scene, type SceneHandles } from "./df2/DF2Scene";
 import type { GrassUniforms } from "./df2/GrassMaterial";
 import type { FlyState, Stance } from "./df2/FlyControls";
 import type { LoadedTerrain } from "./df2/loadTerrain";
@@ -36,6 +37,8 @@ export default function App() {
   // reads back, so changing a slider never re-renders the canvas tree.
   const [grassUniforms, setGrassUniforms] = useState<GrassUniforms | null>(null);
   const onGrassReady = useCallback((u: GrassUniforms | null) => setGrassUniforms(u), []);
+  const [sceneHandles, setSceneHandles] = useState<SceneHandles | null>(null);
+  const onSceneReady = useCallback((s: SceneHandles | null) => setSceneHandles(s), []);
 
   // Publish exact numbers for the benchmark driver rather than making it read the HUD.
   // In an EFFECT, not the render body: written during render it fires twice per commit
@@ -88,6 +91,7 @@ export default function App() {
       />
 
       {BENCH.debug && !status.loading && <GrassDebug uniforms={grassUniforms} />}
+      {BENCH.debug && !status.loading && <WeatherDebug scene={sceneHandles} />}
 
       <GameCanvas>
         <DF2Scene
@@ -101,6 +105,7 @@ export default function App() {
           onToggleGround={toggleGround}
           onStance={chooseStance}
           onGrassReady={onGrassReady}
+          onSceneReady={onSceneReady}
           scopeDemo={scopeDemo}
           weaponDemo={weaponDemo}
         />

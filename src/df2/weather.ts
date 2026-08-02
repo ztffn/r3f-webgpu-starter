@@ -297,6 +297,97 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
     rain: 0,
     snow: 0,
   },
+
+  // --- Kenney Skyboxes 1.0, CC0 (tools/sky-convert) --------------------------
+  //
+  // A SECOND PACK ON PURPOSE, and the contrast is the point. These are smooth painted
+  // gradients with a soft horizon and a graded lower hemisphere; the retro pack is
+  // photographic with a hard painted floor. The haze samples the sky now, so the two
+  // stress it differently — this pack is the case where "Haze horizon lift" can sit near
+  // zero, and the retro pack is the case that proved it has to exist at all.
+  //
+  // Converted from 4096x2048 panoramas rather than shipped as faces. Every colour below
+  // is measured from the source by that tool, not picked by eye.
+  kday: {
+    id: "kday",
+    sky: "kenney-day",
+    skyColor: "#a4c1f1",
+    fogColor: "#aec3f2",
+    fogNear: 264,
+    fogFar: 2200,
+    filter: [128, 128, 128],
+    gamma: 128,
+    saturation: 128,
+    groundFogTop: 0,
+    groundFogBase: 0,
+    groundFogDensity: 0.0,
+    rain: 0,
+    snow: 0,
+  },
+  kmorning: {
+    id: "kmorning",
+    sky: "kenney-morning",
+    skyColor: "#fce5cf",
+    fogColor: "#f9dcc1",
+    fogNear: 232,
+    fogFar: 1936,
+    filter: [156, 132, 108],
+    gamma: 128,
+    saturation: 118,
+    groundFogTop: 96,
+    groundFogBase: 0,
+    groundFogDensity: 0.0016,
+    rain: 0,
+    snow: 0,
+  },
+  knight: {
+    id: "knight",
+    sky: "kenney-night",
+    skyColor: "#2c3a6b",
+    fogColor: "#2d3a67",
+    fogNear: 110,
+    fogFar: 920,
+    filter: [46, 56, 92],
+    gamma: 128,
+    saturation: 88,
+    groundFogTop: 128,
+    groundFogBase: 0,
+    groundFogDensity: 0.0022,
+    rain: 0,
+    snow: 0,
+  },
+  kalien: {
+    id: "kalien",
+    sky: "kenney-alien",
+    skyColor: "#d7b8f0",
+    fogColor: "#d9c5e8",
+    fogNear: 220,
+    fogFar: 1830,
+    filter: [146, 118, 162],
+    gamma: 128,
+    saturation: 142,
+    groundFogTop: 0,
+    groundFogBase: 0,
+    groundFogDensity: 0.0,
+    rain: 0,
+    snow: 0,
+  },
+  kspace: {
+    id: "kspace",
+    sky: "kenney-space",
+    skyColor: "#1d2956",
+    fogColor: "#242e61",
+    fogNear: 92,
+    fogFar: 770,
+    filter: [36, 44, 82],
+    gamma: 128,
+    saturation: 80,
+    groundFogTop: 0,
+    groundFogBase: 0,
+    groundFogDensity: 0.0,
+    rain: 0,
+    snow: 0,
+  },
 };
 
 /** `?weather=` — falls back to the neutral preset on anything unrecognised. */

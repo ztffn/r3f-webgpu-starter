@@ -87,3 +87,17 @@ misled anyone authoring from the folder list rather than from the pixels.
 512x512 and visibly banded is the RIGHT resolution here, not a compromise — a modern HDRI
 sky above a 1024-texel pre-shaded colormap and 3 cm grass columns would read as two different
 games. See `docs/03` on the recognisability test.
+
+### A second pack — Kenney Skyboxes 1.0, also CC0
+
+`kenney-{day,morning,night,alien,space}` come from **Kenney Skyboxes 1.0**
+(https://kenney.nl), **CC0**, credited here though not required. They ship as 4096x2048
+equirectangular panoramas rather than cube faces, so
+`node tools/sky-convert/equirect-to-cube.mjs <panorama.png> <slug> [faceSize]` resamples them
+to the same six-face layout and prints the horizon and zenith colours a preset needs — every
+colour in the five `k*` presets is measured by that tool, not eyedropped.
+
+**Having two packs is worth more than having more skies.** These are smooth painted gradients
+with a graded lower hemisphere; the retro pack is photographic with a hard painted floor. The
+haze now samples the sky, so the two stress it in opposite directions — the retro pack is what
+proved `hazeLift` has to exist at all, and this pack is the case that wants it near zero.

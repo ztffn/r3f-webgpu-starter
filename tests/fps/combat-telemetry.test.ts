@@ -9,7 +9,12 @@ import type { BallisticEnvironment } from "../../src/fps/combat/BallisticEnviron
 import { HealthDamageable } from "../../src/fps/combat/Damageable.ts";
 import type { SurfaceId } from "../../src/fps/combat/SurfaceProfile.ts";
 import type { WorldHitKind, WorldQuery } from "../../src/fps/core/WorldQuery.ts";
-import { CombatTelemetry, type ShotTelemetry } from "../../src/fps/ui/CombatTelemetry.ts";
+import {
+  CombatTelemetry,
+  impactTelemetryKey,
+  shotTelemetryKey,
+  type ShotTelemetry,
+} from "../../src/fps/ui/CombatTelemetry.ts";
 import { AMMUNITION_DEFINITIONS } from "../../src/fps/weapons/AmmunitionDefinition.ts";
 
 const STILL: BallisticEnvironment = {
@@ -98,6 +103,73 @@ function fireThrough(layers: readonly Layer[], maxDistance = 40): ShotTelemetry 
   assert.ok(published);
   return published;
 }
+
+function publishMiss(telemetry: CombatTelemetry, sourceId: string, sequence: number): void {
+  const system = new BallisticProjectileSystem({ raycast: () => null }, STILL, { capacity: 1 });
+  assert.equal(
+    system.spawn({
+      sourceId,
+      sequence,
+      origin: new Vector3(),
+      direction: new Vector3(0, 0, -1),
+      maxDistance: 20,
+      maxFlightSeconds: 1,
+      damage: 10,
+      ammunition: AMMUNITION_DEFINITIONS["556"],
+    }),
+    true
+  );
+  let published = false;
+  for (let frame = 0; frame < 240 && !published; frame += 1) {
+    system.update(1 / 60);
+    system.drainResults((result) => {
+      telemetry.publishShot(result);
+      published = true;
+    });
+  }
+  assert.ok(published);
+}
+
+test("shot and impact identity keys stay distinct across weapons", () => {
+  const telemetry = new CombatTelemetry();
+  // Every weapon numbers its own shots from one, so two weapons both produce a
+  // sequence 1 and a bare sequence would collide as a presentation key.
+  publishMiss(telemetry, "prototype-sniper", 1);
+  publishMiss(telemetry, "glock-9mm", 1);
+  const [latest, previous] = telemetry.getSnapshot().recentShots;
+  assert.equal(latest.sequence, previous.sequence);
+  assert.notEqual(shotTelemetryKey(latest), shotTelemetryKey(previous));
+
+  const contact = {
+    shotSequence: 1,
+    interactionIndex: 0,
+    ammunitionId: "556" as const,
+    kind: "world" as const,
+    objectId: "crate",
+    objectName: "crate",
+    targetId: null,
+    damageApplied: 0,
+    healthBefore: null,
+    healthAfter: null,
+    destroyed: false,
+    surfaceId: "wood" as const,
+    outcome: "stopped" as const,
+    point: new Vector3(0, 0, -5),
+    exitPoint: null,
+    normal: new Vector3(0, 0, 1),
+    effectiveThicknessMetres: 0.06,
+    speedBeforeMetresPerSecond: 900,
+    speedAfterMetresPerSecond: 0,
+    energyBeforeJoules: 1_600,
+    energyAfterJoules: 0,
+  };
+  telemetry.publishImpact({ ...contact, sourceId: "prototype-sniper" });
+  const sniperImpact = telemetry.getSnapshot().lastImpact!;
+  telemetry.publishImpact({ ...contact, sourceId: "glock-9mm" });
+  const glockImpact = telemetry.getSnapshot().lastImpact!;
+  assert.equal(glockImpact.sourceId, "glock-9mm");
+  assert.notEqual(impactTelemetryKey(sniperImpact), impactTelemetryKey(glockImpact));
+});
 
 test("a target followed by terrain keeps target range and terminal contact apart", () => {
   const sentry = new HealthDamageable("sentry", 400);

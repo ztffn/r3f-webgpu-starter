@@ -9,7 +9,11 @@ import { useSyncExternalStore } from "react";
 import type { LoadedTerrain } from "../df2/loadTerrain";
 import type { PerfSample } from "../df2/PerfMonitor";
 import type { FlyState, Stance } from "../df2/FlyControls";
-import { combatTelemetry } from "../fps/ui/CombatTelemetry";
+import {
+  combatTelemetry,
+  impactTelemetryKey,
+  shotTelemetryKey,
+} from "../fps/ui/CombatTelemetry";
 import { HipfireCrosshair } from "../fps/ui/HipfireCrosshair";
 
 export interface HudProps {
@@ -69,10 +73,7 @@ export function Hud({
     <div className="hud-root">
       {fpsMode && <HipfireCrosshair />}
       {combat.lastImpact && combat.lastImpact.damageApplied > 0 && (
-        <div
-          className="hit-marker"
-          key={`${combat.lastImpact.shotSequence}-${combat.lastImpact.interactionIndex}`}
-        >
+        <div className="hit-marker" key={impactTelemetryKey(combat.lastImpact)}>
           {combat.lastImpact.destroyed ? "TARGET DOWN" : "HIT"}
         </div>
       )}
@@ -102,7 +103,7 @@ export function Hud({
                   ? "hit"
                   : undefined;
               return (
-                <li key={shot.sequence} className={status}>
+                <li key={shotTelemetryKey(shot)} className={status}>
                   <span>#{shot.sequence}</span>
                   <strong title={target?.objectName ?? terminal?.objectName}>{subject}</strong>
                   <em>{detail}</em>

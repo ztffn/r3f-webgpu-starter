@@ -83,6 +83,7 @@ export interface BallisticEnvironmentTelemetry {
 }
 
 export interface ImpactTelemetry {
+  readonly sourceId: string;
   readonly shotSequence: number;
   readonly interactionIndex: number;
   readonly ammunitionId: AmmunitionId;
@@ -121,6 +122,18 @@ export interface CombatSnapshot {
   readonly dryFireSequence: number;
   readonly projectileRejectSequence: number;
 }
+
+/**
+ * Every weapon numbers its own shots from one, so a sequence alone is not an
+ * identity. Presentation keys must combine it with the firing weapon.
+ */
+export const shotTelemetryKey = (
+  shot: Pick<ShotTelemetry, "sourceId" | "sequence">
+): string => `${shot.sourceId}:${shot.sequence}`;
+
+export const impactTelemetryKey = (
+  impact: Pick<ImpactTelemetry, "sourceId" | "shotSequence" | "interactionIndex">
+): string => `${impact.sourceId}:${impact.shotSequence}:${impact.interactionIndex}`;
 
 type Listener = () => void;
 
@@ -247,6 +260,7 @@ export class CombatTelemetry {
     this.replace({
       ...this.snapshot,
       lastImpact: {
+        sourceId: event.sourceId,
         shotSequence: event.shotSequence,
         interactionIndex: event.interactionIndex,
         ammunitionId: event.ammunitionId,

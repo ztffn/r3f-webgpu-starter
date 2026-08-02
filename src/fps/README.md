@@ -4,6 +4,12 @@ For the full as-built module map, performance boundaries, human acceptance
 checklist, and deliberately deferred work, start with
 [`docs/10-fps-combat-implementation-spec.md`](../../docs/10-fps-combat-implementation-spec.md).
 
+The detailed trigger-to-impact contract, formulas, modifier seams, and failure
+budgets are in
+[`docs/11-weapon-ballistics-and-modifier-system-spec.md`](../../docs/11-weapon-ballistics-and-modifier-system-spec.md).
+The attachment/perk implementation sequence is in the
+[`weapon-ballistics modifier roadmap`](../../docs/plans/2026-08-02-weapon-ballistics-modifier-roadmap.md).
+
 `src/fps` is a local-first gameplay slice, not a general ECS or game framework.
 Mutable systems own gameplay truth; React Three Fiber components adapt that
 truth to cameras, GLBs, mixers, materials, and HUD snapshots.
@@ -12,7 +18,7 @@ truth to cameras, GLBs, mixers, materials, and HUD snapshots.
 
 ```text
 DOM input
-  -> LocalPlayerController
+  -> LocalPlayerController ordered WeaponCommand edges
   -> LoadoutSystem / WeaponSystem
   -> accepted shot event
   -> BallisticProjectileSystem (120 Hz gravity / drag / wind)
@@ -86,11 +92,51 @@ request. It is never applied to gameplay aim by the rig.
 
 ## Current playable slice
 
-`?scene=scope` mounts one primary semi-auto sniper. Click the canvas once to
-capture the pointer; mouse movement then aims without holding a button, Escape
-releases it, left click fires, and right click toggles ADS. Shift holds breath
-while ADS is active, R reloads, and T resets targets. The numbered keys remain
-direct authored-animation inspection.
+`?scene=scope` mounts a development loadout: 1 equips the semi-auto sniper, 2
+equips the semi/burst M4, 3 equips the semi-auto 9 mm Glock, and 4 equips the
+semi/automatic 900 RPM SAW. B cycles each definition's authored mode order.
+Click the canvas once to capture the pointer;
+that capture click does not fire. Mouse movement then aims without holding a
+button, Escape releases it, left mouse down/up sends trigger edges, and right
+click toggles ADS. Shift boosts movement and, while ADS is active, also holds
+breath; firing remains available while moving or sprinting. R reloads, and T
+resets targets. Blur, pointer-lock loss, and teardown release held-trigger state.
+
+All selectable weapons currently use the same clearly labelled
+`testmodels/fps_rig.glb` proxy. Gameplay definitions contain no asset URL or
+GLTF animation indices; `presentation/WeaponPresentationDefinition.ts` owns
+model selection and maps fire/reload to source segments 5/4. Replacing a proxy
+is therefore presentation configuration rather than a gameplay schema change.
+Use `&weaponanim=1` with `?scene=weapon` to enable direct segment inspection on
+keys 1–8 without conflicting with scope-scene equipment controls.
+
+Weapon commands are plain serializable data: trigger down/up, select fire mode,
+reload, and numeric equip slot. Semi fires only on a down edge, an accepted
+three-round burst completes after release, and automatic fire advances every
+cadence boundary crossed by the bounded simulation interval. Reload, switching,
+and mode changes cancel incomplete bursts; switching also cancels reload rather
+than pausing it on an unequipped weapon. Mode changes preserve cooldown, and an
+empty automatic weapon emits one dry-fire event per press.
+
+Spread and recoil are authoritative weapon state. Each definition separately
+authors mechanical dispersion, hip/movement/airborne handling error, bounded
+bloom, pitch/yaw recoil, caps, and recovery. Stance, measured planar speed
+(including a bounded extra sprint penalty),
+grounded state, ADS, and breath stabilization resolve into the cone; going prone
+does not erase a weapon's mechanical grouping limit. Every accepted shot samples
+that cone from a deterministic weapon-instance seed and shot sequence, captures
+the recoil left by earlier rounds, and only then applies its own recoil/bloom for
+later rounds. Recovery advances at cadence boundaries, including when several
+automatic rounds are accepted in one render frame or while a weapon is reloading
+or unequipped.
+
+The hipfire crosshair projects the current mean sight direction and expands to
+the current cone radius. It is presentation feedback only and never chooses a
+shot direction. Its SVG attributes read a mutable presentation snapshot without
+causing frame-rate React/HUD updates; it fades during ADS and hides outside
+pointer lock. Use `&crosshair=0` to disable it. Future attachments can resolve to
+the existing flat dispersion/recoil/bloom/recovery/sway modifier channels, but
+attachment slots and inventory remain out of scope.
 
 While pointer-locked and ADS, Arrow Up/Down select an ammunition-calibrated
 elevation zero, Arrow Left/Right apply manual 0.1 mrad windage clicks, and 0
@@ -115,13 +161,16 @@ Sway is authoritative gameplay aim. Stand, crouch, and prone use multipliers
 sensitivity. The scope picture, rangefinder, shot, and trace share that result.
 
 Add `&shotdebug=1` to draw the latest resolved shot in world space. The cyan
-line is the shot path, the white segment is initial authoritative aim, and red
-marks the impact and surface normal. The HUD retains a short recent-shot log.
+screen-space-width line is the shot path, the white segment is initial
+authoritative aim, and red marks the impact and surface normal. The wider debug
+line remains legible when viewed nearly end-on at gameplay ranges. The HUD
+retains a short recent-shot log.
 Press L to clear the current debug trace.
 
-The sniper now uses an active 120 Hz ballistic projectile. Its 792.48 m/s,
-G1-0.505 prototype ammunition is affected by gravity, drag, and world-space
-wind; damage is delayed until a swept path segment actually reaches a target.
+Accepted weapon events use active 120 Hz ballistic projectiles. The sniper's
+792.48 m/s, G1-0.505 prototype ammunition is affected by gravity, drag, and
+world-space wind; damage is delayed until a swept path segment actually reaches
+a target.
 The default wind is +4 m/s on world X. Use `windx` and `windz` query parameters
 for controlled tests, including `&windx=0` for still air and `&windx=-4` for an
 equal opposite crosswind. Flight time, drop, signed drift, impact speed, damage,
@@ -139,6 +188,14 @@ bounded projectile/query workload, not an entire 32-player rendered/networked
 match; character, network, audio, and GPU acceptance still requires a browser
 benchmark on target hardware. Each weapon also authors a finite maximum flight
 lifetime, so a slow missed round cannot occupy a slot indefinitely.
+
+Weapon-layer coverage separately instantiates 32 complete loadouts, depletes
+automatic magazines, drains all real weapon events, completes reloads, and
+resumes fire at both 600 and 900 RPM. Equivalent timelines at 30, 60, and 144 Hz
+must produce identical shot offsets, final recoil/bloom, ammo, dry-fire, and
+reload outcomes. The test uses independent shooter seeds, retains only rolling
+direction checksums, and reports CPU time without a machine-specific millisecond
+assertion.
 
 ## Surface penetration and impacts
 
@@ -165,10 +222,11 @@ Open `?scene=scope&impacttest=1&shotdebug=1` for eight cover lanes, ordered left
 to right: cloth, wood, sheet metal, armored metal, glass, stone, dirt, and water.
 Each has a resettable flesh target behind it. Choose representative diagnostic
 ammunition with `ammo=9mm`, `ammo=556`, `ammo=308` (default), or `ammo=50bmg`.
-The current sniper GLB remains mounted for all four because only its presentation
-exists; the URL changes authoritative ammunition data, not the displayed gun.
-In particular, `ammo=9mm` is not yet a Glock: the sidearm definition, model,
-animations, equip controls, and first-person view remain future work.
+The proxy sniper GLB remains mounted for all four because authored per-weapon
+presentation does not exist; the URL changes the sniper slot's diagnostic
+ammunition data, not the displayed gun. The selectable Glock definition uses
+9 mm by default, while `ammo=9mm` still overrides the sniper slot for ballistic
+diagnostics.
 The first canvas press also unlocks spatial audio. T resets the target husks.
 
 Shot debug keeps the cyan gameplay path, white sightline, and yellow bore.

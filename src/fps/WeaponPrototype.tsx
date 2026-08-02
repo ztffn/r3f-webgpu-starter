@@ -3,7 +3,7 @@
 // interpolates, so terrain controls and the main view remain stable.
 
 import { useFrame, useThree } from "@react-three/fiber";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three/webgpu";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { float, mix, positionGeometry, smoothstep, texture, uniform, vec2, vec3 } from "three/tsl";
@@ -14,9 +14,14 @@ import type { PlayerStance } from "./core/PlayerMotor";
 import type { RegisteredWorldQuery } from "./core/WorldQuery";
 import { BallisticProjectileSystem, type BallisticResult } from "./combat/BallisticProjectileSystem";
 import { readBallisticEnvironment } from "./combat/BallisticEnvironment";
-import { LoadoutSystem } from "./weapons/LoadoutSystem";
-import { WeaponSystem, type WeaponEvent } from "./weapons/WeaponSystem";
-import { SNIPER_DEFINITION } from "./weapons/weaponDefinitions";
+import { type LoadoutEvent } from "./weapons/LoadoutSystem";
+import {
+  GLOCK_DEFINITION,
+  M4_DEFINITION,
+  SAW_DEFINITION,
+  SNIPER_DEFINITION,
+} from "./weapons/weaponDefinitions";
+import { createDevelopmentLoadout, LOCAL_PLAYER_SEED } from "./weapons/developmentLoadout";
 import { ammunitionFromSearch } from "./weapons/AmmunitionDefinition";
 import { combatTelemetry } from "./ui/CombatTelemetry";
 import { shotDebugStore } from "./debug/ShotDebugStore";
@@ -27,15 +32,23 @@ import {
   type LookSensitivityController,
 } from "./core/LookSensitivityController";
 import { AimSwayController } from "./core/AimSwayController";
+import { WeaponAimComposer } from "./core/WeaponAimComposer";
+import {
+  clampSimulationDelta,
+  createFiringTimelineFrame,
+  FiringTimeline,
+  type AcceptedShotView,
+} from "./core/FiringTimeline";
 import {
   ScopeAdjustmentController,
   scopeAdjustmentActionForKey,
   type ScopeAdjustmentSnapshot,
 } from "./core/ScopeAdjustmentController";
+import { weaponPresentationFor } from "./presentation/WeaponPresentationDefinition";
+import { weaponAimIndicator } from "./ui/WeaponAimIndicator";
 
 const WORLD_LAYER = 0;
 const WEAPON_LAYER = 1;
-const MODEL_URL = new URL("../../testmodels/fps_rig.glb", import.meta.url).href;
 const RETICLE_URL = "/assets/reticles/default-mildot.png";
 const MODEL_SCALE = 3;
 const SCOPE_TARGET_SIZE = 512;
@@ -58,32 +71,13 @@ const RANGE_SAMPLE_INTERVAL_MS = 160;
 const PERFORMANCE_SAMPLE_SECONDS = 0.25;
 const HIP_OFFSET = new THREE.Vector3(0.24, -0.37, -0.56);
 const OPTIC_EYE_OFFSET = new THREE.Vector3(0, 0, -0.075);
-const LOCAL_X = new THREE.Vector3(1, 0, 0);
-const LOCAL_Y = new THREE.Vector3(0, 1, 0);
+const MAX_TRANSITIONAL_SPEED_METRES_PER_SECOND = 30;
 // The circular lens mesh is authored in this local X/Y square. Use geometry
 // coordinates for its optical screen space—the texture-atlas UV island is
 // rotated relative to the physical glass.
 const LENS_MIN_X = -0.010685681;
 const LENS_MIN_Y = 0.08512605;
 const LENS_DIAMETER = 0.02137136;
-
-// The source exports every demonstration action as one 27-second timeline.
-// These gaps are present in the key data, so split them before playback rather
-// than accidentally looping a sequence of unrelated actions as "idle".
-const SOURCE_FPS = 60;
-// The exported animation's first usable pose is its first key at 1 / 60s;
-// the glTF bind pose leaves the first-person arms outside the camera.
-const INITIAL_POSE_TIME = 1 / SOURCE_FPS;
-const ANIMATION_SEGMENTS = [
-  [0, 1],
-  [1.166667, 7.666667],
-  [7.833333, 10.666667],
-  [10.833333, 15],
-  [15.166667, 15.833333],
-  [16, 18.166666],
-  [18.316668, 26.5],
-  [26.666666, 27.166666],
-] as const;
 
 export interface WeaponPrototypeProps {
   /** Mount PiP display to the animated rifle's actual scope mesh. */
@@ -94,14 +88,53 @@ export interface WeaponPrototypeProps {
   lookSensitivity: LookSensitivityController;
 }
 
-function disposeObject(root: THREE.Object3D) {
+function collectTextures(material: THREE.Material, into: Set<THREE.Texture>) {
+  for (const value of Object.values(material)) {
+    if (value && (value as THREE.Texture).isTexture) into.add(value as THREE.Texture);
+  }
+}
+
+/**
+ * Releases the GPU resources a loaded rig owns. Three.js material disposal does
+ * not touch referenced textures, and both materials and geometries can be
+ * shared between meshes, so each is collected once and disposed once.
+ * `preservedMaterial` is created and disposed by this component; neither it nor
+ * its textures belong to the rig. `replacedMaterials` are rig materials that
+ * were swapped out at load time and would otherwise never be reachable again.
+ */
+function disposeObject(
+  root: THREE.Object3D,
+  preservedMaterial?: THREE.Material,
+  replacedMaterials: readonly THREE.Material[] = []
+) {
+  const geometries = new Set<THREE.BufferGeometry>();
+  const materials = new Set<THREE.Material>(replacedMaterials);
+  // A skinned mesh owns a bone-matrix DataTexture that only Skeleton.dispose()
+  // releases; nothing reachable from geometry or material frees it.
+  const skeletons = new Set<THREE.Skeleton>();
   root.traverse((object) => {
-    const mesh = object as THREE.Mesh;
-    mesh.geometry?.dispose();
+    const mesh = object as THREE.SkinnedMesh;
+    if (mesh.geometry) geometries.add(mesh.geometry);
+    if (mesh.isSkinnedMesh && mesh.skeleton) skeletons.add(mesh.skeleton);
     const material = mesh.material;
-    if (Array.isArray(material)) material.forEach((m) => m.dispose());
-    else material?.dispose();
+    if (Array.isArray(material)) {
+      for (const item of material) if (item) materials.add(item);
+    } else if (material) materials.add(material);
   });
+  if (preservedMaterial) materials.delete(preservedMaterial);
+
+  const preservedTextures = new Set<THREE.Texture>();
+  if (preservedMaterial) collectTextures(preservedMaterial, preservedTextures);
+  const textures = new Set<THREE.Texture>();
+  for (const material of materials) {
+    collectTextures(material, textures);
+    material.dispose();
+  }
+  for (const geometry of geometries) geometry.dispose();
+  for (const skeleton of skeletons) skeleton.dispose();
+  for (const texture of textures) {
+    if (!preservedTextures.has(texture)) texture.dispose();
+  }
 }
 
 // TSL's uniform node generic is erased when passed across a helper boundary.
@@ -209,7 +242,7 @@ export function WeaponPrototype({
     () => ammunitionFromSearch(typeof window === "undefined" ? "" : window.location.search),
     []
   );
-  const weaponDefinition = useMemo(
+  const sniperDefinition = useMemo(
     () => ({
       ...SNIPER_DEFINITION,
       displayName:
@@ -224,11 +257,12 @@ export function WeaponPrototype({
     }),
     [ammunition]
   );
-  const weapon = useMemo(() => new WeaponSystem(weaponDefinition), [weaponDefinition]);
   const loadout = useMemo(
-    () => new LoadoutSystem([{ id: "primary", weapon }], "primary"),
-    [weapon]
+    () => createDevelopmentLoadout(LOCAL_PLAYER_SEED, sniperDefinition),
+    [sniperDefinition]
   );
+  const [presentationWeaponId, setPresentationWeaponId] = useState(sniperDefinition.id);
+  const presentation = weaponPresentationFor(presentationWeaponId);
   const ballisticEnvironment = useMemo(
     () => readBallisticEnvironment(typeof window === "undefined" ? "" : window.location.search),
     []
@@ -242,6 +276,7 @@ export function WeaponPrototype({
     () => ({
       elapsedSeconds: 0,
       simulationMilliseconds: 0,
+      projectileMilliseconds: 0,
       maxSimulationMilliseconds: 0,
       frames: 0,
       segmentQueries: 0,
@@ -251,19 +286,34 @@ export function WeaponPrototype({
     [ballistics, worldQuery]
   );
   const scopeAdjustments = useMemo(
-    () =>
-      new ScopeAdjustmentController(
-        {
-          muzzleVelocityMetresPerSecond: ammunition.muzzleVelocityMetresPerSecond,
-          ballisticCoefficientG1: ammunition.ballisticCoefficientG1,
-        },
-        ballisticEnvironment,
-        weaponDefinition.shot.maxFlightSeconds
-      ),
-    [ammunition, ballisticEnvironment, weaponDefinition.shot.maxFlightSeconds]
+    () => {
+      const controllers = new Map<string, ScopeAdjustmentController>();
+      for (const definition of [
+        sniperDefinition,
+        M4_DEFINITION,
+        GLOCK_DEFINITION,
+        SAW_DEFINITION,
+      ]) {
+        const shot = definition.shot;
+        controllers.set(
+          definition.id,
+          new ScopeAdjustmentController(
+            {
+              muzzleVelocityMetresPerSecond: shot.ammunition.muzzleVelocityMetresPerSecond,
+              ballisticCoefficientG1: shot.ammunition.ballisticCoefficientG1,
+            },
+            ballisticEnvironment,
+            shot.maxFlightSeconds
+          )
+        );
+      }
+      return controllers;
+    },
+    [ballisticEnvironment, sniperDefinition]
   );
+  const activeScopeAdjustments = useRef(scopeAdjustments.get(sniperDefinition.id)!);
   const commands = useMemo<LocalPlayerCommands>(
-    () => ({ triggerPresses: 0, reloadRequested: false, adsWanted: false, holdingBreath: false }),
+    () => ({ weaponCommands: [], adsWanted: false, holdingBreath: false }),
     []
   );
   const rig = useMemo(() => {
@@ -285,7 +335,6 @@ export function WeaponPrototype({
   const activeAction = useRef<THREE.AnimationAction | null>(null);
   const aim = useRef(0);
   const aimSway = useMemo(() => new AimSwayController(), []);
-  const cameraMotionReady = useRef(false);
   const optic = useRef<THREE.Object3D | null>(null);
   const opticLocal = useMemo(() => new THREE.Vector3(), []);
   const aimOffset = useMemo(() => new THREE.Vector3(), []);
@@ -294,18 +343,44 @@ export function WeaponPrototype({
   const opticWorld = useMemo(() => new THREE.Vector3(), []);
   const opticInEyeSpace = useMemo(() => new THREE.Vector3(), []);
   const lookLag = useMemo(() => new THREE.Vector2(), []);
-  const previousCameraQuaternion = useMemo(() => new THREE.Quaternion(), []);
   const cameraDeltaQuaternion = useMemo(() => new THREE.Quaternion(), []);
   const rangeOrigin = useMemo(() => new THREE.Vector3(), []);
   const rangeDirection = useMemo(() => new THREE.Vector3(), []);
+  const crosshairPoint = useMemo(() => new THREE.Vector3(), []);
   const authoritativeDirection = useMemo(() => new THREE.Vector3(), []);
-  const boreDirection = useMemo(() => new THREE.Vector3(), []);
+  const aimComposer = useMemo(() => new WeaponAimComposer(), []);
   const authoritativeAimQuaternion = useMemo(() => new THREE.Quaternion(), []);
-  const aimYawQuaternion = useMemo(() => new THREE.Quaternion(), []);
-  const aimPitchQuaternion = useMemo(() => new THREE.Quaternion(), []);
+  const currentMeanAimQuaternion = useMemo(() => new THREE.Quaternion(), []);
+  const timelineFrame = useMemo(() => createFiringTimelineFrame(), []);
+  // The previous frame's end pose, and this frame's start pose. One capture
+  // feeds planar speed, sub-frame interpolation, and the weapon-lag impulse.
+  const framePreviousPosition = useMemo(() => new THREE.Vector3(), []);
+  const framePreviousQuaternion = useMemo(() => new THREE.Quaternion(), []);
+  const framePoseReady = useRef(false);
+  const firingTimeline = useMemo(
+    () =>
+      new FiringTimeline({
+        ballistics,
+        sway: aimSway,
+        // Resolved from the accepted round's own weapon so a switch inside the
+        // frame cannot apply another optic's zero.
+        sightAdjustmentFor: (weaponId) =>
+          scopeAdjustments.get(weaponId) ?? activeScopeAdjustments.current,
+      }),
+    [aimSway, ballistics, scopeAdjustments]
+  );
   const playerPose = useMemo(
-    () => ({ position: camera.position, stance, grounded }),
+    () => ({ position: camera.position, stance, grounded, planarSpeedMetresPerSecond: 0 }),
     [camera]
+  );
+  const handlingContext = useMemo(
+    () => ({
+      stance,
+      grounded,
+      planarSpeedMetresPerSecond: 0,
+      breathStabilization: 0,
+    }),
+    []
   );
   const recoilPitch = useRef(0);
   const recoilYaw = useRef(0);
@@ -336,8 +411,8 @@ export function WeaponPrototype({
     return map;
   }, []);
   const scopeStatusMap = useMemo(
-    () => createScopeStatusTexture(scopeAdjustments.getSnapshot()),
-    [scopeAdjustments]
+    () => createScopeStatusTexture(activeScopeAdjustments.current.getSnapshot()),
+    []
   );
   const lensMaterial = useMemo(
     () => createLensMaterial(target, eyeOffset, scopeActive, reticleMap, scopeStatusMap),
@@ -358,38 +433,44 @@ export function WeaponPrototype({
     activeAction.current = next;
   }, []);
 
+  const handleAcceptedShot = useCallback(
+    (shot: AcceptedShotView, event: Extract<LoadoutEvent, { type: "shot" }>) => {
+      if (!shot.spawned) combatTelemetry.publishProjectileRejected();
+      recoilPitch.current += event.recoilImpulsePitchRadians;
+      recoilYaw.current += event.recoilImpulseYawRadians;
+      const segment = weaponPresentationFor(event.weaponId).animationSegments.fire;
+      if (segment !== undefined) playSegment(segment);
+    },
+    [playSegment]
+  );
+
   const handleWeaponEvent = useCallback(
-    (event: WeaponEvent) => {
-      if (event.type === "shot") {
-        const spawned = ballistics.spawn({
-          sourceId: weaponDefinition.id,
-          sequence: event.sequence,
-          origin: player.aim.origin,
-          direction: boreDirection,
-          sightDirection: player.aim.direction,
-          maxDistance: event.range,
-          maxFlightSeconds: event.maxFlightSeconds,
-          damage: event.damage,
-          ammunition: event.ammunition,
-          captureTrace: captureShotTrace,
-        });
-        if (!spawned) combatTelemetry.publishProjectileRejected();
-        recoilPitch.current += event.recoilPitch;
-        recoilYaw.current += event.sequence % 2 === 0 ? -event.recoilYaw : event.recoilYaw;
-        if (event.animationSegment !== undefined) playSegment(event.animationSegment);
-        return;
-      }
+    (event: Exclude<LoadoutEvent, { type: "shot" }>) => {
       if (event.type === "dry-fire") {
         combatTelemetry.publishDryFire();
-        if (event.animationSegment !== undefined) playSegment(event.animationSegment);
+        const segment = weaponPresentationFor(event.weaponId).animationSegments.dryFire;
+        if (segment !== undefined) playSegment(segment);
         return;
       }
-      if (event.type === "reload-started" && event.animationSegment !== undefined) {
-        playSegment(event.animationSegment);
+      if (event.type === "reload-started") {
+        const segment = weaponPresentationFor(event.weaponId).animationSegments.reload;
+        if (segment !== undefined) playSegment(segment);
+        return;
+      }
+      if (event.type === "weapon-switch-started") {
+        const idle = weaponPresentationFor(loadout.equippedWeapon.definition.id).animationSegments.idle;
+        if (idle !== undefined) playSegment(idle);
+        return;
+      }
+      if (event.type === "weapon-equipped") {
+        setPresentationWeaponId(event.weaponId);
       }
     },
-    [ballistics, boreDirection, captureShotTrace, playSegment, player, weaponDefinition]
+    [loadout, playSegment]
   );
+
+  // `runFrame` takes its handlers per call, so this needs no stable identity.
+  const timelineHandlers = { onShot: handleAcceptedShot, onEvent: handleWeaponEvent };
 
   const handleBallisticResult = useCallback((result: BallisticResult) => {
     combatTelemetry.publishShot(result);
@@ -409,6 +490,7 @@ export function WeaponPrototype({
       lookSensitivity.reset();
       aimSway.reset();
       ballistics.clear();
+      weaponAimIndicator.clear();
     },
     [aimSway, ballistics, lookSensitivity]
   );
@@ -419,15 +501,21 @@ export function WeaponPrototype({
 
   useEffect(() => {
     const publish = () => {
-      const snapshot = scopeAdjustments.getSnapshot();
+      const snapshot = activeScopeAdjustments.current.getSnapshot();
       drawScopeStatus(scopeStatusMap, snapshot);
       combatTelemetry.publishScopeAdjustment(snapshot);
     };
     publish();
-    return scopeAdjustments.subscribe(publish);
+    const unsubscribes = [...scopeAdjustments.values()].map((controller) =>
+      controller.subscribe(() => {
+        if (controller === activeScopeAdjustments.current) publish();
+      })
+    );
+    return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
   }, [scopeAdjustments, scopeStatusMap]);
 
   useEffect(() => {
+    if (!FPS_DEBUG.weaponAnimations || scopeDemo) return;
     const playDebugSegment = (event: KeyboardEvent) => {
       const match = /^Digit([1-8])$/.exec(event.code);
       if (!match || event.repeat) return;
@@ -435,14 +523,26 @@ export function WeaponPrototype({
     };
     addEventListener("keydown", playDebugSegment);
     return () => removeEventListener("keydown", playDebugSegment);
-  }, [playSegment]);
+  }, [playSegment, scopeDemo]);
 
   useEffect(() => {
     if (!scopeDemo) return;
-    const requestReload = (event: KeyboardEvent) => {
-      if (event.code !== "KeyR" || event.repeat) return;
-      player.setAdsWanted(false);
-      player.requestReload();
+    const handleWeaponKey = (event: KeyboardEvent) => {
+      if (event.repeat) return;
+      if (event.code === "KeyR") {
+        player.setAdsWanted(false);
+        player.requestReload();
+        return;
+      }
+      if (event.code === "KeyB") {
+        player.selectFireMode();
+        return;
+      }
+      const equipMatch = /^Digit([1-4])$/.exec(event.code);
+      if (equipMatch) {
+        player.setAdsWanted(false);
+        player.equipSlot(Number(equipMatch[1]));
+      }
     };
     const holdBreath = (event: KeyboardEvent) => {
       if ((event.code !== "ShiftLeft" && event.code !== "ShiftRight") || !player.wantsAds) return;
@@ -481,46 +581,69 @@ export function WeaponPrototype({
       // movement controller can always clear an earlier arrow-key press.
       event.preventDefault();
       event.stopImmediatePropagation();
-      if (!event.repeat) scopeAdjustments.apply(action);
+      if (!event.repeat) activeScopeAdjustments.current.apply(action);
     };
-    const togglePointer = (event: PointerEvent) => {
+    const handlePointerDown = (event: PointerEvent) => {
       // The browser requires a user gesture before pointer lock. Do not also
       // turn that first capture click into an accidental shot.
       if (event.button === 0 && document.pointerLockElement === gl.domElement) {
-        player.pressTrigger();
+        player.triggerDown();
       }
       if (event.button === 2) {
         event.preventDefault();
         player.toggleAds();
       }
     };
-    const clearInput = () => player.resetInput();
+    const handlePointerUp = (event: PointerEvent) => {
+      if (event.button === 0) player.triggerUp();
+    };
+    const clearInput = () => {
+      player.resetInput();
+      loadout.clearHeldTrigger();
+    };
+    const handlePointerLockChange = () => {
+      if (document.pointerLockElement !== gl.domElement) clearInput();
+    };
     const preventMenu = (event: MouseEvent) => event.preventDefault();
-    addEventListener("keydown", requestReload);
+    addEventListener("keydown", handleWeaponKey);
     addEventListener("keydown", adjustMagnification, true);
     addEventListener("keydown", adjustTurrets, true);
     addEventListener("keydown", holdBreath, true);
     addEventListener("keyup", holdBreath, true);
     addEventListener("blur", clearInput);
-    gl.domElement.addEventListener("pointerdown", togglePointer);
+    addEventListener("pointerup", handlePointerUp);
+    document.addEventListener("pointerlockchange", handlePointerLockChange);
+    gl.domElement.addEventListener("pointerdown", handlePointerDown);
     gl.domElement.addEventListener("contextmenu", preventMenu);
     return () => {
-      removeEventListener("keydown", requestReload);
+      removeEventListener("keydown", handleWeaponKey);
       removeEventListener("keydown", adjustMagnification, true);
       removeEventListener("keydown", adjustTurrets, true);
       removeEventListener("keydown", holdBreath, true);
       removeEventListener("keyup", holdBreath, true);
       removeEventListener("blur", clearInput);
-      gl.domElement.removeEventListener("pointerdown", togglePointer);
+      removeEventListener("pointerup", handlePointerUp);
+      document.removeEventListener("pointerlockchange", handlePointerLockChange);
+      gl.domElement.removeEventListener("pointerdown", handlePointerDown);
       gl.domElement.removeEventListener("contextmenu", preventMenu);
+      clearInput();
+      loadout.deactivateAll();
     };
-  }, [gl, player, scopeAdjustments, scopeCamera, scopeDemo]);
+  }, [gl, loadout, player, scopeCamera, scopeDemo]);
 
   useEffect(() => {
     let alive = true;
+    optic.current = null;
+    hasOptic.current = false;
+    // Materials this component swaps out of the loaded rig. Nothing else can
+    // reach them afterwards, so teardown owns their disposal.
+    const replacedMaterials: THREE.Material[] = [];
+    // The mixer is built on the loaded scene, not on the host group, and
+    // uncacheRoot silently does nothing when handed the wrong root.
+    let mixerRoot: THREE.Object3D | null = null;
     const loader = new GLTFLoader();
     loader.load(
-      MODEL_URL,
+      presentation.modelUrl,
       (gltf) => {
         if (!alive) {
           disposeObject(gltf.scene);
@@ -544,6 +667,10 @@ export function WeaponPrototype({
           const scopeLens = gltf.scene.getObjectByName("SCOPE_Lens") as THREE.Mesh | undefined;
           const scopeCameraTarget = gltf.scene.getObjectByName("ScopeCam_Target");
           if (scopeLens?.geometry && scopeCameraTarget) {
+            const authoredLensMaterial = scopeLens.material;
+            if (Array.isArray(authoredLensMaterial)) {
+              replacedMaterials.push(...authoredLensMaterial);
+            } else if (authoredLensMaterial) replacedMaterials.push(authoredLensMaterial);
             scopeLens.material = lensMaterial;
             scopeLens.renderOrder = 1;
             optic.current = scopeCameraTarget;
@@ -559,15 +686,17 @@ export function WeaponPrototype({
         }
 
         const nextMixer = new THREE.AnimationMixer(gltf.scene);
+        mixerRoot = gltf.scene;
         const clip = gltf.animations[0];
-        if (clip) {
-          segmentActions.current = ANIMATION_SEGMENTS.map(([start, end], index) => {
+        const sourceAnimation = presentation.sourceAnimation;
+        if (clip && sourceAnimation) {
+          segmentActions.current = sourceAnimation.segmentsSeconds.map(([start, end], index) => {
             const segment = THREE.AnimationUtils.subclip(
               clip,
               `source-action-${index + 1}`,
-              Math.round(start * SOURCE_FPS),
-              Math.round(end * SOURCE_FPS),
-              SOURCE_FPS
+              Math.round(start * sourceAnimation.framesPerSecond),
+              Math.round(end * sourceAnimation.framesPerSecond),
+              sourceAnimation.framesPerSecond
             );
             return nextMixer.clipAction(segment);
           });
@@ -576,7 +705,7 @@ export function WeaponPrototype({
           // enters in a complete, animated first-person presentation.
           const initialPose = segmentActions.current[0];
           initialPose.reset();
-          initialPose.time = INITIAL_POSE_TIME;
+          initialPose.time = sourceAnimation.initialPoseSeconds;
           initialPose.setLoop(THREE.LoopOnce, 1);
           initialPose.clampWhenFinished = true;
           initialPose.play();
@@ -592,13 +721,18 @@ export function WeaponPrototype({
     return () => {
       alive = false;
       mixer.current?.stopAllAction();
-      mixer.current?.uncacheRoot(rig);
+      if (mixerRoot) mixer.current?.uncacheRoot(mixerRoot);
       mixer.current = null;
+      mixerRoot = null;
       segmentActions.current = [];
       activeAction.current = null;
-      disposeObject(rig);
+      optic.current = null;
+      hasOptic.current = false;
+      disposeObject(rig, lensMaterial, replacedMaterials);
+      replacedMaterials.length = 0;
+      rig.clear();
     };
-  }, [aimOffset, lensMaterial, opticLocal, rig, scopeDemo]);
+  }, [lensMaterial, presentation, rig, scopeDemo]);
 
   useEffect(() => {
     scene.add(rig);
@@ -626,16 +760,92 @@ export function WeaponPrototype({
   // before the near-plane weapon overlay, preserving a future single final
   // composite/grade stage instead of grading every camera independently.
   useFrame((_, delta) => {
-    // Existing rounds advance before this frame's input can spawn another one,
-    // so a newly accepted shot never receives time that elapsed before firing.
-    const ballisticStartedAt = performance.now();
-    ballistics.update(delta);
-    const ballisticMilliseconds = performance.now() - ballisticStartedAt;
+    // Weapons, gameplay sway, and projectiles share one clamped clock. A hitch
+    // must not hand the three systems different amounts of simulation time.
+    const simulationDelta = clampSimulationDelta(delta);
+    camera.updateMatrixWorld();
+
+    // The frame's start pose is captured exactly once, here, while the previous
+    // frame's end pose is still intact. Planar speed, the timeline's sub-frame
+    // interpolation, and the weapon-lag impulse all read this one capture, so
+    // no future camera work inside this callback can make them disagree.
+    const hadPreviousFrame = framePoseReady.current;
+    let yawDelta = 0;
+    let pitchDelta = 0;
+    if (hadPreviousFrame && delta > 0) {
+      playerPose.planarSpeedMetresPerSecond = Math.min(
+        MAX_TRANSITIONAL_SPEED_METRES_PER_SECOND,
+        Math.hypot(
+          camera.position.x - framePreviousPosition.x,
+          camera.position.z - framePreviousPosition.z
+        ) / delta
+      );
+      cameraDeltaQuaternion.copy(framePreviousQuaternion).invert().multiply(camera.quaternion);
+      // For the tiny per-frame camera deltas here, 2*x/y is the local angular
+      // delta in radians.
+      yawDelta = cameraDeltaQuaternion.y * 2;
+      pitchDelta = cameraDeltaQuaternion.x * 2;
+    } else {
+      playerPose.planarSpeedMetresPerSecond = 0;
+    }
+    timelineFrame.startPosition.copy(hadPreviousFrame ? framePreviousPosition : camera.position);
+    timelineFrame.startOrientation.copy(
+      hadPreviousFrame ? framePreviousQuaternion : camera.quaternion
+    );
+    framePreviousPosition.copy(camera.position);
+    framePreviousQuaternion.copy(camera.quaternion);
+    framePoseReady.current = true;
+
+    playerPose.stance = stance;
+    playerPose.grounded = grounded;
+    player.syncMotorPose(playerPose);
+    handlingContext.stance = player.stance;
+    handlingContext.grounded = player.grounded;
+    handlingContext.planarSpeedMetresPerSecond = player.planarSpeedMetresPerSecond;
+    handlingContext.breathStabilization = aimSway.breathStabilization;
+    loadout.setHandlingContext(handlingContext);
+    player.consumeCommands(commands);
+    for (const command of commands.weaponCommands) loadout.handleCommand(command);
+    loadout.setAdsWanted(commands.adsWanted);
+    const weaponBeforeUpdate = loadout.equippedWeapon;
+    const adsProgressBefore = weaponBeforeUpdate.adsProgress;
+    loadout.update(simulationDelta);
+    const equippedWeapon = loadout.equippedWeapon;
+    const weaponSnapshot = equippedWeapon.getSnapshot();
+    const nextScopeAdjustments = scopeAdjustments.get(equippedWeapon.definition.id)!;
+    if (activeScopeAdjustments.current !== nextScopeAdjustments) {
+      activeScopeAdjustments.current = nextScopeAdjustments;
+      const scopeSnapshot = nextScopeAdjustments.getSnapshot();
+      drawScopeStatus(scopeStatusMap, scopeSnapshot);
+      combatTelemetry.publishScopeAdjustment(scopeSnapshot);
+    }
+
+    timelineFrame.deltaSeconds = simulationDelta;
+    timelineFrame.endPosition.copy(camera.position);
+    timelineFrame.endOrientation.copy(camera.quaternion);
+    timelineFrame.stance = stance;
+    timelineFrame.holdingBreath = scopeDemo && commands.holdingBreath;
+    timelineFrame.swayHandlingMultiplier = weaponSnapshot.swayFactor;
+    // Gameplay sway follows authoritative ADS progress, not the damped rig
+    // blend: sway must not depend on whether the proxy GLTF finished loading.
+    // A switch that completed inside this update changes which weapon owns that
+    // progress, so do not interpolate between two unrelated ADS states.
+    timelineFrame.adsProgressStart =
+      equippedWeapon === weaponBeforeUpdate ? adsProgressBefore : equippedWeapon.adsProgress;
+    timelineFrame.adsProgressEnd = equippedWeapon.adsProgress;
+    timelineFrame.captureTrace = captureShotTrace;
+    // Sway advance, per-boundary shot spawning, and projectile stepping all
+    // happen inside this call, in cadence order on one timeline.
+    const simulationStartedAt = performance.now();
+    firingTimeline.runFrame(timelineFrame, loadout, timelineHandlers);
+    const simulationMilliseconds = performance.now() - simulationStartedAt;
+    ballisticPerformance.projectileMilliseconds += firingTimeline.projectileMilliseconds;
+
     ballisticPerformance.elapsedSeconds += delta;
-    ballisticPerformance.simulationMilliseconds += ballisticMilliseconds;
+    ballisticPerformance.simulationMilliseconds += simulationMilliseconds;
     ballisticPerformance.maxSimulationMilliseconds = Math.max(
       ballisticPerformance.maxSimulationMilliseconds,
-      ballisticMilliseconds
+      simulationMilliseconds
     );
     ballisticPerformance.frames += 1;
     if (ballisticPerformance.elapsedSeconds >= PERFORMANCE_SAMPLE_SECONDS) {
@@ -647,6 +857,8 @@ export function WeaponPrototype({
         peakActiveProjectiles: projectileMetrics.peakActive,
         simulationMillisecondsPerFrame:
           ballisticPerformance.simulationMilliseconds / ballisticPerformance.frames,
+        projectileMillisecondsPerFrame:
+          ballisticPerformance.projectileMilliseconds / ballisticPerformance.frames,
         maxSimulationMilliseconds: ballisticPerformance.maxSimulationMilliseconds,
         segmentQueriesPerSecond:
           (projectileMetrics.segmentQueries - ballisticPerformance.segmentQueries) / elapsed,
@@ -658,6 +870,7 @@ export function WeaponPrototype({
       });
       ballisticPerformance.elapsedSeconds = 0;
       ballisticPerformance.simulationMilliseconds = 0;
+      ballisticPerformance.projectileMilliseconds = 0;
       ballisticPerformance.maxSimulationMilliseconds = 0;
       ballisticPerformance.frames = 0;
       ballisticPerformance.segmentQueries = projectileMetrics.segmentQueries;
@@ -667,22 +880,8 @@ export function WeaponPrototype({
     ballistics.drainImpactEvents(handleImpact);
     ballistics.drainResults(handleBallisticResult);
 
-    camera.updateMatrixWorld();
-    playerPose.stance = stance;
-    playerPose.grounded = grounded;
-    player.consumeCommands(commands);
-    weapon.setAdsWanted(commands.adsWanted);
-    if (commands.reloadRequested) weapon.requestReload();
-    for (let i = 0; i < commands.triggerPresses; i += 1) weapon.pressTrigger();
-    loadout.update(delta);
-    const aimTarget = scopeDemo && hasOptic.current ? weapon.adsProgress : 0;
+    const aimTarget = scopeDemo && hasOptic.current ? equippedWeapon.adsProgress : 0;
     aim.current = THREE.MathUtils.damp(aim.current, aimTarget, AIM_RESPONSE, delta);
-    const holdingScopeBreath = scopeDemo && commands.holdingBreath;
-    aimSway.update(delta, {
-      stance,
-      adsBlend: aim.current,
-      holdingBreath: holdingScopeBreath,
-  });
     if (scopeDemo) {
       lookSensitivity.setOpticState(
         aim.current,
@@ -699,17 +898,39 @@ export function WeaponPrototype({
       stance
     );
 
-    authoritativeAimQuaternion.copy(camera.quaternion);
-    aimYawQuaternion.setFromAxisAngle(LOCAL_Y, aimSway.yawRadians);
-    aimPitchQuaternion.setFromAxisAngle(LOCAL_X, aimSway.pitchRadians);
-    authoritativeAimQuaternion.multiply(aimYawQuaternion).multiply(aimPitchQuaternion);
-    authoritativeDirection.set(0, 0, -1).applyQuaternion(authoritativeAimQuaternion).normalize();
-    scopeAdjustments.applyToSightDirection(authoritativeDirection, boreDirection);
-    player.syncPresentationPose(playerPose, authoritativeDirection);
-    // Shot events are drained only after the exact swayed aim shown this frame
-    // has become authoritative gameplay state.
-    loadout.drainEvents(handleWeaponEvent);
-    combatTelemetry.publishWeapon(weapon.getSnapshot());
+    aimComposer.composeQuaternion(
+      camera.quaternion,
+      aimSway.yawRadians,
+      aimSway.pitchRadians,
+      authoritativeAimQuaternion
+    );
+    aimComposer.composeQuaternion(
+      authoritativeAimQuaternion,
+      weaponSnapshot.recoilYawRadians,
+      weaponSnapshot.recoilPitchRadians,
+      currentMeanAimQuaternion
+    );
+    aimComposer.directionFromQuaternion(currentMeanAimQuaternion, authoritativeDirection);
+    player.syncAim(authoritativeDirection);
+    crosshairPoint.copy(camera.position).add(authoritativeDirection).project(camera);
+    const perspectiveCamera = camera as THREE.PerspectiveCamera;
+    const coneRadiusPixels =
+      (Math.tan(weaponSnapshot.dispersionConeRadians) /
+        Math.tan(THREE.MathUtils.degToRad(perspectiveCamera.fov) * 0.5)) *
+      size.height *
+      0.5;
+    weaponAimIndicator.publish(
+      (crosshairPoint.x * 0.5 + 0.5) * size.width,
+      (-crosshairPoint.y * 0.5 + 0.5) * size.height,
+      coneRadiusPixels,
+      1 - THREE.MathUtils.smoothstep(aim.current, 0.15, 0.75),
+      scopeDemo &&
+        FPS_DEBUG.hipfireCrosshair &&
+        document.pointerLockElement === gl.domElement &&
+        crosshairPoint.z >= -1 &&
+        crosshairPoint.z <= 1
+    );
+    combatTelemetry.publishWeapon(weaponSnapshot);
 
     mixer.current?.update(delta);
     scopeActive.value = scopeDemo ? aim.current : 0;
@@ -717,19 +938,9 @@ export function WeaponPrototype({
     // Mouse-look rotates the camera immediately, but a held rifle has a small
     // positional lag. Feed that physical lag into the eyebox rather than
     // magnifying the constant breathing motion.
-    let yawDelta = 0;
-    let pitchDelta = 0;
-    if (cameraMotionReady.current && delta > 0) {
-      cameraDeltaQuaternion.copy(previousCameraQuaternion).invert().multiply(camera.quaternion);
-      // For the tiny per-frame camera deltas here, 2*x/y is the local angular
-      // delta in radians. A quick look produces a one-shot weapon-lag impulse;
-      // unlike a velocity target it cannot be filtered away in one frame.
-      yawDelta = cameraDeltaQuaternion.y * 2;
-      pitchDelta = cameraDeltaQuaternion.x * 2;
-    } else {
-      cameraMotionReady.current = true;
-    }
-    previousCameraQuaternion.copy(camera.quaternion);
+    // yawDelta/pitchDelta were measured at the top of the frame against the same
+    // captured start pose the timeline used. A quick look produces a one-shot
+    // impulse; unlike a velocity target it cannot be filtered away in one frame.
     lookLag.x = THREE.MathUtils.clamp(
       lookLag.x + yawDelta * LOOK_LAG_METRES_PER_RADIAN,
       -LOOK_LAG_MAX_METRES,
@@ -761,8 +972,8 @@ export function WeaponPrototype({
     rig.translateZ(offset.z);
     recoilPitch.current = THREE.MathUtils.damp(recoilPitch.current, 0, 8, delta);
     recoilYaw.current = THREE.MathUtils.damp(recoilYaw.current, 0, 10, delta);
-    rig.rotateY(aimSway.yawRadians + recoilYaw.current);
-    rig.rotateX(aimSway.pitchRadians + recoilPitch.current);
+    rig.rotateY(aimSway.yawRadians + weaponSnapshot.recoilYawRadians + recoilYaw.current);
+    rig.rotateX(aimSway.pitchRadians + weaponSnapshot.recoilPitchRadians + recoilPitch.current);
     rig.updateMatrixWorld(true);
 
     weaponCamera.position.copy(camera.position);
@@ -784,7 +995,7 @@ export function WeaponPrototype({
       scopeCamera.position.copy(opticWorld);
       // Scope picture, rangefinder, shot resolver and trajectory debug all use
       // the same authoritative aim, including stance/breath gameplay sway.
-      scopeCamera.quaternion.copy(authoritativeAimQuaternion);
+      scopeCamera.quaternion.copy(currentMeanAimQuaternion);
       scopeCamera.updateMatrixWorld();
       renderer.setRenderTarget(target);
       renderer.clear();

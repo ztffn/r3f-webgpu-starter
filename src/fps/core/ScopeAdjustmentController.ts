@@ -64,7 +64,11 @@ const KEY_FALLBACKS: Readonly<Record<string, ScopeAdjustmentAction>> = {
 export function scopeAdjustmentActionForKey(
   event: Pick<KeyboardEvent, "code" | "key">
 ): ScopeAdjustmentAction | null {
-  return DEFAULT_SCOPE_BINDINGS[event.code] ?? KEY_FALLBACKS[event.key] ?? null;
+  // Own-property only. These tables are keyed straight from a KeyboardEvent, so
+  // a key named "constructor" or "toString" would otherwise return a function.
+  if (Object.hasOwn(DEFAULT_SCOPE_BINDINGS, event.code)) return DEFAULT_SCOPE_BINDINGS[event.code];
+  if (Object.hasOwn(KEY_FALLBACKS, event.key)) return KEY_FALLBACKS[event.key];
+  return null;
 }
 
 export function predictBallisticAtSightRange(

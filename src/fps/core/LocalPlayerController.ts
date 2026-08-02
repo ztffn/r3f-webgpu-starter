@@ -1,10 +1,10 @@
 import * as THREE from "three/webgpu";
-import { AuthoritativeAimState } from "./AuthoritativeAimState";
-import type { PlayerMotorSnapshot, PlayerStance } from "./PlayerMotor";
+import { AuthoritativeAimState } from "./AuthoritativeAimState.ts";
+import type { PlayerMotorSnapshot, PlayerStance } from "./PlayerMotor.ts";
+import type { WeaponCommand } from "../weapons/WeaponDefinition.ts";
 
 export interface LocalPlayerCommands {
-  triggerPresses: number;
-  reloadRequested: boolean;
+  weaponCommands: WeaponCommand[];
   adsWanted: boolean;
   holdingBreath: boolean;
 }
@@ -18,9 +18,10 @@ export class LocalPlayerController {
   readonly aim = new AuthoritativeAimState();
   stance: PlayerStance = "stand";
   grounded = false;
+  planarSpeedMetresPerSecond = 0;
 
-  private triggerPresses = 0;
-  private reloadRequested = false;
+  private readonly weaponCommands: WeaponCommand[] = [];
+  private triggerHeld = false;
   private adsWanted = false;
   private holdingBreath = false;
 
@@ -33,18 +34,45 @@ export class LocalPlayerController {
   }
 
   syncPresentationPose(pose: PlayerMotorSnapshot, aimDirection: THREE.Vector3Like): void {
+    this.syncMotorPose(pose);
+    this.syncAim(aimDirection);
+  }
+
+  syncMotorPose(pose: PlayerMotorSnapshot): void {
     this.position.set(pose.position.x, pose.position.y, pose.position.z);
     this.stance = pose.stance;
     this.grounded = pose.grounded;
+    this.planarSpeedMetresPerSecond = Number.isFinite(pose.planarSpeedMetresPerSecond)
+      ? Math.max(0, pose.planarSpeedMetresPerSecond)
+      : 0;
+  }
+
+  syncAim(aimDirection: THREE.Vector3Like): void {
     this.aim.set(this.position, aimDirection);
   }
 
-  pressTrigger(): void {
-    this.triggerPresses += 1;
+  triggerDown(): void {
+    if (this.triggerHeld) return;
+    this.triggerHeld = true;
+    this.weaponCommands.push({ type: "triggerDown" });
+  }
+
+  triggerUp(): void {
+    if (!this.triggerHeld) return;
+    this.triggerHeld = false;
+    this.weaponCommands.push({ type: "triggerUp" });
   }
 
   requestReload(): void {
-    this.reloadRequested = true;
+    this.weaponCommands.push({ type: "reload" });
+  }
+
+  selectFireMode(): void {
+    this.weaponCommands.push({ type: "selectFireMode" });
+  }
+
+  equipSlot(slot: number): void {
+    this.weaponCommands.push({ type: "equipSlot", slot });
   }
 
   toggleAds(): boolean {
@@ -63,17 +91,15 @@ export class LocalPlayerController {
   }
 
   consumeCommands(target: LocalPlayerCommands): void {
-    target.triggerPresses = this.triggerPresses;
-    target.reloadRequested = this.reloadRequested;
+    target.weaponCommands.length = 0;
+    target.weaponCommands.push(...this.weaponCommands);
     target.adsWanted = this.adsWanted;
     target.holdingBreath = this.holdingBreath;
-    this.triggerPresses = 0;
-    this.reloadRequested = false;
+    this.weaponCommands.length = 0;
   }
 
   resetInput(): void {
-    this.triggerPresses = 0;
-    this.reloadRequested = false;
+    this.triggerUp();
     this.holdingBreath = false;
   }
 }

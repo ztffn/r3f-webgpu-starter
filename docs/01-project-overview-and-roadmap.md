@@ -254,15 +254,23 @@ and immediately answers "does this feel like DF2?".
 - 🟡 Authority-core load tests cover 16/32 shooters at 600 RPM and 32 at 900 RPM. This is
   not yet a full rendered/networked 32-player browser benchmark; character, networking,
   remote presentation, audio contention, and GPU cost remain to be measured together.
-- ⬜ A representative 9x19 mm ammunition profile exists, but the requested Glock sidearm
-  definition/view/animations and in-game loadout switching are not yet implemented.
+- ✅ Selectable sniper, M4, Glock, and SAW definitions share a replaceable proxy rig while
+  keeping presentation outside gameplay data. Numeric loadout switching and semi/burst/auto
+  command timelines are covered at 30/60/144 Hz.
+- 🟡 Weapon handling now includes deterministic stance/movement/ADS/breath spread,
+  recoil, bloom, recovery, an orange hip-fire crosshair, and run-and-gun input. Attachments,
+  perks, and live statuses are intentionally deferred behind a typed deterministic resolver;
+  see `11-weapon-ballistics-and-modifier-system-spec.md` and
+  `plans/2026-08-02-weapon-ballistics-modifier-roadmap.md`.
 - ⬜ First-person collision and stance motor using Rapier; basic AI/objectives.
   *(What exists today is a camera rig only — `FlyControls.tsx` clamps to the surface at a
   stance eye height. No physics, no collision.)*
 - ⬜ ECS (bitECS) as entity count grows (`05-...md` §3).
 
 The as-built FPS contracts, controls, performance claims, and remaining gaps are in
-`10-fps-combat-implementation-spec.md`.
+`10-fps-combat-implementation-spec.md`. Detailed weapon/ballistic invariants are in
+`11-weapon-ballistics-and-modifier-system-spec.md`; staged attachment, perk, replay,
+and scale work is in `plans/2026-08-02-weapon-ballistics-modifier-roadmap.md`.
 
 ### Phase 5 — Polish (⬜ not started)
 - ⬜ Wind animation tuning, LOD blend tuning, color-matching at draw distance, audio.

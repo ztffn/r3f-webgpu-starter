@@ -25,6 +25,8 @@ player instinctively recognise this?* — applies to features, not to whether a 
 | `06-asset-extraction-findings.md` | **Ground truth from real extracted data** — trumps guesses elsewhere |
 | `07-grass-visual-reference.md` | Grass measurement methodology, concealment results, **open artifacts** |
 | `08-implementation-spec.md` | **As-built: module map, contracts, invariants, traps.** Read this before touching code |
+| `10-fps-combat-implementation-spec.md` | **As-built FPS ownership, frame order, controls, performance, and deferred work** |
+| `11-weapon-ballistics-and-modifier-system-spec.md` | **Trigger-to-impact contracts, formulas, budgets, and attachment/perk extension rules** |
 
 ## Current state (July 2026)
 

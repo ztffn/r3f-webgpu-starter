@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DF2 session test</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: #0e1116;
+        color: #d7dee8;
+        font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+        overflow: hidden;
+      }
+      canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; }
+      #hud {
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        padding: 10px 14px;
+        background: rgba(10, 13, 18, 0.82);
+        border: 1px solid #253041;
+        border-radius: 6px;
+        white-space: pre;
+        pointer-events: none;
+      }
+      #help {
+        position: fixed;
+        bottom: 12px;
+        left: 12px;
+        color: #7c8ba1;
+        pointer-events: none;
+      }
+      #status { color: #e0b062; }
+      .live { color: #63c68a; }
+    </style>
+  </head>
+  <body>
+    <canvas id="view"></canvas>
+    <div id="hud">connecting…</div>
+    <div id="help">
+      WASD move · Shift sprint · Space jump · C crouch · Z prone · drag to look
+    </div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

@@ -21,15 +21,15 @@ import {
   texture3D,
 } from "three/tsl";
 import type { GrassField } from "./grassField";
-import type { ColorGrade } from "./colorGrade";
+import type { Atmosphere } from "./atmosphere";
 
 export interface BladeMaterialOptions {
   /** The canopy samplers the MARCH was built from. Not a copy — the same object. */
   field: GrassField;
   /** Colormap — the source of each blade's colour, exactly as for a column. */
   colorMap: THREE.Texture;
-  /** Shared weather grade — the same object the terrain and the march apply. */
-  grade: ColorGrade;
+  /** Shared grade and fog — the same expression the terrain and the march apply. */
+  atmosphere: Atmosphere;
   /** Requested instance pool. Rounded to a square so the lattice is regular. */
   count: number;
   /** Half-extent of the square field, metres. */
@@ -123,7 +123,7 @@ export function createBladeMaterial(opts: BladeMaterialOptions): BladeMaterial {
   const {
     field,
     colorMap,
-    grade,
+    atmosphere,
     count,
     radius,
     thinStart,
@@ -423,14 +423,17 @@ export function createBladeMaterial(opts: BladeMaterialOptions): BladeMaterial {
         ? vAlive.greaterThan(float(0.5)).select(V3(0.15, 1, 0.25), V3(1, 0, 0.75))
         : V3(near.oneMinus(), near.mul(near.oneMinus()).mul(4), near);
   } else {
-    material.colorNode = grade.apply(vColour.mul(shade));
+    material.colorNode = atmosphere.shade(vColour.mul(shade));
   }
   // DOUBLE-SIDED. Single-sided is the right call for camera-facing sprites, where the
   // back is never seen; for world-anchored geometry backface culling does not save
   // fill, it deletes blades whenever you happen to view them from behind.
   material.side = THREE.DoubleSide;
-  // UNLIT and unfogged, like every other material here. Blades live inside 12 m and
-  // FOG_NEAR is 300 m, so three's automatic fog would contribute nothing but a term.
+  // three's AUTOMATIC fog stays off, but the shared term above is now applied — and the
+  // difference matters. The old reasoning was that blades live inside 12 m while FOG_NEAR
+  // is 300 m, so fog could contribute nothing. That stopped being true when fog gained a
+  // ground layer: a blade five metres away inside a dense bank rendered perfectly sharp
+  // while the terrain under it was hazed.
   material.fog = false;
 
   return {

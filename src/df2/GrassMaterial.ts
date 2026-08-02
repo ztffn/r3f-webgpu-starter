@@ -50,8 +50,7 @@ import {
   struct,
 } from "three/tsl";
 import { createGrassField, type GrassField } from "./grassField";
-import type { ColorGrade } from "./colorGrade";
-import type { Fog } from "./fog";
+import type { Atmosphere } from "./atmosphere";
 
 /**
  * Margin the shell is lifted above the smooth canopy envelope.
@@ -107,10 +106,8 @@ export interface GrassMaterialOptions {
   lodDistances: number[];
   /** Colormap — the source of each column's colour. */
   colorMap: THREE.Texture;
-  /** Shared weather grade, applied BEFORE fog — see colorGrade.ts. */
-  grade: ColorGrade;
-  /** Shared atmosphere — the same expression the terrain applies (fog.ts). */
-  fog: Fog;
+  /** Shared grade and fog — the same expression the terrain applies (atmosphere.ts). */
+  atmosphere: Atmosphere;
   /** Metres spanned by one tile of the maps. */
   worldSize: number;
   /** Metres per raw canopy unit — how tall "255" grass stands. */
@@ -145,18 +142,6 @@ export interface GrassMaterialOptions {
   stripePixels?: number;
   /** 0 = tone keyed on the world cell (shipped), 1 = keyed on ray bearing. */
   toneMode?: number;
-  /**
-   * Scene fog, applied by this material rather than by three.
-   *
-   * three fogs a fragment by its RASTERISED depth, which for this material is the
-   * shell — and the shell is nowhere near where the ray actually hit. Standing
-   * inside the canopy the hit is metres away while the shell fragment can be
-   * hundreds of metres out, so near grass came out washed pale with fog it should
-   * not have had. Same class of error as depthNode exists to fix.
-   */
-  fogColor?: THREE.ColorRepresentation;
-  fogNear?: number;
-  fogFar?: number;
   /**
    * Width of one grass column in metres — the DDA grid, decoupled from the
    * heightmap texel. DF2's striations are far finer than its 1024² heightmap:
@@ -322,8 +307,7 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     finestVertexSpacing,
     lodDistances,
     colorMap,
-    grade,
-    fog,
+    atmosphere,
     worldSize,
     grassScale,
     steps: coarseSteps = 12,
@@ -333,9 +317,6 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     insideSpan,
     stripePixels = 3,
     toneMode = 0,
-    fogColor = "#aac2d6",
-    fogNear = 300,
-    fogFar = 2200,
     cellSize = 0.35,
     nearClip = 1.2,
     toneVariation = 0.42,
@@ -387,9 +368,11 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
   /** Reach for a ray that starts inside the canopy. See the note beside `span`. */
   const uInsideSpan = uniform(insideSpan);
   const uStripePixels = uniform(stripePixels);
-  const uFogColor = uniform(new THREE.Color(fogColor));
-  const uFogNear = uniform(fogNear);
-  const uFogFar = uniform(fogFar);
+  // The LIVE fog uniforms, read through the atmosphere rather than snapshotted here.
+  // Copies taken at construction went stale the moment a preset switched or a panel
+  // slider moved, so the three debug views that exist to diagnose fog were reporting a
+  // range the picture was not using — worse than having no readout.
+  const { near: uFogNear, far: uFogFar, color: uFogColor } = atmosphere.fog.uniforms;
   /** 0 = tone keyed on the world cell, 1 = keyed on ray bearing. */
   const uToneMode = uniform(toneMode);
   /** 0 = normal, 1 = hit mask, 2 = hit distance, 3 = height up the column. */
@@ -989,21 +972,16 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     // grass is the plain colormap.
     const faded: NodeArg = fade.oneMinus().mix(columns, base.rgb);
 
-    // Fog, from the HIT's world position rather than the rasterised shell's — the shell
-    // can sit hundreds of metres from where the ray actually struck. SHARED with the
-    // terrain material (fog.ts) rather than matched by hand: once fog gained a
-    // height-dependent ground layer, two implementations agreeing on plain linear
-    // distance stopped being enough, and any difference shows along every skyline.
-    // The mix ORDER here is the one that cost a session: written the GLSL way,
-    // `faded.mix(uFogColor, fogFactor)` compiles to mix(uFogColor, fogFactor, faded),
-    // making the fog colour the base of the blend and the grass colour the interpolant —
-    // every fragment came out near fog colour however close it was, and widening the fog
-    // range changed nothing. `fog.apply` now owns that ordering in one place.
+    // Shaded from the HIT's world position rather than the rasterised shell's — the
+    // shell can sit hundreds of metres from where the ray actually struck, which is the
+    // whole reason `shade` takes a position at all.
     //
-    // GRADED BEFORE FOGGED. The fog colour is part of the weather preset and already
-    // carries the hour; grading it again would drag the horizon away from the sky it
-    // has to meet, which is the seam that makes a sky swap look like a mistake.
-    const shaded: NodeArg = fog.apply(grade.apply(faded), hitWorld);
+    // Both the grade/fog ORDER and the mix order now live in atmosphere.ts, and neither
+    // is a free choice: written the GLSL way, `faded.mix(fogColor, factor)` compiles to
+    // mix(fogColor, factor, faded), making the fog colour the base of the blend and the
+    // grass colour the interpolant — every fragment came out near fog colour however
+    // close it was, and widening the fog range changed nothing.
+    const shaded: NodeArg = atmosphere.shade(faded, hitWorld);
 
     // Debug views are selected by a uniform rather than baked in, so they can be
     // switched without rebuilding the material — which would also throw away the

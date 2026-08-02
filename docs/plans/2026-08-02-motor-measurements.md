@@ -74,12 +74,84 @@ hot path on hand-packed binary rather than Colyseus Schema.
 **Still missing:** behaviour as tick and patch rates diverge, and the same run under an
 actual server process with sockets attached rather than a bare loop.
 
+## §7.1 Cross-runtime divergence — first result, 3.4 cm
+
+Two Chrome tabs running the real client against the Node server over real WebSockets, on
+rolling terrain, several hundred reconciliations each:
+
+| Client | Reconciles | Worst drift | Worst correction |
+| --- | ---: | ---: | ---: |
+| Chrome tab A | 542 | 0.0336 m | 0.0337 m |
+| Chrome tab B | 542 | 0.0336 m | 0.0337 m |
+
+Worst disagreement between a browser-predicted position and the Node authority is **3.4 cm**,
+and both tabs report the identical figure, which suggests one specific event — most likely a
+landing — rather than accumulating noise.
+
+**This is a weak form of the measurement and must not be quoted as the strong one.** Chrome
+and Node here are the same V8 and the same WASM build on one machine. The real question is
+Chrome on ARM against a server on x86, and that remains unanswered. What this does establish
+is that the replay path is sound: a browser motor rewound to the server's state and
+replayed forward lands within centimetres of where it independently predicted.
+
+## §7.3 Correction rate and magnitude — answered for a single player
+
+One scripted player, 1800 ticks (30 s), 60 Hz tick, 20 Hz patch, through the real server,
+client, codec and reconciliation over a simulated link.
+
+| Link | Worst drift | Mean drift | Worst correction | Replayed | Dropped |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| localhost | 0.401 m | 0.0024 m | 0.401 m | 0 | 0 |
+| 20 ms LAN | 0.460 m | 0.192 m | 0.404 m | 1197 | 0 |
+| 60 ms broadband | 1.302 m | 0.754 m | 0.753 m | 4775 | 0 |
+| 60 ms + 2% loss | 1.459 m | 0.839 m | 0.893 m | 5184 | 0 |
+| 120 ms + 5% loss | 2.828 m | 1.528 m | 1.840 m | 9482 | 0 |
+| 250 ms + 10% loss | 4.666 m | 2.569 m | 4.666 m | 15960 | 0 |
+
+Drift grows roughly linearly with latency, which is expected and is not divergence: the
+client is legitimately ahead of the newest snapshot by about one round trip plus the patch
+interval. Corrections stay under a metre out to 60 ms broadband. At 250 ms the worst
+correction equals the worst drift, which is the 4 m hard-snap threshold firing — beyond
+that the client stops replaying and simply accepts authority. No inputs were discarded in
+any scenario.
+
+Reproduce with `npm run motor:bench` and
+`node --experimental-strip-types --experimental-specifier-resolution=node
+tools/motor-bench/prediction-quality.ts`.
+
+## Three bugs the measurements found
+
+Recorded because each one was invisible until something was actually measured.
+
+1. **The correction telemetry read its own output.** `reconcile` held a reference to
+   `motor.state.position` as the "before" value and then teleported, which mutates that
+   object in place. Every after-minus-before reading was therefore exactly zero, including
+   the assertions in the session tests, which passed vacuously. Copy scalars, never alias
+   mutable state, when measuring a delta across a mutation.
+2. **A join teleported the player about 6 m.** The welcome packet carried no spawn
+   position, so the client started its prediction at the origin while the server had placed
+   it on a ring. The first snapshot corrected it. Worst drift fell from 5.97 m to 0.028 m
+   once the packet carried the resolved feet position.
+3. **Resent commands were queued twice.** A client repeats its unacknowledged tail; a
+   command still sitting in the server queue passed the `tick > acknowledgedTick` check and
+   was enqueued again. The queue grew, the overflow guard began discarding genuine input,
+   and the server fell permanently behind. Dedupe now tracks the highest tick ever queued,
+   not the highest consumed.
+
+A fourth issue is a client design constraint rather than a bug: **Chrome suspends
+`requestAnimationFrame` completely in a hidden tab** — measured at 0 frames per second, not
+merely throttled. A simulation loop driven by animation frames stops dead when backgrounded
+and then floods the server on return. The harness drives its fixed tick from a timer and
+abandons any backlog on becoming visible again, letting the hard snap resolve the gap.
+
 ## Open
 
-- **§7.1 cross-runtime divergence** — not started. Needs the same recorded command stream
-  through the motor in a browser and in Node. `tests/motor/character-motor.test.ts` proves
-  same-runtime replay determinism, which is the weaker precondition.
-- **§7.3 correction rate and magnitude** under latency and loss — needs transport.
+- **§7.1 across genuinely different platforms** — the result above is same-machine,
+  same-V8. Needs a server on different hardware and architecture.
+- **§7.2 under a real server process** with sockets attached rather than a bare loop, and
+  with tick and patch rates deliberately diverged.
+- **§7.3 for a full room** — the table above is one player. 64 players correcting at once
+  is the case that matters.
 - **§7.4 client cost of 64 remote interpolated entities** — not started.
 - **§7.5 collision-representation disagreement** between the Rapier character world and
   `CompositeWorldQuery` — not started, and it is the one with a gameplay failure attached

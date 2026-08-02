@@ -38,6 +38,8 @@ const SMOKE_GROW_SECONDS = 5;
  */
 const SMOKE_EMIT_SECONDS = 1.1;
 const SMOKE_EMIT_SECONDS_TOTAL = 30;
+/** Canisters burning at once. Beyond this the shared slot pool cannot feed them. */
+const SMOKE_MAX_EMITTERS = 3;
 /**
  * Extinction per metre at the centre — thick enough to break a sightline.
  *
@@ -445,7 +447,10 @@ export function createFog(settings: FogSettings): Fog {
     // A GRENADE, not a puff: it sits where it landed and emits until it burns out.
     spawnSmoke: (x, y, z, color) => {
       const c = color ?? "#e8e8ea";
-      emitters.push({ x, y, z, color: c, age: 0, sinceEmit: SMOKE_EMIT_SECONDS });
+      // Oldest canister goes out when the pool is full. Without this, enough grenades
+      // starve every plume down to one puff each and none of them read at all.
+      if (emitters.length >= SMOKE_MAX_EMITTERS) emitters.shift();
+      emitters.push({ x, y, z, color: c, age: 0, sinceEmit: Infinity });
       // One immediately, so a thrown grenade is not invisible for its first interval.
       emitPuff(x, y, z, c);
     },
@@ -458,7 +463,14 @@ export function createFog(settings: FogSettings): Fog {
           emitters.splice(e, 1);
           continue;
         }
-        if (em.sinceEmit >= SMOKE_EMIT_SECONDS) {
+        // INTERVAL SCALES WITH THE NUMBER OF BURNING CANISTERS, which is what stops a
+        // second grenade wrecking the first. The slots are a shared pool, so three
+        // emitters at a fixed interval fill it three times as fast and start recycling
+        // puffs that are still on screen — the cloud visibly resets. Holding the TOTAL
+        // rate constant keeps every puff alive its full life; the cost is that each plume
+        // is made of fewer, longer-lived puffs when several are burning, which is a far
+        // better failure than flickering.
+        if (em.sinceEmit >= SMOKE_EMIT_SECONDS * emitters.length) {
           em.sinceEmit = 0;
           emitPuff(em.x, em.y, em.z, em.color);
         }

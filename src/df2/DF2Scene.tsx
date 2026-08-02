@@ -117,6 +117,48 @@ function fogSettings(w: WeatherPreset) {
 }
 
 /**
+ * Smoke: ages the live volumes, and throws one on G.
+ *
+ * A prototype, and scoped like one — the puff lands a fixed distance ahead of the eye
+ * rather than being thrown, and nothing but the renderer knows it exists. Before this
+ * could be a mechanic the volume has to become a field the concealment query reads too,
+ * or smoke would hide a player on screen while the gameplay side still saw them, which
+ * is the fairness break docs/08 §8 invariant 6 exists to prevent.
+ */
+function SmokeRig({
+  fog,
+  ready,
+}: {
+  fog: ReturnType<typeof createFog>;
+  ready: boolean;
+}): null {
+  const camera = useThree((s) => s.camera);
+  useEffect(() => {
+    // Placed from the URL so a smoke screenshot is reproducible, which a thrown one never
+    // is — and placed on READY rather than on mount, because the terrain decode takes
+    // tens of seconds and a puff spawned at mount has expired before anything is on
+    // screen. Frames are already running behind the loading overlay.
+    if (BENCH.smoke && ready) {
+      const forward = new THREE.Vector3();
+      camera.getWorldDirection(forward);
+      const at = camera.position.clone().addScaledVector(forward, BENCH.smoke);
+      fog.spawnSmoke(at.x, at.y, at.z);
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code !== "KeyN") return;
+      const forward = new THREE.Vector3();
+      camera.getWorldDirection(forward);
+      const at = camera.position.clone().addScaledVector(forward, 12);
+      fog.spawnSmoke(at.x, at.y, at.z);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [camera, fog, ready]);
+  useFrame((_, dt) => fog.tickSmoke(dt));
+  return null;
+}
+
+/**
  * Keeps the precipitation box on the camera.
  *
  * Its own component so the per-frame follow gets a `useFrame` without adding a hook to
@@ -598,6 +640,7 @@ export function DF2Scene({
       {bladeMesh && grass && <primitive object={bladeMesh} />}
 
       <PrecipitationRig precipitation={precipitation} />
+      <SmokeRig fog={fog} ready={!!heightfield} />
 
       {/* Scope mode promotes the contrast ladder into resettable shootable targets. */}
       {(BENCH.targets || (scopeDemo && !FPS_DEBUG.impactTest)) && heightfield && (

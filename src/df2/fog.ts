@@ -6,6 +6,8 @@
 // is why it is here at all: a valley you can crawl along unseen is cover, not decoration.
 
 import {
+  Fn,
+  If,
   cameraPosition,
   cameraViewMatrix,
   float,
@@ -21,6 +23,23 @@ import * as THREE from "three/webgpu";
 type NodeArg = any;
 
 const V3 = vec3 as unknown as (x: NodeArg, y: NodeArg, z: NodeArg) => NodeArg;
+
+/** Metres. A grenade's initial puff, before it billows. */
+const SMOKE_START_RADIUS = 1.5;
+const SMOKE_MAX_RADIUS = 9;
+const SMOKE_GROW_SECONDS = 4;
+/** Extinction per metre at the centre — thick enough to break a sightline. */
+const SMOKE_DENSITY = 0.55;
+/** Long enough to cross a road under, which is the only reason to throw one. */
+const SMOKE_LIFE_SECONDS = 22;
+/** Lattice units per metre for the churn. About a 3 m lump at this value. */
+const SMOKE_NOISE_SCALE = 0.35;
+/** Lattice units per second — smoke boils slowly, and fast reads as fire. */
+const SMOKE_CHURN = 0.12;
+/** How far the noise pushes the silhouette in or out, as a fraction of the radius. */
+const SMOKE_LUMPINESS = 0.22;
+/** How far it swings the density inside. */
+const SMOKE_MOTTLE = 0.45;
 
 export interface FogSettings {
   color: string;
@@ -55,7 +74,21 @@ export interface FogSettings {
   groundDrift: number;
 }
 
+/** How many smoke volumes can exist at once. Unrolled in the graph, so it is baked. */
+export const SMOKE_SLOTS = 4;
+
 export interface Fog {
+  /**
+   * Drop a smoke volume at a world position. Reuses the oldest slot when full.
+   *
+   * Cheap for the same reason the fog layer is: the medium is a function of position with
+   * a closed-form line integral, so a puff costs a few arithmetic operations per fragment
+   * rather than a raymarch. Optical depths ADD, so smoke and weather compose into one
+   * exponential at the end with no blending order to get wrong.
+   */
+  spawnSmoke: (x: number, y: number, z: number) => void;
+  /** Grow and fade the live volumes. Call once a frame with the delta in seconds. */
+  tickSmoke: (dt: number) => void;
   uniforms: {
     color: NodeArg;
     near: NodeArg;
@@ -98,9 +131,79 @@ export function createFog(settings: FogSettings): Fog {
   const uTop = uniform(settings.groundTop);
   const uScale = uniform(Math.max(0.5, settings.groundScale));
   const uDensity = uniform(settings.groundDensity);
+  // Smoke: centre in xyz and current radius in w, with density held separately so a puff
+  // can fade without shrinking. Separate uniforms rather than an array because the graph
+  // unrolls them anyway at this count, and a scalar `.value` assignment is the one form
+  // the WebGPU uniform path reliably re-uploads.
+  const uSmoke = Array.from({ length: SMOKE_SLOTS }, () => uniform(new THREE.Vector4(0, 0, 0, 1)));
+  const uSmokeDensity = Array.from({ length: SMOKE_SLOTS }, () => uniform(0));
+  const smokeAge = new Array<number>(SMOKE_SLOTS).fill(Infinity);
+
   const uNoiseScale = uniform(settings.groundNoiseScale);
   const uNoiseAmount = uniform(settings.groundNoiseAmount);
   const uDrift = uniform(settings.groundDrift);
+
+  /**
+   * Optical depth added by the smoke volumes along a ray.
+   *
+   * The exact integral of a UNIFORM sphere is its chord, and the chord already falls to
+   * zero at the rim — but with a vertical tangent, which reads as a hard ball. Weighting
+   * it by the same quantity again approximates a quadratic density falloff and costs one
+   * multiply, which is the whole difference between a bubble and smoke.
+   *
+   * `maxT` clips the integral at the surface behind it, so a puff correctly stops fogging
+   * what is in front of it — that is what makes this compose with geometry rather than
+   * float over it.
+   */
+  /**
+   * GATED, and the gate is the whole difference between shippable and not.
+   *
+   * Written branchlessly first, this cost 5 ms a frame at dpr 2 — on every frame, with no
+   * smoke anywhere, because a noise sample per slot runs for every fragment on screen and
+   * a density of zero only zeroes the RESULT, never the work. That is the same shape of
+   * mistake as an unmeasured overlay, and the same toggle discipline caught it.
+   *
+   * Inside a `Fn`, `If` gives the lanes somewhere to skip to. The test is two comparisons
+   * against values already in hand: is this slot alive, and could its sphere possibly
+   * touch this ray. Empty slots then cost two compares, and a live puff costs its noise
+   * only across the pixels it actually covers.
+   */
+  const smokeDepth = Fn(([origin, dir, maxT]: NodeArg[]): NodeArg => {
+    const drift = time.mul(SMOKE_CHURN);
+    const total = float(0).toVar();
+    for (let i = 0; i < SMOKE_SLOTS; i++) {
+      const centre = uSmoke[i];
+      const m = centre.xyz.sub(origin);
+      const b = dir.dot(m);
+      const perpSq = m.dot(m).sub(b.mul(b));
+      // Generous by the lumpiness margin, since the noise can push the silhouette out.
+      const reach = centre.w.mul(1 + SMOKE_LUMPINESS);
+      If(uSmokeDensity[i].greaterThan(float(0)).and(perpSq.lessThan(reach.mul(reach))), () => {
+      // ONE noise sample, doing both jobs. It is taken at the ray's CLOSEST POINT to the
+      // centre — a world position, not a screen or view quantity — so the lumps stay put
+      // when the camera turns. Sampling per screen pixel instead is the classic way to
+      // make smoke that crawls as you look around.
+      //
+      // Perturbing the radius breaks the circular silhouette, which is what gives a puff
+      // away as a sphere; reusing the same sample on the density correlates the bulges
+      // with the thick parts, which is how real smoke reads. Two jobs from one sample
+      // because at four slots this is the most expensive thing in the term.
+      const perp = origin.add(dir.mul(b));
+      const n = mx_noise_float(perp.mul(SMOKE_NOISE_SCALE).add(drift));
+      const radius = centre.w.mul(n.mul(SMOKE_LUMPINESS).add(1));
+
+      const inside = radius.mul(radius).sub(perpSq).max(float(0));
+      const half = inside.sqrt();
+      const t0 = b.sub(half).clamp(float(0), maxT);
+      const t1 = b.add(half).clamp(float(0), maxT);
+      const chord = t1.sub(t0).max(float(0));
+      const falloff = inside.div(radius.mul(radius).max(float(1e-4)));
+      const density = uSmokeDensity[i].mul(n.mul(SMOKE_MOTTLE).add(1).max(float(0)));
+      total.addAssign(density.mul(chord).mul(falloff));
+      });
+    }
+    return total;
+  });
 
   const apply = (rgb: NodeArg, worldPos: NodeArg): NodeArg => {
     // Planar view depth, matching three's own linear fog, so anything still using the
@@ -175,7 +278,12 @@ export function createFog(settings: FogSettings): Fog {
       V3(worldPos.x.mul(uNoiseScale).add(drift), worldPos.z.mul(uNoiseScale), drift.mul(0.6))
     );
     const modulated = noise.mul(uNoiseAmount).add(1).max(float(0));
-    const optical = uDensity.mul(throughLayer).mul(modulated).max(float(0));
+    // Smoke adds to the SAME optical depth rather than blending as a separate layer,
+    // which is what makes weather and smoke compose without an ordering to get wrong.
+    const toPoint = worldPos.sub(cameraPosition);
+    const rayLength = toPoint.length().max(float(1e-4));
+    const smoke = smokeDepth(cameraPosition, toPoint.div(rayLength), rayLength);
+    const optical = uDensity.mul(throughLayer).mul(modulated).max(float(0)).add(smoke);
     const ground = optical.negate().exp().oneMinus();
 
     // Combined as two independent extinctions rather than added, so heavy ground fog at
@@ -214,7 +322,13 @@ export function createFog(settings: FogSettings): Fog {
     // so including it would flood the entire sky with fog colour on every preset; the
     // skybox already meets the terrain because each preset's fog colour was sampled from
     // that sky's own horizon band.
-    const optical = uDensity.mul(columnAbove()).div(direction.y.max(float(1e-3)));
+    // The sky ray runs to infinity; a distance past the far plane is indistinguishable
+    // from it for a volume of a few metres, and keeps the clip finite.
+    const smoke = smokeDepth(cameraPosition, direction, float(1e5));
+    const optical = uDensity
+      .mul(columnAbove())
+      .div(direction.y.max(float(1e-3)))
+      .add(smoke);
     const amount: NodeArg = optical.negate().exp().oneMinus().clamp(0, 1);
     return amount.mix(rgb, uColor);
   };
@@ -228,6 +342,31 @@ export function createFog(settings: FogSettings): Fog {
       groundTop: uTop,
       groundScale: uScale,
       groundDensity: uDensity,
+    },
+    spawnSmoke: (x, y, z) => {
+      // Oldest slot, so a fifth grenade replaces the first rather than being dropped.
+      let slot = 0;
+      for (let i = 1; i < SMOKE_SLOTS; i++) if (smokeAge[i] > smokeAge[slot]) slot = i;
+      smokeAge[slot] = 0;
+      uSmoke[slot].value.set(x, y, z, SMOKE_START_RADIUS);
+      uSmokeDensity[slot].value = SMOKE_DENSITY;
+    },
+    tickSmoke: (dt) => {
+      for (let i = 0; i < SMOKE_SLOTS; i++) {
+        if (!Number.isFinite(smokeAge[i])) continue;
+        smokeAge[i] += dt;
+        const t = smokeAge[i];
+        // Expands quickly then slows, and fades on a longer curve than it grows — the
+        // shape of a real cloud, and it is also what makes smoke useful rather than a
+        // flash: it has to stay up long enough to cross under.
+        uSmoke[i].value.w = SMOKE_START_RADIUS + (SMOKE_MAX_RADIUS - SMOKE_START_RADIUS) * Math.min(1, t / SMOKE_GROW_SECONDS);
+        const fade = Math.max(0, 1 - t / SMOKE_LIFE_SECONDS);
+        uSmokeDensity[i].value = SMOKE_DENSITY * fade * fade;
+        if (t > SMOKE_LIFE_SECONDS) {
+          smokeAge[i] = Infinity;
+          uSmokeDensity[i].value = 0;
+        }
+      }
     },
     apply,
     applySky,

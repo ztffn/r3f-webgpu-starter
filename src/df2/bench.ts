@@ -96,6 +96,13 @@ export interface BenchConfig {
   fogBase?: number;
   fogTop?: number;
   fogDensity?: number;
+  /**
+   * Drop a smoke volume this many metres ahead of the eye at load — `?smoke=15`.
+   *
+   * A thrown puff cannot be screenshotted twice the same way, and smoke is judged
+   * entirely on how it sits against terrain at a given range.
+   */
+  smoke?: number;
   /** Per-texel share of the baked height field. Baked, so reload to change. */
   strand?: number;
   /** Longest span a ray searches, metres. Sets step size for grazing rays. */
@@ -173,6 +180,7 @@ function parse(): BenchConfig {
     fogBase: num("fogbase"),
     fogTop: num("fogtop"),
     fogDensity: num("fogdensity"),
+    smoke: num("smoke"),
   };
 
   if (q.get("bench") !== "1") {

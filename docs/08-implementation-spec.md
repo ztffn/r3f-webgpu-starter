@@ -86,9 +86,11 @@ Everything below `src/df2/` is the Phase-1 spike. The target layout is `05` §7
 | `grassField.ts` | THE canopy field as TSL samplers: `columnTop`, `groundAt` (with its half-texel correction), `meshMipAt`, `canopyBase`/`canopyNorm`, `strandHash` | which layer is drawing |
 | `BladeMaterial.ts` | near-field instanced blades: vertex-stage placement, wind, player parting, sun modulation | coverage — it OVERLAYS the march and must never replace it; gameplay queries |
 | `bladeGeometry.ts` | one tapered blade primitive; `bladeVertexData` is Three-free and unit-tested | instancing, placement, materials |
-| `colorGrade.ts` | the `.trn` grade — `filter`/`gamma`/`saturation` — as one term applied by terrain, march and blades | fog, which must come after it |
+| `atmosphere.ts` | the COMPOSITION of grade-then-fog as one `shade(rgb, worldPos?)` call — the single thing a scene material asks for | either half's internals; it exposes only `fog`, for debug readouts |
+| `colorGrade.ts` | the `.trn` grade — `filter`/`gamma`/`saturation` — plus the exported `luminance()` both it and `fog.ts` need | fog, which must come after it |
 | `fog.ts` | distance fog, the height slab, and the smoke volumes, as one shared term | **smoke will have to leave**: it is about to become an authoritative, networked, concealment-readable system and cannot live in a file that imports `three/webgpu` |
 | `weather.ts` | presets: sky, grade, fog, precipitation, measured from the skyboxes | rendering |
+| `tools/sky-convert/` | equirectangular panorama -> the six cube faces the sky pipeline loads, and the horizon/zenith colours a preset needs | the runtime |
 | `noiseTexture.ts` | one baked tiling 3D noise, four octaves in four channels | its consumers |
 | `Precipitation.ts` | camera-local instanced rain/snow, ported from three-geospatial | the scene; it is placed by a rig |
 | `components/WeatherDebug.tsx` | live weather, fog, rain and blade sliders; writes `uniform.value` directly | material internals |
@@ -113,7 +115,10 @@ is the reason smoke cannot stay in `fog.ts` once it answers gameplay queries.
 
 **One field, many consumers** is now the load-bearing pattern here, applied four times:
 `grassField.ts` (march + blades), `colorGrade.ts` (terrain + march + blades), `fog.ts`
-(terrain + march + sky) and `noiseTexture.ts` (fog + smoke + blade wind). Each exists
+(terrain + march + sky) and `noiseTexture.ts` (fog + smoke + blade wind). `atmosphere.ts`
+is the fifth and a different shape: it does not own a field, it owns the ORDER two of them
+compose in, because that order was being restated per material and one material simply
+stopped applying it. Each exists
 because the alternative — two implementations agreeing by hand — has failed in this
 codebase every time it was tried. Anything that samples the colormap or the canopy joins
 the existing term; it does not add a second one.
@@ -449,6 +454,16 @@ and there are thirteen of them. Two calibration notes carry:
   the grade from the sky's own luminance and chroma; the rules and their justifications
   are in `weather.ts`'s own comment. The check that the method is right is that `clear`
   comes out exactly neutral — it is the sky the colormap was baked under.
+- **`fogColor` is no longer the colour terrain fades to at range.** The haze samples the
+  sky cubemap along the view ray, so `fogColor` is now only the NON-DIRECTIONAL term used
+  at short range and the fallback for presets with `sky: null`. The old constraint that it
+  had to match the sky's horizon is retired, and the eighteen presets carrying values
+  chosen under it are due a re-tune.
+- **`hazeLift` is a property of the ASSET, not of the weather.** It is the lowest elevation
+  the haze will sample the sky at, and it exists because the retro pack paints a black
+  lower hemisphere that terrain was always going to cover. Packs converted by
+  `tools/sky-convert` have a graded floor and want it near 0. It is currently one global
+  uniform with no per-preset field — see §14.
 
 ## 8. Invariants that break silently
 
@@ -535,6 +550,21 @@ Nothing throws when these break. Check them after touching `config.ts`.
    **Test it, do not assume it.** Any change to the march bounds, the proxy geometry, or the fade
    needs the hit-distance view (`?debug=1`, view 2) checked prone as well as standing. A ceiling
    on hit distance is invisible in a normal render — it looks like ordinary bare ground.
+
+7. **Every scene material shades through `atmosphere.shade`.** Grade first, fog second, and no
+   material composes the two itself. One that skips it renders at full contrast against hazed
+   terrain with **no line of code looking wrong**, which is how the blade layer came to stand
+   sharp inside a dense fog bank: it set `material.fog = false` on reasoning that was true when
+   written (blades live inside 12 m, distance fog starts at 300) and stopped being true the day
+   fog gained a ground layer.
+
+   **The limit worth knowing before adding props.** `shade` attaches to `colorNode`, which is
+   correct only because every material here is unlit against a pre-shaded colormap. A LIT
+   material needs fog applied AFTER lighting, on the output node — fogging albedo and then
+   lighting the fog is visibly wrong. Three world-space things already bypass the term and none
+   of them could adopt it as written: the water plane (`MeshStandardNodeMaterial`), the GLTF
+   targets, and `fps/world/WorldObjectPrefab.ts` (plain non-node `MeshStandardMaterial`). That
+   post-lighting variant is the first thing buildings and foliage will need (§14).
 
 ---
 
@@ -704,6 +734,35 @@ worse. A review that has not read it will propose changes that have already been
   several sessions as the "pale grass" artifact — see §9 and `docs/07` §9.
 - **Prone showing only grass is correct, not a bug.** If you are concealed you are also blind;
   that symmetry is the mechanic.
+
+### A vec3 constant dotted against a vec4 — cost most of a session
+
+`colorGrade.apply` computed luminance as `rgb.dot(vec3(0.2126, 0.7152, 0.0722))`. The terrain
+hands it a **vec4** straight from `texture()`, and TSL promotes the vec3 constant to a vec4
+with `w = 1`, so the dot silently adds the alpha channel as a fourth term: luminance came out
+around 1.3 instead of 0.3. The grade then desaturated toward a "grey" brighter than white and
+tinted it warm, painting the whole terrain a flat beige with no map detail in it at all.
+
+**Why it stayed hidden for months.** At saturation 128 the mix weight is exactly 1.0, which
+discards the bad luminance entirely — and every extracted map ships the neutral 128. The first
+preset with a non-neutral saturation (`overcast`, at 72) made it visible instantly. The file's
+own comment had already recorded that this neutrality masked one other bug; it masked two.
+
+`luminance()` is exported from `colorGrade.ts` now and both callers use it, so the swizzle
+lives in one place. **The general rule: in TSL, never dot a vec4 against a vec3 constant.**
+Take `.rgb` first. Nothing warns.
+
+### An effect that read `weather` and did not depend on it
+
+The effect applying a preset's grade and fog omitted `weather` from its dependency array, so
+it ran once at load and never again. The sky still swapped, because that is a different effect
+and it does list `weather` — so a preset appeared to half-work: new sky, same graded ground,
+same fog range. It presented as "the ground is always olive and no button changes it".
+
+There is no ESLint in this project, so nothing flags a stale dependency array. Both memo
+arrays for the grass and blade kits had the same defect after the atmosphere refactor,
+naming `fog` and `grade` which their bodies no longer read. **When a shared field object is
+replaced, grep the dependency arrays, not just the call sites.**
 
 ### The half-texel convention gap — cost a session on its own
 
@@ -917,11 +976,16 @@ canopy behind it and reads as texture; the lift is what separates the two layers
 
 | Parameter | Default | Effect |
 |---|---|---|
-| `?weather=` | `day` | Preset: `clear`, `classic`, `overcast`, `dusk`, `moody`, `dawn`, `apocalypse`, `sinister`, `techno`, `netherworld`, `night`, `space`. Sky, grade, fog and precipitation together |
+| `?weather=` | `day` | Preset: `clear`, `classic`, `overcast`, `dusk`, `moody`, `dawn`, `apocalypse`, `sinister`, `techno`, `netherworld`, `night`, `space`, plus the Kenney set `kday`, `kmorning`, `knight`, `kalien`, `kspace`. Sky, grade, fog and precipitation together |
+| `?fognear=` `?fogfar=` | per preset | Distance fog range, metres. A SHORT range is where the haze is stressed hardest — it drives the term to full on terrain still well below eye level, which is the geometry that exposed the haze sampling the skybox's painted ground |
 | `?fogtop=` | per preset | Top of the fog slab, ABSOLUTE world metres |
 | `?fogbase=` | per preset | Bottom of it. Below the terrain's minimum this is ordinary ground fog; raised above the valley floor the layer lifts into a BAND — clear below, clear above, blind at one altitude |
 | `?fogdensity=` | per preset | Extinction per metre inside the layer. Optical depth reaches 1 at `1/density` metres, so mild lives between 0.001 and 0.004 |
 | `?water=` | none | Force a water level in world metres. Every `.trn` in this pack ships `water_height` 0, below the terrain's own minimum, so the plane never draws and nothing downstream of it has ever run |
+
+Four atmosphere dials are panel-only and cannot yet be put in a URL: `Preset grade strength`,
+`Sky-tinted haze`, `Haze softness`, `Haze drains colour` and `Haze horizon lift`. A look found
+with them cannot be reproduced or shared — see §14.
 
 A fog BAND is a pose as much as a setting — it only reads from a vantage where the layer
 cuts the terrain — which is why these three are reachable in the same URL that fixes the
@@ -974,6 +1038,29 @@ Bundle is ~1.77 MB (490 kB gzip), dominated by Three. Not yet code-split.
 - **Concealment's consumer** — `04` §7: Pillars 5 and 10 suggest concealment should have no
   player-facing readout at all, which turns "boolean vs. percentage" into a question about AI
   input fidelity rather than UI. Decide the consumer first.
+- **A post-lighting `shade`** — §8 invariant 7. `atmosphere.shade` attaches to `colorNode`,
+  which only works for unlit materials. Buildings, props and foliage will be lit, and fog has
+  to reach them after lighting. This is the gating piece for the whole asset phase, not a
+  nicety, and it is the point at which a full-screen post pass becomes worth its cost: the
+  `.trn` grade is a global operation being simulated per material, and a wet lens and
+  dithering are both already wanted and both impossible forward.
+- **Concealment as a COMPOSITION of occluders** — today the simulation knows exactly one,
+  `grassHeightField`, sampled as a field. Smoke already breaks §8 invariant 6 (it conceals on
+  screen and nothing else knows it exists), and bushes multiply that. The current design draws
+  its correctness from renderer and simulation reading the *same field*; a list of placed
+  occluders has no such guarantee and needs its authority established deliberately. **Do not
+  reuse the grass placement trick for props:** the world-cell hash runs in TSL on the GPU with
+  no CPU twin, and WGSL does not guarantee bit-identical floats across vendors, so "the server
+  computes the same bush position" is not safe. Place on the CPU with an integer hash and
+  upload as instance attributes.
+- **`hazeLift` should be per-pack, or unnecessary** — it compensates for a painted lower
+  hemisphere in the retro sky pack and is currently one global uniform tuned for that pack,
+  applied to the Kenney packs which do not need it. Either give `WeatherPreset` a field, or
+  have `tools/sky-convert` grade the bottom band on write and retire the uniform.
+- **Five atmosphere dials have no URL parameter** — grade strength, sky-tinted haze, haze
+  softness, haze drain, haze lift. `?fognear=` was added this session precisely because a case
+  reachable only by dragging sliders "could be shown but not reproduced"; the same argument
+  applies to these and was not applied.
 
 ### Sequenced, not open
 

@@ -11,7 +11,6 @@ import {
   cos,
   cross,
   float,
-  hash,
   instanceIndex,
   length,
   mix,
@@ -139,10 +138,24 @@ export function createPrecipitation(opts: PrecipitationOptions = {}): Precipitat
     .add(V2(ix.sub(halfSide), iz.sub(halfSide)));
 
   // Per-drop randoms from the CELL, not the index — that is the whole change.
-  const r1: NodeArg = hash(worldCell.x.mul(37.7).add(worldCell.y.mul(91.3)));
-  const r2: NodeArg = hash(worldCell.x.mul(11.9).add(worldCell.y.mul(57.1)).add(13.17));
-  const r3: NodeArg = hash(worldCell.x.mul(73.1).add(worldCell.y.mul(19.7)).add(31.41));
-  const r4: NodeArg = hash(worldCell.x.mul(29.3).add(worldCell.y.mul(83.9)).add(57.93));
+  //
+  // The SIN-FREE hash grassField.ts uses, and for its documented reason. Cell indices are
+  // world-metres over a sub-metre cell, so a few hundred metres out they reach tens of
+  // thousands; a hash fed values that large has no bits left to vary and degenerates to a
+  // near-constant, stacking every drop at one offset with one phase. Packing the pair as
+  // `x + y*512` to feed TSL's single-float `hash` puts the magnitude straight back — this
+  // form consumes the pair without ever building a large number, and wraps first anyway.
+  const cellHash = (salt: number): NodeArg => {
+    const c: NodeArg = worldCell.add(V2(salt * 37.13, salt * 91.71));
+    const w: NodeArg = c.sub(c.mul(1 / 512).floor().mul(512));
+    const p0: NodeArg = w.mul(V2(0.1031, 0.103)).fract();
+    const p: NodeArg = p0.add(p0.dot(V2(p0.y, p0.x).add(33.33)));
+    return p.x.add(p.y).mul(p.x).fract();
+  };
+  const r1: NodeArg = cellHash(0);
+  const r2: NodeArg = cellHash(1);
+  const r3: NodeArg = cellHash(2);
+  const r4: NodeArg = cellHash(3);
 
 
   // Mode blends physics AND shape: 0 is a rain streak, 1 a square snowflake.
@@ -165,10 +178,14 @@ export function createPrecipitation(opts: PrecipitationOptions = {}): Precipitat
   // Vertical phase anchored to a WORLD height band, not to the camera's own altitude.
   // Snapping the band to whole multiples of its height means climbing or descending moves
   // it in steps rather than dragging it, so drops do not slide vertically as you move.
-  const band: NodeArg = cameraPosition.y.div(u.height).floor().mul(u.height);
-  const upPos: NodeArg = band.add(
-    mod(r3.mul(u.height).add(vy.mul(time)), u.height)
-  );
+  // Offset down by half its height so the eye sits in the MIDDLE of the band — snapped to
+  // the camera's own height alone, the band starts at the eye and all the rain is overhead.
+  const band: NodeArg = cameraPosition.y
+    .div(u.height)
+    .floor()
+    .mul(u.height)
+    .sub((u.height as NodeArg).mul(0.5));
+  const upPos: NodeArg = band.add(mod(r3.mul(u.height).add(vy.mul(time)), u.height));
 
   // Surface wind drives drops in air and fades out under water, so submerged specks
   // drift on the gentle sway below rather than at wind speed.

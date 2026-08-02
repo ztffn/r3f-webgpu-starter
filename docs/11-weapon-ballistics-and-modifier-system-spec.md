@@ -125,32 +125,43 @@ ordered WeaponCommand
 The mounted FPS prototype uses this order:
 
 ```text
-advance projectiles that already existed
-drain their impact and completed-result events
+clamp the render delta once into one simulation delta
 sample player pose, stance, grounded state, planar speed, and breath
 set equipped-weapon handling context
 consume ordered commands
 advance every loadout weapon, switching, cadence, reload, ADS, and recovery
-advance authoritative sway
-derive current sight and bore directions
-drain accepted weapon events and spawn each projectile
+run the FiringTimeline over this frame's accepted events, in cadence order
+drain impact and completed-result events
 update mixer and cosmetic recoil
 render scope, world, and weapon passes
 ```
 
-A projectile spawned in the current frame never receives time that elapsed
-before its trigger command. Handling context is supplied before commands because
-a trigger-down edge may accept a semi-auto or first automatic round immediately.
+`FiringTimeline` is the single simulation timeline for the frame. For each
+accepted event in order it advances gameplay sway and the projectile solver to
+that event's acceptance offset, interpolates the player pose there, composes
+sight, mean bore, and projectile directions, spawns, and then continues. After
+the last event it advances both to the end of the frame.
+
+The weapon runtime, gameplay sway, and the projectile solver therefore share one
+clamped delta (`MAX_SIMULATION_FRAME_SECONDS`, 0.1 s). A projectile receives
+exactly the time after its own acceptance boundary — never time that elapsed
+before the trigger command, and never zero. Handling context is supplied before
+commands because a trigger-down edge may accept a semi-auto or first automatic
+round immediately.
 
 ### 5.3 Freeze points
 
-There are two important freeze points:
+There are three important freeze points:
 
-1. `WeaponEvent.type === "shot"` captures sequence, damage, range, lifetime,
-   ammunition, pre-shot recoil, sampled dispersion, cone radius, and the new
-   recoil impulse.
-2. `BallisticProjectileSystem.spawn()` clones/normalizes origin, projectile
-   direction, and sight direction and stores the remaining launch data.
+1. `WeaponEvent.type === "shot"` captures sequence, the acceptance offset inside
+   the update that accepted it, damage, range, lifetime, ammunition, pre-shot
+   recoil, sampled dispersion, cone radius, and the new recoil impulse. Rounds
+   accepted by a command between updates report offset `0`.
+2. `FiringTimeline` freezes the interpolated origin and base orientation at that
+   offset, together with the sway state advanced to the same instant.
+3. `BallisticProjectileSystem.spawn()` clones/normalizes origin, projectile
+   direction, sight direction, and mean bore direction and stores the remaining
+   launch data.
 
 Later camera motion, recovery, mode changes, attachment changes, or player perks
 must not bend or retune an already accepted projectile.
@@ -166,10 +177,21 @@ must not bend or retune an already accepted projectile.
 - `fireModes`: ordered supported modes, default mode, and optional burst size;
 - `ads`, `accuracy`, and `recoil`: transition and handling values.
 
-The constructor rejects unsupported defaults, duplicate modes, invalid burst
-sizes, non-positive cadence, negative/non-finite handling values, and recoil or
-bloom caps smaller than one authored impulse. Projectile spawn separately
-validates its launch and ammunition inputs.
+The constructor validates every authored runtime number before any state is
+built: unsupported defaults, duplicate modes, invalid burst sizes, non-finite or
+non-positive cadence, shot range, shot lifetime and reload duration, negative or
+non-finite damage and ADS timings, fractional or negative magazine and reserve
+counts, the referenced ammunition's mass, muzzle velocity, ballistic
+coefficient, penetration multiplier and base damage, negative/non-finite
+handling values, and recoil or bloom caps smaller than one authored impulse.
+Projectile spawn separately validates its launch and ammunition inputs.
+
+The constructor also requires an explicit integer `instanceSeed`. There is no
+definition-derived default: it silently gave every copy of a weapon one shared
+recoil and dispersion pattern. Use `deriveWeaponInstanceSeed(shooterSeed, slotId,
+weaponId)` — `createDevelopmentLoadout(shooterSeed)` does exactly that, so
+replaying a shooter seed reproduces every pattern while separate shooters
+carrying the same weapon diverge.
 
 ### 6.1 Serializable commands
 
@@ -390,8 +412,13 @@ Before attachments or perks ship, add tests for:
 ### 10.1 Spawn contract
 
 `BallisticProjectileSystem.spawn()` accepts source and sequence identity,
-origin, projectile direction, optional sight direction, maximum distance,
-maximum lifetime, nominal damage, ammunition, and optional trace capture.
+origin, projectile direction, optional sight direction, optional
+turret-adjusted mean bore direction, maximum distance, maximum lifetime,
+nominal damage, ammunition, and optional trace capture. Sight and bore both
+default to the projectile direction. All three are retained on `ShotTrace` so
+diagnostics can separate scope elevation and windage from this shot's
+dispersion sample; drawing the projectile direction as the bore reports random
+spread as a turret adjustment.
 
 Spawn rejects and counts:
 
@@ -552,13 +579,26 @@ the first impact effect.
 - final stopping hit or `null`;
 - total applied damage and destruction flag;
 - the last target report plus all target reports;
-- a `ShotTrace` with sight direction, initial projectile direction, sampled
-  points, every surface interaction, final impact, flight time, drop, drift,
-  path length, and impact speed.
+- a `ShotTrace` with sight direction, mean bore direction, initial projectile
+  direction, sampled points, every surface interaction, final impact, flight
+  time, drop, drift, path length, and impact speed.
 
 A projectile that penetrates a target and later expires may have target reports
 while its final `hit` is `null`. Code must not equate `result.hit === null` with
 “this shot touched nothing.” Inspect `reports` and `trace.interactions`.
+
+Because of that, consumers must keep three groups of fields apart, and
+`CombatTelemetry.ShotTelemetry` now does so structurally:
+
+| Group | Source | Example |
+| --- | --- | --- |
+| target | `result.report` only | damage and health of the last damaged target |
+| aggregate | `result.damageApplied` / `destroyed` / `reports.length` | shot-wide totals |
+| terminal | final impact plus the interaction that stopped the round | stopping distance, surface, exit speed |
+
+Merging them lets a round that penetrates a target and then hits terrain credit
+that target with the terrain's distance and object name, and lets one destroyed
+target mark a different, surviving target as down.
 
 ### 13.3 Queue and history policy
 
@@ -641,7 +681,8 @@ treating every remote projectile simulation as authority.
 | Budget/guard | Current value or behavior |
 | --- | --- |
 | projectile fixed step | 120 Hz |
-| ballistic catch-up cap | 0.25 s |
+| ballistic catch-up cap | 0.25 s (internal guard; the frame host clamps first) |
+| shared simulation frame clamp | 0.1 s for weapons, sway, and projectiles |
 | weapon update hitch cap | 0.1 s per call |
 | projectile pool | 2,048 slots |
 | trace storage | 1,024 points per traced projectile |
@@ -667,7 +708,19 @@ The current suite covers:
 
 - command ordering, fire-mode semantics, reload/switch cancellation, dry fire,
   cooldown preservation, and hitch bounds;
-- deterministic dispersion and distinct instance seeds;
+- hostile authored definition values rejected before state is built, and an
+  invalid equip duration rejected before switch state is touched;
+- exact per-round acceptance offsets inside an update, including after a reload;
+- end-to-end trigger-to-projectile equivalence at 30/60/144 Hz for a stationary
+  shooter (exact) and a moving, turning shooter (within the pose-reconstruction
+  residual), comparing origins, sight/bore/projectile directions, acceptance
+  times, and resolved results;
+- distinct sight, mean bore, and projectile directions on the resolved trace;
+- target/aggregate/terminal telemetry separation for target-then-terrain,
+  target-then-expiry, and two damaged targets where only one is destroyed;
+- shot and impact presentation identity across weapons that share a sequence;
+- deterministic dispersion, required instance seeds, and per-slot seed
+  derivation that replays for one shooter and diverges between shooters;
 - stance, movement, airborne, ADS, breath, modifier, recoil, bloom, and recovery
   relationships;
 - exact 32-loadout event/ammo/reload outcomes at 600 and 900 RPM under 30, 60,

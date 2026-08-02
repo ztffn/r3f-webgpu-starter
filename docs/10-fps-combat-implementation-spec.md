@@ -52,6 +52,7 @@ throttled snapshots to the HUD.
 | --- | --- | --- |
 | `LocalPlayerController` | input commands, position, stance, planar speed, authoritative world aim | meshes, bones, scope materials |
 | `AimSwayController` | deterministic gameplay sway and breath stabilization | a second cosmetic-only shot direction |
+| `FiringTimeline` | one per-frame simulation timeline: sub-frame sway/projectile advance, frozen pose per accepted round, sight/bore/projectile composition | cadence decisions, input, GLTF, HUD |
 | `LookSensitivityController` | FOV-scaled pointer response and scan curve | camera or React state |
 | `LoadoutSystem` | slots, equipped weapon, switch state | GLTF animation details |
 | `WeaponSystem` | ammunition, cadence, reload, ADS, handling context, deterministic dispersion, recoil/bloom and shot events | terrain, targets, or scope shaders |
@@ -66,12 +67,13 @@ throttled snapshots to the HUD.
 DOM input
   -> LocalPlayerController commands
   -> stance / speed / grounded / breath handling context
-  -> weapon/loadout update queues an accepted shot event
-  -> authoritative base aim + gameplay sway
+  -> weapon/loadout update queues an accepted shot event with its cadence offset
+  -> FiringTimeline advances sway/projectiles to that offset
+  -> pose interpolated at the offset + gameplay sway = base aim
   -> event-captured pre-shot recoil offset
   -> scope turret-adjusted mean bore
   -> event-captured deterministic dispersion
-  -> drain accepted shot event with its resolved directions
+  -> spawn, then continue the timeline to the next offset
   -> pooled 120 Hz ballistic simulation
   -> CompositeWorldQuery swept segments
   -> penetration / Damageable / impact events
@@ -99,26 +101,48 @@ recoil, and spread are gameplay; the extra fast proxy-rig kick is cosmetic.
 R3F frame integration. The important order is:
 
 ```text
-advance existing projectiles
-drain impact/result events
+clamp the render delta once into one simulation delta
 sample player pose, planar speed, stance, grounded state, and breath
 set equipped-weapon handling context
 consume current input commands
 update weapon/loadout cadence, reload, ADS, recoil, and bloom recovery
+run the FiringTimeline over the frame's accepted events, in cadence order:
+  advance sway and projectiles to the next acceptance boundary
+  interpolate the player pose at that boundary
+  compose sight -> turret-adjusted mean bore -> dispersed projectile direction
+  spawn, then continue to the following boundary
+  finally advance sway and projectiles to the end of the frame
+drain impact/result events
 update ADS presentation blend
-update authoritative sway from stance + ADS + breath
-derive base and current mean sight directions
-derive current turret-adjusted mean bore
-sync AuthoritativeAimState
-drain accepted weapon events, compose each captured offset, and spawn projectiles
+derive end-of-frame mean sight direction and sync AuthoritativeAimState
 update mixer, cosmetic recoil, crosshair, and presentation
 render scope/world/weapon passes
 ```
 
-A projectile spawned this frame never receives time that elapsed before the
-trigger press. A shot always captures one normalized origin/sight/bore state;
-later camera, sway, or turret motion does not bend a projectile already in
-flight.
+**One clock.** Weapons, gameplay sway, and the projectile solver all receive the
+same clamped simulation delta (`MAX_SIMULATION_FRAME_SECONDS`, 0.1 s, the weapon
+runtime's own hitch bound). Presentation damping and the animation mixer keep the
+raw render delta.
+
+A projectile spawned this frame receives exactly the simulation time after its
+own acceptance boundary — never time that elapsed before the trigger press, and
+never zero. A shot captures one normalized origin/sight/bore state at that
+boundary; later camera, sway, or turret motion does not bend a projectile
+already in flight.
+
+Sub-frame poses are reconstructed by interpolating the frame's two endpoint
+samples, because that is all a render host observes. Two residuals survive that
+and both shrink with frame length: `THREE.Quaternion.slerp` carries roughly
+2e-8 rad of numerical error on short arcs, and a look path that is not a
+quaternion great circle bends away from the interpolated one. Both are orders of
+magnitude below one 0.1 mrad turret click.
+
+Two inputs are still sampled once per frame rather than per boundary, so they
+are not bit-exact across render rates during a transition: breath stabilization
+in the handling context (it only moves while ADS with breath held), and the
+damped ADS rig blend, which is presentation only. Gameplay sway reads
+authoritative `adsProgress` instead, so it does not depend on the damped blend
+or on whether the proxy GLTF finished loading.
 
 For third-person characters, preserve the separate mandatory lifecycle:
 
@@ -282,6 +306,7 @@ is the evidence of gravity and wind curvature.
 | `core/AuthoritativeAimState.ts` | undamped world-space gameplay aim |
 | `core/AimSwayController.ts` | deterministic stance/breath gameplay sway |
 | `core/WeaponAimComposer.ts` | allocation-free local recoil/dispersion direction composition |
+| `core/FiringTimeline.ts` | one-frame trigger-to-projectile timeline and shared simulation clamp |
 | `core/LookSensitivityController.ts` | FOV-scaled pointer response |
 | `core/ScopeAdjustmentController.ts` | reachable zeros, elevation, and windage |
 | `core/WorldQuery.ts` | analytic terrain, collider index, composite query |

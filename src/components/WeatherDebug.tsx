@@ -25,10 +25,58 @@ interface Dial {
 
 const ATMOSPHERE: Dial[] = [
   {
+    label: "Preset grade strength",
+    min: 0,
+    max: 2,
+    step: 0.01,
+    get: (s) => Number(s.grade.uniforms.strength.value),
+    set: (s, v) => (s.grade.uniforms.strength.value = v),
+    hint: "how far the sky's own tint, gamma and saturation recolour the ground. 0 is the raw colormap",
+  },
+  {
+    label: "Sky-tinted haze",
+    min: 0,
+    max: 1,
+    step: 0.01,
+    get: (s) => Number(s.fog.uniforms.skyAmount.value),
+    set: (s, v) => (s.fog.uniforms.skyAmount.value = v),
+    hint: "0 fades distance to the flat fog colour, 1 to the sky behind it. This is the A/B",
+  },
+  {
+    label: "Haze softness",
+    min: 0,
+    max: 1,
+    step: 0.01,
+    get: (s) => Number(s.fog.uniforms.skyBlur.value),
+    set: (s, v) => (s.fog.uniforms.skyBlur.value = v),
+    hint: "how much sky detail the haze keeps. Sharp stamps clouds onto distant ground",
+  },
+  {
+    label: "Haze drains colour",
+    min: 0,
+    max: 1,
+    step: 0.01,
+    get: (s) => Number(s.fog.uniforms.hazeDrain.value),
+    set: (s, v) => (s.fog.uniforms.hazeDrain.value = v),
+    hint: "0 cross-fades straight to the sky. Higher goes grey FIRST, sky-coloured later",
+  },
+  {
+    label: "Haze horizon lift",
+    min: 0,
+    max: 0.4,
+    step: 0.01,
+    get: (s) => Number(s.fog.uniforms.hazeLift.value),
+    set: (s, v) => (s.fog.uniforms.hazeLift.value = v),
+    hint: "keeps the haze off the skybox's baked ground. Too low turns the far field black",
+  },
+  {
     label: "Fog near",
-    min: 10,
+    // From 0, in metres. A near of a few metres is not a silly setting — it is how you
+    // put the haze onto the near field to see what it does there, and the old floor of
+    // 10 with a step of 10 made everything below that reachable only from a URL.
+    min: 0,
     max: 1200,
-    step: 10,
+    step: 1,
     get: (s) => Number(s.fog.uniforms.near.value),
     set: (s, v) => (s.fog.uniforms.near.value = v),
   },

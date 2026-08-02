@@ -4,12 +4,16 @@
 // every horizon, which is why this is a module rather than two copies — the same seam
 // the colour grade went through. Ground fog is height-based and pools in hollows, which
 // is why it is here at all: a valley you can crawl along unseen is cover, not decoration.
+//
+// Fog COLOUR comes from the sky itself, sampled along the view ray, rather than from a
+// constant — see `hazeAt` for why a constant cannot be made to work.
 
 import {
   Fn,
   If,
   cameraPosition,
   cameraViewMatrix,
+  cubeTexture,
   float,
   texture3D,
   time,
@@ -18,6 +22,7 @@ import {
   vec4,
 } from "three/tsl";
 import * as THREE from "three/webgpu";
+import { luminance } from "./colorGrade";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type NodeArg = any;
@@ -146,7 +151,23 @@ export interface Fog {
     groundTop: NodeArg;
     groundScale: NodeArg;
     groundDensity: NodeArg;
+    /** How far the fog colour comes from the sky rather than from `color`. */
+    skyAmount: NodeArg;
+    /** How much of the sky's detail the haze keeps, 0 sharp to 1 flat. */
+    skyBlur: NodeArg;
+    /** How much haze drains colour before it adds the sky's. 0 is a pure cross-fade. */
+    hazeDrain: NodeArg;
+    /** Lowest sky elevation the haze samples, keeping it off the pack's baked ground. */
+    hazeLift: NodeArg;
   };
+  /**
+   * Point the haze at a sky, or at nothing.
+   *
+   * IN PLACE, not a rebuild — see the node's own comment. `null` collapses the term to the
+   * flat `color`, which is what presets with no cubemap want and is also the pre-cubemap
+   * behaviour, so nothing regresses when a sky is missing or still loading.
+   */
+  setSky: (sky: THREE.CubeTexture | null) => void;
   /**
    * Blend a colour toward the fog, given the world position it was sampled at.
    *
@@ -180,6 +201,67 @@ export function createFog(settings: FogSettings): Fog {
   const uTop = uniform(settings.groundTop);
   const uScale = uniform(Math.max(0.5, settings.groundScale));
   const uDensity = uniform(settings.groundDensity);
+
+  // --- the sky, as the fog's colour ------------------------------------------
+  //
+  // ONE base node, sampled several ways. `.sample()` and `.level()` clone the node but
+  // point the clone's `referenceNode` back here, and TextureNode's `value` accessor
+  // forwards through that reference — so a preset switch assigns `.value` once and every
+  // derived sample follows. Three rebuilds the bind group when a texture uniform comes to
+  // refer to a different texture object, which is what lets the sky swap without
+  // rebuilding the terrain material and losing its geometry cache.
+  //
+  // Starts empty: the fog is built before the cubemap has loaded, and `skyAmount` holds
+  // the whole term at zero until `setSky` supplies one.
+  const emptySky = new THREE.CubeTexture();
+  const skyBase: NodeArg = cubeTexture(emptySky);
+  /**
+   * SEPARATE from the dial below, and they were briefly the same uniform.
+   *
+   * This is the fact "a cubemap is bound", owned by `setSky`; `skyAmount` is the number
+   * a person is tuning. Sharing storage meant every preset button press slammed the dial
+   * back to 1 and threw away whatever had been found — on the one dial whose whole
+   * purpose is comparing presets against each other.
+   */
+  const uHasSky = uniform(0);
+  const uSkyAmount = uniform(1);
+  /**
+   * 0 samples the sharp sky, 1 its smallest mip. Haze is the sky's LOW frequencies —
+   * sampled sharp, the cubemap's clouds get stamped onto distant terrain.
+   *
+   * A FRACTION of the mip chain rather than a level, via `.blur()`, which scales it by
+   * three's own `maxMipLevel`. That node re-reads the texture every frame, so it copes
+   * with a cubemap whose faces are still downloading and with a pack at any resolution —
+   * neither of which a level computed at build time from `image[0].width` can do.
+   */
+  const uSkyBlur = uniform(0.55);
+  /**
+   * How much haze DRAINS colour before it adds its own.
+   *
+   * A straight cross-fade to the sky says colour is lost and sky colour gained at exactly
+   * the same rate, and air does not work that way: a ridge in the middle distance has gone
+   * grey-blue long before it has gone sky-coloured. Draining toward luminance first
+   * separates the two, so the same fog range can read as thin clear air that merely
+   * desaturates, or as a wash that takes the sky's hue with it.
+   *
+   * 0 is the pure cross-fade — the behaviour before this dial existed, kept as the default
+   * so nothing shifts under anyone who already liked what they had.
+   */
+  const uHazeDrain = uniform(0);
+  /**
+   * Lowest elevation the haze will sample the sky at, as sin(pitch).
+   *
+   * NOT COSMETIC. Distant terrain is below eye level, so its view ray points down, and a
+   * skybox below the horizon holds whatever the pack baked under it — black, in this one,
+   * because terrain was always going to cover it. Fading the far field toward that turned
+   * everything past the fog range into a black wall under a pale sky.
+   *
+   * Lifted clear of the horizon rather than clamped flat onto it, because the haze samples
+   * a blurred mip whose footprint spans several degrees: sitting exactly on the seam
+   * averages the pack's baked ground back in through the blur. A pack with a graded lower
+   * hemisphere wants this near 0; one with a hard painted floor wants it higher.
+   */
+  const uHazeLift = uniform(0.12);
   // Smoke: centre in xyz and current radius in w, with density held separately so a puff
   // can fade without shrinking. Separate uniforms rather than an array because the graph
   // unrolls them anyway at this count, and a scalar `.value` assignment is the one form
@@ -308,6 +390,40 @@ export function createFog(settings: FogSettings): Fog {
     return V4(tint.div(total.max(float(1e-5))), total);
   });
 
+  /**
+   * The colour distance fades TOWARD, for a ray leaving the eye in `dir`.
+   *
+   * A single fog colour cannot be made to work and the presets already said so: every one
+   * of them carries a hand-picked `fogColor` that has to match its sky's horizon, which is
+   * only satisfiable for a sky that looks the same in every direction. Under a red dawn or
+   * a storm the constant is right facing one way and a bar of the wrong colour facing the
+   * other — terrain fading pale under a dark ceiling, and a hilltop coming out BRIGHTER
+   * than the sky directly behind it, which never happens in air and reads as fake at once.
+   *
+   * Sampling the sky in the view direction removes the whole class of problem: terrain
+   * fades toward exactly what is behind it, so it can never outshine it. Sun inscatter
+   * comes free with it — looking into a low sun the sky there is already warm, so distant
+   * ground hazes warm on that side and stays cool on the other, with no second term.
+   *
+   * `weight` ramps from the flat colour to the directional sample with distance, which is
+   * Unreal's pair of inscattering distances and is not a detail to drop. Haze on something
+   * a few metres away is light scattered into the eye from all around it, not from the
+   * patch of sky behind it; sampling directionally up close makes near fog take on the
+   * sky's silhouette and the whole effect reads as a reflection.
+   */
+  const hazeAt = (dir: NodeArg, weight: NodeArg): NodeArg => {
+    // Pitch floored, azimuth untouched — the compass bearing is what carries the sun's
+    // warmth round the sky, and it is the half of the direction worth keeping.
+    // NOT normalized: a cube fetch is direction-only and scale-invariant, so the
+    // inversesqrt and three multiplies bought nothing on every fragment of the terrain,
+    // the march, the cap and 250k blades.
+    const lifted: NodeArg = V3(dir.x, dir.y.max(uHazeLift), dir.z);
+    return weight
+      .mul(uSkyAmount)
+      .mul(uHasSky)
+      .mix(uColor, skyBase.sample(lifted).blur(uSkyBlur));
+  };
+
   const apply = (rgb: NodeArg, worldPos: NodeArg): NodeArg => {
     // Planar view depth, matching three's own linear fog, so anything still using the
     // automatic path agrees with anything using this one.
@@ -375,7 +491,8 @@ export function createFog(settings: FogSettings): Fog {
     // which is what makes weather and smoke compose without an ordering to get wrong.
     const toPoint = worldPos.sub(cameraPosition);
     const rayLength = toPoint.length().max(float(1e-4));
-    const smoke: NodeArg = smokeDepth(cameraPosition, toPoint.div(rayLength), rayLength);
+    const viewDir = toPoint.div(rayLength);
+    const smoke: NodeArg = smokeDepth(cameraPosition, viewDir, rayLength);
     // No `max(0)`: density has a slider floor of 0, throughLayer is a length, and
     // modulated is already clamped.
     const optical = uDensity.mul(throughLayer).mul(modulated);
@@ -393,7 +510,13 @@ export function createFog(settings: FogSettings): Fog {
     // catalogued in docs/08 §11 that has cost this project a pale wash once already.
     // No clamp: 1 - exp(-x) with x >= 0 is in [0,1) by construction.
     const smokeAmount: NodeArg = smoke.w.negate().exp().oneMinus();
-    return smokeAmount.mix(total.mix(rgb, uColor), smoke.xyz);
+    // Colour drained on the way, at Rec. 709 luminance so the drain preserves brightness
+    // and only removes hue — a green hillside going grey, not going dark.
+    const lum = luminance(rgb);
+    const drained: NodeArg = total.mul(uHazeDrain).mix(rgb, V3(lum, lum, lum));
+    // The linear distance factor doubles as the directional weight: the more fogged a
+    // surface is, the more its haze is the sky behind it rather than the ambient average.
+    return smokeAmount.mix(total.mix(drained, hazeAt(viewDir, distance)), smoke.xyz);
   };
 
   // Shared with `apply`, and the reason the profile is written as an antiderivative:
@@ -447,7 +570,16 @@ export function createFog(settings: FogSettings): Fog {
     const optical = uDensity.mul(columnAbove()).div(direction.y.max(float(1e-3)));
     const amount: NodeArg = optical.negate().exp().oneMinus();
     const smokeAmount: NodeArg = smoke.w.negate().exp().oneMinus();
-    return smokeAmount.mix(amount.mix(rgb, uColor), smoke.xyz);
+    // THE SKY FOGS TOWARD A BLURRED VERSION OF ITSELF, which is what haze does to a sky
+    // and what a constant could never do. The ground layer goes unbounded along the
+    // horizon, so this term reaches full strength there; toward a flat colour that drew a
+    // pale bar across the bottom of a dark sky, with the terrain silhouette cut against a
+    // colour belonging to neither. Toward the sky's own low frequencies it softens instead,
+    // and the terrain — now fading to the same sample — meets it with no seam at all.
+    //
+    // Weight is 1: this ray does run to infinity, so it is fully directional by
+    // construction rather than by choice.
+    return smokeAmount.mix(amount.mix(rgb, hazeAt(direction, float(1))), smoke.xyz);
   };
 
   return {
@@ -459,6 +591,14 @@ export function createFog(settings: FogSettings): Fog {
       groundTop: uTop,
       groundScale: uScale,
       groundDensity: uDensity,
+      skyAmount: uSkyAmount,
+      skyBlur: uSkyBlur,
+      hazeDrain: uHazeDrain,
+      hazeLift: uHazeLift,
+    },
+    setSky: (sky) => {
+      skyBase.value = sky ?? emptySky;
+      uHasSky.value = sky ? 1 : 0;
     },
     // A GRENADE, not a puff: it sits where it landed and emits until it burns out.
     spawnSmoke: (x, y, z, color) => {

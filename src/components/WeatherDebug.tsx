@@ -61,11 +61,15 @@ const ATMOSPHERE: Dial[] = [
   {
     label: "Ground fog density",
     min: 0,
-    max: 0.06,
-    step: 0.001,
+    max: 0.02,
+    step: 0.0002,
     get: (s) => Number(s.fog.uniforms.groundDensity.value),
     set: (s, v) => (s.fog.uniforms.groundDensity.value = v),
-    hint: "extinction per metre through the layer; 0 removes it",
+    // Range and step chosen from what the number does rather than from round figures:
+    // optical depth reaches 1 — about 63% fogged — at 1/density metres, so 0.005 is
+    // half-hidden at 140 m and the top of this dial is opaque within 50. Mild lives
+    // between 0.001 and 0.004, which a 0.001 step could not reach.
+    hint: "extinction per metre inside the layer; ~63% fogged at 1/density metres",
   },
 ];
 

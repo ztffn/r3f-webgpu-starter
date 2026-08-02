@@ -103,7 +103,17 @@ export function createFog(settings: FogSettings): Fog {
     // bracket vanish together. `(1 - exp(-x)) / x` tends to 1 there, so substituting that
     // limit gives `D * dist * exp(...)`, which is just uniform density over the path.
     const dy = worldPos.y.sub(cameraPosition.y);
-    const heightFall = cameraPosition.y.sub(uLevel).div(uScale).negate().exp();
+    // CAPPED AT 1, which is what makes `density` mean anything. A pure exponential keeps
+    // growing below the level — at a level of 220 m with the camera at 122 the factor is
+    // ~50x — so the same slider value was mild in one valley and opaque in the next, and
+    // the whole usable range collapsed into the bottom of the dial.
+    //
+    // Capping models a well-mixed layer under an inversion: uniform density below the
+    // level, falling off above it. That is also the mental model the dial's label claims
+    // — extinction per metre INSIDE the layer — and it is what makes the number portable
+    // between maps. The integral below is then exact above the level and a smooth
+    // approximation below it, which is the right trade for art-directed fog.
+    const heightFall = cameraPosition.y.sub(uLevel).div(uScale).negate().exp().min(float(1));
     const x = dy.div(uScale);
     // The limit form, guarded: `expm1(-x)/-x` is 1 at x = 0 and TSL has no expm1, so the
     // series is used inside a hair of zero where the direct form loses all its bits.

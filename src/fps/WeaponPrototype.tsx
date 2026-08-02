@@ -109,12 +109,17 @@ function disposeObject(
 ) {
   const geometries = new Set<THREE.BufferGeometry>();
   const materials = new Set<THREE.Material>(replacedMaterials);
+  // A skinned mesh owns a bone-matrix DataTexture that only Skeleton.dispose()
+  // releases; nothing reachable from geometry or material frees it.
+  const skeletons = new Set<THREE.Skeleton>();
   root.traverse((object) => {
-    const mesh = object as THREE.Mesh;
+    const mesh = object as THREE.SkinnedMesh;
     if (mesh.geometry) geometries.add(mesh.geometry);
+    if (mesh.isSkinnedMesh && mesh.skeleton) skeletons.add(mesh.skeleton);
     const material = mesh.material;
-    if (Array.isArray(material)) for (const item of material) materials.add(item);
-    else if (material) materials.add(material);
+    if (Array.isArray(material)) {
+      for (const item of material) if (item) materials.add(item);
+    } else if (material) materials.add(material);
   });
   if (preservedMaterial) materials.delete(preservedMaterial);
 
@@ -126,6 +131,7 @@ function disposeObject(
     material.dispose();
   }
   for (const geometry of geometries) geometry.dispose();
+  for (const skeleton of skeletons) skeleton.dispose();
   for (const texture of textures) {
     if (!preservedTextures.has(texture)) texture.dispose();
   }
@@ -464,10 +470,8 @@ export function WeaponPrototype({
     [loadout, playSegment]
   );
 
-  const timelineHandlers = useMemo(
-    () => ({ onShot: handleAcceptedShot, onEvent: handleWeaponEvent }),
-    [handleAcceptedShot, handleWeaponEvent]
-  );
+  // `runFrame` takes its handlers per call, so this needs no stable identity.
+  const timelineHandlers = { onShot: handleAcceptedShot, onEvent: handleWeaponEvent };
 
   const handleBallisticResult = useCallback((result: BallisticResult) => {
     combatTelemetry.publishShot(result);
@@ -635,6 +639,9 @@ export function WeaponPrototype({
     // Materials this component swaps out of the loaded rig. Nothing else can
     // reach them afterwards, so teardown owns their disposal.
     const replacedMaterials: THREE.Material[] = [];
+    // The mixer is built on the loaded scene, not on the host group, and
+    // uncacheRoot silently does nothing when handed the wrong root.
+    let mixerRoot: THREE.Object3D | null = null;
     const loader = new GLTFLoader();
     loader.load(
       presentation.modelUrl,
@@ -680,6 +687,7 @@ export function WeaponPrototype({
         }
 
         const nextMixer = new THREE.AnimationMixer(gltf.scene);
+        mixerRoot = gltf.scene;
         const clip = gltf.animations[0];
         const sourceAnimation = presentation.sourceAnimation;
         if (clip && sourceAnimation) {
@@ -714,8 +722,9 @@ export function WeaponPrototype({
     return () => {
       alive = false;
       mixer.current?.stopAllAction();
-      mixer.current?.uncacheRoot(rig);
+      if (mixerRoot) mixer.current?.uncacheRoot(mixerRoot);
       mixer.current = null;
+      mixerRoot = null;
       segmentActions.current = [];
       activeAction.current = null;
       optic.current = null;
@@ -724,7 +733,7 @@ export function WeaponPrototype({
       replacedMaterials.length = 0;
       rig.clear();
     };
-  }, [aimOffset, lensMaterial, opticLocal, presentation, rig, scopeDemo]);
+  }, [lensMaterial, presentation, rig, scopeDemo]);
 
   useEffect(() => {
     scene.add(rig);

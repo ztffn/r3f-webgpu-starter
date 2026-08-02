@@ -23,6 +23,7 @@ import * as THREE from "three/webgpu";
 import type { Heightfield } from "./Heightfield";
 import { buildChunkGeometry } from "./terrainGeometry";
 import { CANOPY_MARGIN } from "./GrassMaterial";
+import { publishTerrain } from "./bench";
 import {
   CHUNK_COUNT,
   VIEW_RADIUS_MAX_CHUNKS,
@@ -298,6 +299,12 @@ export function Terrain({
 
     const deadline = performance.now() + BUILD_MS;
     let mayBuild = true;
+    // Slots still waiting on the build budget. Published below so a measurement rig can
+    // tell "the world is finished" from "the world is still filling in" — inferring it
+    // from a stable draw-call count does not work, because at a few frames per second
+    // the budget advances a few milliseconds per SECOND and the count sits still for
+    // long stretches while chunks are very much still missing.
+    let pendingChunks = 0;
 
     for (let k = 0; k < slots.length; k++) {
       const slot = slots[k];
@@ -337,6 +344,7 @@ export function Terrain({
         }
         // else: keep last frame's geometry (or stay hidden) and retry next frame.
       }
+      if (slot.lod !== lod) pendingChunks += 1;
       slot.mesh.visible = slot.lod >= 0;
 
       // --- grass shell ------------------------------------------------------
@@ -371,9 +379,12 @@ export function Terrain({
             mayBuild = performance.now() < deadline;
           }
         }
+        if (want && slot.grassLod !== lod) pendingChunks += 1;
         slot.grass.visible = want && slot.grassLod >= 0;
       }
     }
+
+    publishTerrain(pendingChunks);
   });
 
   return <primitive object={state.group} />;

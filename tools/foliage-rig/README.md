@@ -25,23 +25,38 @@ CHROME_PATH=/path/to/chrome node tools/foliage-rig/smoke.mjs \
   "http://127.0.0.1:4183/?bench=1&foliage=1&dpr=0.5&stance=stand&x=5&z=375" shot.png
 ```
 
-## It waits for the counts to SETTLE, and that matters
+## It waits for the world to FINISH BUILDING, not for numbers to stop moving
 
-Terrain chunk building and foliage cell building are both budgeted per frame, so the first
-few seconds report a half-built world. An earlier version sampled as soon as the foliage counters appeared and produced
-draw-call numbers varying 6x between runs of the same configuration. Waiting on the
-draw-call count alone was not enough either: a ground-level frame here can take 900 ms, so
-a 2 s poll sees two or three frames and chunk building — budgeted per FRAME — barely
-advances between polls, so two identical readings look settled while the world is still
-filling in. One pass reported 25 draw calls against another run's 103 for the same scene.
+Stability is not completion. Chunk building is budgeted per FRAME, so at one frame per
+second it advances about 6 ms per SECOND: a draw-call count can sit unchanged for ten
+seconds with a third of the chunk window still missing. Two comparisons were wrong before
+this was understood — one pass reported 25 draw calls against another run's 103 for the
+same scene, and a grass-on/grass-off pair read 175 against 244, i.e. grass appearing to
+*reduce* draw calls, which is impossible.
 
-It now requires draw calls AND triangles to hold for four consecutive polls with no bucket
-pending, and reports `settled: false` rather than hand back a half-built world. With that,
-repeated runs of the same configuration reproduce counts exactly.
+The builders now publish their own completion signals — `window.__terrain.pendingChunks`
+and `window.__foliage.pendingBuckets` — and this rig waits for both to reach zero. The same
+grass comparison then reads 274 against 244, with grass adding 212k triangles.
 
-Frame times still do not reproduce and never will here — the same configuration reorders
-freely run to run (923 ms then 839 ms), and a settled frame costs ~800 ms with vegetation
-and grass both switched OFF. Quote the counts; ignore the milliseconds.
+`settled: false` in the output means the deadline expired with work outstanding. Do not
+compare those numbers to anything.
+
+Frame times still do not reproduce here and never will: the same configuration reorders
+freely run to run, and a settled frame costs ~800 ms with vegetation and grass both switched
+OFF. Quote the counts; ignore the milliseconds.
+
+## Vantage matters more than you would think
+
+`?x=5&z=375` — the grass bench vantage — has an **openness of 0.15**: 85% of that view is
+hillside above eye level, and only 15 plants and 4 trees are on screen. It is a bad place to
+photograph vegetation and a fine place to measure grass. For vegetation use:
+
+```
+?bench=1&canopyall=0&foliage=1&stance=stand&x=512&z=576&yaw=3.142&pitch=-0.12
+```
+
+`canopyall=0` matters: `?bench=1` forces the grass canopy to full height everywhere, which
+buries scrub and half-buries bushes.
 
 ## Knobs worth sweeping
 

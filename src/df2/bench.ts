@@ -331,6 +331,7 @@ declare global {
   interface Window {
     __perf?: BenchSample;
     __foliage?: FoliageBenchSample;
+    __terrain?: { pendingChunks: number };
   }
 }
 
@@ -340,4 +341,20 @@ export function publish(sample: BenchSample): void {
 
 export function publishFoliage(sample: FoliageBenchSample): void {
   window.__foliage = sample;
+}
+
+/**
+ * Chunks still waiting on the terrain build budget.
+ *
+ * Published so a measurement rig can tell a FINISHED world from one that is still
+ * filling in. Inferring it from a stable draw-call count does not work: chunk building is
+ * budgeted per FRAME, so at a few frames per second it advances a few milliseconds per
+ * second and the draw count sits still for long stretches with chunks plainly missing. A
+ * grass-on/grass-off comparison taken that way reported 175 draw calls against 244 and was
+ * measuring two different amounts of world, not two configurations.
+ *
+ * Ungated: it costs one number per frame and it is the only honest completion signal.
+ */
+export function publishTerrain(pendingChunks: number): void {
+  window.__terrain = { pendingChunks };
 }

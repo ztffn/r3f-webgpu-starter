@@ -331,10 +331,49 @@ Everything below has been *built*, and none of it has been *measured*, because t
 environment has no GPU: three falls back to WebGL2 on SwiftShader and every millisecond it
 reports is software-rasteriser CPU time (`docs/08` §10).
 
+### 7.0 The vantage, and why the first screenshots looked empty
+
+The long-standing bench vantage (5, 375) is a **bad place to look at vegetation**, and the
+reason is measurable rather than aesthetic. Scoring it against the real heightfield and the
+real placement field — which is possible in plain Node precisely because both are
+Three.js-free — gives it an **openness of 0.15**: 85% of that view is hillside standing
+above eye level. Fifteen plants and four trees are actually on screen there.
+
+Finding a better one needed two passes, and the first pass was wrong in a way worth
+recording. Scoring only the AZIMUTH wedge picked a ridge at (-256, -256) claiming 480
+plants and 31 trees in view; it rendered nearly empty, because standing near-level on a
+crest puts everything inside the 192 m window on the downslope **below the bottom of the
+frame**. Adding the vertical frustum and a terrain-occlusion check re-scored that same
+vantage at 152 plants / 12 trees, of which only 9 within 70 m — which matches what it
+looks like.
+
+The vantage now used for vegetation screenshots, and the one to compare against:
+
+```
+?bench=1&canopyall=0&foliage=1&stance=stand&x=512&z=576&yaw=3.142&pitch=-0.12
+```
+
+Openness 0.92, prominence 38.8 m, 206 plants / 30 trees on screen, 31 of them within 70 m.
+**It does not replace (5, 375).** That vantage is load-bearing for every grass measurement
+in `docs/07` and `docs/09` and moving it would invalidate them; this is a second named pose
+for a different subsystem.
+
+Two other things the screenshots taught, both of which change what a foliage capture should
+set:
+
+- **`?bench=1` forces the canopy to full height everywhere** (`docs/08` §11 — it is the
+  only way a grass bench number means anything). At a uniform 1.2 m that buries scrub
+  (0.62 m) outright and half-buries bushes (1.55 m). Vegetation captures want
+  `?canopyall=0`. It also means **scrub is shorter than the grass can be**, which is a
+  design question rather than a bug: a species below canopy height is concealed BY the
+  grass, and whether that is wanted has not been decided.
+- **Nothing is drawn past the window edge**, so on a vista the entire middle distance is
+  bare terrain. This dominates the "it looks empty" impression far more than density does.
+
 ### 7.1 What was verified headlessly
 
-`tools/foliage-rig/smoke.mjs`, at the standing bench vantage (5, 375), dpr 0.5, waiting for
-the counts to settle:
+`tools/foliage-rig/smoke.mjs`, at the standing bench vantage (5, 375), dpr 0.25, waiting
+for both builders to report nothing pending:
 
 | configuration | buckets | instances | scene draw calls |
 |---|---|---|---|
@@ -365,13 +404,25 @@ reorder freely (foliage 923 ms then 839 ms; baseline 798 ms then 856 ms) while t
 and triangle counts reproduce *exactly*. That asymmetry is the whole reason only the counts
 are quoted above.
 
-The rig's own settle check had to be hardened to earn even those. Waiting on a stable
-draw-call count alone is not enough when a frame takes most of a second: a 2 s poll sees
-two or three frames, chunk building is budgeted per FRAME so it advances almost not at all
-between polls, and two identical readings look settled while the world is still filling in.
-One pass produced a run reporting 25 draw calls against another's 103 for the same scene.
-It now requires draw calls *and* triangles to hold for four consecutive polls, and reports
-`settled: false` rather than silently handing back a half-built world.
+**Stability is not completion, and inferring one from the other produced two wrong
+comparisons.** Chunk building is budgeted per FRAME, so at one frame per second it advances
+about 6 ms per SECOND: a draw-call count can sit unchanged for ten seconds with a third of
+the chunk window still missing. A grass-on/grass-off pair taken that way read **175 draw
+calls against 244** — grass appearing to *reduce* draw calls, which is impossible — because
+the two runs had built different amounts of world. `Terrain.tsx` now publishes
+`window.__terrain.pendingChunks` alongside the foliage layer's `pendingBuckets`, and the rig
+waits for both to reach zero. The same comparison then reads **274 against 244, with grass
+adding 212k triangles**, which is the shape it should always have had.
+
+The cell-size table above was re-run against that signal and reproduces exactly, so it was
+never affected — at (5, 375) the window completes inside the old heuristic's window. The
+crest vantage, where frames cost ~1 s, is where the heuristic broke.
+
+**A far ring is worth more than any other change here.** Raising the window to 600 m with
+64 m cells at the crest vantage puts **27,687 plants and 512 draw calls** on screen against
+131 for bare terrain — vegetation to the horizon instead of a 192 m disc of it. That is the
+first thing to measure on real hardware, because the draw-call cost of it is the whole
+question and this environment cannot price it.
 
 ### 7.2 The sweep to run
 
@@ -403,9 +454,14 @@ measurements, and a cost that lives entirely inside one of them is invisible (`d
 - **Shadows are not in the experiment.** The scene's directional light does not cast, so the
   memo's shadows-off / near-only / full axis is unavailable without enabling shadow maps
   globally — which would change every existing frame time. Deferred deliberately.
-- **No impostor ring beyond the window.** Geometry is drawn to the window edge and nothing
-  past it. A far ring of impostor-only cells at a coarser cell size is the obvious next step
-  and is where the draw-call budget is most likely to be won.
+- **No impostor ring beyond the window — now the top item.** Geometry stops dead at the
+  window edge, which on any vista leaves the entire middle distance bare and is the single
+  biggest reason the layer reads as sparse. Measured: 600 m of window at 64 m cells puts
+  27,687 plants and 512 draw calls on screen. A far ring of impostor-only cells at a coarser
+  cell size should get most of that for a fraction of the calls.
+- **Scrub (0.62 m) is shorter than the grass canopy can be (1.2 m)**, so it is concealed by
+  grass at grazing angles. Physically right, but whether a species below canopy height is
+  wanted at all is undecided.
 - **Species do not share buckets.** A cell with all three species costs three draw calls.
   Merging species that share a material into one bucket per cell is possible but needs a
   shared geometry layout; measure first.

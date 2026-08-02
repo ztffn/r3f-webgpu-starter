@@ -16,7 +16,12 @@ const browser = await chromium.launch({
   executablePath: process.env.CHROME_PATH,
   args: ["--no-sandbox", "--use-gl=angle", "--use-angle=swiftshader"],
 });
-const page = await browser.newPage({ viewport: { width: 800, height: 500 } });
+const page = await browser.newPage({
+  viewport: {
+    width: Number(process.env.RIG_WIDTH ?? 800),
+    height: Number(process.env.RIG_HEIGHT ?? 500),
+  },
+});
 const errors = [];
 page.on("pageerror", (e) => errors.push(String(e)));
 page.on("console", (m) => {
@@ -26,37 +31,34 @@ page.on("console", (m) => {
 await page.goto(url, { waitUntil: "load", timeout: 120000 });
 await page.waitForFunction(() => window.__perf !== undefined, null, { timeout: 180000 });
 
-// Settle on DRAW CALLS AND TRIANGLES together, over enough polls to have seen real
-// frames. A fixed wall-clock poll is not enough on its own: a ground-level frame here can
-// take 900 ms, so a 2 s poll observes two or three frames, and chunk building — budgeted
-// at a few ms PER FRAME — advances almost not at all between polls. Two consecutive
-// identical readings then look settled while the world is still filling in, which is how
-// a first pass produced a run reporting 25 draw calls against another run's 103 for the
-// same scene. Triangles move whenever a chunk lands even if the call count happens not to,
-// so requiring both to hold for four polls is what makes a comparison trustworthy.
-let previousDraws = null;
-let previousTriangles = null;
-let stable = 0;
-const deadline = Date.now() + 300000;
-while (Date.now() < deadline && stable < 4) {
+// Wait on the world's OWN completion signal, not on a count that has stopped moving.
+//
+// Stability is not completion here and inferring one from the other produced two wrong
+// comparisons before this was fixed. Chunk building is budgeted per FRAME, so at one
+// frame per second it advances ~6 ms per SECOND: the draw-call count can sit unchanged
+// for ten seconds with a third of the chunk window still missing. A grass-on/grass-off
+// pair taken that way read 175 draw calls against 244 — two different amounts of world,
+// not two configurations.
+//
+// `window.__terrain.pendingChunks` and `window.__foliage.pendingBuckets` are published by
+// the builders themselves and go to zero only when there is nothing left to build.
+let clear = 0;
+const deadline = Date.now() + 900000;
+let last = null;
+while (Date.now() < deadline && clear < 2) {
   await page.waitForTimeout(2000);
-  const sample = await page.evaluate(() => ({
+  last = await page.evaluate(() => ({
+    chunks: window.__terrain?.pendingChunks ?? 0,
+    buckets: window.__foliage?.pendingBuckets ?? 0,
     draws: window.__perf?.drawCalls ?? 0,
-    triangles: window.__perf?.triangles ?? 0,
-    pending: window.__foliage?.pendingBuckets ?? 0,
   }));
-  const held =
-    sample.draws === previousDraws &&
-    sample.triangles === previousTriangles &&
-    sample.pending === 0;
-  stable = held ? stable + 1 : 0;
-  previousDraws = sample.draws;
-  previousTriangles = sample.triangles;
+  clear = last.chunks === 0 && last.buckets === 0 ? clear + 1 : 0;
 }
+const stable = clear >= 2 ? 4 : 0;
 
 const foliage = await page.evaluate(() => window.__foliage ?? null);
 const perf = await page.evaluate(() => window.__perf ?? null);
 // `settled: false` means the numbers below are a half-built world. Do not compare them.
-console.log(JSON.stringify({ settled: stable >= 4, foliage, perf, errors: errors.slice(0, 8) }));
+console.log(JSON.stringify({ settled: stable >= 4, pending: last, foliage, perf, errors: errors.slice(0, 8) }));
 if (shot) await page.screenshot({ path: shot });
 await browser.close();

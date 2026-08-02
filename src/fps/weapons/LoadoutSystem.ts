@@ -79,13 +79,17 @@ export class LoadoutSystem {
     if (slot === this.equippedSlot || slot === this.switchingTo || !this.slots.has(slot)) {
       return false;
     }
+    // Validated before anything is mutated. A NaN duration never reaches zero,
+    // so `switchingTo` would stay set forever and permanently block weapon
+    // commands, ADS, and handling updates.
+    if (!Number.isFinite(durationSeconds) || durationSeconds < 0) return false;
     const from = this.equippedSlot;
     const previous = this.equippedWeapon;
     this.collectWeaponEvents(previous);
     previous.deactivate();
     this.events.push({ type: "weapon-switch-started", from, to: slot });
     this.switchingTo = slot;
-    this.switchRemaining = Math.max(0, durationSeconds);
+    this.switchRemaining = durationSeconds;
     if (this.switchRemaining === 0) this.finishSwitch();
     return true;
   }

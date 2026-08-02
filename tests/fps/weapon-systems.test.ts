@@ -490,6 +490,36 @@ test("numeric loadout switching cancels source actions and drains accepted sourc
   assert.equal(primary.reserve, 120, "switching cancels rather than pausing or completing reload");
 });
 
+test("an invalid switch duration is rejected without touching switching state", () => {
+  const primary = new WeaponSystem(M4_DEFINITION, 1);
+  const secondary = new WeaponSystem(GLOCK_DEFINITION, 2);
+  const loadout = new LoadoutSystem(
+    [
+      { inputSlot: 1, id: "primary", weapon: primary },
+      { inputSlot: 2, id: "sidearm", weapon: secondary },
+    ],
+    "primary"
+  );
+  loadout.handleCommand({ type: "triggerDown" });
+  loadout.handleCommand({ type: "triggerUp" });
+  drainLoadout(loadout);
+  const before = loadout.getSnapshot();
+
+  for (const duration of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -1]) {
+    assert.equal(loadout.requestEquip("sidearm", duration), false, `duration ${duration}`);
+    assert.deepEqual(loadout.getSnapshot(), before, `duration ${duration} mutated state`);
+    assert.deepEqual(drainLoadout(loadout), [], `duration ${duration} emitted events`);
+  }
+
+  // A rejected request must leave the loadout usable, not wedged mid-switch.
+  loadout.update(0.1);
+  drainLoadout(loadout);
+  assert.equal(loadout.requestEquip("sidearm", 0.2), true);
+  loadout.update(0.2);
+  assert.equal(loadout.getSnapshot().equippedSlot, "sidearm");
+  assert.equal(loadout.getSnapshot().switchingTo, null);
+});
+
 test("development slot 4 equips the automatic SAW definition", () => {
   const loadout = createDevelopmentLoadout();
   assert.equal(loadout.requestEquipInputSlot(4, 0), true);

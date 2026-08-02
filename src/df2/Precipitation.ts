@@ -14,7 +14,6 @@ import {
   instanceIndex,
   length,
   mix,
-  mod,
   normalize,
   positionGeometry,
   sin,
@@ -37,7 +36,8 @@ const V2 = vec2 as unknown as (x: NodeArg, y: NodeArg) => NodeArg;
 
 export interface PrecipitationOptions {
   /**
-   * Instance pool. Only `intensity * maxCount` of them are ever drawn.
+   * Instance pool at full intensity. Lighter rain draws a coarser lattice, not a prefix
+   * of this one — see `setIntensity`.
    *
    * PAIRED WITH `area`, exactly as the blade count is paired with its radius: the box
    * volume divided by the count is the drop spacing, so widening the box at a fixed count
@@ -74,24 +74,22 @@ export interface Precipitation {
   /** Move the field onto the camera. Call every frame. */
   update: (camera: THREE.Camera) => void;
   /**
-   * Set the density — the uniform AND the drawn instance range, together.
+   * Set the density — the lattice resolution AND the drawn instance count, together.
    *
-   * ONE call, deliberately. They were briefly separate and the panel drove only the
-   * uniform, so the draw range stayed pinned to whatever the preset had last set: the
-   * slider could not exceed its preset's rain, and on a dry preset it did nothing at all,
-   * which read as rain being gated behind the weather. Any dial that moves one must move
-   * the other.
+   * ONE call, deliberately. They were briefly separate and the panel drove only one of
+   * them, so the draw range stayed pinned to whatever the preset had last set: the slider
+   * could not exceed its preset's rain, and on a dry preset it did nothing at all, which
+   * read as rain being gated behind the weather.
    */
   setIntensity: (intensity: number) => void;
   dispose: () => void;
 }
 
 export function createPrecipitation(opts: PrecipitationOptions = {}): Precipitation {
-  const maxCount = opts.maxCount ?? 24000;
+  const maxCount = opts.maxCount ?? 60000;
   const wind = opts.wind ?? { x: 0, z: 0 };
 
   const u = {
-    intensity: uniform(opts.intensity ?? 0),
     opacity: uniform(opts.opacity ?? 0.05),
     mode: uniform(opts.mode ?? 0),
     // Wind as TWO SCALARS, not a vec2, and this is a trap paid for in the source
@@ -101,7 +99,7 @@ export function createPrecipitation(opts: PrecipitationOptions = {}): Precipitat
     // effect at all. Scalars reassign like any other number.
     windX: uniform(wind.x),
     windZ: uniform(wind.z),
-    area: uniform(opts.area ?? 60),
+    area: uniform(opts.area ?? 80),
     height: uniform(opts.height ?? 55),
     dropLength: uniform(0.9),
     dropWidth: uniform(0.04),
@@ -116,7 +114,6 @@ export function createPrecipitation(opts: PrecipitationOptions = {}): Precipitat
     uwRise: uniform(0.12),
     uwSize: uniform(0.05),
     uwOpacity: uniform(0.06),
-    maxCount: uniform(maxCount),
   };
 
   // WORLD-CELL LATTICE, the same construction the blade layer uses and for the same
@@ -125,9 +122,17 @@ export function createPrecipitation(opts: PrecipitationOptions = {}): Precipitat
   // reads as locked to the viewer — rain sliding along with you rather than falling in
   // the world. Keying on the world cell instead makes the pattern stationary: cells enter
   // and leave the window as you walk, and each one always produces the same drop.
-  const side = Math.max(1, Math.round(Math.sqrt(maxCount)));
-  const halfSide = Math.floor(side / 2);
-  const cellSize: NodeArg = (u.area as NodeArg).mul(1 / side);
+  //
+  // DENSITY IS THE LATTICE'S RESOLUTION, not a prefix of it. Trimming the draw range to
+  // `intensity * count` is the obvious way to thin rain and is wrong: a prefix of a
+  // row-major lattice is a block of ROWS, so half intensity meant a half-plane of rain
+  // with a hard edge running through the player and nothing at all on the other side.
+  // Scaling the side length keeps the box fully covered at every setting and still trims
+  // the work, because the drawn count is that side squared.
+  const maxSide = Math.max(1, Math.round(Math.sqrt(maxCount)));
+  const uSide = uniform(maxSide);
+  const cellSize: NodeArg = (u.area as NodeArg).div(uSide);
+  const halfSide: NodeArg = (uSide as NodeArg).mul(0.5).floor();
   const camXZ = V2(cameraPosition.x, cameraPosition.z);
   // WHERE THE FIELD HAS BLOWN TO. Wind carries the whole body of rain downwind, so this
   // grows without bound — which is fine for a POSITION and fatal for a WINDOW.
@@ -136,8 +141,8 @@ export function createPrecipitation(opts: PrecipitationOptions = {}): Precipitat
     (u.windZ as NodeArg).mul(time)
   );
   const fi: NodeArg = float(instanceIndex);
-  const iz = fi.mul(1 / side).floor();
-  const ix = fi.sub(iz.mul(side));
+  const iz = fi.div(uSide).floor();
+  const ix = fi.sub(iz.mul(uSide));
   // The lattice is sampled in the FIELD'S frame, not the world's: the camera position is
   // pulled back by however far the field has blown, so the window stays around the player
   // once the same offset is added back to the drop below.
@@ -191,17 +196,31 @@ export function createPrecipitation(opts: PrecipitationOptions = {}): Precipitat
   // each drop through the box and handles the negative march cleanly; r3 de-synchronises
   // the phase so they do not fall in ranks.
   const vy: NodeArg = mix((fallSpeed as NodeArg).negate(), u.uwRise, u.uw);
-  // Vertical phase anchored to a WORLD height band, not to the camera's own altitude.
-  // Snapping the band to whole multiples of its height means climbing or descending moves
-  // it in steps rather than dragging it, so drops do not slide vertically as you move.
-  // Offset down by half its height so the eye sits in the MIDDLE of the band — snapped to
-  // the camera's own height alone, the band starts at the eye and all the rain is overhead.
-  const band: NodeArg = cameraPosition.y
-    .div(u.height)
-    .floor()
-    .mul(u.height)
-    .sub((u.height as NodeArg).mul(0.5));
-  const upPos: NodeArg = band.add(mod(r3.mul(u.height).add(vy.mul(time)), u.height));
+
+  /**
+   * Floor-mod, written out rather than `mod()`.
+   *
+   * Both arguments here run far negative — a drop's fall is speed times elapsed time,
+   * unbounded downward — and a truncating remainder returns the sign of its dividend,
+   * which would put half the field below the band instead of wrapped into it.
+   */
+  const wrap = (x: NodeArg, period: NodeArg): NodeArg =>
+    x.sub(x.div(period).floor().mul(period));
+
+  // A TRUE FALL, wrapped into a band that stays centred on the eye.
+  //
+  // The band used to snap to whole multiples of its own height, which leaves the camera
+  // anywhere within it — including above its top, where every drop is below you and you
+  // see no rain at all. Since the snap is keyed on the camera's ALTITUDE, that made rain
+  // appear and vanish in horizontal slabs of terrain height: walk uphill far enough and
+  // you walk out of the weather. Wrapping each drop to the nearest band around the eye
+  // instead centres the camera exactly, at every altitude, and puts the wrap half a band
+  // away — the farthest point from the viewer rather than right at it.
+  const halfH: NodeArg = (u.height as NodeArg).mul(0.5);
+  const phase: NodeArg = wrap(r3.mul(u.height).add(vy.mul(time)), u.height);
+  const upPos: NodeArg = cameraPosition.y.add(
+    wrap(phase.sub(cameraPosition.y).add(halfH), u.height).sub(halfH)
+  );
 
   // Surface wind drives drops in air and fades out under water, so submerged specks
   // drift on the gentle sway below rather than at wind speed.
@@ -231,11 +250,9 @@ export function createPrecipitation(opts: PrecipitationOptions = {}): Precipitat
   // WORLD position now, not an offset from a camera-following box.
   const centre: NodeArg = V3(px, upPos, pz);
 
-  // Only the first `intensity * maxCount` drops exist. Rejected ones collapse to zero
-  // area rather than discarding fragments — the same trick the blade layer uses.
-  const visible = fi.lessThan((u.maxCount as NodeArg).mul(u.intensity));
-  const vis: NodeArg = visible.select(float(1), float(0));
-
+  // NO PER-DROP VISIBILITY TEST. The drawn count is exactly the lattice's side squared,
+  // so every instance that runs maps to a live cell — there is nothing to reject.
+  //
   // A streak aligned to the drop's own velocity, not to the camera. Its LENGTH runs
   // along the direction of travel, so it foreshortens to a dot when you look straight up
   // or down the rain — which a fixed camera-facing sprite cannot do. Its WIDTH turns to
@@ -256,7 +273,7 @@ export function createPrecipitation(opts: PrecipitationOptions = {}): Precipitat
   material.depthWrite = false;
   material.depthTest = true;
   material.side = THREE.DoubleSide;
-  material.positionNode = (centre as NodeArg).add(offset.mul(vis));
+  material.positionNode = (centre as NodeArg).add(offset);
 
   // uv.x runs across the streak's width, uv.y along its length.
   const a: NodeArg = (uv() as NodeArg).sub(0.5);
@@ -267,7 +284,7 @@ export function createPrecipitation(opts: PrecipitationOptions = {}): Precipitat
   const airShape: NodeArg = mix(rainAlpha, snowAlpha, u.mode);
   const shapeAlpha: NodeArg = mix(airShape, snowAlpha, u.uw);
   const effOpacity: NodeArg = mix(u.opacity, u.uwOpacity, u.uw);
-  material.opacityNode = shapeAlpha.mul(effOpacity).mul(vis);
+  material.opacityNode = shapeAlpha.mul(effOpacity);
   material.colorNode = mix(u.rainColor, u.snowColor, u.mode);
   material.fog = false;
 
@@ -279,13 +296,24 @@ export function createPrecipitation(opts: PrecipitationOptions = {}): Precipitat
   geometry.setAttribute("position", plane.getAttribute("position"));
   geometry.setAttribute("uv", plane.getAttribute("uv"));
   geometry.setIndex(plane.getIndex());
-  geometry.instanceCount = maxCount;
   plane.dispose();
 
   const mesh = new THREE.Mesh(geometry, material);
   mesh.frustumCulled = false; // positions live in the node graph, not in the bounds
   mesh.renderOrder = 12; // after opaque geometry, for transparency sorting
   mesh.raycast = () => {}; // weather answers no gameplay query
+
+  const setIntensity = (intensity: number): void => {
+    const v = Math.max(0, Math.min(1, intensity));
+    // Square root, so the DRAWN COUNT — the side squared — is linear in intensity while
+    // the box stays fully covered. The pool is a draw count, not an allocation, so
+    // raising the dial again costs nothing.
+    const s = Math.max(1, Math.round(maxSide * Math.sqrt(v)));
+    uSide.value = s;
+    geometry.instanceCount = s * s;
+    mesh.visible = v > 0;
+  };
+  setIntensity(opts.intensity ?? 0);
 
   return {
     object3D: mesh,
@@ -298,16 +326,7 @@ export function createPrecipitation(opts: PrecipitationOptions = {}): Precipitat
     // in the vertex stage, so the mesh sits at the origin and never moves — the same
     // arrangement the blade layer uses, and it removes a per-frame matrix update too.
     update: () => {},
-    setIntensity: (intensity) => {
-      const v = Math.max(0, Math.min(1, intensity));
-      u.intensity.value = v;
-      // Rejected drops collapse to zero area, but only after their vertex shader has run
-      // four hashes, six trig calls and a normalize — so the drawn range is trimmed too,
-      // not just the shader's visibility test. The pool stays allocated, so raising the
-      // slider again costs nothing.
-      geometry.instanceCount = Math.min(maxCount, Math.ceil(maxCount * v));
-      mesh.visible = v > 0;
-    },
+    setIntensity,
     dispose: () => {
       geometry.dispose();
       material.dispose();

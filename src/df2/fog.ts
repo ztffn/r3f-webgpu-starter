@@ -124,7 +124,7 @@ export interface FogSettings {
  * nothing, which is exactly backwards: the source stays put and the plume streams off it.
  * So the slot count sets how long a plume can be, not how many grenades there are.
  */
-export const SMOKE_SLOTS = 12;
+const SMOKE_SLOTS = 12;
 
 export interface Fog {
   /**
@@ -254,12 +254,18 @@ export function createFog(settings: FogSettings): Fog {
     const tint = V3(0, 0, 0).toVar();
     for (let i = 0; i < SMOKE_SLOTS; i++) {
       const centre = uSmoke[i];
+      // NESTED, not `.and()`. A single combined test still EMITS everything it compares:
+      // `&&` short-circuits the branch, not the statements already written above it. The
+      // ray-sphere setup is ~20 operations, so twelve empty slots were paying ~240 per
+      // fragment — which is the entire measured cost of going from four slots to twelve.
+      // Behind the density test first, a dead slot costs one compare.
+      If(uSmokeDensity[i].greaterThan(float(0)), () => {
       const m = centre.xyz.sub(origin);
       const b = dir.dot(m);
       const perpSq = m.dot(m).sub(b.mul(b));
       // Generous by the lumpiness margin, since the noise can push the silhouette out.
       const reach = centre.w.mul(1 + SMOKE_LUMPINESS);
-      If(uSmokeDensity[i].greaterThan(float(0)).and(perpSq.lessThan(reach.mul(reach))), () => {
+      If(perpSq.lessThan(reach.mul(reach)), () => {
       // ONE noise sample, doing both jobs. It is taken at the ray's CLOSEST POINT to the
       // centre — a world position, not a screen or view quantity — so the lumps stay put
       // when the camera turns. Sampling per screen pixel instead is the classic way to
@@ -278,7 +284,8 @@ export function createFog(settings: FogSettings): Fog {
       const half = inside.sqrt();
       const t0 = b.sub(half).clamp(float(0), maxT);
       const t1 = b.add(half).clamp(float(0), maxT);
-      const chord = t1.sub(t0).max(float(0));
+      // No `max(0)`: clamp is monotone and `half` is non-negative, so t1 >= t0 always.
+      const chord = t1.sub(t0);
       // SMOOTHSTEPPED rather than the raw quadratic. Both reach zero at the rim, but the
       // quadratic arrives with a slope, which the eye reads as an edge on something that
       // should have none. The S-curve is flat at both ends, so the puff fades out of
@@ -292,6 +299,7 @@ export function createFog(settings: FogSettings): Fog {
       // Colour accumulated WEIGHTED BY DEPTH, so two overlapping puffs of different
       // colours blend by how much of each the ray crossed rather than by slot order.
       tint.addAssign((uSmokeColor[i] as NodeArg).mul(depth));
+      });
       });
     }
     // Normalised back out of the weighting, guarded — a ray through no smoke has a zero
@@ -335,20 +343,7 @@ export function createFog(settings: FogSettings): Fog {
     //
     // differentiates to the profile, so the optical depth over the ray is the difference
     // of F at its ends, scaled by how much path each metre of height buys.
-    // Ordered, so dragging base past top in the panel folds the slab to nothing rather
-    // than inverting it into negative optical depth.
-    const base = uBase.min(uTop);
-    const top = uBase.max(uTop);
-    const scale = uScale;
-    // F differentiates to the profile: an exponential tail below the base, full density
-    // through the slab, an exponential tail above the top. Every exponent is clamped
-    // NEGATIVE, which is the whole reason this is written as an antiderivative — the
-    // factored form overflows to a NaN wall at small softness values.
-    const antiderivative = (y: NodeArg): NodeArg =>
-      scale
-        .mul(base.sub(y).max(float(0)).div(scale).negate().exp())
-        .add(y.clamp(base, top).sub(base))
-        .add(scale.mul(y.sub(top).max(float(0)).div(scale).negate().exp().oneMinus()));
+    const { base, top, antiderivative } = layer();
     const dy = worldPos.y.sub(cameraPosition.y);
     // Metres of path per metre of height. A level ray buys infinite path per metre, which
     // is the case the limit below covers.
@@ -360,7 +355,7 @@ export function createFog(settings: FogSettings): Fog {
       .sub(top)
       .max(base.sub(cameraPosition.y))
       .max(float(0))
-      .div(scale)
+      .div(uScale)
       .negate()
       .exp();
     const throughLayer = dy
@@ -381,19 +376,23 @@ export function createFog(settings: FogSettings): Fog {
     const toPoint = worldPos.sub(cameraPosition);
     const rayLength = toPoint.length().max(float(1e-4));
     const smoke: NodeArg = smokeDepth(cameraPosition, toPoint.div(rayLength), rayLength);
-    const optical = uDensity.mul(throughLayer).mul(modulated).max(float(0));
+    // No `max(0)`: density has a slider floor of 0, throughLayer is a length, and
+    // modulated is already clamped.
+    const optical = uDensity.mul(throughLayer).mul(modulated);
     const ground = optical.negate().exp().oneMinus();
 
     // Combined as two independent extinctions rather than added, so heavy ground fog at
     // range cannot push the total past opaque and clip.
-    const total: NodeArg = distance.oneMinus().mul(ground.oneMinus()).oneMinus().clamp(0, 1);
+    // No clamp: a product of two values already in [0,1].
+    const total: NodeArg = distance.oneMinus().mul(ground.oneMinus()).oneMinus();
     // Weather first, then smoke OVER it in its own colour. Smoke can no longer join the
     // single exponential now that it carries a colour: a coloured medium and a grey one
     // do not compose into one extinction, and the puff is the nearer of the two anyway.
     //
     // Interpolant is the receiver — `t.mix(a, b)` is `mix(a, b, t)`, the reordering
     // catalogued in docs/08 §11 that has cost this project a pale wash once already.
-    const smokeAmount: NodeArg = smoke.w.negate().exp().oneMinus().clamp(0, 1);
+    // No clamp: 1 - exp(-x) with x >= 0 is in [0,1) by construction.
+    const smokeAmount: NodeArg = smoke.w.negate().exp().oneMinus();
     return smokeAmount.mix(total.mix(rgb, uColor), smoke.xyz);
   };
 
@@ -401,14 +400,31 @@ export function createFog(settings: FogSettings): Fog {
   // the sky's ray runs to infinity, where F tends to the level itself, so the whole
   // column above the eye has a closed form rather than needing a far point invented for
   // it. Below the level that column grows as you sink into the layer; above it, it decays.
-  const columnAbove = (): NodeArg => {
+  /**
+   * The slab and its antiderivative, in ONE place.
+   *
+   * F differentiates to the profile: an exponential tail below the base, full density
+   * through the slab, an exponential tail above the top. Every exponent is clamped
+   * NEGATIVE, which is the whole reason this is an antiderivative — the factored form
+   * overflows to a NaN wall at small softness values, which reached the frame as a flat
+   * grey band with a razor edge and read exactly like a fog artifact.
+   *
+   * Base and top are ORDERED here, so dragging one past the other in the panel folds the
+   * slab to nothing rather than inverting it into negative optical depth.
+   */
+  const layer = () => {
     const base = uBase.min(uTop);
     const top = uBase.max(uTop);
-    const F = (y: NodeArg): NodeArg =>
+    const antiderivative = (y: NodeArg): NodeArg =>
       uScale
         .mul(base.sub(y).max(float(0)).div(uScale).negate().exp())
         .add(y.clamp(base, top).sub(base))
         .add(uScale.mul(y.sub(top).max(float(0)).div(uScale).negate().exp().oneMinus()));
+    return { base, top, antiderivative };
+  };
+
+  const columnAbove = (): NodeArg => {
+    const { base, top, antiderivative: F } = layer();
     // F at infinity: both tails saturate, so the whole air column is the slab's own
     // thickness plus one softness length at each end. Finite, which is why looking
     // straight up out of a fog bank is hazy rather than opaque.
@@ -429,8 +445,8 @@ export function createFog(settings: FogSettings): Fog {
     // from it for a volume of a few metres, and keeps the clip finite.
     const smoke: NodeArg = smokeDepth(cameraPosition, direction, float(1e5));
     const optical = uDensity.mul(columnAbove()).div(direction.y.max(float(1e-3)));
-    const amount: NodeArg = optical.negate().exp().oneMinus().clamp(0, 1);
-    const smokeAmount: NodeArg = smoke.w.negate().exp().oneMinus().clamp(0, 1);
+    const amount: NodeArg = optical.negate().exp().oneMinus();
+    const smokeAmount: NodeArg = smoke.w.negate().exp().oneMinus();
     return smokeAmount.mix(amount.mix(rgb, uColor), smoke.xyz);
   };
 

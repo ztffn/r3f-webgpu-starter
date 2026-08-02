@@ -64,8 +64,8 @@ export interface Precipitation {
   uniforms: PrecipitationUniforms;
   /** Move the field onto the camera. Call every frame. */
   update: (camera: THREE.Camera) => void;
-  /** 1 while the eye is under water — drops become slow rising specks. */
-  setSubmerged: (uw: number) => void;
+  /** Trim the drawn instance range to what `intensity` actually shows. */
+  setDrawn: (intensity: number) => void;
   dispose: () => void;
 }
 
@@ -225,8 +225,9 @@ export function createPrecipitation(opts: PrecipitationOptions = {}): Precipitat
       camera.getWorldPosition(position);
       mesh.position.copy(position);
     },
-    setSubmerged: (submerged) => {
-      u.uw.value = submerged;
+    setDrawn: (intensity) => {
+      geometry.instanceCount = Math.min(maxCount, Math.ceil(maxCount * Math.max(0, intensity)));
+      mesh.visible = intensity > 0;
     },
     dispose: () => {
       geometry.dispose();

@@ -5,7 +5,7 @@
 // rebuilding discards the terrain geometry cache and stalls for about a second, which
 // makes exactly the A/B comparison these dials exist for impossible.
 
-import { useEffect, useState } from "react";
+import { memo, useState } from "react";
 import type { SceneHandles } from "../df2/DF2Scene";
 import { WEATHER_PRESETS } from "../df2/weather";
 
@@ -219,8 +219,10 @@ function Group({
 }): React.ReactElement {
   // Mirrored in React state only so the readout moves; the uniform is the source of
   // truth and is written directly.
+  // Seeded once per mount. The caller keys each Group on the preset id, so a switch
+  // remounts and re-runs this initializer — an effect doing the same job could only ever
+  // fire redundantly.
   const [vals, setVals] = useState<number[]>(() => dials.map((d) => d.get(scene)));
-  useEffect(() => setVals(dials.map((d) => d.get(scene))), [dials, scene]);
 
   return (
     <>
@@ -252,7 +254,14 @@ function Group({
   );
 }
 
-export function WeatherDebug({ scene }: WeatherDebugProps): React.ReactElement | null {
+/**
+ * MEMOISED. The HUD publishes fly state every 0.15 s and a perf sample every 0.5 s, so an
+ * unmemoised panel reconciles twenty range inputs about seven times a second on telemetry
+ * it does not read. `scene` only changes identity on a preset switch.
+ */
+export const WeatherDebug = memo(function WeatherDebug({
+  scene,
+}: WeatherDebugProps): React.ReactElement | null {
   if (!scene) return null;
   const ids = Object.keys(WEATHER_PRESETS);
 
@@ -289,4 +298,4 @@ export function WeatherDebug({ scene }: WeatherDebugProps): React.ReactElement |
       </p>
     </section>
   );
-}
+});

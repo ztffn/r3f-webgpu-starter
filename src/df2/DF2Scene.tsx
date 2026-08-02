@@ -159,7 +159,7 @@ function SmokeRig({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [camera, fog, ready]);
+  }, [camera, fog]);
   useFrame((_, dt) => {
     // Placed on the first RENDERED FRAME after the terrain is ready, not on mount and not
     // on ready. Two things happen before that which both put the puff somewhere useless:
@@ -407,13 +407,11 @@ export function DF2Scene({
     return createPrecipitation({
       intensity: weatherRef.current.rain,
       mode: weatherRef.current.snow,
-      // The SAME wind the grass bends to and the ballistics drifts on, read through the
-      // same function — so rain, grass and bullets cannot disagree about the weather.
-      wind: readBallisticEnvironment(
-        typeof window === "undefined" ? "" : window.location.search
-      ).windVelocity,
+      // The one wind vector, not a second read of it — three transcriptions of "they
+      // cannot disagree" is agreement by hand, which is the thing being avoided.
+      wind: windVector,
     });
-  }, []);
+  }, [windVector]);
   useEffect(() => () => precipitation.dispose(), [precipitation]);
   // Built once and left in the scene at zero intensity when dry: the pool is allocated
   // either way, and a preset switch that had to construct one would stall the frame it
@@ -421,6 +419,11 @@ export function DF2Scene({
   useEffect(() => {
     precipitation.uniforms.intensity.value = weather.rain;
     precipitation.uniforms.mode.value = weather.snow;
+    // Trim the DRAWN range too, not just the shader's visibility test. Rejected drops
+    // collapse to zero area, but only after their vertex shader has run four hashes, six
+    // trig calls and a normalize — 48,000 wasted invocations every frame on a dry preset.
+    // The pool stays allocated, so a preset switch still costs nothing.
+    precipitation.setDrawn(weather.rain);
   }, [precipitation, weather]);
 
   // The sky as a NODE, not a texture, so the ground fog can reach it. Standing inside a
@@ -519,8 +522,7 @@ export function DF2Scene({
   // position from `cameraPosition` in the vertex stage, so the field follows the player
   // without a per-frame CPU update and without the camera-graph trap the grass cap has
   // to work around (Terrain.tsx).
-  const bladeUniforms = useRef<BladeUniforms | null>(null);
-  const bladeMesh = useMemo(() => {
+  const bladeKit = useMemo(() => {
     if (!grassKit || !world?.colorMap) return null;
     if (BENCH.blades === false) return null;
     const blade = createBladeMaterial({
@@ -548,11 +550,8 @@ export function DF2Scene({
       toneVariation: GRASS_TONE_VARIATION,
       shadeBase: BENCH.bladeShade ?? GRASS_BLADE_SHADE_BASE,
       lift: BENCH.bladeLift ?? GRASS_BLADE_LIFT,
-      // The SAME function the ballistics reads, so the grass a shooter judges windage
-      // from cannot disagree with the drift the bullet actually takes.
-      wind: readBallisticEnvironment(
-        typeof window === "undefined" ? "" : window.location.search
-      ).windVelocity,
+      // The one wind vector — see windVector above.
+      wind: windVector,
       debug: BENCH.bladeDebug ?? 0,
     });
     // Geometry after the material, because the material rounds the requested pool to a
@@ -565,16 +564,15 @@ export function DF2Scene({
       },
       blade.count
     );
-    bladeUniforms.current = blade.uniforms;
-    return createBladeMesh(geometry, blade);
-  }, [fog, grade, grassKit, noise, world]);
+    return { mesh: createBladeMesh(geometry, blade), uniforms: blade.uniforms };
+  }, [grade, grassKit, noise, windVector, world]);
 
   useEffect(
     () => () => {
-      bladeMesh?.geometry.dispose();
-      (bladeMesh?.material as THREE.Material | undefined)?.dispose();
+      bladeKit?.mesh.geometry.dispose();
+      (bladeKit?.mesh.material as THREE.Material | undefined)?.dispose();
     },
-    [bladeMesh]
+    [bladeKit]
   );
 
   useEffect(() => {
@@ -592,9 +590,9 @@ export function DF2Scene({
       grade,
       fog,
       precipitation,
-      blades: bladeUniforms.current,
+      blades: bladeKit?.uniforms ?? null,
     });
-  }, [fog, grade, onSceneReady, precipitation, setPreset, weather]);
+  }, [bladeKit, fog, grade, onSceneReady, precipitation, setPreset, weather]);
 
   // Stable identity so Terrain's slot memo does not rebuild; reads the uniform at
   // call time so the canopy slider takes effect without a React render.
@@ -672,7 +670,7 @@ export function DF2Scene({
           coverage over bare-looking ground would show where the concealment field
           counts a target hidden (docs/08 §8 invariant 6). Rendered here rather than
           inside the terrain group because the mesh needs no transform at all. */}
-      {bladeMesh && grass && <primitive object={bladeMesh} />}
+      {bladeKit && grass && <primitive object={bladeKit.mesh} />}
 
       <PrecipitationRig precipitation={precipitation} />
       <SmokeRig fog={fog} ready={!!heightfield} />

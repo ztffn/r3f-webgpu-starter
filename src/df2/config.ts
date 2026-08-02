@@ -435,10 +435,14 @@ export const GRASS_BLADE_TWIST = 2.5;
 // a shooter reads for windage (docs/03 §4.4). A free direction here would make the
 // instrument lie.
 export const GRASS_BLADE_WIND_GAIN = 0.06;
-// Metres of noise lattice per metre of world, i.e. the size of a gust. 0.48 from the
-// reference: gusts about 2 m across, which is the scale that reads as air moving over
-// grass rather than as the whole field breathing.
-export const GRASS_BLADE_NOISE_SCALE = 0.48;
+// WRAPS PER METRE of the shared noise texture — the reciprocal of the tiling distance.
+//
+// This is NOT the unit the reference's 0.48 was in. That number meant lattice units per
+// metre for computed gradient noise; against a wrapping texture it repeats every 2 m and
+// shrinks a gust to half a metre, which reads as shimmer rather than as wind. At 0.1 the
+// texture repeats every 10 m and its coarsest channel gives gusts about 2.5 m across,
+// which is the scale the reference was actually after.
+export const GRASS_BLADE_NOISE_SCALE = 0.1;
 // How fast the noise field drifts, in lattice units per second per m/s of wind. At
 // 4 m/s and the scale above this walks a gust across the ground at ~0.5 m/s — slower
 // than the wind itself, which is correct: what travels is the gust pattern, not the air.

@@ -96,10 +96,18 @@ import {
 
 const SUN_DISTANCE = 2000;
 
+/** Signal smoke is colour-coded; white is the screening kind. */
+const SMOKE_COLORS = ["#e8e8ea", "#7b3fa0", "#d8c53a", "#c23a2a", "#3aa04a"];
+
 /** A preset's fog, in the shape `createFog` takes. */
-function fogSettings(w: WeatherPreset, noise: THREE.Data3DTexture) {
+function fogSettings(
+  w: WeatherPreset,
+  noise: THREE.Data3DTexture,
+  wind: { x: number; z: number }
+) {
   return {
     noise,
+    wind,
     color: w.fogColor,
     near: w.fogNear,
     far: w.fogFar,
@@ -112,7 +120,9 @@ function fogSettings(w: WeatherPreset, noise: THREE.Data3DTexture) {
     // is filling, which is what makes it read as air rather than as a surface.
     groundScale: 25,
     groundDensity: BENCH.fogDensity ?? w.groundFogDensity,
-    groundNoiseScale: 0.02,
+    // Wraps per metre: repeats every 100 m, so the layer's coarsest lumps are ~25 m —
+    // banks of fog rather than texture on it.
+    groundNoiseScale: 0.01,
     groundNoiseAmount: 0.35,
     groundDrift: 0.03,
   };
@@ -135,28 +145,36 @@ function SmokeRig({
   ready: boolean;
 }): null {
   const camera = useThree((s) => s.camera);
+  const placed = useRef(false);
+  const thrown = useRef(0);
   useEffect(() => {
-    // Placed from the URL so a smoke screenshot is reproducible, which a thrown one never
-    // is — and placed on READY rather than on mount, because the terrain decode takes
-    // tens of seconds and a puff spawned at mount has expired before anything is on
-    // screen. Frames are already running behind the loading overlay.
-    if (BENCH.smoke && ready) {
-      const forward = new THREE.Vector3();
-      camera.getWorldDirection(forward);
-      const at = camera.position.clone().addScaledVector(forward, BENCH.smoke);
-      fog.spawnSmoke(at.x, at.y, at.z);
-    }
     const onKey = (e: KeyboardEvent) => {
       if (e.code !== "KeyN") return;
       const forward = new THREE.Vector3();
       camera.getWorldDirection(forward);
       const at = camera.position.clone().addScaledVector(forward, 12);
-      fog.spawnSmoke(at.x, at.y, at.z);
+      // Cycles the colours, because signal smoke is colour-coded and one puff of each is
+      // the quickest way to see whether they blend where they overlap.
+      fog.spawnSmoke(at.x, at.y, at.z, SMOKE_COLORS[thrown.current++ % SMOKE_COLORS.length]);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [camera, fog, ready]);
-  useFrame((_, dt) => fog.tickSmoke(dt));
+  useFrame((_, dt) => {
+    // Placed on the first RENDERED FRAME after the terrain is ready, not on mount and not
+    // on ready. Two things happen before that which both put the puff somewhere useless:
+    // the terrain decode runs for tens of seconds while frames are already going, so a
+    // puff spawned at mount has expired before anything is visible; and the bench camera
+    // is not at its pose until a frame has run, so one spawned on ready lands behind you.
+    if (!placed.current && ready && BENCH.smoke) {
+      placed.current = true;
+      const forward = new THREE.Vector3();
+      camera.getWorldDirection(forward);
+      const at = camera.position.clone().addScaledVector(forward, BENCH.smoke);
+      fog.spawnSmoke(at.x, at.y, at.z, SMOKE_COLORS[0]);
+    }
+    fog.tickSmoke(dt);
+  });
   return null;
 }
 
@@ -338,12 +356,20 @@ export function DF2Scene({
   // share this texture and therefore its cache. See noiseTexture.ts for why baking beats
   // computing here, and for the measurement that already proved it once.
   const noise = useMemo(() => bakeNoiseTexture(), []);
+  // The one wind vector, read where every consumer reads it: grass bends to it, rain
+  // slants on it, smoke leans on it, and it is what drifts the bullet.
+  const windVector = useMemo(
+    () =>
+      readBallisticEnvironment(typeof window === "undefined" ? "" : window.location.search)
+        .windVelocity,
+    []
+  );
   useEffect(() => () => noise.dispose(), [noise]);
   // Built once with the initial preset; every later change goes through `.set()` below.
   // A real map's own .trn values win over a neutral preset's, since they are what the
   // author graded the colormap for.
   const grade = useMemo(() => createColorGrade(weatherRef.current), []);
-  const fog = useMemo(() => createFog(fogSettings(weatherRef.current, noise)), [noise]);
+  const fog = useMemo(() => createFog(fogSettings(weatherRef.current, noise, windVector)), [noise]);
 
   useEffect(() => {
     grade.set(
@@ -351,7 +377,7 @@ export function DF2Scene({
         ? { filter: world.filter, gamma: 128, saturation: 128 }
         : weather
     );
-    fog.set(fogSettings(weather, noise));
+    fog.set(fogSettings(weather, noise, windVector));
   }, [fog, grade, world]);
 
   /**

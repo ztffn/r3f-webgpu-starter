@@ -25,15 +25,41 @@ type NodeArg = any;
 const V3 = vec3 as unknown as (x: NodeArg, y: NodeArg, z: NodeArg) => NodeArg;
 
 /** Metres. A grenade's initial puff, before it billows. */
-const SMOKE_START_RADIUS = 1.5;
-const SMOKE_MAX_RADIUS = 9;
+const SMOKE_START_RADIUS = 2.5;
+const SMOKE_MAX_RADIUS = 13;
 const SMOKE_GROW_SECONDS = 4;
-/** Extinction per metre at the centre — thick enough to break a sightline. */
-const SMOKE_DENSITY = 0.55;
+/**
+ * Extinction per metre at the centre — thick enough to break a sightline.
+ *
+ * Lowered as the radius grew, because the two multiply: optical depth is density times
+ * the chord, so a wider puff at the same density is not just bigger but far more opaque.
+ */
+const SMOKE_DENSITY = 0.4;
 /** Long enough to cross a road under, which is the only reason to throw one. */
 const SMOKE_LIFE_SECONDS = 22;
-/** Lattice units per metre for the churn. About a 3 m lump at this value. */
-const SMOKE_NOISE_SCALE = 0.35;
+/** Metres per second the column climbs at first, decaying as it mixes. */
+const SMOKE_RISE = 1.6;
+/**
+ * How much of the wind a puff takes. Not 1: a smoke column is denser than air and drags
+ * on the ground, so it leans downwind rather than travelling with it — which is what lets
+ * a screen hold position long enough to be worth throwing.
+ */
+const SMOKE_WIND_SHARE = 0.45;
+/**
+ * WRAPS PER METRE, which is not what it meant before the shared noise texture landed.
+ *
+ * Sampling a 3D texture wraps at 1.0, so this value IS the reciprocal of the tiling
+ * distance: at 0.07 the texture repeats every 14 m and its coarsest channel — four cells
+ * across — gives lumps of about 3.5 m. The old 0.35 was carried over from computed
+ * gradient noise, where the number meant lattice units per metre, and it put 0.7 m lumps
+ * on a 13 m puff.
+ *
+ * That fineness is also what made walking out of a puff feel like a dolly zoom: a single
+ * noise sample per ray is inherently view-dependent, and the finer the lattice the more
+ * violently the pattern slides as the sample point travels along the ray. Coarse features
+ * move slowly enough to read as the medium rather than as a lens.
+ */
+const SMOKE_NOISE_SCALE = 0.07;
 /** Lattice units per second — smoke boils slowly, and fast reads as fire. */
 const SMOKE_CHURN = 0.12;
 /** How far the noise pushes the silhouette in or out, as a fraction of the radius. */
@@ -44,6 +70,8 @@ const SMOKE_MOTTLE = 0.45;
 export interface FogSettings {
   /** The shared tiling noise (noiseTexture.ts) — one fetch instead of gradient noise. */
   noise: THREE.Data3DTexture;
+  /** Horizontal wind, m/s. Smoke leans on it — the same vector that drifts bullets. */
+  wind: { x: number; z: number };
   color: string;
   near: number;
   far: number;
@@ -88,7 +116,7 @@ export interface Fog {
    * rather than a raymarch. Optical depths ADD, so smoke and weather compose into one
    * exponential at the end with no blending order to get wrong.
    */
-  spawnSmoke: (x: number, y: number, z: number) => void;
+  spawnSmoke: (x: number, y: number, z: number, color?: string) => void;
   /** Grow and fade the live volumes. Call once a frame with the delta in seconds. */
   tickSmoke: (dt: number) => void;
   uniforms: {
@@ -139,7 +167,11 @@ export function createFog(settings: FogSettings): Fog {
   // the WebGPU uniform path reliably re-uploads.
   const uSmoke = Array.from({ length: SMOKE_SLOTS }, () => uniform(new THREE.Vector4(0, 0, 0, 1)));
   const uSmokeDensity = Array.from({ length: SMOKE_SLOTS }, () => uniform(0));
+  // PER PUFF, not the fog's colour. Signal smoke is colour-coded — purple, yellow, red,
+  // white — and that is most of what makes it read as a grenade rather than as weather.
+  const uSmokeColor = Array.from({ length: SMOKE_SLOTS }, () => uniform(new THREE.Color(1, 1, 1)));
   const smokeAge = new Array<number>(SMOKE_SLOTS).fill(Infinity);
+  const smokeOrigin = Array.from({ length: SMOKE_SLOTS }, () => new THREE.Vector3());
 
   // Sampled with an EXPLICIT level 0: the coordinates come from world positions that can
   // jump metres between neighbouring pixels, and derivative-selected mips would pick one
@@ -147,6 +179,8 @@ export function createFog(settings: FogSettings): Fog {
   const noiseAt = (p: NodeArg): NodeArg => texture3D(settings.noise, p).level(float(0));
   const uNoiseScale = uniform(settings.groundNoiseScale);
   const uNoiseAmount = uniform(settings.groundNoiseAmount);
+  let windX = settings.wind.x;
+  let windZ = settings.wind.z;
   const uDrift = uniform(settings.groundDrift);
 
   /**
@@ -177,6 +211,7 @@ export function createFog(settings: FogSettings): Fog {
   const smokeDepth = Fn(([origin, dir, maxT]: NodeArg[]): NodeArg => {
     const drift = time.mul(SMOKE_CHURN);
     const total = float(0).toVar();
+    const tint = V3(0, 0, 0).toVar();
     for (let i = 0; i < SMOKE_SLOTS; i++) {
       const centre = uSmoke[i];
       const m = centre.xyz.sub(origin);
@@ -204,12 +239,25 @@ export function createFog(settings: FogSettings): Fog {
       const t0 = b.sub(half).clamp(float(0), maxT);
       const t1 = b.add(half).clamp(float(0), maxT);
       const chord = t1.sub(t0).max(float(0));
-      const falloff = inside.div(radius.mul(radius).max(float(1e-4)));
+      // SMOOTHSTEPPED rather than the raw quadratic. Both reach zero at the rim, but the
+      // quadratic arrives with a slope, which the eye reads as an edge on something that
+      // should have none. The S-curve is flat at both ends, so the puff fades out of
+      // existence instead of stopping.
+      const falloff = inside
+        .div(radius.mul(radius).max(float(1e-4)))
+        .smoothstep(float(0), float(1));
       const density = uSmokeDensity[i].mul(n.mul(SMOKE_MOTTLE).add(1).max(float(0)));
-      total.addAssign(density.mul(chord).mul(falloff));
+      const depth = density.mul(chord).mul(falloff);
+      total.addAssign(depth);
+      // Colour accumulated WEIGHTED BY DEPTH, so two overlapping puffs of different
+      // colours blend by how much of each the ray crossed rather than by slot order.
+      tint.addAssign((uSmokeColor[i] as NodeArg).mul(depth));
       });
     }
-    return total;
+    // Normalised back out of the weighting, guarded — a ray through no smoke has a zero
+    // weight and would otherwise divide by it.
+    const V4 = vec4 as unknown as (a: NodeArg, b: NodeArg) => NodeArg;
+    return V4(tint.div(total.max(float(1e-5))), total);
   });
 
   const apply = (rgb: NodeArg, worldPos: NodeArg): NodeArg => {
@@ -292,16 +340,21 @@ export function createFog(settings: FogSettings): Fog {
     // which is what makes weather and smoke compose without an ordering to get wrong.
     const toPoint = worldPos.sub(cameraPosition);
     const rayLength = toPoint.length().max(float(1e-4));
-    const smoke = smokeDepth(cameraPosition, toPoint.div(rayLength), rayLength);
-    const optical = uDensity.mul(throughLayer).mul(modulated).max(float(0)).add(smoke);
+    const smoke: NodeArg = smokeDepth(cameraPosition, toPoint.div(rayLength), rayLength);
+    const optical = uDensity.mul(throughLayer).mul(modulated).max(float(0));
     const ground = optical.negate().exp().oneMinus();
 
     // Combined as two independent extinctions rather than added, so heavy ground fog at
     // range cannot push the total past opaque and clip.
     const total: NodeArg = distance.oneMinus().mul(ground.oneMinus()).oneMinus().clamp(0, 1);
+    // Weather first, then smoke OVER it in its own colour. Smoke can no longer join the
+    // single exponential now that it carries a colour: a coloured medium and a grey one
+    // do not compose into one extinction, and the puff is the nearer of the two anyway.
+    //
     // Interpolant is the receiver — `t.mix(a, b)` is `mix(a, b, t)`, the reordering
     // catalogued in docs/08 §11 that has cost this project a pale wash once already.
-    return total.mix(rgb, uColor);
+    const smokeAmount: NodeArg = smoke.w.negate().exp().oneMinus().clamp(0, 1);
+    return smokeAmount.mix(total.mix(rgb, uColor), smoke.xyz);
   };
 
   // Shared with `apply`, and the reason the profile is written as an antiderivative:
@@ -334,13 +387,11 @@ export function createFog(settings: FogSettings): Fog {
     // that sky's own horizon band.
     // The sky ray runs to infinity; a distance past the far plane is indistinguishable
     // from it for a volume of a few metres, and keeps the clip finite.
-    const smoke = smokeDepth(cameraPosition, direction, float(1e5));
-    const optical = uDensity
-      .mul(columnAbove())
-      .div(direction.y.max(float(1e-3)))
-      .add(smoke);
+    const smoke: NodeArg = smokeDepth(cameraPosition, direction, float(1e5));
+    const optical = uDensity.mul(columnAbove()).div(direction.y.max(float(1e-3)));
     const amount: NodeArg = optical.negate().exp().oneMinus().clamp(0, 1);
-    return amount.mix(rgb, uColor);
+    const smokeAmount: NodeArg = smoke.w.negate().exp().oneMinus().clamp(0, 1);
+    return smokeAmount.mix(amount.mix(rgb, uColor), smoke.xyz);
   };
 
   return {
@@ -353,13 +404,15 @@ export function createFog(settings: FogSettings): Fog {
       groundScale: uScale,
       groundDensity: uDensity,
     },
-    spawnSmoke: (x, y, z) => {
+    spawnSmoke: (x, y, z, color) => {
       // Oldest slot, so a fifth grenade replaces the first rather than being dropped.
       let slot = 0;
       for (let i = 1; i < SMOKE_SLOTS; i++) if (smokeAge[i] > smokeAge[slot]) slot = i;
       smokeAge[slot] = 0;
+      smokeOrigin[slot].set(x, y, z);
       uSmoke[slot].value.set(x, y, z, SMOKE_START_RADIUS);
       uSmokeDensity[slot].value = SMOKE_DENSITY;
+      if (color) uSmokeColor[slot].value.set(color);
     },
     tickSmoke: (dt) => {
       for (let i = 0; i < SMOKE_SLOTS; i++) {
@@ -369,7 +422,19 @@ export function createFog(settings: FogSettings): Fog {
         // Expands quickly then slows, and fades on a longer curve than it grows — the
         // shape of a real cloud, and it is also what makes smoke useful rather than a
         // flash: it has to stay up long enough to cross under.
-        uSmoke[i].value.w = SMOKE_START_RADIUS + (SMOKE_MAX_RADIUS - SMOKE_START_RADIUS) * Math.min(1, t / SMOKE_GROW_SECONDS);
+        uSmoke[i].value.w =
+          SMOKE_START_RADIUS +
+          (SMOKE_MAX_RADIUS - SMOKE_START_RADIUS) * Math.min(1, t / SMOKE_GROW_SECONDS);
+        // RISES AND DRIFTS. A puff that stays where it landed reads as a ball of fog; the
+        // reference is a column leaning downwind. Both integrate on the CPU, so the shader
+        // still sees one sphere and pays nothing for it.
+        //
+        // The rise decays, because hot gas slows as it mixes — and a puff that kept
+        // climbing would leave the ground it is there to screen.
+        const rise = SMOKE_RISE * SMOKE_GROW_SECONDS * (1 - Math.exp(-t / SMOKE_GROW_SECONDS));
+        uSmoke[i].value.x = smokeOrigin[i].x + windX * t * SMOKE_WIND_SHARE;
+        uSmoke[i].value.y = smokeOrigin[i].y + rise;
+        uSmoke[i].value.z = smokeOrigin[i].z + windZ * t * SMOKE_WIND_SHARE;
         const fade = Math.max(0, 1 - t / SMOKE_LIFE_SECONDS);
         uSmokeDensity[i].value = SMOKE_DENSITY * fade * fade;
         if (t > SMOKE_LIFE_SECONDS) {
@@ -388,6 +453,8 @@ export function createFog(settings: FogSettings): Fog {
       uTop.value = next.groundTop;
       uScale.value = Math.max(0.5, next.groundScale);
       uDensity.value = next.groundDensity;
+      windX = next.wind.x;
+      windZ = next.wind.z;
       uNoiseScale.value = next.groundNoiseScale;
       uNoiseAmount.value = next.groundNoiseAmount;
       uDrift.value = next.groundDrift;

@@ -73,6 +73,11 @@ const STATIONARY: PoseTrack = {
     target.setFromEuler(new THREE.Euler(PITCH_RADIANS, BASE_YAW_RADIANS, 0, "YXZ")),
 };
 
+/**
+ * Yaw at a fixed pitch is `Ry(yaw(t)) · Rx(pitch)` — a left translation of a
+ * one-parameter subgroup, so the quaternion path is a great circle and
+ * spherical interpolation reproduces it exactly. Only floating point survives.
+ */
 const MOVING_AND_TURNING: PoseTrack = {
   planarSpeedMetresPerSecond: Math.hypot(VELOCITY.x, VELOCITY.z),
   position: (seconds, target) => target.copy(START_POSITION).addScaledVector(VELOCITY, seconds),
@@ -81,6 +86,25 @@ const MOVING_AND_TURNING: PoseTrack = {
       new THREE.Euler(
         PITCH_RADIANS,
         BASE_YAW_RADIANS + YAW_RATE_RADIANS_PER_SECOND * seconds,
+        0,
+        "YXZ"
+      )
+    ),
+};
+
+/**
+ * Both axes sweep, so the true look path is no longer a great circle and the
+ * interpolated arc bends away from it. This is the case doc 10 quantifies; the
+ * tolerance below is the measured residual, not an aspiration.
+ */
+const FLICKING: PoseTrack = {
+  planarSpeedMetresPerSecond: Math.hypot(VELOCITY.x, VELOCITY.z),
+  position: (seconds, target) => target.copy(START_POSITION).addScaledVector(VELOCITY, seconds),
+  orientation: (seconds, target) =>
+    target.setFromEuler(
+      new THREE.Euler(
+        PITCH_RADIANS + 1.2 * seconds,
+        BASE_YAW_RADIANS + 3 * seconds,
         0,
         "YXZ"
       )
@@ -221,7 +245,12 @@ function assertClose(
 
 function assertCadenceEquivalence(
   track: PoseTrack,
-  tolerances: { readonly direction: number; readonly metres: number }
+  tolerances: {
+    readonly direction: number;
+    readonly metres: number;
+    /** Acceptance timing is always exact; resolved flight time follows the path. */
+    readonly seconds?: number;
+  }
 ): void {
   const reference = runCadence(30, track);
   assert.equal(reference.spawns.length, ROUNDS);
@@ -256,8 +285,9 @@ function assertCadenceEquivalence(
       const actual = candidate.results[index];
       assert.equal(actual.sequence, expected.sequence, `${hz} Hz result sequence ${index}`);
       assert.ok(
-        Math.abs(actual.flightTimeSeconds - expected.flightTimeSeconds) < 1e-9,
-        `${hz} Hz flight time ${index}`
+        Math.abs(actual.flightTimeSeconds - expected.flightTimeSeconds) <=
+          (tolerances.seconds ?? 1e-9),
+        `${hz} Hz flight time ${index}: ${actual.flightTimeSeconds} vs ${expected.flightTimeSeconds}`
       );
       for (const [label, left, right] of [
         ["path length", actual.pathLengthMetres, expected.pathLengthMetres],
@@ -391,14 +421,21 @@ test("a stationary shooter's accepted rounds are identical at 30, 60, and 144 Hz
   assertCadenceEquivalence(STATIONARY, { direction: 1e-12, metres: 1e-9 });
 });
 
-test("a moving, turning shooter stays equivalent within the pose-reconstruction residual", () => {
-  // Sub-frame poses are reconstructed from the frame's two endpoint samples.
-  // Two residuals survive that, both scaling with frame length: THREE's slerp
-  // carries about 2e-8 rad of numerical error on short arcs, and a look path
-  // that is not a quaternion great circle bends away from the interpolated one.
-  // Both are several orders below one 0.1 mrad turret click, and five orders
-  // below the whole-frame error this test exists to catch.
+test("a moving, single-axis-turning shooter stays equivalent to floating point", () => {
+  // A great-circle look path leaves only THREE's slerp numerical error, roughly
+  // 3e-8 rad on these arcs. The 1e-6 tolerance is 30x that and still five
+  // orders below the whole-frame error this test exists to catch.
   assertCadenceEquivalence(MOVING_AND_TURNING, { direction: 1e-6, metres: 1e-3 });
+});
+
+test("a combined-axis flick diverges only by the bounded interpolation residual", () => {
+  // Yaw and pitch both sweeping bends the true path away from the interpolated
+  // arc, so this divergence is real rather than floating point. Worst measured
+  // on this track (5.7 deg yaw + 2.3 deg pitch per 30 Hz frame, 40 rounds):
+  // 3.3e-4 rad of direction and 1.4 cm of impact position. The bounds sit just
+  // above that, so growth fails the test instead of quietly widening. Doc 10
+  // records the same measurements.
+  assertCadenceEquivalence(FLICKING, { direction: 5e-4, metres: 1e-1, seconds: 1e-3 });
 });
 
 test("the simulation clock is clamped once for the whole gameplay path", () => {

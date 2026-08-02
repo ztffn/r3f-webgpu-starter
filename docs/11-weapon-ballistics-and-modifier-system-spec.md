@@ -144,8 +144,9 @@ the last event it advances both to the end of the frame.
 
 The weapon runtime, gameplay sway, and the projectile solver therefore share one
 clamped delta (`MAX_SIMULATION_FRAME_SECONDS`, 0.1 s). A projectile receives
-exactly the time after its own acceptance boundary — never time that elapsed
-before the trigger command, and never zero. Handling context is supplied before
+exactly the time after its own acceptance boundary, never time that elapsed
+before the trigger command; a round accepted exactly on the frame edge begins
+its flight in the following frame. Handling context is supplied before
 commands because a trigger-down edge may accept a semi-auto or first automatic
 round immediately.
 

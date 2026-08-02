@@ -125,17 +125,36 @@ runtime's own hitch bound). Presentation damping and the animation mixer keep th
 raw render delta.
 
 A projectile spawned this frame receives exactly the simulation time after its
-own acceptance boundary — never time that elapsed before the trigger press, and
-never zero. A shot captures one normalized origin/sight/bore state at that
+own acceptance boundary, never time that elapsed before the trigger press. A
+round accepted exactly on the frame edge therefore begins its flight in the
+following frame. A shot captures one normalized origin/sight/bore state at that
 boundary; later camera, sway, or turret motion does not bend a projectile
 already in flight.
 
-Sub-frame poses are reconstructed by interpolating the frame's two endpoint
-samples, because that is all a render host observes. Two residuals survive that
-and both shrink with frame length: `THREE.Quaternion.slerp` carries roughly
-2e-8 rad of numerical error on short arcs, and a look path that is not a
-quaternion great circle bends away from the interpolated one. Both are orders of
-magnitude below one 0.1 mrad turret click.
+**What sub-frame pose reconstruction does and does not guarantee.** The host
+only observes the camera at frame edges, so an acceptance boundary inside the
+frame interpolates between the two endpoint samples. Position is linear and
+therefore exact. Orientation is not, and the residual is *not* negligible for
+fast combined-axis mouse movement. Measured on this tree, comparing one 30 Hz
+frame against the equivalent 144 Hz frames:
+
+| Look motion in one 33 ms frame | Direction residual |
+| --- | ---: |
+| single-axis (yaw only, or yaw with fixed pitch) | 3e-8 rad — floating point only |
+| 5.7° yaw + 2.3° pitch (the `FLICKING` test track) | 3.3e-4 rad ≈ 0.33 mrad, 1.4 cm at 70 m |
+| 20° yaw + 8° pitch | 4.8e-4 rad ≈ 0.5 mrad |
+| 90° yaw + 30° pitch (a hard flick) | 3.1e-2 rad ≈ 31 mrad ≈ 6 m at 200 m |
+
+A yaw-only path — including yaw at a fixed pitch — is a quaternion great circle,
+which spherical interpolation reproduces exactly; only floating point survives.
+Once both axes move, the true path bends away from the interpolated arc and the
+error grows with the product of the two per-frame angles.
+
+Interpolation is still a large improvement: without it every round in the frame
+takes the end-of-frame orientation, an error equal to the *whole* frame rotation
+rather than its second-order deviation. Removing the remainder requires
+timestamped sub-frame pose samples from the input layer, which is deferred
+(§10). Do not describe the current path as cadence-exact for arbitrary motion.
 
 Two inputs are still sampled once per frame rather than per boundary, so they
 are not bit-exact across render rates during a transition: breath stabilization
@@ -378,6 +397,11 @@ that the test script fails in a way that does not name the version as the cause.
 
 ## 10. Deliberately deferred work
 
+- timestamped sub-frame pose samples from the input layer, which is what would
+  remove the combined-axis interpolation residual in §3;
+- a test harness for the R3F frame host itself: `FiringTimeline` is covered
+  directly, but `WeaponPrototype.tsx`'s frame ordering is only checked by
+  reading it;
 - authored per-weapon GLBs, animations, sounds, and final tuning;
 - in-game ammunition/loadout selection and saved/rebindable controls;
 - Rapier-backed player collision, slopes, stance clearance, and vehicles;

@@ -81,19 +81,30 @@ export function Hud({
           <span className="eyebrow">Recent shots · {combat.lastShot?.mode}</span>
           <ol className="shot-log">
             {combat.recentShots.map((shot) => {
-              const subject = shot.targetId ?? shot.surfaceId ?? shot.kind ?? "miss";
-              const detail = shot.targetId
-                ? `${shot.metres === null ? "—" : fmt(shot.metres, 1)} m · ${fmt(shot.flightTimeSeconds, 2)} s · ${fmt(shot.damage)} dmg · ${
-                    shot.destroyed ? "down" : `${fmt(shot.healthAfter ?? 0)} hp`
-                  }`
+              // The row's subject is the last damaged target, so every value
+              // beside it must come from that target's own report — not from
+              // shot totals or from a later terminal contact.
+              const target = shot.target;
+              const terminal = shot.terminal;
+              const subject = target?.targetId ?? terminal?.surfaceId ?? terminal?.kind ?? "miss";
+              const alsoDamaged =
+                shot.damagedTargetCount > 1 ? ` · +${shot.damagedTargetCount - 1} more` : "";
+              const detail = target
+                ? `${fmt(target.rangeMetres, 1)} m · ${fmt(shot.flightTimeSeconds, 2)} s · ${fmt(target.damageApplied)} dmg · ${
+                    target.destroyed ? "down" : `${fmt(target.healthAfter)} hp`
+                  }${alsoDamaged}`
                 : shot.hit
-                  ? `${shot.penetrationOutcome ?? "impact"} · ${shot.ammunitionId ?? "—"} · ${shot.interactionCount} contact${shot.interactionCount === 1 ? "" : "s"}`
+                  ? `${terminal?.penetrationOutcome ?? "impact"} · ${terminal?.ammunitionId ?? "—"} · ${shot.interactionCount} contact${shot.interactionCount === 1 ? "" : "s"}`
                   : `no impact · ${fmt(shot.flightTimeSeconds, 2)} s`;
-              const status = shot.destroyed ? "down" : shot.damage > 0 ? "hit" : undefined;
+              const status = target?.destroyed
+                ? "down"
+                : shot.totalDamageApplied > 0
+                  ? "hit"
+                  : undefined;
               return (
                 <li key={shot.sequence} className={status}>
                   <span>#{shot.sequence}</span>
-                  <strong title={shot.objectName ?? undefined}>{subject}</strong>
+                  <strong title={target?.objectName ?? terminal?.objectName}>{subject}</strong>
                   <em>{detail}</em>
                 </li>
               );
@@ -177,23 +188,24 @@ export function Hud({
                   ? "—"
                   : `${fmt(combat.lastShot.impactSpeedMetresPerSecond)} m/s`}
               </dd>
-              {combat.lastShot.surfaceId && (
+              {combat.lastShot.terminal?.surfaceId && (
                 <>
-                  <dt>Surface</dt>
+                  <dt>Terminal surface</dt>
                   <dd>
-                    {combat.lastShot.surfaceId} · {combat.lastShot.penetrationOutcome}
+                    {combat.lastShot.terminal.surfaceId} ·{" "}
+                    {combat.lastShot.terminal.penetrationOutcome}
                   </dd>
                   <dt>Thickness</dt>
                   <dd>
-                    {combat.lastShot.effectiveThicknessMetres === null
+                    {combat.lastShot.terminal.effectiveThicknessMetres === null
                       ? "—"
-                      : `${fmt(combat.lastShot.effectiveThicknessMetres * 100, 1)} cm`}
+                      : `${fmt(combat.lastShot.terminal.effectiveThicknessMetres * 100, 1)} cm`}
                   </dd>
                   <dt>Exit speed</dt>
                   <dd>
-                    {combat.lastShot.retainedSpeedMetresPerSecond === null
+                    {combat.lastShot.terminal.retainedSpeedMetresPerSecond === null
                       ? "—"
-                      : `${fmt(combat.lastShot.retainedSpeedMetresPerSecond)} m/s`}
+                      : `${fmt(combat.lastShot.terminal.retainedSpeedMetresPerSecond)} m/s`}
                   </dd>
                 </>
               )}

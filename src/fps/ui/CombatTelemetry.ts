@@ -24,30 +24,56 @@ export interface AimResolutionSample {
   readonly stance: PlayerStance;
 }
 
+/**
+ * The last damaged target on a shot. Every field here describes that target
+ * alone — never a total across targets and never a later terminal contact.
+ */
+export interface ShotTargetTelemetry {
+  readonly targetId: string;
+  readonly objectName: string;
+  readonly damageApplied: number;
+  readonly healthBefore: number;
+  readonly healthAfter: number;
+  readonly destroyed: boolean;
+  readonly rangeMetres: number;
+  readonly point: readonly [number, number, number];
+}
+
+/**
+ * Where the round finished. A penetrating round can damage a target and then
+ * stop in terrain, so this is deliberately separate from the target report.
+ */
+export interface ShotTerminalTelemetry {
+  /** False when the round expired or ran out of range beyond its last contact. */
+  readonly stopped: boolean;
+  readonly kind: CombatRangeKind;
+  readonly objectName: string;
+  readonly targetId: string | null;
+  readonly metres: number | null;
+  readonly point: readonly [number, number, number];
+  readonly ammunitionId: AmmunitionId | null;
+  readonly surfaceId: SurfaceId | null;
+  readonly penetrationOutcome: PenetrationOutcome | null;
+  readonly effectiveThicknessMetres: number | null;
+  readonly retainedSpeedMetresPerSecond: number | null;
+}
+
 export interface ShotTelemetry {
   readonly sequence: number;
   readonly sourceId: string;
   readonly mode: ShotTraceMode;
   readonly hit: boolean;
-  readonly kind: CombatRangeKind | null;
-  readonly targetId: string | null;
-  readonly objectName: string | null;
-  readonly damage: number;
-  readonly healthBefore: number | null;
-  readonly healthAfter: number | null;
-  readonly destroyed: boolean;
-  readonly metres: number | null;
-  readonly point: readonly [number, number, number] | null;
   readonly flightTimeSeconds: number;
   readonly verticalDropMetres: number;
   readonly lateralDriftMetres: number;
   readonly impactSpeedMetresPerSecond: number | null;
-  readonly ammunitionId: AmmunitionId | null;
-  readonly surfaceId: SurfaceId | null;
-  readonly penetrationOutcome: PenetrationOutcome | null;
   readonly interactionCount: number;
-  readonly effectiveThicknessMetres: number | null;
-  readonly retainedSpeedMetresPerSecond: number | null;
+  /** Totals over every damaged target; never attributable to a single one. */
+  readonly totalDamageApplied: number;
+  readonly damagedTargetCount: number;
+  readonly anyTargetDestroyed: boolean;
+  readonly target: ShotTargetTelemetry | null;
+  readonly terminal: ShotTerminalTelemetry | null;
 }
 
 export interface BallisticEnvironmentTelemetry {
@@ -156,30 +182,59 @@ export class CombatTelemetry {
     const impact = result.trace.impact;
     const interactions = result.trace.interactions;
     const lastInteraction = interactions.at(-1) ?? null;
+    // A stopping contact always records its own interaction, so a trailing
+    // "penetrated" one belongs to an earlier surface and must not describe the
+    // terminal contact.
+    const terminalInteraction = impact
+      ? lastInteraction?.outcome === "stopped"
+        ? lastInteraction
+        : null
+      : lastInteraction;
+    const target: ShotTargetTelemetry | null = report
+      ? {
+          targetId: report.targetId,
+          objectName: report.objectName,
+          damageApplied: report.damageApplied,
+          healthBefore: report.healthBefore,
+          healthAfter: report.healthAfter,
+          destroyed: report.destroyed,
+          rangeMetres: report.rangeMetres,
+          point: [report.point.x, report.point.y, report.point.z],
+        }
+      : null;
+    const terminalPoint = impact?.point ?? terminalInteraction?.point ?? null;
+    const terminal: ShotTerminalTelemetry | null =
+      impact || terminalInteraction
+        ? {
+            stopped: impact !== null,
+            kind: impact?.kind ?? terminalInteraction!.kind,
+            objectName: impact?.objectName ?? terminalInteraction!.objectName,
+            targetId: impact ? impact.targetId : terminalInteraction!.targetId,
+            metres: result.hit?.distance ?? null,
+            point: [terminalPoint!.x, terminalPoint!.y, terminalPoint!.z],
+            ammunitionId: terminalInteraction?.ammunitionId ?? null,
+            surfaceId: terminalInteraction?.surfaceId ?? null,
+            penetrationOutcome: terminalInteraction?.outcome ?? null,
+            effectiveThicknessMetres: terminalInteraction?.effectiveThicknessMetres ?? null,
+            retainedSpeedMetresPerSecond:
+              terminalInteraction?.speedAfterMetresPerSecond ?? null,
+          }
+        : null;
     const lastShot: ShotTelemetry = {
       sequence: result.shot.sequence,
       sourceId: result.shot.sourceId,
       mode: result.trace.mode,
       hit: result.hit !== null || interactions.length > 0,
-      kind: result.hit?.kind ?? lastInteraction?.kind ?? null,
-      targetId: report?.targetId ?? null,
-      objectName: impact?.objectName || lastInteraction?.objectName || null,
-      damage: result.damageApplied,
-      healthBefore: report?.healthBefore ?? null,
-      healthAfter: report?.healthAfter ?? null,
-      destroyed: result.destroyed,
-      metres: result.hit?.distance ?? null,
-      point: impact ? [impact.point.x, impact.point.y, impact.point.z] : null,
       flightTimeSeconds: result.trace.flightTimeSeconds,
       verticalDropMetres: result.trace.verticalDropMetres,
       lateralDriftMetres: result.trace.lateralDriftMetres,
       impactSpeedMetresPerSecond: result.trace.impactSpeedMetresPerSecond,
-      ammunitionId: lastInteraction?.ammunitionId ?? null,
-      surfaceId: lastInteraction?.surfaceId ?? null,
-      penetrationOutcome: lastInteraction?.outcome ?? null,
       interactionCount: interactions.length,
-      effectiveThicknessMetres: lastInteraction?.effectiveThicknessMetres ?? null,
-      retainedSpeedMetresPerSecond: lastInteraction?.speedAfterMetresPerSecond ?? null,
+      totalDamageApplied: result.damageApplied,
+      damagedTargetCount: result.reports.length,
+      anyTargetDestroyed: result.destroyed,
+      target,
+      terminal,
     };
     this.replace({
       ...this.snapshot,

@@ -94,7 +94,8 @@ test("telemetry retains five reports and debug store retains only the latest tra
     telemetry.getSnapshot().recentShots.map((shot) => shot.sequence),
     [6, 5, 4, 3, 2]
   );
-  assert.equal(telemetry.getSnapshot().lastShot?.targetId, null);
+  assert.equal(telemetry.getSnapshot().lastShot?.target, null);
+  assert.equal(telemetry.getSnapshot().lastShot?.terminal, null);
   assert.equal(telemetry.getSnapshot().lastShot?.mode, "hitscan");
   assert.equal(debug.getSnapshot().trace?.shotSequence, 6);
   assert.equal(notifications, 6);

@@ -24,8 +24,6 @@ import {
   uniform,
   uv,
   vec3,
-  vec2,
-  cameraPosition,
 } from "three/tsl";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -34,7 +32,6 @@ type NodeArg = any;
 // TSL's constructors are typed per component and cannot follow component types through
 // `.mul()`; the graph is validated by compiling it, as elsewhere in this renderer.
 const V3 = vec3 as unknown as (x: NodeArg, y: NodeArg, z: NodeArg) => NodeArg;
-const V2 = vec2 as unknown as (x: NodeArg, y: NodeArg) => NodeArg;
 
 export interface PrecipitationOptions {
   /**
@@ -120,30 +117,15 @@ export function createPrecipitation(opts: PrecipitationOptions = {}): Precipitat
     maxCount: uniform(maxCount),
   };
 
-  // WORLD-CELL LATTICE, the same construction the blade layer uses and for the same
-  // reason. Keying a drop's scatter on its INSTANCE INDEX ties it to the camera-following
-  // box, so every drop's world position translates with the player and the whole field
-  // reads as locked to the viewer — rain sliding along with you rather than falling in
-  // the world. Keying on the world cell instead makes the pattern stationary: cells enter
-  // and leave the window as you walk, and each one always produces the same drop.
-  const side = Math.max(1, Math.round(Math.sqrt(maxCount)));
-  const halfSide = Math.floor(side / 2);
-  const cellSize: NodeArg = (u.area as NodeArg).mul(1 / side);
-  const camXZ = V2(cameraPosition.x, cameraPosition.z);
-  const fi: NodeArg = float(instanceIndex);
-  const iz = fi.mul(1 / side).floor();
-  const ix = fi.sub(iz.mul(side));
-  const worldCell: NodeArg = camXZ
-    .div(cellSize)
-    .floor()
-    .add(V2(ix.sub(halfSide), iz.sub(halfSide)));
+  // Per-drop deterministic randoms from the instance index — stable across frames, so
+  // each drop keeps its scatter and phase with nothing stored anywhere.
+  const idx: NodeArg = float(instanceIndex);
+  const r1: NodeArg = hash(idx);
+  const r2: NodeArg = hash(idx.add(13.17));
+  const r3: NodeArg = hash(idx.add(31.41));
+  const r4: NodeArg = hash(idx.add(57.93));
 
-  // Per-drop randoms from the CELL, not the index — that is the whole change.
-  const r1: NodeArg = hash(worldCell.x.mul(37.7).add(worldCell.y.mul(91.3)));
-  const r2: NodeArg = hash(worldCell.x.mul(11.9).add(worldCell.y.mul(57.1)).add(13.17));
-  const r3: NodeArg = hash(worldCell.x.mul(73.1).add(worldCell.y.mul(19.7)).add(31.41));
-  const r4: NodeArg = hash(worldCell.x.mul(29.3).add(worldCell.y.mul(83.9)).add(57.93));
-
+  const half: NodeArg = (u.area as NodeArg).mul(0.5);
 
   // Mode blends physics AND shape: 0 is a rain streak, 1 a square snowflake.
   const fallSpeed: NodeArg = mix(u.fallSpeedRain, u.fallSpeedSnow, u.mode);
@@ -162,12 +144,8 @@ export function createPrecipitation(opts: PrecipitationOptions = {}): Precipitat
   // each drop through the box and handles the negative march cleanly; r3 de-synchronises
   // the phase so they do not fall in ranks.
   const vy: NodeArg = mix((fallSpeed as NodeArg).negate(), u.uwRise, u.uw);
-  // Vertical phase anchored to a WORLD height band, not to the camera's own altitude.
-  // Snapping the band to whole multiples of its height means climbing or descending moves
-  // it in steps rather than dragging it, so drops do not slide vertically as you move.
-  const band: NodeArg = cameraPosition.y.div(u.height).floor().mul(u.height);
-  const upPos: NodeArg = band.add(
-    mod(r3.mul(u.height).add(vy.mul(time)), u.height)
+  const upPos: NodeArg = mod(r3.mul(u.height).add(vy.mul(time)), u.height).sub(
+    (u.height as NodeArg).mul(0.5)
   );
 
   // Surface wind drives drops in air and fades out under water, so submerged specks
@@ -175,13 +153,12 @@ export function createPrecipitation(opts: PrecipitationOptions = {}): Precipitat
   const windX: NodeArg = (u.windX as NodeArg).mul((u.uw as NodeArg).oneMinus());
   const windZ: NodeArg = (u.windZ as NodeArg).mul((u.uw as NodeArg).oneMinus());
 
-  // Jittered inside its own cell so the lattice never shows as rows, plus a wind offset
-  // applied to the WHOLE field. A shared offset is the physically right shape: wind moves
-  // the entire body of rain downwind together, so the pattern translates rather than each
-  // drop wandering out of its cell.
-  const cellCentre: NodeArg = worldCell.add(0.5).mul(cellSize);
-  const driftX = cellCentre.x.add(r1.sub(0.5).mul(cellSize)).add(windX.mul(time));
-  const driftZ = cellCentre.y.add(r2.sub(0.5).mul(cellSize)).add(windZ.mul(time));
+  // Scatter plus continuous wind drift, wrapped back into the box so the field stays
+  // seamless however far the wind carries it.
+  const x0 = r1.sub(0.5).mul(u.area);
+  const z0 = r2.sub(0.5).mul(u.area);
+  const driftX = mod(x0.add(windX.mul(time)).add(half), u.area).sub(half);
+  const driftZ = mod(z0.add(windZ.mul(time)).add(half), u.area).sub(half);
 
   // Snow flutters; submerged specks drift gently sideways for a suspended look.
   const swayAmp: NodeArg = (u.flakeSize as NodeArg).mul(6).mul(u.mode);
@@ -192,12 +169,11 @@ export function createPrecipitation(opts: PrecipitationOptions = {}): Precipitat
   const pz = driftZ
     .add(cos(time.mul(1.3).add(r4.mul(6.2832))).mul(swayAmp))
     .add(cos(time.mul(0.35).add(r4.mul(6.2832))).mul(uwSway));
-  // WORLD position now, not an offset from a camera-following box.
   const centre: NodeArg = V3(px, upPos, pz);
 
   // Only the first `intensity * maxCount` drops exist. Rejected ones collapse to zero
   // area rather than discarding fragments — the same trick the blade layer uses.
-  const visible = fi.lessThan((u.maxCount as NodeArg).mul(u.intensity));
+  const visible = idx.lessThan((u.maxCount as NodeArg).mul(u.intensity));
   const vis: NodeArg = visible.select(float(1), float(0));
 
   // A streak aligned to the drop's own velocity, not to the camera. Its LENGTH runs
@@ -205,7 +181,7 @@ export function createPrecipitation(opts: PrecipitationOptions = {}): Precipitat
   // or down the rain — which a fixed camera-facing sprite cannot do. Its WIDTH turns to
   // face the camera, perpendicular to both the velocity and the view ray.
   const velLocal: NodeArg = normalize(V3(windX, vy, windZ));
-  const toCam: NodeArg = normalize(cameraPosition.sub(centre));
+  const toCam: NodeArg = normalize((centre as NodeArg).negate());
   // The epsilon keeps the cross product finite for a drop sitting exactly on the view axis.
   const widthAxis: NodeArg = normalize(cross(velLocal, toCam).add(V3(1e-4, 0, 0)));
   const g: NodeArg = positionGeometry; // plane vertices, x and y in [-0.5, 0.5]
@@ -251,6 +227,7 @@ export function createPrecipitation(opts: PrecipitationOptions = {}): Precipitat
   mesh.renderOrder = 12; // after opaque geometry, for transparency sorting
   mesh.raycast = () => {}; // weather answers no gameplay query
 
+  const position = new THREE.Vector3();
   return {
     object3D: mesh,
     uniforms: {
@@ -258,10 +235,10 @@ export function createPrecipitation(opts: PrecipitationOptions = {}): Precipitat
       opacity: u.opacity,
       fallSpeedRain: u.fallSpeedRain,
     },
-    // NOTHING TO UPDATE. Every drop derives its own world position from `cameraPosition`
-    // in the vertex stage, so the mesh sits at the origin and never moves — the same
-    // arrangement the blade layer uses, and it removes a per-frame matrix update too.
-    update: () => {},
+    update: (camera) => {
+      camera.getWorldPosition(position);
+      mesh.position.copy(position);
+    },
     setIntensity: (intensity) => {
       const v = Math.max(0, Math.min(1, intensity));
       u.intensity.value = v;

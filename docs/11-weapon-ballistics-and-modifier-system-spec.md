@@ -595,7 +595,7 @@ Because of that, consumers must keep three groups of fields apart, and
 | --- | --- | --- |
 | target | `result.report` only | damage and health of the last damaged target |
 | aggregate | `result.damageApplied` / `destroyed` / `reports.length` | shot-wide totals |
-| terminal | final impact plus the interaction that stopped the round | stopping distance, surface, exit speed |
+| terminal | the round's last authored-surface contact, with a `stopped` flag | stopping distance, surface, exit speed |
 
 Merging them lets a round that penetrates a target and then hits terrain credit
 that target with the terrain's distance and object name, and lets one destroyed

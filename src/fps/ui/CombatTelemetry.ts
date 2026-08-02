@@ -40,11 +40,16 @@ export interface ShotTargetTelemetry {
 }
 
 /**
- * Where the round finished. A penetrating round can damage a target and then
- * stop in terrain, so this is deliberately separate from the target report.
+ * The round's last authored-surface contact, and whether it ended there. Every
+ * field describes that one contact. A penetrating round can damage a target and
+ * then stop in terrain, so this is deliberately separate from the target report.
+ *
+ * When `stopped` is false the round carried on past this contact and expired or
+ * ran out of range in flight, so `point` is that surface rather than the expiry
+ * position and `metres` is null. `null` overall means the round touched nothing.
  */
 export interface ShotTerminalTelemetry {
-  /** False when the round expired or ran out of range beyond its last contact. */
+  /** False when the round expired or ran out of range beyond this contact. */
   readonly stopped: boolean;
   readonly kind: CombatRangeKind;
   readonly objectName: string;

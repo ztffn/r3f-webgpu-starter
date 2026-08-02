@@ -333,6 +333,64 @@ test("automatic fire advances every cadence boundary and stops on trigger up", (
   assert.equal(advanceWeapon(weapon, 0.5).filter((event) => event.type === "shot").length, 0);
 });
 
+// 3,000 RPM crosses several cadence boundaries inside one update without
+// approaching the 100 ms hitch clamp, and the short reload keeps the timing
+// arithmetic exact.
+const RAPID_CADENCE_DEFINITION: WeaponDefinition = {
+  ...SAW_DEFINITION,
+  id: "rapid-cadence",
+  shot: { ...SAW_DEFINITION.shot, roundsPerMinute: 3_000 },
+  ammo: { magazineSize: 6, initialReserve: 6 },
+  reload: { durationSeconds: 0.05 },
+};
+
+test("accepted shots report the cadence offset inside the update that accepted them", () => {
+  const weapon = new WeaponSystem(RAPID_CADENCE_DEFINITION, 5);
+  const interval = 60 / RAPID_CADENCE_DEFINITION.shot.roundsPerMinute;
+  weaponCommand(weapon, { type: "triggerDown" });
+  const immediate = drainWeapon(weapon).find(
+    (event): event is Extract<WeaponEvent, { type: "shot" }> => event.type === "shot"
+  );
+  assert.ok(immediate);
+  assert.equal(
+    immediate.acceptedAtOffsetSeconds,
+    0,
+    "a round accepted by a command belongs to the start of the next simulation step"
+  );
+
+  const delta = interval * 2.5;
+  weapon.update(delta);
+  const offsets = drainWeapon(weapon)
+    .filter((event): event is Extract<WeaponEvent, { type: "shot" }> => event.type === "shot")
+    .map((event) => event.acceptedAtOffsetSeconds);
+  assert.equal(offsets.length, 2);
+  for (let index = 0; index < offsets.length; index += 1) {
+    assert.ok(
+      Math.abs(offsets[index] - interval * (index + 1)) < 1e-12,
+      `offset ${index}: ${offsets[index]}`
+    );
+    assert.ok(offsets[index] <= delta, "an offset can never exceed its own update delta");
+  }
+
+  // A reload consumes simulation time before firing resumes, so the first round
+  // after it must not claim the start of the frame.
+  const reloading = new WeaponSystem(RAPID_CADENCE_DEFINITION, 6);
+  reloading.magazine = 0;
+  weaponCommand(reloading, { type: "reload" });
+  weaponCommand(reloading, { type: "triggerDown" });
+  reloading.update(0.04);
+  drainWeapon(reloading);
+  reloading.update(0.05);
+  const afterReload = drainWeapon(reloading).find(
+    (event): event is Extract<WeaponEvent, { type: "shot" }> => event.type === "shot"
+  );
+  assert.ok(afterReload);
+  assert.ok(
+    Math.abs(afterReload.acceptedAtOffsetSeconds - 0.01) < 1e-12,
+    `first round after the reload: ${afterReload.acceptedAtOffsetSeconds}`
+  );
+});
+
 test("an empty automatic weapon dry-fires once per trigger press", () => {
   const weapon = new WeaponSystem(SAW_DEFINITION);
   weapon.magazine = 0;

@@ -34,6 +34,12 @@ import {
 import { AimSwayController } from "./core/AimSwayController";
 import { WeaponAimComposer } from "./core/WeaponAimComposer";
 import {
+  clampSimulationDelta,
+  createFiringTimelineFrame,
+  FiringTimeline,
+  type AcceptedShotView,
+} from "./core/FiringTimeline";
+import {
   ScopeAdjustmentController,
   scopeAdjustmentActionForKey,
   type ScopeAdjustmentSnapshot,
@@ -304,14 +310,25 @@ export function WeaponPrototype({
   const rangeDirection = useMemo(() => new THREE.Vector3(), []);
   const crosshairPoint = useMemo(() => new THREE.Vector3(), []);
   const authoritativeDirection = useMemo(() => new THREE.Vector3(), []);
-  const boreDirection = useMemo(() => new THREE.Vector3(), []);
-  const eventSightDirection = useMemo(() => new THREE.Vector3(), []);
-  const eventBoreDirection = useMemo(() => new THREE.Vector3(), []);
-  const eventProjectileDirection = useMemo(() => new THREE.Vector3(), []);
   const aimComposer = useMemo(() => new WeaponAimComposer(), []);
   const authoritativeAimQuaternion = useMemo(() => new THREE.Quaternion(), []);
   const currentMeanAimQuaternion = useMemo(() => new THREE.Quaternion(), []);
-  const eventMeanAimQuaternion = useMemo(() => new THREE.Quaternion(), []);
+  const timelineFrame = useMemo(() => createFiringTimelineFrame(), []);
+  const simulationStartPosition = useMemo(() => new THREE.Vector3(), []);
+  const simulationStartQuaternion = useMemo(() => new THREE.Quaternion(), []);
+  const simulationPoseReady = useRef(false);
+  const firingTimeline = useMemo(
+    () =>
+      new FiringTimeline({
+        ballistics,
+        sway: aimSway,
+        // Resolved from the accepted round's own weapon so a switch inside the
+        // frame cannot apply another optic's zero.
+        sightAdjustmentFor: (weaponId) =>
+          scopeAdjustments.get(weaponId) ?? activeScopeAdjustments.current,
+      }),
+    [aimSway, ballistics, scopeAdjustments]
+  );
   const playerPose = useMemo(
     () => ({ position: camera.position, stance, grounded, planarSpeedMetresPerSecond: 0 }),
     [camera]
@@ -378,45 +395,19 @@ export function WeaponPrototype({
     activeAction.current = next;
   }, []);
 
+  const handleAcceptedShot = useCallback(
+    (shot: AcceptedShotView, event: Extract<LoadoutEvent, { type: "shot" }>) => {
+      if (!shot.spawned) combatTelemetry.publishProjectileRejected();
+      recoilPitch.current += event.recoilImpulsePitchRadians;
+      recoilYaw.current += event.recoilImpulseYawRadians;
+      const segment = weaponPresentationFor(event.weaponId).animationSegments.fire;
+      if (segment !== undefined) playSegment(segment);
+    },
+    [playSegment]
+  );
+
   const handleWeaponEvent = useCallback(
-    (event: LoadoutEvent) => {
-      if (event.type === "shot") {
-        aimComposer.composeQuaternion(
-          authoritativeAimQuaternion,
-          event.recoilOffsetYawRadians,
-          event.recoilOffsetPitchRadians,
-          eventMeanAimQuaternion
-        );
-        aimComposer.directionFromQuaternion(eventMeanAimQuaternion, eventSightDirection);
-        activeScopeAdjustments.current.applyToSightDirection(
-          eventSightDirection,
-          eventBoreDirection
-        );
-        aimComposer.offsetDirection(
-          eventBoreDirection,
-          event.dispersionYawRadians,
-          event.dispersionPitchRadians,
-          eventProjectileDirection
-        );
-        const spawned = ballistics.spawn({
-          sourceId: event.weaponId,
-          sequence: event.sequence,
-          origin: player.aim.origin,
-          direction: eventProjectileDirection,
-          sightDirection: eventSightDirection,
-          maxDistance: event.range,
-          maxFlightSeconds: event.maxFlightSeconds,
-          damage: event.damage,
-          ammunition: event.ammunition,
-          captureTrace: captureShotTrace,
-        });
-        if (!spawned) combatTelemetry.publishProjectileRejected();
-        recoilPitch.current += event.recoilImpulsePitchRadians;
-        recoilYaw.current += event.recoilImpulseYawRadians;
-        const segment = weaponPresentationFor(event.weaponId).animationSegments.fire;
-        if (segment !== undefined) playSegment(segment);
-        return;
-      }
+    (event: Exclude<LoadoutEvent, { type: "shot" }>) => {
       if (event.type === "dry-fire") {
         combatTelemetry.publishDryFire();
         const segment = weaponPresentationFor(event.weaponId).animationSegments.dryFire;
@@ -437,19 +428,12 @@ export function WeaponPrototype({
         setPresentationWeaponId(event.weaponId);
       }
     },
-    [
-      aimComposer,
-      authoritativeAimQuaternion,
-      ballistics,
-      captureShotTrace,
-      eventBoreDirection,
-      eventMeanAimQuaternion,
-      eventProjectileDirection,
-      eventSightDirection,
-      loadout,
-      playSegment,
-      player,
-    ]
+    [loadout, playSegment]
+  );
+
+  const timelineHandlers = useMemo(
+    () => ({ onShot: handleAcceptedShot, onEvent: handleWeaponEvent }),
+    [handleAcceptedShot, handleWeaponEvent]
   );
 
   const handleBallisticResult = useCallback((result: BallisticResult) => {
@@ -727,16 +711,77 @@ export function WeaponPrototype({
   // before the near-plane weapon overlay, preserving a future single final
   // composite/grade stage instead of grading every camera independently.
   useFrame((_, delta) => {
-    // Existing rounds advance before this frame's input can spawn another one,
-    // so a newly accepted shot never receives time that elapsed before firing.
-    const ballisticStartedAt = performance.now();
-    ballistics.update(delta);
-    const ballisticMilliseconds = performance.now() - ballisticStartedAt;
+    // Weapons, gameplay sway, and projectiles share one clamped clock. A hitch
+    // must not hand the three systems different amounts of simulation time.
+    const simulationDelta = clampSimulationDelta(delta);
+    camera.updateMatrixWorld();
+    playerPose.stance = stance;
+    playerPose.grounded = grounded;
+    if (playerMotionReady.current && delta > 0) {
+      playerPose.planarSpeedMetresPerSecond = Math.min(
+        MAX_TRANSITIONAL_SPEED_METRES_PER_SECOND,
+        Math.hypot(
+          camera.position.x - previousPlayerPosition.x,
+          camera.position.z - previousPlayerPosition.z
+        ) / delta
+      );
+    } else {
+      playerPose.planarSpeedMetresPerSecond = 0;
+      playerMotionReady.current = true;
+    }
+    previousPlayerPosition.copy(camera.position);
+    player.syncMotorPose(playerPose);
+    handlingContext.stance = player.stance;
+    handlingContext.grounded = player.grounded;
+    handlingContext.planarSpeedMetresPerSecond = player.planarSpeedMetresPerSecond;
+    handlingContext.breathStabilization = aimSway.breathStabilization;
+    loadout.setHandlingContext(handlingContext);
+    player.consumeCommands(commands);
+    for (const command of commands.weaponCommands) loadout.handleCommand(command);
+    loadout.setAdsWanted(commands.adsWanted);
+    const adsProgressBefore = loadout.equippedWeapon.adsProgress;
+    loadout.update(simulationDelta);
+    const equippedWeapon = loadout.equippedWeapon;
+    const weaponSnapshot = equippedWeapon.getSnapshot();
+    const nextScopeAdjustments = scopeAdjustments.get(equippedWeapon.definition.id)!;
+    if (activeScopeAdjustments.current !== nextScopeAdjustments) {
+      activeScopeAdjustments.current = nextScopeAdjustments;
+      const scopeSnapshot = nextScopeAdjustments.getSnapshot();
+      drawScopeStatus(scopeStatusMap, scopeSnapshot);
+      combatTelemetry.publishScopeAdjustment(scopeSnapshot);
+    }
+
+    if (!simulationPoseReady.current) {
+      simulationStartPosition.copy(camera.position);
+      simulationStartQuaternion.copy(camera.quaternion);
+      simulationPoseReady.current = true;
+    }
+    timelineFrame.deltaSeconds = simulationDelta;
+    timelineFrame.startPosition.copy(simulationStartPosition);
+    timelineFrame.endPosition.copy(camera.position);
+    timelineFrame.startOrientation.copy(simulationStartQuaternion);
+    timelineFrame.endOrientation.copy(camera.quaternion);
+    timelineFrame.stance = stance;
+    timelineFrame.holdingBreath = scopeDemo && commands.holdingBreath;
+    timelineFrame.swayHandlingMultiplier = weaponSnapshot.swayFactor;
+    // Gameplay sway follows authoritative ADS progress, not the damped rig
+    // blend: sway must not depend on whether the proxy GLTF finished loading.
+    timelineFrame.adsProgressStart = adsProgressBefore;
+    timelineFrame.adsProgressEnd = equippedWeapon.adsProgress;
+    timelineFrame.captureTrace = captureShotTrace;
+    // Sway advance, per-boundary shot spawning, and projectile stepping all
+    // happen inside this call, in cadence order on one timeline.
+    const simulationStartedAt = performance.now();
+    firingTimeline.runFrame(timelineFrame, loadout, timelineHandlers);
+    const simulationMilliseconds = performance.now() - simulationStartedAt;
+    simulationStartPosition.copy(camera.position);
+    simulationStartQuaternion.copy(camera.quaternion);
+
     ballisticPerformance.elapsedSeconds += delta;
-    ballisticPerformance.simulationMilliseconds += ballisticMilliseconds;
+    ballisticPerformance.simulationMilliseconds += simulationMilliseconds;
     ballisticPerformance.maxSimulationMilliseconds = Math.max(
       ballisticPerformance.maxSimulationMilliseconds,
-      ballisticMilliseconds
+      simulationMilliseconds
     );
     ballisticPerformance.frames += 1;
     if (ballisticPerformance.elapsedSeconds >= PERFORMANCE_SAMPLE_SECONDS) {
@@ -768,50 +813,8 @@ export function WeaponPrototype({
     ballistics.drainImpactEvents(handleImpact);
     ballistics.drainResults(handleBallisticResult);
 
-    camera.updateMatrixWorld();
-    playerPose.stance = stance;
-    playerPose.grounded = grounded;
-    if (playerMotionReady.current && delta > 0) {
-      playerPose.planarSpeedMetresPerSecond = Math.min(
-        MAX_TRANSITIONAL_SPEED_METRES_PER_SECOND,
-        Math.hypot(
-          camera.position.x - previousPlayerPosition.x,
-          camera.position.z - previousPlayerPosition.z
-        ) / delta
-      );
-    } else {
-      playerPose.planarSpeedMetresPerSecond = 0;
-      playerMotionReady.current = true;
-    }
-    previousPlayerPosition.copy(camera.position);
-    player.syncMotorPose(playerPose);
-    handlingContext.stance = player.stance;
-    handlingContext.grounded = player.grounded;
-    handlingContext.planarSpeedMetresPerSecond = player.planarSpeedMetresPerSecond;
-    handlingContext.breathStabilization = aimSway.breathStabilization;
-    loadout.setHandlingContext(handlingContext);
-    player.consumeCommands(commands);
-    for (const command of commands.weaponCommands) loadout.handleCommand(command);
-    loadout.setAdsWanted(commands.adsWanted);
-    loadout.update(delta);
-    const equippedWeapon = loadout.equippedWeapon;
-    const weaponSnapshot = equippedWeapon.getSnapshot();
-    const nextScopeAdjustments = scopeAdjustments.get(equippedWeapon.definition.id)!;
-    if (activeScopeAdjustments.current !== nextScopeAdjustments) {
-      activeScopeAdjustments.current = nextScopeAdjustments;
-      const scopeSnapshot = nextScopeAdjustments.getSnapshot();
-      drawScopeStatus(scopeStatusMap, scopeSnapshot);
-      combatTelemetry.publishScopeAdjustment(scopeSnapshot);
-    }
     const aimTarget = scopeDemo && hasOptic.current ? equippedWeapon.adsProgress : 0;
     aim.current = THREE.MathUtils.damp(aim.current, aimTarget, AIM_RESPONSE, delta);
-    const holdingScopeBreath = scopeDemo && commands.holdingBreath;
-    aimSway.update(delta, {
-      stance,
-      adsBlend: aim.current,
-      holdingBreath: holdingScopeBreath,
-      handlingMultiplier: weaponSnapshot.swayFactor,
-  });
     if (scopeDemo) {
       lookSensitivity.setOpticState(
         aim.current,
@@ -841,7 +844,6 @@ export function WeaponPrototype({
       currentMeanAimQuaternion
     );
     aimComposer.directionFromQuaternion(currentMeanAimQuaternion, authoritativeDirection);
-    activeScopeAdjustments.current.applyToSightDirection(authoritativeDirection, boreDirection);
     player.syncAim(authoritativeDirection);
     crosshairPoint.copy(camera.position).add(authoritativeDirection).project(camera);
     const perspectiveCamera = camera as THREE.PerspectiveCamera;
@@ -861,9 +863,6 @@ export function WeaponPrototype({
         crosshairPoint.z >= -1 &&
         crosshairPoint.z <= 1
     );
-    // Every event carries the pre-impulse recoil and dispersion captured at its
-    // own cadence boundary, so several rounds drained here retain distinct aim.
-    loadout.drainEvents(handleWeaponEvent);
     combatTelemetry.publishWeapon(weaponSnapshot);
 
     mixer.current?.update(delta);

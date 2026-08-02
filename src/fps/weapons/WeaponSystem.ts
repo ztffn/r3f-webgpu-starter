@@ -49,6 +49,12 @@ export type WeaponEvent =
   | (WeaponEventBase & {
       readonly type: "shot";
       readonly sequence: number;
+      /**
+       * Seconds elapsed inside the `update(dt)` call that accepted this round.
+       * Commands accepted between updates report `0`, so a frame host can place
+       * every accepted round on one simulation timeline.
+       */
+      readonly acceptedAtOffsetSeconds: number;
       readonly damage: number;
       readonly range: number;
       readonly maxFlightSeconds: number;
@@ -67,7 +73,10 @@ export type WeaponEvent =
   | (WeaponEventBase & { readonly type: "ads-changed"; readonly wanted: boolean })
   | (WeaponEventBase & { readonly type: "fire-mode-changed"; readonly fireMode: FireMode });
 
-const DT_MAX = 0.1;
+/** Longest simulation time one `update()` call may consume. */
+export const WEAPON_UPDATE_MAX_SECONDS = 0.1;
+
+const DT_MAX = WEAPON_UPDATE_MAX_SECONDS;
 const TIME_EPSILON = 1e-9;
 const UINT32_RANGE = 0x1_0000_0000;
 const TWO_PI = Math.PI * 2;
@@ -110,6 +119,7 @@ export class WeaponSystem {
   private recoilPitchRadians = 0;
   private recoilYawRadians = 0;
   private bloomRadians = 0;
+  private updateCursorSeconds = 0;
   private handlingStance = DEFAULT_WEAPON_HANDLING_CONTEXT.stance;
   private handlingGrounded = DEFAULT_WEAPON_HANDLING_CONTEXT.grounded;
   private handlingPlanarSpeed = DEFAULT_WEAPON_HANDLING_CONTEXT.planarSpeedMetresPerSecond;
@@ -164,11 +174,21 @@ export class WeaponSystem {
   }
 
   update(dtSeconds: number): void {
+    // The cursor makes every event emitted inside this call carry its exact
+    // acceptance offset. Rounds accepted by a command between updates keep
+    // offset zero, which is the start of the next simulation step.
+    this.updateCursorSeconds = 0;
+    this.advanceUpdate(dtSeconds);
+    this.updateCursorSeconds = 0;
+  }
+
+  private advanceUpdate(dtSeconds: number): void {
     let dt = Number.isFinite(dtSeconds) ? Math.min(Math.max(dtSeconds, 0), DT_MAX) : 0;
 
     if (this.reloadRemaining > 0) {
       const reloadElapsed = Math.min(dt, this.reloadRemaining);
       this.advanceContinuousState(reloadElapsed);
+      this.updateCursorSeconds += reloadElapsed;
       this.reloadRemaining -= reloadElapsed;
       dt -= reloadElapsed;
       if (this.reloadRemaining <= TIME_EPSILON) {
@@ -306,10 +326,12 @@ export class WeaponSystem {
     while (true) {
       if (this.cooldownRemaining > remaining + TIME_EPSILON) {
         this.advanceContinuousState(remaining);
+        this.updateCursorSeconds += remaining;
         return;
       }
       const toBoundary = this.cooldownRemaining;
       this.advanceContinuousState(toBoundary);
+      this.updateCursorSeconds += toBoundary;
       remaining = Math.max(0, remaining - toBoundary);
 
       if (this.burstRoundsRemaining > 0) {
@@ -322,6 +344,7 @@ export class WeaponSystem {
         if (!this.tryFireOnce()) return;
       } else {
         this.advanceContinuousState(remaining);
+        this.updateCursorSeconds += remaining;
         return;
       }
 
@@ -379,6 +402,7 @@ export class WeaponSystem {
       type: "shot",
       weaponId: this.definition.id,
       sequence: this.shotSequence,
+      acceptedAtOffsetSeconds: this.updateCursorSeconds,
       damage: this.definition.shot.damage,
       range: this.definition.shot.range,
       maxFlightSeconds: this.definition.shot.maxFlightSeconds,

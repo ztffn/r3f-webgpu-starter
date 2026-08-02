@@ -23,6 +23,7 @@ import {
   type MotorTuning,
   type PlayerCommand,
   type PlayerStance,
+  type Vec3 as Vec3Like,
 } from "./MotorTypes.ts";
 
 const HALF_PI = Math.PI / 2;
@@ -126,6 +127,31 @@ export class CharacterMotor {
     out.x = this.state.position.x;
     out.y = this.state.position.y + eyeHeightFor(this.state, this.tuning);
     out.z = this.state.position.z;
+  }
+
+  /**
+   * Forces the motor onto an authoritative pose. This is the reconciliation
+   * entry point: a client rewinds to the server's state here and then replays
+   * its unacknowledged commands. `setTranslation` rather than
+   * `setNextKinematicTranslation`, because a correction must take effect before
+   * the replay steps rather than being interpolated into over the next tick.
+   */
+  teleport(position: Vec3Like, velocity?: Vec3Like): void {
+    const feetY = position.y;
+    this.state.position.x = position.x;
+    this.state.position.y = feetY;
+    this.state.position.z = position.z;
+    if (velocity !== undefined) {
+      this.state.velocity.x = velocity.x;
+      this.state.velocity.y = velocity.y;
+      this.state.velocity.z = velocity.z;
+    }
+    this.nextTranslation.x = position.x;
+    this.nextTranslation.y = feetY + this.currentHalfHeightOffset();
+    this.nextTranslation.z = position.z;
+    this.body.setTranslation(this.nextTranslation, true);
+    this.body.setNextKinematicTranslation(this.nextTranslation);
+    this.terrain.update(position.x, position.z);
   }
 
   dispose(): void {

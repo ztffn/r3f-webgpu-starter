@@ -47,5 +47,7 @@ const PRESENTATIONS: Readonly<Record<string, WeaponPresentationDefinition>> = {
 
 /** GLTF and animation selection stays on the presentation side of the boundary. */
 export function weaponPresentationFor(weaponId: string): WeaponPresentationDefinition {
-  return PRESENTATIONS[weaponId] ?? PROXY_PRESENTATION;
+  // Own-property only: an inherited key such as "constructor" would otherwise
+  // resolve to a function instead of falling back to the proxy rig.
+  return Object.hasOwn(PRESENTATIONS, weaponId) ? PRESENTATIONS[weaponId] : PROXY_PRESENTATION;
 }

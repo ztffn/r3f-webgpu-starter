@@ -54,8 +54,14 @@ export const AMMUNITION_DEFINITIONS: Readonly<Record<AmmunitionId, AmmunitionDef
 export const DEFAULT_AMMUNITION = AMMUNITION_DEFINITIONS["308"];
 
 export function ammunitionFromSearch(search: string): AmmunitionDefinition {
-  const requested = new URLSearchParams(search).get("ammo") as AmmunitionId | null;
-  return (requested && AMMUNITION_DEFINITIONS[requested]) || DEFAULT_AMMUNITION;
+  const requested = new URLSearchParams(search).get("ammo");
+  // Own-property only. A plain object literal inherits from Object.prototype,
+  // so `?ammo=constructor` would otherwise return a truthy function and pass
+  // straight through the fallback into weapon construction.
+  if (requested !== null && Object.hasOwn(AMMUNITION_DEFINITIONS, requested)) {
+    return AMMUNITION_DEFINITIONS[requested as AmmunitionId];
+  }
+  return DEFAULT_AMMUNITION;
 }
 
 export function kineticEnergyJoules(

@@ -17,6 +17,12 @@ import {
   WEAPON_DEFINITIONS,
 } from "../../src/fps/weapons/weaponDefinitions.ts";
 import { createDevelopmentLoadout } from "../../src/fps/weapons/developmentLoadout.ts";
+import {
+  ammunitionFromSearch,
+  DEFAULT_AMMUNITION,
+} from "../../src/fps/weapons/AmmunitionDefinition.ts";
+import { scopeAdjustmentActionForKey } from "../../src/fps/core/ScopeAdjustmentController.ts";
+import { weaponPresentationFor } from "../../src/fps/presentation/WeaponPresentationDefinition.ts";
 
 const weaponCommand = (
   weapon: WeaponSystem,
@@ -117,6 +123,27 @@ test("weapon handling definitions reject invalid bloom and recoil capacity", () 
       ),
     /finite non-negative recoil/
   );
+});
+
+test("external lookups ignore inherited object keys", () => {
+  // These tables are keyed straight from a URL parameter, a KeyboardEvent, and
+  // a weapon id. An inherited key returns a truthy function, which used to slip
+  // past the fallback and reach weapon construction as an ammunition record.
+  for (const hostile of ["constructor", "__proto__", "toString", "hasOwnProperty"]) {
+    assert.equal(
+      ammunitionFromSearch(`?ammo=${hostile}`),
+      DEFAULT_AMMUNITION,
+      `?ammo=${hostile}`
+    );
+    assert.equal(
+      scopeAdjustmentActionForKey({ code: hostile, key: hostile }),
+      null,
+      `key ${hostile}`
+    );
+    assert.equal(weaponPresentationFor(hostile).modelUrl, weaponPresentationFor("m4").modelUrl);
+  }
+  assert.equal(ammunitionFromSearch("?ammo=556").id, "556");
+  assert.equal(scopeAdjustmentActionForKey({ code: "ArrowUp", key: "ArrowUp" }), "elevation-up");
 });
 
 test("definition validation rejects hostile authored runtime values", () => {

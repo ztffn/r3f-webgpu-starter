@@ -19,6 +19,7 @@ import { createGrassMaterial, type GrassUniforms } from "./GrassMaterial";
 import { createBladeMaterial, createBladeMesh, type BladeUniforms } from "./BladeMaterial";
 import { createColorGrade } from "./colorGrade";
 import { createFog } from "./fog";
+import { bakeNoiseTexture } from "./noiseTexture";
 import { cubeTexture, normalWorldGeometry } from "three/tsl";
 import { WEATHER_PRESETS, readWeather, type WeatherPreset } from "./weather";
 import { createPrecipitation } from "./Precipitation";
@@ -96,8 +97,9 @@ import {
 const SUN_DISTANCE = 2000;
 
 /** A preset's fog, in the shape `createFog` takes. */
-function fogSettings(w: WeatherPreset) {
+function fogSettings(w: WeatherPreset, noise: THREE.Data3DTexture) {
   return {
+    noise,
     color: w.fogColor,
     near: w.fogNear,
     far: w.fogFar,
@@ -331,11 +333,17 @@ export function DF2Scene({
   // state value so those constructions do not list `weather` as a dependency and rebuild
   // on every switch — which is the whole thing this arrangement exists to avoid.
   const weatherRef = useRef(weather);
+  // ONE noise texture for the whole renderer — fog, smoke and the blades' wind. They
+  // cannot share a noise VALUE, since each samples at its own world position, but they
+  // share this texture and therefore its cache. See noiseTexture.ts for why baking beats
+  // computing here, and for the measurement that already proved it once.
+  const noise = useMemo(() => bakeNoiseTexture(), []);
+  useEffect(() => () => noise.dispose(), [noise]);
   // Built once with the initial preset; every later change goes through `.set()` below.
   // A real map's own .trn values win over a neutral preset's, since they are what the
   // author graded the colormap for.
   const grade = useMemo(() => createColorGrade(weatherRef.current), []);
-  const fog = useMemo(() => createFog(fogSettings(weatherRef.current)), []);
+  const fog = useMemo(() => createFog(fogSettings(weatherRef.current, noise)), [noise]);
 
   useEffect(() => {
     grade.set(
@@ -343,7 +351,7 @@ export function DF2Scene({
         ? { filter: world.filter, gamma: 128, saturation: 128 }
         : weather
     );
-    fog.set(fogSettings(weather));
+    fog.set(fogSettings(weather, noise));
   }, [fog, grade, world]);
 
   /**
@@ -504,6 +512,7 @@ export function DF2Scene({
       // from it, so the two cannot be allowed to disagree.
       vDepth: GRASS_BLADE_V_DEPTH,
       sun: BENCH.bladeSun ?? GRASS_BLADE_SUN,
+      noise,
       sunDirection: SUN_DIRECTION,
       windGain: GRASS_BLADE_WIND_GAIN,
       pushRadius: BENCH.bladePushRadius ?? GRASS_BLADE_PUSH_RADIUS,
@@ -532,7 +541,7 @@ export function DF2Scene({
     );
     bladeUniforms.current = blade.uniforms;
     return createBladeMesh(geometry, blade);
-  }, [fog, grade, grassKit, world]);
+  }, [fog, grade, grassKit, noise, world]);
 
   useEffect(
     () => () => {

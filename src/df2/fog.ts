@@ -11,7 +11,7 @@ import {
   cameraPosition,
   cameraViewMatrix,
   float,
-  mx_noise_float,
+  texture3D,
   time,
   uniform,
   vec3,
@@ -42,6 +42,8 @@ const SMOKE_LUMPINESS = 0.22;
 const SMOKE_MOTTLE = 0.45;
 
 export interface FogSettings {
+  /** The shared tiling noise (noiseTexture.ts) — one fetch instead of gradient noise. */
+  noise: THREE.Data3DTexture;
   color: string;
   near: number;
   far: number;
@@ -139,6 +141,10 @@ export function createFog(settings: FogSettings): Fog {
   const uSmokeDensity = Array.from({ length: SMOKE_SLOTS }, () => uniform(0));
   const smokeAge = new Array<number>(SMOKE_SLOTS).fill(Infinity);
 
+  // Sampled with an EXPLICIT level 0: the coordinates come from world positions that can
+  // jump metres between neighbouring pixels, and derivative-selected mips would pick one
+  // near the top of the pyramid — the pale-wash trap this project already paid for.
+  const noiseAt = (p: NodeArg): NodeArg => texture3D(settings.noise, p).level(float(0));
   const uNoiseScale = uniform(settings.groundNoiseScale);
   const uNoiseAmount = uniform(settings.groundNoiseAmount);
   const uDrift = uniform(settings.groundDrift);
@@ -189,7 +195,8 @@ export function createFog(settings: FogSettings): Fog {
       // with the thick parts, which is how real smoke reads. Two jobs from one sample
       // because at four slots this is the most expensive thing in the term.
       const perp = origin.add(dir.mul(b));
-      const n = mx_noise_float(perp.mul(SMOKE_NOISE_SCALE).add(drift));
+      const s3 = noiseAt(perp.mul(SMOKE_NOISE_SCALE).add(drift));
+      const n = s3.r.mul(0.6).add(s3.g.mul(0.4)).sub(0.5).mul(2);
       const radius = centre.w.mul(n.mul(SMOKE_LUMPINESS).add(1));
 
       const inside = radius.mul(radius).sub(perpSq).max(float(0));
@@ -274,9 +281,12 @@ export function createFog(settings: FogSettings): Fog {
       .select(viewZ.mul(profileAtEye), perHeight.mul(integral));
 
     const drift = time.mul(uDrift);
-    const noise = mx_noise_float(
-      V3(worldPos.x.mul(uNoiseScale).add(drift), worldPos.z.mul(uNoiseScale), drift.mul(0.6))
+    // Two octaves from ONE fetch — the channels hold successively finer lattices, which
+    // is the whole reason the bake packs four of them.
+    const n = noiseAt(
+      V3(worldPos.x.mul(uNoiseScale).add(drift), drift.mul(0.6), worldPos.z.mul(uNoiseScale))
     );
+    const noise = n.r.mul(0.65).add(n.g.mul(0.35)).sub(0.5).mul(2);
     const modulated = noise.mul(uNoiseAmount).add(1).max(float(0));
     // Smoke adds to the SAME optical depth rather than blending as a separate layer,
     // which is what makes weather and smoke compose without an ordering to get wrong.

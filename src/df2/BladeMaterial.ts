@@ -18,7 +18,7 @@ import {
   instanceIndex,
   varying,
   time,
-  mx_noise_float,
+  texture3D,
 } from "three/tsl";
 import type { GrassField } from "./grassField";
 import type { ColorGrade } from "./colorGrade";
@@ -49,6 +49,8 @@ export interface BladeMaterialOptions {
   vDepth: number;
   /** Sun-facing brightness modulation, either side of 1.0. See GRASS_BLADE_SUN. */
   sun: number;
+  /** The shared tiling noise (noiseTexture.ts). One fetch for both wind octaves. */
+  noise: THREE.Data3DTexture;
   /** World sun direction. Only its horizontal part matters to a vertical blade. */
   sunDirection: [number, number, number];
   /** Tip displacement per metre of height per m/s of wind. */
@@ -132,6 +134,7 @@ export function createBladeMaterial(opts: BladeMaterialOptions): BladeMaterial {
     vDepth,
     sun,
     sunDirection,
+    noise,
     windGain,
     pushRadius,
     pushStrength,
@@ -332,15 +335,17 @@ export function createBladeMaterial(opts: BladeMaterialOptions): BladeMaterial {
   const lag = t.mul(1.2).add(bendAmount.mul(0.5));
   const phase = time.mul(uGustRate).mul(uWindSpeed).mul(seed.mul(0.15).add(1)).sub(lag);
   const ns = uNoiseScale;
-  const n1 = mx_noise_float(
-    V3(bladeXZ.x.mul(ns).add(phase), bladeXZ.y.mul(ns).add(phase.mul(0.7)), 0)
-  );
-  const n2 = mx_noise_float(
-    V3(bladeXZ.x.mul(ns).mul(2).add(phase.mul(0.8)), bladeXZ.y.mul(ns).mul(2), 0)
-  );
+  // ONE fetch, TWO octaves — the shared noise texture packs successively finer lattices
+  // in its channels, so the second octave the wind wants is the green channel of the
+  // sample already taken rather than a second evaluation. This used to be two separate
+  // gradient-noise calls, each ~8 hashes and 8 gradients, per vertex.
+  const gustSample: NodeArg = texture3D(
+    noise,
+    V3(bladeXZ.x.mul(ns).add(phase), phase.mul(0.7), bladeXZ.y.mul(ns))
+  ).level(float(0));
   // Anchored at the root by the high power on t, and scaled by the blade's own height
   // so a tall blade leans further in metres than a short one.
-  const gust = n1.mul(0.8).add(n2.mul(0.2));
+  const gust = gustSample.r.sub(0.5).mul(1.6).add(gustSample.g.sub(0.5).mul(0.4));
   const windBend = gust
     .mul(t.pow(2.8))
     .mul(1.4)

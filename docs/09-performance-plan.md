@@ -112,6 +112,31 @@ several seconds of chunk geometry after a navigation, and a frame sampled inside
 says nothing about steady state. Wait for the draw-call count to settle before reading
 `window.__perf`. This cost the first reading of this very measurement.
 
+### 0.3 One baked noise texture beat computed gradient noise by 4.2 ms — measured
+
+Standing at (-375, 787), `?dpr=2&steps=32&weather=clear&smoke=16` so the frame is clear of
+the 120 Hz cap, with the blade layer, the fog term and one smoke volume all sampling noise.
+
+| Noise source | frame |
+|---|---|
+| `mx_noise_float`, computed | 13.83 ms |
+| baked 64³ RGBA texture, one fetch | **9.67 ms** |
+
+The consumers cannot share a noise VALUE — the fog samples at the fragment, smoke at each
+ray's closest approach to a puff, blades at their own base — but they share one texture and
+its cache. Four octaves live in the four channels, so the two-octave consumers (wind, fog,
+smoke) each went from two gradient evaluations to ONE fetch.
+
+This is the same trade `grassJitter.ts` recorded at 99.8 ms against 12.57 ms, on a bigger
+scale then because the march evaluated its hash at every step. Reach for it whenever noise
+appears in a hot path: **a texture fetch beats eight hashes and eight gradients.**
+
+The related finding, from the same session: a branchless smoke term cost **5 ms per frame
+with no smoke anywhere**, because a noise sample per slot runs for every fragment and a zero
+density only zeroes the RESULT, never the work. Gating each slot behind two comparisons
+inside an `Fn` made empty slots free. Any effect that is usually off needs the same
+treatment — "it does nothing when disabled" is a claim about output, not about cost.
+
 ### §3.1.2 has a second failure mode: the vsync staircase
 
 The battery-throttle story below is real, but it made `33.3 ms` look like a throttle signature

@@ -404,11 +404,20 @@ that the test script fails in a way that does not name the version as the cause.
   reading it;
 - authored per-weapon GLBs, animations, sounds, and final tuning;
 - in-game ammunition/loadout selection and saved/rebindable controls;
-- the bounded ecctrl/Rapier player-and-vehicle controller spike, followed by the selected
-  controller implementation; see
+- the ecctrl half of the controller spike. The custom Rapier character motor is BUILT and
+  documented in `12-character-motor-and-networking-spec.md`; what ecctrl's slope, step and
+  floating-body techniques would have added was never recorded, so the adoption question
+  is currently closed by assumption rather than evidence. See
   `plans/2026-08-01-ecctrl-player-vehicle-controller-spike-design.md`;
-- third-person character host, bot harness, and 32/64-rig browser benchmark;
-- network authority, prediction/reconciliation, replication, and remote tracers;
+- vehicles of any kind;
+- **joining the motor to the weapon path.** They are separate today: `?scene=motor` walks a
+  collided body and `?scene=scope` fires a weapon, and movement does not feed stance,
+  planar speed or grounded state into weapon handling;
+- animation on the character, a bot harness, and a 32/64-rig browser benchmark. A
+  third-person collider proxy exists (`?scene=motor`, then V) but it is a diagnostic
+  wireframe capsule, not a character host, and `CharacterAimRig` remains unmounted;
+- replication of anything beyond player motor state, and remote tracers. Authority,
+  prediction and reconciliation now exist for MOVEMENT only; see doc 12;
 - full piecewise drag/weather model, moving target lead aids, and wind estimation;
 - attachment inventory/slots, stamina, injury, suppression, bipods, leaning,
   supported-fire detection, and authored recoil-pattern textures;

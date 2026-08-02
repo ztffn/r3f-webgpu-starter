@@ -54,11 +54,19 @@ This is a hobby/personal reconstruction project, not a commercial release.
 > that foreclose it either — in particular `Heightfield.ts` and the concealment field must
 > stay renderer-free so they can be sampled server-side (`08` §3).
 >
-> **The motor layer of the plan is now laid out**, acting on (b) only:
-> `plans/2026-08-02-multiplayer-motor-and-transport-decisions.md`. It settles the authority
-> model (client prediction plus snapshot reconciliation, never bitwise lockstep) and commits
-> to one shared headless character motor. Session framework and transport stay deferred
-> behind an interface until the measurements in its §7 exist. (a) still holds for the rest.
+> **The motor layer is now BUILT**, acting on (b). Decisions:
+> `plans/2026-08-02-multiplayer-motor-and-transport-decisions.md` settles the authority model
+> (client prediction plus snapshot reconciliation, never bitwise lockstep) and commits to one
+> shared headless character motor. As built: `12-character-motor-and-networking-spec.md`.
+> Measurements: `plans/2026-08-02-motor-measurements.md`.
+>
+> **This narrows (a) rather than lifting it.** Movement authority, prediction and
+> reconciliation exist and two clients share a room. What is still explicitly not built, and
+> must not be built speculatively, is the session framework, matchmaking, reconnection,
+> persistence, anti-cheat, and replication of anything beyond player movement. The WebSocket
+> transport in `src/net/` is disposable scaffolding for measurement, not a choice — the
+> framework decision waits on the measurements in §7 of the decision record, several of
+> which are still open.
 
 ## 3. Legal / asset-sourcing posture
 

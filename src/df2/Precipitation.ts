@@ -129,10 +129,26 @@ export function createPrecipitation(opts: PrecipitationOptions = {}): Precipitat
   const halfSide = Math.floor(side / 2);
   const cellSize: NodeArg = (u.area as NodeArg).mul(1 / side);
   const camXZ = V2(cameraPosition.x, cameraPosition.z);
+  // WHERE THE FIELD HAS BLOWN TO. Wind carries the whole body of rain downwind, so this
+  // grows without bound — which is fine for a POSITION and fatal for a WINDOW.
+  const windOffset: NodeArg = V2(
+    (u.windX as NodeArg).mul(time),
+    (u.windZ as NodeArg).mul(time)
+  );
   const fi: NodeArg = float(instanceIndex);
   const iz = fi.mul(1 / side).floor();
   const ix = fi.sub(iz.mul(side));
+  // The lattice is sampled in the FIELD'S frame, not the world's: the camera position is
+  // pulled back by however far the field has blown, so the window stays around the player
+  // once the same offset is added back to the drop below.
+  //
+  // Without that compensation the window sat at the camera while every drop was pushed
+  // downwind by wind x time, so the entire cloud drifted away and never came back — 120 m
+  // out after thirty seconds at 4 m/s. That is the rain "running away from you", and it is
+  // the one thing the blade layer never has to solve, because wind BENDS a blade rather
+  // than moving it.
   const worldCell: NodeArg = camXZ
+    .sub(windOffset)
     .div(cellSize)
     .floor()
     .add(V2(ix.sub(halfSide), iz.sub(halfSide)));
@@ -196,9 +212,12 @@ export function createPrecipitation(opts: PrecipitationOptions = {}): Precipitat
   // applied to the WHOLE field. A shared offset is the physically right shape: wind moves
   // the entire body of rain downwind together, so the pattern translates rather than each
   // drop wandering out of its cell.
+  // Jittered inside its own cell so the lattice never shows as rows, then carried
+  // downwind by the same offset the window was pulled back by. The two cancel, so drops
+  // stream past the player forever instead of the cloud leaving.
   const cellCentre: NodeArg = worldCell.add(0.5).mul(cellSize);
-  const driftX = cellCentre.x.add(r1.sub(0.5).mul(cellSize)).add(windX.mul(time));
-  const driftZ = cellCentre.y.add(r2.sub(0.5).mul(cellSize)).add(windZ.mul(time));
+  const driftX = cellCentre.x.add(r1.sub(0.5).mul(cellSize)).add(windOffset.x);
+  const driftZ = cellCentre.y.add(r2.sub(0.5).mul(cellSize)).add(windOffset.y);
 
   // Snow flutters; submerged specks drift gently sideways for a suspended look.
   const swayAmp: NodeArg = (u.flakeSize as NodeArg).mul(6).mul(u.mode);

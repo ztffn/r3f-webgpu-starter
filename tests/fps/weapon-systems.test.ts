@@ -439,6 +439,50 @@ test("an empty automatic weapon dry-fires once per trigger press", () => {
   assert.equal(drainWeapon(weapon).filter((event) => event.type === "dry-fire").length, 1);
 });
 
+test("a dry weapon still spends its whole frame on ADS, recoil, and bloom recovery", () => {
+  const emptied = (holdTrigger: boolean) => {
+    const weapon = new WeaponSystem(SAW_DEFINITION, 31);
+    weapon.setHandlingContext(STATIONARY_STAND);
+    weaponCommand(weapon, { type: "triggerDown" });
+    // Empty the magazine, then keep or release the trigger and request ADS.
+    weapon.magazine = 1;
+    advanceWeapon(weapon, 0.2);
+    assert.equal(weapon.magazine, 0);
+    if (!holdTrigger) weaponCommand(weapon, { type: "triggerUp" });
+    weapon.setAdsWanted(true);
+    advanceWeapon(weapon, 1);
+    const snapshot = weapon.getSnapshot();
+    return [snapshot.adsProgress, snapshot.recoilPitchRadians, snapshot.bloomRadians];
+  };
+
+  const held = emptied(true);
+  const released = emptied(false);
+  assert.equal(held[0], 1, "a held trigger must not freeze ADS progress on an empty weapon");
+  assert.deepEqual(
+    held,
+    released,
+    "holding the trigger on an empty weapon must not stop continuous recovery"
+  );
+});
+
+test("dry automatic recovery is identical at 30, 60, and 144 Hz", () => {
+  const run = (hz: number) => {
+    const weapon = new WeaponSystem(SAW_DEFINITION, 32);
+    weapon.setHandlingContext(STATIONARY_STAND);
+    weapon.magazine = 2;
+    weaponCommand(weapon, { type: "triggerDown" });
+    weapon.setAdsWanted(true);
+    advanceWeapon(weapon, 1, hz);
+    const snapshot = weapon.getSnapshot();
+    return [snapshot.adsProgress, snapshot.recoilPitchRadians, snapshot.bloomRadians].map(
+      (value) => value.toFixed(12)
+    );
+  };
+  const at30 = run(30);
+  assert.deepEqual(run(60), at30);
+  assert.deepEqual(run(144), at30);
+});
+
 test("reload is explicit and locks accepted shots through the proxy clip", () => {
   const weapon = new WeaponSystem(SNIPER_DEFINITION, 27);
   weapon.magazine = 0;

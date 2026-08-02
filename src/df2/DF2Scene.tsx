@@ -31,6 +31,7 @@ import { bakeGrassJitter } from "./grassJitter";
 import { buildHeightTexture } from "./heightTexture";
 import { loadTerrain, type LoadedTerrain } from "./loadTerrain";
 import { WeaponPrototype } from "../fps/WeaponPrototype";
+import { MotorControls } from "../fps/MotorControls";
 import { CompositeWorldQuery } from "../fps/core/WorldQuery";
 import { FPS_DEBUG } from "../fps/debug/debugConfig";
 import { LookSensitivityController } from "../fps/core/LookSensitivityController";
@@ -244,6 +245,12 @@ export interface DF2SceneProps {
   scopeDemo?: boolean;
   /** Isolated animated rifle-and-hands test scene. */
   weaponDemo?: boolean;
+  /**
+   * Walk on the shared character motor instead of the terrain spike's camera
+   * rig. Opt-in: `FlyControls` stays the default because free flight is still
+   * how the terrain and grass work gets judged.
+   */
+  motorDemo?: boolean;
 }
 
 /**
@@ -291,6 +298,7 @@ export function DF2Scene({
   onSceneReady,
   scopeDemo = false,
   weaponDemo = false,
+  motorDemo = false,
 }: DF2SceneProps) {
   const lookSensitivity = useMemo(() => new LookSensitivityController(), []);
   // undefined = still loading, null = no assets (synthetic), object = real map
@@ -733,7 +741,9 @@ export function DF2Scene({
         </Suspense>
       )}
 
-      {heightfield && (
+      {/* Exactly one camera owner. Both write camera.position every frame, so
+          mounting them together makes the view fight itself. */}
+      {heightfield && !motorDemo && (
         <FlyControls
           heightfield={heightfield}
           grounded={grounded}
@@ -742,6 +752,16 @@ export function DF2Scene({
           lookSensitivity={lookSensitivity}
           onState={onFly}
           onToggleGround={onToggleGround}
+          onStance={onStance}
+        />
+      )}
+
+      {heightfield && motorDemo && (
+        <MotorControls
+          heightfield={heightfield}
+          pointerLock={scopeDemo}
+          lookSensitivity={lookSensitivity}
+          onState={onFly}
           onStance={onStance}
         />
       )}

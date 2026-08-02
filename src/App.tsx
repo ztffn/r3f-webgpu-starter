@@ -13,12 +13,17 @@ import { BENCH, publish } from "./df2/bench";
 const requestedScene = new URLSearchParams(window.location.search).get("scene");
 const scopeDemo = requestedScene === "scope";
 const weaponDemo = requestedScene === "weapon";
+/** Walk the shared character motor instead of the terrain spike's camera rig. */
+const motorDemo = requestedScene === "motor";
 
 export default function App() {
   const [wireframe, setWireframe] = useState(false);
   const [grass, setGrass] = useState(BENCH.grass ?? true);
   // ?bench=1 always starts on foot: the ground-level frame is the one being tuned.
-  const [grounded, setGrounded] = useState(BENCH.enabled || scopeDemo || weaponDemo);
+  // The motor is always on foot — it has no fly mode to toggle out of.
+  const [grounded, setGrounded] = useState(
+    BENCH.enabled || scopeDemo || weaponDemo || motorDemo
+  );
   const [stance, setStance] = useState<Stance>(BENCH.stance ?? "stand");
 
   const [perf, setPerf] = useState<PerfSample | null>(null);
@@ -108,6 +113,7 @@ export default function App() {
           onSceneReady={onSceneReady}
           scopeDemo={scopeDemo}
           weaponDemo={weaponDemo}
+          motorDemo={motorDemo}
         />
       </GameCanvas>
     </>

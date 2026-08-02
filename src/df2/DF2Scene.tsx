@@ -18,6 +18,7 @@ import { createTerrainMaterial } from "./TerrainMaterial";
 import { createGrassMaterial, type GrassUniforms } from "./GrassMaterial";
 import { createBladeMaterial, createBladeMesh } from "./BladeMaterial";
 import { createColorGrade } from "./colorGrade";
+import { createFog } from "./fog";
 import { readWeather } from "./weather";
 import { createPrecipitation } from "./Precipitation";
 import { buildBladeGeometry } from "./bladeGeometry";
@@ -289,9 +290,32 @@ export function DF2Scene({
   }, [weather]);
   useEffect(() => () => precipitation?.dispose(), [precipitation]);
 
+  // Atmosphere, shared by terrain and the march for the same reason the grade is:
+  // two implementations of one horizon disagree the moment either gains a term.
+  const fog = useMemo(
+    () =>
+      createFog({
+        color: weather.fogColor,
+        near: weather.fogNear,
+        far: weather.fogFar,
+        // The layer's top comes from the preset; its base sits a little below, so the
+        // fade happens over a few metres rather than as a plane you can see.
+        groundBase: weather.groundFogTop - 8,
+        groundTop: weather.groundFogTop,
+        groundDensity: weather.groundFogDensity,
+        groundNoiseScale: 0.02,
+        groundNoiseAmount: 0.35,
+        groundDrift: 0.03,
+      }),
+    [weather]
+  );
+
   const material = useMemo(
-    () => (world?.colorMap ? createTerrainMaterial({ colorMap: world.colorMap, grade }) : null),
-    [grade, world]
+    () =>
+      world?.colorMap
+        ? createTerrainMaterial({ colorMap: world.colorMap, grade, fog })
+        : null,
+    [fog, grade, world]
   );
   useEffect(() => () => material?.dispose(), [material]);
 
@@ -320,6 +344,7 @@ export function DF2Scene({
       texelSize: world.heightfield.cellSize,
       colorMap: world.colorMap,
       grade,
+      fog,
       worldSize: world.heightfield.worldSize,
       grassScale: GRASS_SCALE,
       // ?steps= raises the compiled CEILING as well as the running value, so asking for
@@ -348,7 +373,7 @@ export function DF2Scene({
       fogFar: weather.fogFar,
     });
     return { ...kit, heightTex, jitterTex: jitter };
-  }, [grade, weather, world]);
+  }, [fog, grade, weather, world]);
 
   useEffect(
     () => () => {
@@ -464,6 +489,9 @@ export function DF2Scene({
       ) : (
         <color attach="background" args={[weather.skyColor]} />
       )}
+      {/* Scene fog stays declared for anything using three's automatic path — the
+          water, and any object added later. Terrain and grass take the shared term
+          instead, which the scene fog cannot express. */}
       <fog attach="fog" args={[weather.fogColor, weather.fogNear, weather.fogFar]} />
 
       {/* Sun. The terrain is unlit (its colormap is pre-shaded); this lights the

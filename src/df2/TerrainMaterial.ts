@@ -10,8 +10,9 @@
 // (syntheticMaps.ts) so it can take this same path.
 
 import * as THREE from "three/webgpu";
-import { texture, uv } from "three/tsl";
+import { positionWorld, texture, uv } from "three/tsl";
 import type { ColorGrade } from "./colorGrade";
+import type { Fog } from "./fog";
 
 export interface TerrainMaterialOptions {
   /** Colormap: extracted for a real map, CPU-baked for the synthetic fallback. */
@@ -25,16 +26,31 @@ export interface TerrainMaterialOptions {
    * colours the moment a preset made it non-neutral.
    */
   grade: ColorGrade;
+  /**
+   * Shared atmosphere (fog.ts).
+   *
+   * Terrain used three's AUTOMATIC scene fog until the ground layer arrived, and that
+   * could not stay: three fogs from the rasterised fragment's depth, while the march
+   * fogs from its ray hit — which sits at a different place entirely — so the two only
+   * agreed while both were plain linear distance. A height-dependent term makes the
+   * disagreement visible along every skyline. `material.fog` is off below for that
+   * reason, not as an optimisation.
+   */
+  fog: Fog;
 }
 
 export function createTerrainMaterial(
   opts: TerrainMaterialOptions
 ): THREE.MeshBasicNodeMaterial {
-  const { colorMap, grade } = opts;
+  const { colorMap, grade, fog } = opts;
 
   const material = new THREE.MeshBasicNodeMaterial();
 
-  material.colorNode = grade.apply(texture(colorMap, uv()));
+  // Graded, then fogged — never the other way round. The fog colour belongs to the
+  // weather preset and already carries the hour; grading it again would drag the horizon
+  // away from the sky it has to meet.
+  material.colorNode = fog.apply(grade.apply(texture(colorMap, uv())), positionWorld);
+  material.fog = false;
 
   // Double-sided so LOD-crack skirts fill gaps regardless of winding
   // (terrainGeometry.ts). Being unlit, a back face now shows terrain colour rather

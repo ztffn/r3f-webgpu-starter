@@ -32,6 +32,18 @@ export interface WeatherPreset extends ColorGradeSettings {
   fogFar: number;
   /** Flat background, used only when `sky` is null, and the hemisphere light's colour. */
   skyColor: string;
+  /**
+   * Ground fog: the world height it fills to, and how thick it is per metre.
+   *
+   * ABSOLUTE heights, so the layer settles into hollows and leaves ridges standing out
+   * of it. Green Mile's terrain runs about 5-174 m raw, so a base near 100 puts fog in
+   * the valleys of this map; a preset for another map wants its own.
+   *
+   * Density 0 means no ground layer, which is most presets — this is weather, not a
+   * permanent feature.
+   */
+  groundFogTop: number;
+  groundFogDensity: number;
   /** Fraction of the precipitation pool drawn, 0-1. 0 is dry. */
   rain: number;
   /** 0 rain, 1 snow. Blended, so a value between the two is sleet. */
@@ -49,6 +61,8 @@ const DAY: WeatherPreset = {
   filter: [128, 128, 128],
   gamma: 128,
   saturation: 128,
+  groundFogTop: 0,
+  groundFogDensity: 0,
   rain: 0,
   snow: 0,
 };
@@ -92,6 +106,8 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
     filter: [188, 134, 162],
     gamma: 128,
     saturation: 122,
+    groundFogTop: 0,
+    groundFogDensity: 0,
     rain: 0,
     snow: 0,
   },
@@ -105,6 +121,8 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
     filter: [128, 128, 128],
     gamma: 128,
     saturation: 128,
+    groundFogTop: 0,
+    groundFogDensity: 0,
     rain: 0,
     snow: 0,
   },
@@ -118,6 +136,8 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
     filter: [120, 91, 82],
     gamma: 128,
     saturation: 72,
+    groundFogTop: 128,
+    groundFogDensity: 0.01,
     rain: 0.25,
     snow: 0,
   },
@@ -131,6 +151,8 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
     filter: [213, 75, 52],
     gamma: 128,
     saturation: 174,
+    groundFogTop: 128,
+    groundFogDensity: 0.006,
     rain: 0.3,
     snow: 0,
   },
@@ -144,6 +166,8 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
     filter: [109, 83, 69],
     gamma: 128,
     saturation: 76,
+    groundFogTop: 126,
+    groundFogDensity: 0.008,
     rain: 0.12,
     snow: 0,
   },
@@ -157,6 +181,8 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
     filter: [71, 51, 47],
     gamma: 128,
     saturation: 77,
+    groundFogTop: 132,
+    groundFogDensity: 0.02,
     rain: 0.55,
     snow: 0,
   },
@@ -170,6 +196,8 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
     filter: [104, 45, 20],
     gamma: 128,
     saturation: 190,
+    groundFogTop: 130,
+    groundFogDensity: 0.016,
     rain: 0,
     snow: 0,
   },
@@ -183,6 +211,8 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
     filter: [43, 32, 38],
     gamma: 128,
     saturation: 119,
+    groundFogTop: 136,
+    groundFogDensity: 0.028,
     rain: 0.8,
     snow: 0,
   },
@@ -196,6 +226,8 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
     filter: [33, 29, 27],
     gamma: 128,
     saturation: 98,
+    groundFogTop: 0,
+    groundFogDensity: 0,
     rain: 0.2,
     snow: 0,
   },
@@ -209,6 +241,8 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
     filter: [18, 20, 27],
     gamma: 128,
     saturation: 82,
+    groundFogTop: 140,
+    groundFogDensity: 0.03,
     rain: 0.4,
     snow: 1,
   },
@@ -222,6 +256,8 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
     filter: [18, 20, 27],
     gamma: 128,
     saturation: 82,
+    groundFogTop: 128,
+    groundFogDensity: 0.012,
     rain: 0,
     snow: 0,
   },
@@ -235,6 +271,8 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
     filter: [18, 20, 27],
     gamma: 128,
     saturation: 82,
+    groundFogTop: 0,
+    groundFogDensity: 0,
     rain: 0,
     snow: 0,
   },

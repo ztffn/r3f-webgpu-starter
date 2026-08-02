@@ -51,6 +51,7 @@ import {
 } from "three/tsl";
 import { createGrassField, type GrassField } from "./grassField";
 import type { ColorGrade } from "./colorGrade";
+import type { Fog } from "./fog";
 
 /**
  * Margin the shell is lifted above the smooth canopy envelope.
@@ -108,6 +109,8 @@ export interface GrassMaterialOptions {
   colorMap: THREE.Texture;
   /** Shared weather grade, applied BEFORE fog — see colorGrade.ts. */
   grade: ColorGrade;
+  /** Shared atmosphere — the same expression the terrain applies (fog.ts). */
+  fog: Fog;
   /** Metres spanned by one tile of the maps. */
   worldSize: number;
   /** Metres per raw canopy unit — how tall "255" grass stands. */
@@ -320,6 +323,7 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     lodDistances,
     colorMap,
     grade,
+    fog,
     worldSize,
     grassScale,
     steps: coarseSteps = 12,
@@ -985,23 +989,21 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
     // grass is the plain colormap.
     const faded: NodeArg = fade.oneMinus().mix(columns, base.rgb);
 
-    // Fog, applied here from the HIT's view depth. three's automatic fog is
-    // switched off on this material (see material.fog below) because it uses the
-    // rasterised shell depth. Matches three's linear fog exactly —
-    // smoothstep(near, far, viewZ) then mix toward the fog colour — so grass and
-    // terrain agree at the same distance instead of showing a seam.
-    const fogFactor: NodeArg = viewZ.negate().smoothstep(uFogNear, uFogFar);
-    // THIS was the pale wash. Written as `faded.mix(uFogColor, fogFactor)` it
-    // compiled to mix(uFogColor, fogFactor, faded) — the fog colour became the
-    // BASE of the blend and the grass colour became the interpolant, so every
-    // fragment came out near the fog colour no matter how near it was. It also
-    // explains why pushing the fog range to 1e6 changed nothing: that only drives
-    // fogFactor, which in the rotated form is the far end of the blend, weighted
-    // by `faded` — a dark grass colour — so it barely contributes.
-    // GRADED BEFORE FOG. The fog colour is part of the weather preset and already
+    // Fog, from the HIT's world position rather than the rasterised shell's — the shell
+    // can sit hundreds of metres from where the ray actually struck. SHARED with the
+    // terrain material (fog.ts) rather than matched by hand: once fog gained a
+    // height-dependent ground layer, two implementations agreeing on plain linear
+    // distance stopped being enough, and any difference shows along every skyline.
+    // The mix ORDER here is the one that cost a session: written the GLSL way,
+    // `faded.mix(uFogColor, fogFactor)` compiles to mix(uFogColor, fogFactor, faded),
+    // making the fog colour the base of the blend and the grass colour the interpolant —
+    // every fragment came out near fog colour however close it was, and widening the fog
+    // range changed nothing. `fog.apply` now owns that ordering in one place.
+    //
+    // GRADED BEFORE FOGGED. The fog colour is part of the weather preset and already
     // carries the hour; grading it again would drag the horizon away from the sky it
     // has to meet, which is the seam that makes a sky swap look like a mistake.
-    const shaded: NodeArg = fogFactor.mix(grade.apply(faded), uFogColor);
+    const shaded: NodeArg = fog.apply(grade.apply(faded), hitWorld);
 
     // Debug views are selected by a uniform rather than baked in, so they can be
     // switched without rebuilding the material — which would also throw away the
@@ -1060,7 +1062,7 @@ export function createGrassMaterial(opts: GrassMaterialOptions): GrassMaterial {
       dbgFrac,
       columns,
       faded,
-      band(fogFactor),
+      band(viewZ.negate().smoothstep(uFogNear, uFogFar)),
       band(viewZ.negate().div(uFogFar)),
       band(fade),
       uFogColor,

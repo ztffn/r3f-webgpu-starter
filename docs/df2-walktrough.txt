@@ -1,0 +1,2891 @@
+
+
+
+                          Delta Force 2
+
+                Unofficial Strategy Guide and FAQ
+
+                         by Kasey Chang
+
+                    released August 19, 2005
+
+
+1    Introduction
+
+This section is for "what the FAQ is about" and things like that.
+Feel free to skip this section.
+
+If you like the FAQ, please send me a dollar. :-)  See [1.3]
+
+This FAQ is about "Delta Force 2", the military shooter created
+and published by Novalogic, "very" loosely based on the exploits
+of US Army Special Forces, detachment Delta, a.k.a. Delta Force.
+.
+
+
+1.1   A WORD FROM THE AUTHOR
+
+This is a FAQ, NOT a manual, not that you really need a manual to
+play this shooter. How hard can it be, really? Besides, all the
+commands are listed when you press F1.
+
+This USG only covers the PC Version, since this only existed on
+the PC.
+
+
+1.2   TERMS OF DISTRIBUTION
+
+This document is copyrighted by Kuo-Sheng "Kasey" Chang (c) 2005;
+all rights reserved excepted as noted above in the disclaimer
+section.
+
+This document is available FREE of charge subjected to the
+following conditions:
+
+1)This notice and author's name must accompany all copies of
+  this document: "Delta Force 2 Unofficial Strategy Guide and
+  FAQ" is copyrighted (c) 2005 by Kasey K.S. Chang, all rights
+  reserved except as noted in the disclaimer."
+
+2)This document must NOT be modified in any form or manner
+  without prior permission of the author with the following
+  exception: if you wish to convert this document to a different
+  file format or archive format, with no change to the content,
+  then no permission is needed.
+
+  2a) In case you can't read, that means TXT only. No banners,
+  no HTML borders, no cutting up into multiple pages to get you
+  more banner hits, and esp. no adding your site name to the
+  site list. [Small exception: a "small" toolbar with no banners
+  embedded is okay. See IGN or Neoseeker for examples.]
+
+3)No charge other than "reasonable" compensation should charged
+  for its distribution. Free is preferred, of course. Sale of
+  this information is expressly prohibited. If you see any one
+  selling this guide, contact me (see below).
+
+4)If you used material from this, PLEASE ACKNOWLEDGE the source,
+  else it is plagiarism.
+
+5)The author hereby grants all games-related website the right
+  to archive and link to this document to share among the game
+  fandom, provided that all above restrictions are followed.
+
+Sidenote: The above conditions are known as a statutory contract.
+If you meet them, then you are entitled to the rights I give you
+in 5), i.e. archive and display this document on your website. If
+you don't follow them, then you did not meet the statutory
+contract conditions, and therefore you have no right to display
+this document. If you do so, then you are infringing upon my
+copyright. This section was added for any website that don't seem
+to understand this.
+
+For the gamers: You are under NO obligation to send me ANY
+compensation.  However, I do ask for a VOLUNTARY contribution of
+one (1) US Dollar if you live in the United States, and if you
+believe this guide helped your game. If you choose to do so,
+please make your US$1.00 check or $1.00 worth of US stamps to
+"Kuo-Sheng Chang", and send it to "2220 Turk Blvd. #6, San
+Francisco, CA 94118 USA".
+
+If you don't live in the US, please send me some local stamps. I
+collect stamps too.
+
+1.3   VOLUNTARY CONTRIBUTION
+
+Gamers who read this guide are under NO obligation to send me ANY
+compensation.
+
+However, a VOLUNTARY contribution of one (1) US Dollar would be
+very appreciated.
+
+If you choose to do so, please make your US$1.00 check or $1.00
+worth of stamps to "Kuo-Sheng Chang", and send it to "2220 Turk
+Blvd. #6, San Francisco, CA 94118 USA".
+
+If you don't live in the US, please send me some local stamps. I
+collect stamps too.
+
+For the record, out of ALL the FAQs I wrote (over 60 at last
+count) over the past ten years or so, I've received exactly 35
+dollars and 8 sets of stamps, as of release of this guide. So I'm
+NOT making any money off these guides, folks.
+
+
+1.4   HOW AND WHEN TO CONTACT ME
+
+PLEASE let me know if there's a confusing or missing remark,
+mistakes, and thereof... If you find a question about this game
+that is not covered in the USG, e-mail it to me at the address
+specified below.  I'll try to answer it and include it in the
+next update.
+
+Please do NOT write me for technical support. That is the
+publisher's job.
+
+Please do NOT ask me to answer questions that have already
+answered in this FAQ/guide. It makes you look REALLY idiotic.
+
+I will NOT answer stupid questions like the ones above unless I'm
+in a really good mood. If you send questions like that, do NOT
+expect a reply.
+
+The address below is spelled out phonetically so spammers can't
+use spambots on it:
+
+Kilo-Sierra-Charlie-Hotel-Alpha-November-Golf-Seven-Seven AT
+Yankee-Alpha-Hotel-Oscar-Oscar DOT Charlie-Oscar-Mike
+
+To decipher this, simply read the first letter off each word
+except for the numbers and the punctuation. This is "military
+phonetics" or "aeronautical phonetics" in case you're wondering.
+
+This document was produced on Microsoft Word 97. Some editing was
+done with Editpad (editpadclassic.com).
+
+
+1.5    THE AUTHOR
+
+I am just a game player who decided to write my own FAQs when the
+ones I find don't cover what I want to see.  Lots of people like
+what I did, so I kept doing it.
+
+Previously, I've written Unofficial Strategy Guides (USGs) for
+XCOM, XCOM2:TFTD, Wing Commander, Wing Commander 2, Wing
+Commander 3, Wing Commander 4, Privateer, Spycraft, 688(I)
+Hunter/Killer. Mechwarrior 3, MW3 Expansion Pack, Mechwarrior 4,
+Mechwarrior 4: Black Knight, Need for Speed: Porsche Unleashed,
+The Sting!, Terranova, Fallout Tactics, Starfleet Command Volume
+II, DS9: The Fallen, DS9: Dominion War, Driver, Warlords:
+Battlecry, Monopoly Tycoon, Dungeon Siege, and a few others.
+
+To contact me, see 1.4 above.
+
+
+1.6   DISCLAIMER / COPYRIGHT INFORMATION
+
+Novalogic created and published Delta Force 2. It's the second
+game in the Delta Force franchise, as the name suggests.
+
+This USG is not endorsed or authorized by NovaLogic.
+
+The information compiled in this USG has been gathered
+independently through the author's efforts except where noted
+otherwise.
+
+This document is based on the retail version with final patch,
+which is V1.06.15.
+
+
+1.7   HISTORY
+
+19-AUG-2005    Initial release
+
+
+
+2    DF2 General Info
+
+
+2.1   THE MOST FREQUENTLY ASKED QUESTIONS
+
+Q: Can you send me the game (or portions thereof)?
+A: No.
+
+Q: Can you send me the manual? (or portions thereof)
+A: It's on the CD, you m****! Also, press F1 in the game.
+
+Q: Can you tell me how to play the game?
+A: Read the manual please.
+
+Q: How big is the install?
+A: About 475MB regular install, 125MB compact install.
+
+Q: Is there a patch?
+
+A: Use the auto-update tool. As of this release, it's V1.06.15
+
+Q: What's the difference among the difficulty levels?
+A: How easy you die, mainly, and how good the enemy is. AI on
+higher level is also more aggressive in patrols. They also react
+to sounds of gunfire or explosions or screams of pain. Finally,
+their accuracy is improved. Also, if a friendly helicopter is
+involved, it may die if you loiter excessively on normal or hard
+difficulty levels.
+
+Q: What about some cheat codes?
+A:  See final section.
+
+Q: How about a mission editor?
+A: It's installed with the game, you *****!
+
+
+2.2   DF2 HISTORY
+
+Novalogic has been around since 1986, though they mainly did
+ports and published through other publishers such as Accolade
+(Steel Thunder) and Broderbund (Wolfpack).
+
+NovaLogic broke onto the PC gaming scene in 1992 with their
+breakthrough title: Commanche: Maximum Overkill. Using their
+proprietary voxel-based technology, they were able to deliver
+full 3D with realistic terrain that's NOT based on polygons, as
+well as effects like reflections and such, on then available PC
+(386), with extremely high frame rates, and that is simply
+amazing. Commanche was Novalogic's first self-published title. It
+spawned multiple follow-ups. Currently it's on "Commanche 4".
+
+The voxel technology was quickly reused in Ultrabots (a giant-
+robot fighting game) and Armored Fist (tank combat sim). Related
+technology was used in the various fighter sims such as F-22
+series, F-16, and MiG-29.
+
+In 1999, NovaLogic introduced Delta Force, a first-person shooter
+based on their voxel technology. It was a success and spawned
+multiple sequels: Delta Force 2, Delta Force / Land Warrior, and
+Delta Force / Task Force Dagger.
+
+You are, of course, playing Delta Force 2.
+
+Later, NovaLogic improved the engine to create Delta Force /
+Black Hawk Down, partly inspired by the movie and the exploits of
+the Ranger company and Delta force before that infamous day in
+Mogadishu. It also spawned an expansion pack: Team Sabre, that
+have you traveling to South America and Southeast Asia in search
+of drug kingpins and terrorists.
+
+NovaLogic then went to a new engine for Joint Operations, and its
+expansion: Escalation.
+
+On the other hand, it recently revived the Delta Force franchise
+by creating Delta Force Xtreme.
+
+Most NovaLogic games feature support for NovaWorld, a full-
+featured online gaming lobby and stat tracker where you can earn
+ranks and get promoted if you play well. Imagine having a 50-150
+player battle, across maps that's measured in square KILOMETERS,
+not square meters!
+
+
+2.3   HARDWARE REQUIREMENTS
+
+From official website:
+
+     Required Processor:      Pentium II or faster
+
+     Video Card:    Any Windows Compatible
+
+     Hard Drive:    200 MB
+
+     RAM:      64 MB
+
+
+2.4   HOW DOES THIS GAME PLAY?
+
+Basically, it's one of those lone-wolf type games where you shoot
+a LOT of terrorists or militia, basically EVERYONE in your way.
+You get a couple AI buddies along with you, but they die quite
+often, never seeks cover, and so on.
+
+Sniping is encouraged, and indeed, required. You usually have 10
+mags of ammo for your primary weapon. You carry your pistol for
+close-quarters combat, but you don't have much ammo for it. (4
+mags for pistol). You can carry other items like ghillie suit,
+satchel charges, and so on for specific missions.
+
+You may need to retrieve documents and/or computers, destroy
+computers, demolish buildings, plant beacons, and so on. Lots of
+things to do, but the way you do them is similar enough.
+
+In some missions you encounter civilians.
+
+There is also a full mission editor if you want to create your
+own missions. However, it's not that easy to use.
+
+
+2.5   BUGS AND FIXES
+
+The game is very stable and never crashed even once on my test
+computer. However, it does not enjoy task switching. If you hit
+ALT-TAB, and try to switch back, the game will crash to desktop
+with a SYSDUMP.TXT message.
+
+You should get the latest patch via the auto-update tool, and
+close any extra programs such as virus checker, firewall (unless
+you're going online), and such before starting the game. That
+seems to help.
+
+Cheating is rampant online and since NovaLogic has moved onto
+other games, new patches are unlikely.
+
+
+2.6   EXPANSION PACKS? SEQUELS? RELATED TITLES?
+
+Delta Force: Land Warrior: 3rd in series, introduced different
+characters such as sniper, close-quarters, assault, heavy
+weapons, demolition, and so on. Each has special "powers".
+
+Delta Force: Task Force Dagger: 4th in series, introduced
+missions roughly based on the exploits of Coalition forces in
+Afghanistan.
+
+Delta Force / Black Hawk Down -- partly inspired by the movie and
+the exploits of the Delta Force and Ranger company before that
+infamous day in Mogadishu.
+
+Delta Force / Black Hawk Down: Team Sabre -- expansion pack that
+have your team go to Southeast Asia and Colombia to chase
+terrorists and drug kingpins.
+
+Joint Operations -- small squad combat in jungles of Indonesia,
+designed for multiplayer, using vehicles, helicopters, small
+boats, and lots of infantry action.
+
+Joint Operations: Escalation -- expansion pack, adding more
+riverine stuff, more vehicles, including tanks, and so on.
+
+Delta Force Extreme -- the latest version, including co-op play,
+multiplayer, and more is now in stores, for a low price of $20!
+Features state of the art graphics upgrades.
+
+
+2.7  SOME COMMON SUPPORT ISSUES
+
+Latest version is 1.06.15, dated March 22, 2000.
+
+If you bought the Delta Force trilogy and the install code did
+not work, check the official website (http://www.novalogic.com)
+for a temporary install code.
+
+There is no in-game save. You must finish the mission.
+
+If the choices for campaign and/or quick mission are not
+available, your CD was not being recognized.
+
+The mission editor does NOT work in Win2K or WinXP. This is a
+known issue and there's nothing that can be done about it.
+
+
+
+3    Your weapons and equipment
+
+They are organized by the game into several categories
+
+
+3.1   KNIFE
+
+Everybody carries one. Spec ops guys usually have theirs
+darkened, and could be any shape. It's great for silent kills.
+Sneak up behind a guard, whoosh, dead guard.
+
+If you are wondering... It is actually smaller than the one Rambo
+carried. That one would be too big and unwieldy for any one other
+than Rambo.
+
+In terms of the game... It's rare for you to get close enough to
+use the knife, but sometimes, if you are prone, and enemy patrol
+is right on top of you, using the knife may get rid of him
+instead of rotating on the ground and trying to shoot him.
+
+
+3.2   SIDEARM
+
+Your pistol, good for close combat, but lacks the range or
+firepower of the other weapons. There are a few models, but they
+don't really make a BIG difference in their operation, except
+whether they are silenced or not. All pistols are semi-automatic
+only.
+
+The SOCOM w/ Silencer is recommended, mainly for the silencer.
+Why let the enemy know you're here?
+
+
+3.2.1     H&K Mk 23 mod 0 "SOCOM"
+
+Caliber: .45 ACP
+
+NOTE: SOCOM can be equipped with a silencer, and becomes known as
+"SOCOM w/ silencer"
+
+
+3.2.2     H&K Mk 23 mod 0 "SOCOM" w/ silencer
+
+Caliber: .45 ACP
+
+NOTE: Also available without silencer, but why? Always fire two
+shots at a time, to make sure you kill the target. One shot may
+not kill unless you go for the head.
+
+
+3.2.3     Underwater Pistol
+
+Caliber: n/a / 5 shots
+
+
+3.3   PRIMARY WEAPON
+
+Primary Weapon falls into several categories: Sniper Rifles,
+Assault Rifles, or Machine Guns.
+
+For sniper rifles you carry about 75 rounds of ammo.
+
+For assault rifles, you carry about 200-210 rounds of ammo.
+
+For machine guns, you carry about 400 rounds of ammo.
+
+
+3.3.1     M4 with M203 combo (assault rifle, w/ grenade launcher)
+
+M4 is a proven carbine with M203 grenade launcher slung below.
+This design is a bit long in the tooth though. As the range for
+the 40 mm M203 grenade is not that far. Uses 30 rounds magazine
+of 5.56mm bullets. You also get a 4x scope, which makes it a low-
+end sniper rifle.
+
+The three modes are: semi-auto, 3-round burst, grenade.
+
+Even with the scope, your realistic range is not much above 300
+meters.
+
+
+3.3.2     M4 with shotgun combo (assault rifle, w/ shotgun
+     attachment)
+
+M4 is a proven design with a shotgun slung below. Shotgun has
+limited range, but excellent for close combat. Uses 30 rounds
+magazine of 5.56mm bullets. You also get a 4x scope for sniping.
+
+This combo is also known as "Masterkey", as in "blowing the door
+hinges off".
+
+The three modes are: semi-auto, 3-round burst, shotgun.
+
+Even with the scope, your realistic range is not much above 300
+meters.
+
+
+3.3.3     M40 Sniper Rifle
+
+This sniper rifle is built for the Marine Corp sharpshooters by
+the Marine Corp armorers. 12 mags of 5 rounds each.  10x scope
+lets you reach out and touch someone. It's bolt action, so pause
+between shots is long, and switching magazines is also slow.
+
+Realistic range is about 500m.
+
+
+3.3.4     M82 Barrett .50 cal Sniper Rifle
+
+The first .50 cal sniper rifle, it was first introduced in 1982
+(thus, M82). It was NOT meant to hit human targets. It was
+designed as anti-material weapon, like punching holes in
+radiators of cars, or jet engines, radar dishes, etc. However, it
+will punch holes in human flesh all right. 8 mags of 8 rounds
+each. (Hey, these are BIG bullets). Also equipped with a 10x
+scope.
+
+Realistically, this can hit targets out to 800 meters or so.
+
+
+3.3.5     M249 "Minimi" machine gun (i.e. Squad Automatic Weapon,
+     or SAW)
+
+Originally built by FN of Belgium, the "Minimi" is an air-cooled
+belt-fed machine gun.
+
+2 belts of 200 rounds each, can be fired on full auto or semi-
+auto. No scope.
+
+Full auto allows you to "walk" the shots onto the target.
+
+No reticule view at all, so effective range is maybe 150m at
+most.
+
+
+3.3.6     MP5SD3 (silenced submachine gun)
+
+The MP-5 series by Heckler and Koch is the quintessential
+submachine gun, favored by "operators" all over the world. The
+SD3 has an integral silencer that just slightly reduces muzzle
+velocity yet quiets the shot noise down to a whisper, esp. when
+equipped with special subsonic rounds.
+
+In DF2, this gun will NOT leave a "tracer" trail, thus making it
+impossible to spot. This is great for sneaking up on enemies and
+putting bullets in their heads.
+
+3 firing modes: full auto, 3-round burst, semi-auto. No scope.
+
+Full auto allows you to "walk" the shots onto the target, but
+very wasteful of ammo.
+
+Effective range is under 100m, since there is no scope or
+reticule view at all.
+
+
+3.3.7     Underwater assault rifle
+
+26 shots, total. Hopefully you don't need more than that. Noisy,
+but good for what it was designed for.
+
+
+3.4    EXPLOSIVES
+
+You have three choices... AT-4 rocket, Claymore mine, and satchel
+charge.
+
+(Hand grenades are counted separately!)
+
+
+3.4.1     AT-4 LAW
+
+The AT-4 LAW (light anti-tank weapon) is a should-fired light-
+weight rocket that should destroy most vehicles in one hit,
+useful in demolitions or anti-vehicle ops.
+
+Engage the scope for more precise targeting.
+
+Some vehicles may need more than one LAW.
+
+It is the only weapon available against helicopters, except the
+grenade launcher.
+
+
+3.4.2     Satchel Charge
+
+Toss this where you want things to blow up, run away, and hit the
+radio detonator trigger, and watch things go BOOM!
+
+Objectives that need more than one LAW can be destroyed with just
+one satchel charge.
+
+You can drop multiple satchel charges, then blow them up
+altogether at once.
+
+One satchel can also take out multiple targets if they are close
+enough to each other.
+
+
+3.4.3     Claymore
+
+The M18 Claymore is a directional munition with motion sensor,
+packed with an explosive charge and steel bearings. When
+triggered, the explosives launch the projectiles in a 60-degrees
+arc, turning everything in the arc and in range into bloody pulp.
+Remember to set the proper SIDE toward enemy. The motion sensor
+covers an arc FORWARD... and will be triggered by ANYONE,
+including you!
+
+Best used to guard your back, but since you're mainly on the
+attack in DF2...
+
+
+3.5   RADIO DETONATOR
+
+Triggers satchel charges to go boom.
+
+
+3.6   GRENADES
+
+Only two types here: delayed fragmentation grenade, or
+fragmentation grenade.
+
+In general, one or two grenades should take out a tent or a
+camouflaged shelter.
+
+
+3.6.1     Delayed Fragmentation Grenade
+
+Five second delay, bigger boom.
+
+
+3.6.2     Fragmentation grenade
+
+Immediate detonation upon impact. Zero delay. Enough to destroy a
+truck. Need 3-4 to destroy a BRDM.
+
+
+3.7   LASER RANGE FINDER
+
+It's also a designator... Point it at a target, and call in some
+fire support. Be precise though. Hitting the wrong target is
+embarrassing.
+
+
+3.8   SECONDARY EQUIPMENT
+
+Possible choices here are
+
+Extra ammo:    50% more reloads
+
+LAW rocket: see above
+
+Satchel Charge: see above
+
+Claymore Mine: see above
+
+Remote Camera: drop the camera somewhere and you can move pan and
+zoom the view in the Picture-in-Picture, but little practical use
+
+Laser Target Designator: call in some more fire support
+
+
+3.9   AUXILIARY GEAR
+
+Following auxiliary gear is available:
+
+Ghillie Suit: makes you almost invisible in grass, great for
+snipers, but only on certain terrain.
+
+LAR V rebreather: no need to surface while diving, but also
+dresses you in a black diving suit. May help in certain night
+missions.
+
+Kevlar vest: gives you some protection against enemy shots
+
+And finally, most of the "secondary equipment" is also available,
+if you need more of it.
+
+
+3.10  ARMORY
+
+You only carry limited weapons and ammo. However, you may
+sometimes locate additional sources of ammo in the enemy
+buildings, in the form of bullet boxes and grenade boxes. Run
+over them and you'll hear a "reload" sound.
+
+In some missions you may also run into first aid boxes.
+
+
+
+4    Quick Glossary in DF2
+
+Here are some terms used in DF2 that you may need to understand
+first.
+
+ALPHA - fire team that provides recon/sniper support
+
+BLACK WIDOW - the helicopter that retrieves/inserts you
+
+BRAVO - that would be you, must perform all main objective tasks
+
+CHARLIE - backup fire team that provides additional cover
+
+COPPERHEAD - artillery/air strike. Technically Copperhead is a
+laser-guided cannon round that's precise enough to hit a tank. In
+DF2 Copperhead is used as a generic term for fire support.
+
+DOWN - disabled / dead, EX: "Charlie 2 is down!"
+
+FIRE TEAM - basically a pair of soldiers supporting each other,
+i.e. buddy system
+
+KING ELEMENTS - everybody under command of King Six, that's you,
+and all your buddies.
+
+KING SIX - HQ that issues overall orders
+
+OBJECTIVE - exactly that... where you need to perform your
+mission.
+
+TANGO - the letter "T", short for "terrorists"
+
+WP - waypoint, a location you need to go to / go past
+
+
+
+5    Various Tactics
+
+
+5.1  GENERAL TACTICS
+
+
+5.1.1      Turn ON the goal listing
+
+Hit "G" to turn on the Goal listing. It tells you which goals
+have been completed (brown) and which goals are still pending
+(white).
+
+
+5.1.2      Check Commander's map periodically
+
+The map is extremely useful. You can often see where enemies are
+and where they are facing. You can use that information to avoid
+or flank enemies as you see fit.
+
+Obviously, this map doesn't show all the info, just those visible
+from other teammates and other means, so don't rely on this 100%
+to tell you that an area is clear. If you see only red X's, it
+does NOT mean the area is clear!
+
+
+5.1.3      Hit enemies where they are NOT expecting you
+
+As the Rogue Warrior Richard Marcinko had said (paraphrased), "I
+never play fair. I hit enemies from ambush. I flank them and hit
+them in the rear. I don't give them time to react."
+
+You should heed those words. Rogue Warrior, i.e. Richard
+Marcinko, is the founder of SEAL Team Six for the US Navy.
+
+Sneak around enemies and shoot them in the back. Shoot them from
+long distance. So on and so forth. Alternatively, distract them
+(see next hint)
+
+
+5.1.4      Make noise only as distraction
+
+Sometimes, you need to make noise, just to attract the bad guys'
+attention. Then you can flank the enemies and take them from
+behind with silenced weapons.
+
+Distract tangos with exploding barrels and such with silenced
+weapons, THEN shoot them from another angle. Thrown grenades are
+also good distractions.
+
+
+5.1.5      shoot from as far as possible
+
+You can get hits from as far as 800 meters away, and a single
+shot can kill. Thus, there is no need to get any closer unless
+terrain prevents you from getting closer.
+
+
+5.1.6      Use the shot compensator
+
+If you use the scope, you'll see that the range is indicated to
+right, and there's another number to the left. That is the shot
+compensator to deal with gravity. Bullets DO drop in flight, and
+this tells your gun to point a little higher to compensate for
+it. Set to the closest 100 meters, rounded up.
+
+For example, fi the range says 148m, set compensator to 200m. Set
+it to 200m by default as it doesn't affect accuracy THAT much
+even if firing at point-blank targets.
+
+
+5.1.7      Different firing modes have different uses
+
+There is no need to use burst mode unless you're doing CQB or
+need to shoot a lot of enemies from an unstable platform (i.e.
+shooting from a chopper). A single shot in almost any part of the
+body will kill the enemy.
+
+On the other hand, there are times where you need to go full
+auto. Some weapons function better on full auto. The SAW and
+MP5SD3 on full auto can be "walked" onto the target, if you have
+enough ammo.
+
+Burst mode is when you may need to engage multiple moving enemies
+in a hurry. Firing single-shots at a moving target means you need
+to be a VERY good marksman, but if you're firing bursts you are
+far more likely to score a hit.
+
+
+5.1.8     Listen for close hits
+
+If you hear bullets slapping the ground near you, FIND SOME COVER
+QUICKLY! Someone has seen you and is firing at you! Find some
+cover, then displace laterally, THEN peek back out and locate the
+threat.
+
+In some scenarios some enemies will seek to pin you down with
+covering fire while other enemies advance to engage you at close
+range. That's why lateral displacement is a good idea (they head
+for your last known position).
+
+
+5.1.9      how to blow things up
+
+You have basically four choices:
+
+Satchel charge: drop one near the target, run away, hit the radio
+trigger. You can drop more than one and hit the trigger to blow
+them up all at once. Sometimes, satchel charge is powerful enough
+that one charge can destroy two targets... If they're close
+enough together.
+
+LAW rocket: one shot will destroy an armored car, or any vehicle
+except a tank. It should also take down a helicopter. Tanks and
+locomotives take two.
+
+Grenades: you only have a couple, but one or two grenades should
+take out a truck. May need more to blow up bigger stuff
+
+Fire support: use the laser designator to call in artillery or
+air strike. You have VERY few of these and you need to be VERY
+precise with them.
+
+
+5.2  MOVEMENT TIPS
+
+
+5.2.1     Almost always crouch, sometimes prone
+
+Crouch gives you almost the same forward speed as stand-up run,
+but much stealthier.
+
+Only stand up if you need to peek into a window.
+
+In dangerous areas, go prone.
+
+
+5.2.2     Descend vertical hills while prone
+
+While the game penalize your health for falls, it does NOT do
+much so while you're prone. So you can descend nearly vertical
+cliffs without getting killed if you move downhill while prone.
+You'll simply slide off, and end up prone at the bottom of the
+hill, without a scratch.
+
+This only works if you're facing downhill. If you're looking to
+the side, and you slide NOT pointing downhill, then you will
+still get hurt.
+
+
+5.2.3     Clear a room with grenade(s)
+
+Grenades are the best way to clear small rooms. Lob one through
+the window or door and watch the fireworks.
+
+On the other hand, grenades do have limited range and may not
+kill all enemies in a large room.
+
+
+5.2.4     Try to expose your RIGHT arm first
+
+As that is your shooting arm in DF2. If you expose your left arm
+first, then shoot, you may end up shooting the wall.
+
+
+5.3  CLOSE QUARTERS COMBAT TACTICS
+
+
+5.3.1     Get close
+
+Preferably, close enough that you can't miss, which means
+directly in the guy's path, but behind him.
+
+
+5.3.2     If you can't get close... use semi-auto
+
+When you cannot get close enough, stay in cover, use single
+shots. Move away after that. AI is sometimes good enough to send
+patrols in the direction where the shots came from.
+
+
+5.3.3     Knife as defense
+
+Sometimes AI patrols will walk right over you if you're prone.
+They know you're there, but they can't shoot at you (they only
+shoot horizontally or so). However, they are moving too fast for
+you to shoot them with your pistol. In this case, take out your
+knife and just swing the knife blindly, and you should have a
+dead patrol guy.
+
+
+5.3.4     The gully defense
+
+If you have a large group hunting you, one possibility is to hide
+in a gully and wait for enemy to walk right up to you. You can
+use the terrain to snipe at the patrols, then if they get close
+enough, use your pistol and knife for defense.
+
+
+
+6    Hostile Forces and Buildings
+
+Here's a quick summary of the forces you can encounter in DF2
+
+
+6.1  SOLDIERS
+
+Soldiers come in four types: officers, assault rifle guys,
+snipers, and pistoleros.
+
+Note: all soldiers react to noises (unless they are specifically
+designated as "deaf" in the mission editor). Thus, noise like
+explosion fuel drums, grenades, and so on are excellent
+distraction devices.
+
+
+6.1.1     Officers
+
+Officers are only seen in certain missions and are often unarmed,
+as they represent someone you need to capture.
+
+
+6.1.2      Assault rifle guys
+
+These are your main opponents. Armed with AK-47's (or similar),
+they pump out 3-round bursts with virtually infinite ammo, and
+some of them have excellent accuracy, even for such an inaccurate
+weapon! Go prone and take them out from a distance, or circle
+them.
+
+
+6.1.3     Snipers
+
+Snipers are extremely deadly. You can tell they are around as
+they fire one shot at a time, and you better take them out first
+before they get you. Many can even go prone!
+
+
+6.1.4     Pistoleros
+
+These guys are generic officers armed with a pistol. Pistols are
+louder with a sharper bark than the snipers. Pistols have lousy
+range and bad accuracy, but can still kill you if up close.
+
+
+6.2  VEHICLES
+
+As for road vehicles, you can see pickup trucks, BRDM armored
+cars, and T-7x series tanks. There are also trucks and other
+jeeps, I'll just mention those.
+
+
+6.2.1     Pickup trucks
+
+There are smaller pickups, usually with one or two gunmen riding
+in the bed, these often chase you, and the gunmen in the back can
+be trouble. Either blow it up with M4w/GL, a LAW, or grenades.
+
+
+6.2.2     BRDM
+
+BRDM is a light armored car with a heavy machine gun. It may
+sometimes be referred to as a tank, but it's not. It's just an
+armored car, and a single hit from a LAW or 3-4 hits from a M203
+grenade will destroy it. 2-3 regular grenades under the vehicle
+will also blow it up.
+
+That heavy machine gun has a LOT of range and fires 3-round
+bursts.
+
+
+6.2.3     T-7x series tank
+
+This main battle tank (MBT) has been around for 30+ years in one
+form or another. One LAW may not kill one. Best way is to call in
+a Copperhead round.
+
+
+6.2.4     Other vehicles
+
+You may also encounter civilian vehicles such as older Range
+Rovers, HUMVEEs, empty pickup trucks, empty large trucks, and so
+on. Single grenade will take care of one.
+
+
+6.3  AIR THREATS
+
+Air threats are just that... threats that come from the air, and
+that means helicopters. Your only weapon against helicopters is a
+LAW rocket, and we all know how hard it is to hit a non-stable
+subject.
+
+Well, technically you can use the grenade thrower too, but you
+need 3-4 hits to bring one down, and I doubt you'll survive that
+long.
+
+When you try to shoot one, it's best to HIDE behind a hill, then
+when it flies over, shoot its rear end with your LAW.
+
+If you must do a head-on pass, try to get as HIGH as possible, so
+the chopper has to CLIMB in order to expose its chin guns, then
+you have a few more seconds to shoot.
+
+And definitely use the scope. AND anticipate the flight time.
+Best to wait until either the chopper is heading away or directly
+toward you.
+
+
+
+7    Structures
+
+You will encounter a variety of structures, but most of them are
+the "same", just different combinations.
+
+
+7.1  SIMPLE BUILDINGS
+
+These can be destroyed with a bit of explosives.
+
+
+7.1.1     Tents
+
+The fabric is light enough that you can shoot THROUGH it, but you
+can't see through it, so be careful. Enemy shots can also
+penetrate the tent.
+
+A tent has one entrance on each end, so one trick is to make a
+sound on one end, then sneak around the other end and peek inside
+for people you can shoot in the back, preferably with a silenced
+pistol or a knife.
+
+A tent can be blown up with 1 or 2 grenade hits.
+
+
+7.1.2     Camouflaged shelters
+
+These look like a "nest", and have 2 entrances to one side. They
+look semi-transparent and enemies inside may be able to see
+through and shoot out. Be very careful when approaching one of
+these.
+
+One of these can be blown up with one or two grenades.
+
+
+7.2  TOWERS
+
+Lookout towers allows enemies to see further and shoot further.
+
+
+7.2.1     Lookout tower
+
+This is a relatively tall tower with one guard on top. Snipe the
+guard is best, or sneak up and use the knife on him if no one
+else can see you and he's looking the other way.
+
+
+7.2.2     Big tower
+
+This multi-story tower with ramps going up has LOTS of room on
+top for snipers and lookouts. Expect up to four shooters on top.
+
+
+7.3  GENERAL BUILDINGS
+
+These are relatively simple buildings, minimal partitions inside.
+
+
+7.3.1     Large Building
+
+This large building has 2 entrances on opposite corners, and both
+sides have huge windows. It has normal sloped roofs.
+
+These are easy to clear if you take out the windows and see who's
+inside.
+
+
+7.3.2     Medium Building
+
+These look like an aluminum can split in half vertically, then
+laid flat on the ground. Entrance and two small windows on both
+sides, often used as barracks (with bunk beds inside)
+
+Make noise on one end and then go in the other end with your
+silenced pistol.
+
+
+7.3.3     Bunkers
+
+Regular bunker has one entrance in the back, and a wide firing
+port in front.
+
+Best way to clear them is use sniper rifle and shoot them through
+the firing port. The second best way is to approach it from the
+side, then sneak in the back and kill each guy with a knife.
+
+
+7.3.4     Hangar
+
+Hangar is basically a roof with sloped walls, WIDE openings on
+both ends, very easy to see through, which can be a problem.
+
+
+7.4  ADVANCED BUILDINGS
+
+These buildings are more complicated, usually with multiple
+rooms, multiple stories, and so on.
+
+
+7.4.1     2-story "apartment" building
+
+The 2-story building has six windows on each side, one door in,
+stairs up to 2nd floor and roof, multiple rooms on each level
+
+Take out any one on the roof if you can, sniper the windows or
+use explosives to break all the windows, then pick out the
+snipers at every window, then sneak in and clear each floor. Go
+in prone and stay prone as you don't want any one from outside to
+be able to see you inside.
+
+
+7.4.2     Comm center
+
+Comm center has two doors, and lots of windows. Go in the door,
+prone and see if you can clear out the first floor without
+revealing yourself in the windows. Peek into each room and blast
+tangos. Then come back out and sneak up the stairs outside in
+order to reach the final room. The room has one entrance, but a
+big open window. If you don't care if the room's trashed, throw
+in a grenade or two.
+
+
+7.4.3     Prison
+
+The prison has only one way in... through the gate. However, it
+is best to take out the guard at the entrance tower, then climb
+the tower and look down to see if there's any ambush from just
+inside the prison gate. An ambush there can be deadly. Drop
+grenades if you need to. Then sneak inside and clear one room at
+a time, slowly without being seen. If any one sees you they may
+kill the prisoners.
+
+
+7.4.4     Fort
+
+This structure has a front "gate" similar to a prison, and into
+that is a courtyard, where hostiles can hide. Once inside you
+have a room to the left, stairs up, stairs right, and an exit to
+the side door on the right. On the upper floor, the 2 sets of
+stairs are connected by a corridor, which leads into the big
+room.
+
+Best way to attack a fort is through the side door. Look at the
+side door from a distance to make sure there's no one there (or
+kill him if you do spot someone). Sneak in prone, and get to
+where the stairs merge and the main entrance is. Clear the
+"courtyard", then into that "left" room (watch for ambush from
+the corners!) Then get to main entrance, and take the stairs on
+your RIGHT. Head up and clear the corridor, past the other set of
+stairs, and finally, clear the big room.
+
+
+7.4.5     HQ with raised barracks
+
+This is probably the toughest building to clear if you're alone.
+The main building itself is sort of S-shaped, with entrances on
+both "sides". The main branch has a ladder leading up to a
+section on stilts.
+
+To attack, put a grenade or two into the upper section, then go
+around the "back" and enter THAT way, and clear room by room,
+VERY SLOWLY.
+
+
+7.4.6     Advanced bunker
+
+Advanced bunker has one entrance, but FOUR firing slits covering
+all sides.
+
+To defeat advanced bunker, snipe the guards through the slits,
+THEN sneak in and take out the rest
+
+
+7.5  TROPICAL BUILDINGS
+
+These buildings can be found in a tropical setting
+
+
+7.5.1     Wooden raised building
+
+A wooden raised building has a single door and a small "patio"
+that has a "ramp" on either side leading to ground level. No
+windows to see through.
+
+You can go prone and slide up the ramp, and stay prone, slide up
+to entrance, and peek inside. Throwing a grenade or two inside is
+also a valid tactic.
+
+This building is actually destructible. With enough firepower you
+can blow the structure up.
+
+
+7.5.2     Wooden raised mansion
+
+The mansion has a building with partitions, then a "corridor"
+leading to a white tower (that can be climbed from inside).
+
+Clear the other side first, through the entrance, check rooms to
+left, then go through corridor and check top of tower.
+
+
+7.5.3     Barn
+
+A barn has two main entrances, plus at least one small side
+entrance. There would be stalls for animals on both sides.
+
+To clear a barn, it's best to take a peek from the main entrance
+to ascertain where the enemies are, then see if the side entrance
+will allow you to enter unmolested, then you can perfect your
+stealth attacks.
+
+
+7.6  DESERT BUILDINGS
+
+
+7.6.1     Small hut
+
+The small hut has a single room, one door, and 2-3 windows.
+
+If you are far away, shoot through the door or the window. If
+you're close, toss a grenade through the door.
+
+
+7.6.2     Large hut with roof access
+
+The large hut has a side room and 2 back rooms, plus a "net" to
+climb up to the roof. Windows all around.
+
+Most large huts occupied by enemies have guards standing on the
+roof. Take them out first. Then look through the door and windows
+long-distance and see if you can take out the guards that way.
+Then sneak in the front door, prone, clear the first room to
+left, then clear the last two rooms. Grenades are helpful but not
+required. Watch for prone enemies and/or enemies hiding in
+corners.
+
+
+
+8    Quick Missions Walkthru
+
+For each and every mission, you get a list of the actual goals,
+suggested weapons, and suggested approaches.
+
+
+8.1   SIX OF ONE
+
+Briefing: we have located six SCUD launchers believed to have
+biological warheads. Demolish them.
+
+Situation: there's light snow falling. Ground has a bit of snow
+cover. SCUD launchers are in groups of 2, 2, 1, and 1. The last
+one is inside the armed camp, with heavy guard presence and
+roving patrols throughout the perimeter.
+
+Goals: demolish all six SCUD launchers
+
+NOTE: you have limited fire support available, use them wisely.
+
+Suggested outfit: bring a sniper rifle and as many satchel
+charges as you can fit. Call in fire support on the rest.
+
+Suggested tactics: Stealth is preferred, but not required. Just
+sneak up on one group at a time, shoot guards (preferably using
+silenced weapons), and drop one satchel pack at each SCUD
+launcher. Deal with roving patrols, then snipe the guards in the
+camp and call in some arty on the remaining launchers.
+
+Walkthru: Move forward until you see your first two launchers,
+and kill the two guards beside them. Look to left and spot two
+more guards. Shoot them if you can. Else just watch them. Drop
+satchel charges on the first two launchers. Carefully move toward
+next waypoint. Take care of the guards from a distance or move in
+with silenced weapons. Keep moving and you should spot the
+antenna in the distance. That's the enemy camp. Look all around
+and take out any guards from a distance. Watch out for patrols.
+Look for guards though windows and doors. There's one SCUD
+outside the base alone by itself. Destroy it with grenades or
+call in artillery. Finally, find a good spot and call in
+artillery on the final SCUD launcher inside the base.
+
+
+8.2   STOLEN GOODS
+
+Briefing: One of our military couriers was ambushed and the
+biocontaminant he was carrying is now in the hands of a
+paramilitary group. Retrieve it from enemy camp.
+
+Situation: It's night time, the briefcase is in an enemy camp,
+patrols are about.
+
+Goals: Retrieve the briefcase, make to extraction point, Black
+Widow must survive
+
+NOTE: enemy reinforcements will come over the hill, watch out for
+them.
+
+Suggested outfit: sniper rifle or M-4 w/ shotgun
+
+Suggested tactics: stealth if you can, but it's not required.
+
+Walkthru: It's night time, so your nightvision is on. Crouch and
+move slowly up the path and be /ready to engage enemy. One's
+hiding next to the arch/ruins to your right on the path. There
+are 2-3 more to your left, slightly below. Continue through
+waypoints until you're approaching main camp. Go prone and take
+out as many guards as you can from up high. If you heard a
+warning for reinforcements, that means they're coming over the
+big hill (behind you). Take them out, then clear out the rest of
+the camp. When done, go down and explore the northern-most tent.
+The briefcase is inside. Escape to extraction waypoint and kill
+any remaining guards. When Black Widows gets overhead, you win!
+
+
+8.3   FRONT RUNNER
+
+Briefing: Rebels have hijacked a convoy of relief supplies.
+Rescue the drivers being held hostage in the main building,
+escort them to the trucks, then escort the trucks out of hostile
+territory.
+
+Situation: You're landing via parachute. Enemy camp has multiple
+buildings. The three trucks are nearby. Enemy may have
+reinforcements.
+
+Goals: Rescue all 3 drivers, all 3 trucks must reach extraction
+point
+
+NOTE: rebels can and will shoot hostages if you give them a
+chance.
+
+Suggested outfit: sniper rifle, silenced pistol, at least one LAW
+rocket
+
+Suggested tactics: no stealth is really needed, but it's nice to
+have
+
+Walkthru: You start parachute in. You can try to shoot the two
+tangos from the air. Hide on hills to left and approach camp.
+Shoot all tangos visible, esp. in windows and doorways, and
+balconies. Shoot reinforcements running in. Circle the camp
+carefully and make sure no one is visible. Switch to pistols and
+clear each and every building except the "hotel" where the
+hostages are being held (it's the largest building). When ready,
+go inside, kill FOUR guards on first floor. Then slowly move up
+the stairs and take out one last guard, and the hostages are
+free. Run up to them and they'll run down to the trucks. The rest
+of friendlies will also run to the trucks, and so should you.
+Your teammates should have cleared the area but help them just in
+case. Then run ahead of the convoy and kill the few tangos in
+your way. Should be simple enough. Shoot tangos when you see
+them. When convoy arrives at extraction point, you win!
+
+
+8.4   PAYBACK
+
+Briefing: Rebel armored group attacked a UN peacekeeping force.
+Track them down and call in fire support to destroy rebel armor.
+
+Situation: You are dropped quite a long way from enemy camp, it's
+daylight time, and hills are green. Expect patrols near the base,
+and guards. You may not have enough fire support to take out all
+the tanks so some demolition may be required.
+
+Goals: destroy all tanks in enemy compound. Escape to extraction
+point.
+
+NOTE: Limited fire support available.
+
+Suggested outfit: one or two satchel charges for the tanks.
+You'll need an assault rifle or sniper rifle for the guards and
+any patrols outside.
+
+Suggested tactics: No need to keep quiet, blast everyone you see.
+
+Walkthru: Follow the waypoints until you get close to waypoint
+charlie. You'll see a barracks down into the valley, with some
+tents and a house. Turn right a bit and you'll see about 10
+tangos right at the valley's entrance. Shoot them now, or they'll
+shoot you as you run by. By now Alpha is probably blabbing
+"Bravo's compromised!"  Ignore that. Just keep going. Shoot more
+tangos, one of them is on the hill to right of alpha team.
+Charlie will shoot the compound along with Alpha, but it's your
+job (with sniper rifle) to take out as many guards as you can.
+Then use the laser designator to take out as many tanks as you
+can see from your angle. There should be a total of FOUR tanks to
+get rid of, two outside, one partially under the roof, and one
+inside the curved roof. Put a fire mission between the two tanks
+to get rid of two, then take out that other tank. Finally, sneak
+into the base (after circling it once to make sure no more
+tangos) and demolish the last tank with a satchel charge.
+
+
+8.5   POSSE
+
+Briefing: Rebel arms train is about to reach the border. Stop the
+train, and kill all the train guards. Do NOT cross the border
+yourself.
+
+Situation: Absolutely do NOT cross the border. Enemy firepower is
+overwhelming, but they will NOT shoot UNLESS you cross over.
+Rebels on this side are messy enough! Keep the rebel on THIS
+SIDE!  You're just landing and the train will be here in a few
+minutes. About 10 rebels are running through the pass toward the
+border ahead of the train. Additional guards on the train itself.
+
+Goals: Stop the train before it crosses the border, kill all the
+guards on the train.
+
+NOTE: The locomotive will need TWO LAW hits... or drop a satchel
+on the tracks and blow it up as the locomotive go by.
+
+Suggested outfit: bring 2-4 LAW rockets, and a sniper rifle or M4
+w/ grenade launcher.
+
+Suggested tactics: instead of following the waypoint, just land
+and run to the left a bit, straight at the train. You can see it
+in the distance. Aim for the hill next to the train, ignore the
+helicopters. Stop the train first, then clear out the guards.
+Ignore the infantry in the pass. They are not a factor at all
+unless they double back to shoot at you.
+
+Walkthru: Head for the hill next to the train a bit to your left.
+IGNORE the waypoints. When you get there, the first helicopter
+should have already left, and the second helicopter is behind
+you. The train should be just about coming. Put 2 LAWs into the
+locomotive and that will stop it WAY short of the border.
+(Remember to lead the target!)  then go prone and pick off all
+the guards, and that's it!
+
+While there's a fight toward the border, it's not important, as
+least not from the list of goals. Though if you shoot at their
+back, some may double back and shoot at you.
+
+
+8.6   PLAYBOOK
+
+Briefing: We've found an enemy communications center. Get inside,
+take the codebook, then demolish the comm center.
+
+Situation: One checkpoint on the road to the comm center. The
+center itself has fence, guard towers, and more. Plus roving
+guards inside.
+
+Goals: obtain codebook, destroy comm center
+
+Suggested outfit: satchel charge, assault rifle
+
+Suggested tactics: take out the checkpoint, then destroy the base
+itself.
+
+Walkthru: Follow the waypoints and you should see the checkpoint,
+so kill tangos there. Chuck a grenade at the truck. Don't let it
+escape.  Clear the checkpoint of all hostiles. Continue toward
+the comm center. You may encounter some roving patrols. Take care
+of them. Go a bit to your left, and use the hill as cover. Snipe
+the guards from the towers, and the entrance checkpoints. Then
+look into the building windows, and shoot through to take out the
+guards. Look between buildings for more guards. Circle the comm
+center from the outside, look for more guards to shoot from every
+angle before moving in. Once in, clear the bottom floor first,
+then go up to second floor and clear that. Claim the codebook.
+Drop a satchel charge here. If you want you can drop another one
+downstairs. Run for extraction point and detonate the explosives.
+Kill additional tangos as you head toward the extraction point.
+
+
+8.7   DECEPTION
+
+Briefing: A rebel supply convoy has just left the rebel base. We
+can't let that convoy reaches its destination, but we can't get
+in front of it. We will attack the base, find the codebook, and
+call the convoy back, so we can attack it.
+
+Situation: It's a long run to the enemy base, and you need to
+shoot enemies as fast as you can. Then grab the codebook and be
+ready for the ambush...
+
+Goals: kill everybody in enemy base, call convoy back, destroy
+convoy
+
+NOTE: if you take too long, the convoy will NOT turn back
+
+Suggested outfit: max LAW rockets, M4 w/ Grenade Launcher,
+
+Suggested tactics: this one is brute force all the way. Run and
+kill guards as you find them. Head toward the base and attack
+when the rest of the team runs in. Shoot bad guys ASAP. Your team
+will help clear the base. The ambush is easy enough.
+
+Walkthru: Follow the waypoint, kill one guard ahead, then follow
+the turn and kill more guards. Keep going until you can almost
+see the camp. Try to get on top of a hill. When the rest of your
+
+team attack, pick off the shooters in the enemy camp of those you
+can see (one is hiding in a broken house, very hard to spot!) and
+quickly claim the codebook from the radio tent in the far end.
+There's likely 2 guards inside. Once the radio codebook's
+claimed, pick your LAW and head back out, find a good spot to
+ambush, and go prone. The convoy will arrive after a few minutes.
+When ready, put a LAW or grenade into the lead vehicle, then a
+LAW into the armored car. A group of guards will rush your
+position but your teammates should cut them down. Backtrack the
+route and destroy every vehicle (should be like 2 armored cars
+and 4 trucks total). If the game insist you did not kill
+everybody in the camp, you may have missed one or two patrols as
+you approached the camp from insertion. Go back and kill them.
+Then the mission will end.
+
+
+8.8   HOLIDAY
+
+Briefing: Group of tourists has been taken hostage by a terrorist
+group. Liberate the hostages, defend them until Black Widow can
+arrive to extract them.
+
+Situation: It's night and you have to infiltrate a terrorist
+camp. Guards are about, and there's a second camp you will run
+into
+
+Goals: liberate hostages, escort hostages to roof, all hostages
+must survive
+
+Suggested outfit: Bring the MP5SD3 and the silenced .45. It's
+time to go hunting. Bring extra ammo may help.
+
+Suggested tactics: Stealth is preferred, but not required.
+
+Walkthru: Go forward, spot the 2 guards. Take them out with
+silenced weapons. Continue following the waypoints. You'll run
+into the "2nd camp" with 2 structures and some armored cars, with
+some guards. Sneak close and drop a grenade on each. Then get to
+the other camp on the other side of the hill. Go low and sneak
+close, prone. Then use silenced weapons and take out all the
+external guards, each at one of those firing positions. Then
+sneak inside, and clear 1st and 2nd floor. Third is locked, and
+there's one more tango next to the 3 hostages on the 4th floor.
+Do NOT approach the hostages yet. Get up to the roof and look
+over the edge for tangos. They should be shooting at you, but
+they don't really know where you are, so shoot back. Go full
+auto, as you need to secure the roof for extraction. Look at
+adjacent roofs, between the vehicles, and so on. When you see no
+more fire coming, run back down and run into each of the
+hostages, thus "freeing them". They will run for the roof. Run
+back up to the roof, and the mission should end.
+
+
+8.9   LIFE GUARD
+
+Briefing: F-16 pilot was shot down behind enemy lines. Get in
+there and rescue him.
+
+Situation: Light snow on the ground, lots of enemies, on foot or
+on snowcat
+
+Goals: Destroy SAM at small camp, destroy SAM at big camp, rescue
+pilot
+
+NOTE: limited fire support available
+
+Suggested outfit: Kevlar vest, extra ammo for the M4 w/ Grenade
+Launcher
+
+Suggested tactics: watch out for snipers, keep yourself in cover
+
+Walkthru: Follow the waypoints. When you hear radio about patrol
+on the ridge, look right. Two tangos are on the ridge with you.
+Take them out. Continue past the ridge and follow the WP until
+you come to camp one. Take out the guards, then put a grenade or
+two on each SAM launcher. A Snow-cat will approach, take it out.
+Take out any snipers in the distance. Continue to next camp.
+Snipe at any enemies you can see (quite a few of them). There's
+also more tangos on the ridge to your left. When there's no more
+shooting, use the target designator and point it at the APC in
+the middle of the 3 SAM launchers. That should take out all of
+them. Run for the next waypoint, shoot any bad guys you see. As
+you get close, you realize he HAS been captured... He's kneeling
+on the ground with hands behind his head, and there's a bad guy
+next to him! Shoot the bad guy without hitting the pilot. Once
+that's done, walk up to him, and he'll run for extraction. Follow
+him. When you reach the extraction point, you're done!
+
+
+8.10  JAILBREAK
+
+Briefing: A UN transport convoy was ambushed by rebels and
+captured, and taken to a local town jail. Liberate them. If you
+clear the armory, the UN soldiers will defend themselves.
+
+Situation: This is in Europe, supposedly. Green hills and such.
+
+Goals: Rescue all UN soldiers, escort all UN soldiers to
+extraction point
+
+NOTE: You can only lose this by getting yourself killed, or
+letting ALL of them die.
+
+Suggested outfit: Sniper rifle or M4 w/ shotgun, pistol with
+silencer for covert work
+
+Suggested tactics: sneak a bit, take out all the guards around
+the perimeter, clear out the armory (the building with a gun
+rack), then get into the prison, liberate the prisoners, and
+they'll do the rest.
+
+Walkthru: Follow the waypoints and take out the 2 patrols in
+front. Then continue following the waypoints until you see the
+"river". Go prone and start pick off the guards one by one in and
+around the town. Then clear the "town" itself. Clear the two
+wooden buildings first, one of which is the armory. There are
+grenades on the ground if you had used some already. Next, clear
+the entrance of the prison. There are two ways to do this: attack
+through the front with grenades and full automatic fire, or climb
+up the ladder and shoot the tangos from overhead. Go in slowly
+and kill anyone who's armed. Check each and every room. That
+should liberate all the prisoners. Run outside and watch them go
+into the armory to grab weapons. They'll then rush to the exit
+and toward extraction. If you liberated all of them, they should
+take care of any one standing in their way, though it never hurts
+to help them out. Keep running until you reach a flat area and
+two Blackhawks arrive to pick you all up.
+
+
+8.11  SUDDEN IMPACT
+
+Briefing: We're going to attack the enemy camp, expect heavy
+resistance. The 3 vehicle convoy must be escorted to the camp so
+the attack can take place.
+
+Situation: Green woodland area, expect lots of resistance.
+
+Goals: Convoy must reach enemy base, eliminate all enemies from
+enemy camp
+
+Suggested outfit: M4 w/ grenade launcher or M40 sniper rifle,
+bring at least 2 LAWs
+
+Suggested tactics: shooting all the way
+
+Walkthru: Look forward and take out one patrol next to the tree.
+Run forward and look left down toward the road, and kill tangos.
+Look slight left through the tree and shoot more tangos. Go
+forward but be ready to hide as there are more shooters ahead.
+Take them all out. Run forward and hide next to the trees. A
+pickup truck with 2 tangos should approach, take out the tangos,
+and the truck will crash. Or destroy the truck with grenades.
+Continue as the road makes right turn. You should hear warning
+about the enemy helicopter coming in. Arm LAW and get ready. Hide
+at the bottom of the hill, then as it passes, climb the hill and
+give it a parting present. Alternatively, you can wait until it
+turns back to strafe the convoy. It'll be like moving directly
+toward you, so feed it a LAW, and it goes boom. (If you miss with
+both shots, restart the mission as you are f***ed, but you can
+try the M4's grenades if you really want to). Help clean out the
+base. Quite a few friendlies from the convoy will rush the base.
+Help them clean out the buildings and the surrounding area. When
+you have taken out all the hostiles, mission will end.
+
+
+8.12  MOTORCADE
+
+Briefing: A US Senator on a country-side tour was hijacked. His
+limo is being escorted by hostile armored cars to an enemy camp.
+We are inserting your team just outside to enemy camp to
+intercept the convoy. Rescue the senator by escorting the limo to
+the extraction point!
+
+Situation: Green / brown land, hilly terrain, enemy patrols are
+all over the place, as well as enemies inside the camp and with
+the convoy
+
+Goals: destroy the 4 armored cars escorting the limo, escort limo
+to extraction point
+
+NOTE: no time for fire support. You hit with all 4 LAWs, or
+you'll have a hard time.
+
+Suggested outfit: 4 LAWs, and a sniper rifle
+
+Suggested tactics: you need good timing and fast but accurate
+shots
+
+Walkthru: Start by crossing the bridge, and head up the hill.
+You'll see two tangos just below you to the left. Take them out,
+but don't expose yourself to fire from the camp itself. Turn
+right and look up the hill, then more to the right, and up. Two
+tangos up there too. Take them out. Then run up the closer hill
+on its right side, and switch to LAW. Run just far enough to see
+the convoy coming in. HIT the first BRDM. You'll need to lead it
+SLIGHTLY. Wait for the second one to stop. Then kill the other
+three. Switch back to sniper rifle and shoot all the tangos you
+can see following the convoy, and some more in the camp itself.
+The limo should be making its escape, but alpha and charlie will
+escort it. Do NOT follow the limo! Shoot a couple guys at the
+camp, then run back to the bridge ASAP. You'll see like 6
+soldiers lined up on the bridge shooting down at the riverbed
+where the limo is. Clear the bridge ASAP or they'll destroy the
+limo and kill your fellow soldiers! Once the bridge is clear, run
+down next to the limo, and Black Widow will come in and rescue
+you all.
+
+
+8.13  TAPS
+
+Briefing: Rebels have seized a government supply depot. Destroy
+the comm center to prevent them from calling for help, then kill
+all rebels in the area.
+
+Situation: One comm center, guarded, one supply base, guarded,
+possible enemy helicopter on patrol.
+
+Goals: Kill all rebels
+
+Suggested outfit: sniper rifle, and 2 LAWs, plus others.
+
+Suggested tactics: Take out the comm center first, or else you'll
+get choppers on your rear end. Then just kill everybody.
+
+Walkthru: Follow waypoint until you spot the comm center. It has
+2 big antennas on the roof. Get close enough, and put a LAW into
+each antenna. Now you can kill all enemies without helicopters to
+bother you. (Else, expect to see up to 4 choppers) Kill all
+guards you see, then kill all the guards around the base, AND the
+patrols. Circle the base to make sure no one else is alive...
+Then go into the base and kill all others.
+
+
+8.14  HIGHER BIDDER
+
+Briefing: Assault the renegade Russian general's base with his
+elite guard, who are now mercenaries.
+
+Situation: Winter attack, lots of towers surround the base. Take
+out the towers and patrols then take out as many defenders in the
+base as possible, before heading in.
+
+Goals: Kill all hostiles in Objective Icebox (the base)
+
+NOTE: This one is extremely tough, death comes in every
+direction. Second toughest quick mission.
+
+Suggested outfit: Barrett 50 cal sniper rifle, at least one LAW,
+preferably three.  Delayed grenades are better.
+
+Suggested tactics: Slowly take out the towers one at a time,
+watch for patrols, then take care of the armored car if it has
+left the base, else take out the guards in the base as many as
+you can. Get down to base. There are snipers in the base itself.
+Move carefully and take out all the guards. Then assault the main
+building and take out any remaining resistance.
+
+Walkthru: Set range compensator to 300 m. Then go to hill on your
+left (one plant there) and look for a tower to your right... Kill
+the tower guy. Look for a 2-man patrol coming from the tower,
+kill them. Look at commander's map and slowly pick off each and
+every tower that is visible as you creep around the hill. When
+those are all gone, move up the hill of the first tower, and see
+another tower, so shoot the tango on it. Move up to the tent...
+Shoot through the tent and you'll blow up the furnaces... Killing
+the 2 guards inside (don't get too close!) though a grenade would
+work as well. Look beyond the tent and kill the rest of the
+towers, and try not to miss any. Use commander's map for
+reference. Now look down and you'll see the base. I recommend you
+go north up to the next tower and snipe from there. You get the
+angle into the "garage" and can take out the BRDM from here if
+you angle it just right. Snipe away at the tangos. Then return to
+original spot and snipe from there as well. Try to shoot the
+tangos up on the two raised structures, though if you're lazy you
+can just put a LAW into each one. When ready, get to the
+entrance, and peek inside. Shoot more tangos. If you're facing
+the entrance, first clear everybody that's visible. Then go right
+from entrance and clear barracks. Then clear the garage. Some may
+hide just behind door while others hide behind explosive barrels.
+Explode the barrels, and go in the "backdoor". Then clear the
+garage. When you've cleared all the visible guards, 2 Spetnaz
+commandos land via parachute into the camp and take up defensive
+stations. Finally, clear the HQ, and you're done! Easier said
+than done, of course. Use one grenade every room in the HQ, and
+use your pistol, not your rifle for CQB. Don't use the "front'
+door facing the entrance, but rather, go around the "back" door
+from the garage, follow the wall. Use delayed grenades so if you
+made a mistake you get a chance to run away. Keep moving slowly
+room to room, toss a grenade around every corner that may have
+enemies and eventually you'll get to the general... Kill him and
+it's over.
+
+
+8.15  BOOT CAMP
+
+Briefing: We have located a terrorist training camp. Kill all
+hostiles.
+
+Situation: You're in something close to Afghanistan... Snow on
+the mountains, with brown hills. Almost no cover. Hostiles are
+divided into at least three "teams" each lead by a mercenary
+officer (who wears grey / black) while the trainees wear white.
+The camp itself may contain additional tangos. Take out the
+leaders first, then the trainees, then assault the camp.
+
+Goals: Kill all hostiles
+
+Suggested outfit: M40 sniper rifle, with LOTS and LOTS of ammo.
+
+Suggested tactics: stay covert as much as possible. You really
+want to take out the leaders before you take out any one else.
+
+Walkthru: Follow waypoints, and you'll see one group near you.
+Survey it, don't let them see you, and take out the leader in the
+first shot. Then slowly pick off the rest. One group down. Zoom
+out to see the second group, repeat the process. Remember to stay
+in cover! Head up to the camp and you may spot the third group to
+northwest, repeat. Then clean out the camp by sniping everybody
+that's visible, then head northeast so you can "circle" the camp,
+shooting at more tangos. Then move in slowly and clear each and
+every building.
+
+Don't be surprised when Alpha and Charlie teams got wiped out.
+They simply rush the camp and were overwhelmed by superior
+firepower. Just keep doing your bit and you can still salvage the
+mission if you finish the objective.
+
+
+8.16  SWAMP RAT
+
+Briefing: Terrorists have seized a small airport. Go inside and
+free the hostages, and make sure they survive. You fail if ANY of
+the hostages died.
+
+Situation: Swampy land, some easily visible "pungi stake traps"
+in the marshy part.
+
+Goals: Kill hostiles at airport, escort hostages to extraction,
+ALL hostages must survive
+
+Suggested outfit: MP5-SD3 and silenced pistol
+
+Suggested tactics: perform the first portions like a stealth
+mission. You can vastly increase your kill numbers if you have a
+bit of patience.
+
+Walkthru: Jog to first waypoint, then crouch and move forward at
+a WALKING pace. Zoom out and watch the map closely. Rotate left
+and right 90 degrees to scan for targets. The heavy fog means you
+can see things out of corner of your eye, but not in front
+(weird, heh?) and the scope is almost useless, so don't even
+bring a scoped weapon. Keep walking in and you'll see that there
+is a perimeter of guards in an arc. Get close to one guy, and
+take him out using the MP5 in semi-auto to save ammo. If you
+really want to, take out the ENTIRE perimeter. Then follow the
+waypoint (avoiding those traps) and head onto dry land. Take out
+guards as you see them, and clear each building using the minimum
+of shots needed. No hostages here. Continue toward next cluster
+of buildings, and you should see the planes, one's a charred mess
+while the other is fine. Take out guards silently, then continue
+to the hangar, and kill guards inside. Look up to airport control
+tower (the one with the stairs on the side) and kill guards up
+there. Sneak up if you have to. Then kill the guard down at the
+barrack buildings (the 2 that look like half of an oil drum). The
+four hostages are in one of them. Make sure the camp is clear
+though. When ready, move in and "touch" all four hostages, who'll
+then run for the extraction point. Alpha and Charlie will rush in
+and help you out by engaging more hostiles. Follow the hostages
+to the extraction point and you're done.
+
+
+8.17  AUDIT TRAIL
+
+Briefing: US is moving against one of the Colombian drug lords,
+and first thing we need is his documents detailing his
+"production". Get into the camp, get the ledger, and get out.
+
+Situation: This is a night jungle mission, lots of bad guys, esp.
+between you and the exit.
+
+Goals: obtain the ledger, reach extraction
+
+Suggested outfit: M40 sniper rifle
+
+Suggested tactics: sniper mission, meaning long distance
+takedowns as much as possible.
+
+Walkthru: You start in the grass. Move forward slight, hide next
+to a tree, and observe the area ahead: a couple shacks and such.
+Lots of guards though. When you're ready, start picking them off
+one at a time. There should be close to 10. Do a bit of lateral
+displacement after every 3-4 shots. Spot more targets with
+binoculars, then shoot some more. When it seems to be clear,
+sneak toward the buildings, one tree at a time. Head to the LEFT
+of the buildings (enemies to your right) and take out the few
+enemies you weren't able to see before. When you're ready, head
+for the main compound. There's this one mini-fort, and a couple
+buildings to its side. Again, take out the tangos from as far as
+possible. Use binoculars to scan for targets and eliminate them.
+Get into the main building by eliminating the guards (quite a few
+at the entrance, more inside). Probably best to go prone and use
+the silenced pistol one shot at a time. Look in and see one
+guard's foot higher up the stairs, so shoot him there. There are
+two staircases up. Go up the one to the RIGHT, go up slowly, and
+take out one guard on top. Go into last room, kill 2 guards, and
+the ledger is on the desk. Get it, and come back down. Eliminate
+the rest of the guards if you want. Else, sneak out and head
+toward extraction. However, there are problems... At least 10,
+likely more tangos are in your way. At least 5 are near the
+bridge, and more beyond. Again, go prone, use binoculars to spot
+enemies, and take them out from a distance. Keep shooting tangos
+until you can make it to the extraction point.
+
+
+8.18  HELPING HAND
+
+Briefing: Enemy intelligence officer wishes to defect, but the
+news leaked, and he was being chased. You will eliminate the
+roadblock, then deal with any pursuing forces, to ensure the
+safety of the defector's HUMVEE.
+
+Situation: African hills, no vegetation, LOTS and LOTS of
+enemies, possible enemy air support
+
+Goals: Eliminate hostiles from roadblock, make sure the friendly
+HUMVEE survives.
+
+NOTE: Probably the TOUGHEST quick mission, this one will have you
+retrying many times.
+
+Suggested outfit: M-4 w/ grenade launcher, max number of LAWs
+available. If you are VERY sure of your shots, then bring a
+kevlar vest, as you'll get hit A LOT
+
+Suggested tactics: speed is of the essence, forget stealth.
+
+Walkthru: Advance and slide right a bit until you can see the
+roadblock (a BRDM, trucks, a HUMVEE, and many tangos) Quickly
+shoot all visible tangos at roadblock, clear it ASAP. Many tangos
+will charge you, shoot them all. Charge up the hill to your
+slight right, go around it, and shoot any tango beyond it (2 or
+more), and you should see the BRDM (from behind!) Destroy the
+BRDM with 3 shots from the grenade launcher, and kill any
+remaining tangos.  (NOTE: You MUST clear the entire roadblock or
+the defector's HUMVEE will NOT survive!) Wait for the HUMVEE to
+come through the pass, but climb on top of the hill and shoot
+tangos approaching. An enemy chopper (Gazelle?) will be here any
+moment. Feed it a LAW ASAP. Start backing up and pop some
+grenades over the hill. Run after the HUMVEE, toss a few more,
+then keep running. Every couple seconds, turn back and engage
+with grenades or grenade launcher. The explosions will slow them
+down. When you're almost caught up with the HUMVEE, you should
+get a radio call that a SECOND chopper (looks like Mi-24 Hind) is
+heading in from the East. Arm LAW (you should have 2-3 left).
+Look for east, find, activate scope, and shoot the incoming
+chopper. If you got the second chopper, then zig-zag up the hill
+and then the other team will help you kill the rest of the
+incoming hostiles. Else just keep running to the extraction
+point, as the HUMVEE should already be there, and Black Widow
+should be arriving any time.
+
+
+
+9    Campaign 1 Walkthru: Operation Common Resolve
+
+Twenty-four hours ago, we lost contact with one of the most top
+secret bio labs in Antarctica. Satellite shows heavy damage to
+area. Someone may be after the germs...
+
+
+9.1   COLD STORAGE
+
+Briefing: Unknown hostiles have taken over the research facility.
+Terminate all hostiles. Preserve as many civilians as you can,
+but do not let that interfere with your mission.
+
+Situation: Snow, snow, and more snow. Some buildings, some
+snipers...
+
+Goals: Eliminate all hostiles from the facility
+
+NOTE: Enemies inside and outside, beware of counterattack, fast-
+reacting hostiles
+
+Suggested outfit: M4 w/ GL, silenced SOCOM
+
+Suggested tactics: with a bit of help, you can play this half
+stealth, half Rambo.
+
+Walkthru: Sneak up to the edge of the base, between the two
+guards. One's looking left to your left, while the other is to
+your right patrolling. As the one to right turns his back, Use
+pistol on the guy to your left. Then put a grenade into the upper
+floor to take care of the sniper. The rest of the team will
+assault the other entrances, so you just enter via the side
+entrance (to left). Clear the two buildings to your left, at
+least one, possibly more tangos in there. Then slowly move in
+with pistol and clear the big building next to entrance (with the
+second story on top). Some civilians may get killed, but that's
+life. Move in slowly and clear one room at a time. Then head for
+the dome and clear that as well. Usually one guard on upper
+floor, and multiple guards in the main room. After that, 3 tangos
+will mount a counterattack, but it should be easily repelled by
+your teammates. And that should be all.
+
+Go to next mission: WHITE-OUT
+
+
+9.2   WHITE-OUT
+
+Briefing: We have located the hostile force's base and we will
+attack it at once to retrieve the virus they have stolen.
+
+Situation: More snow, lots of snow
+
+Goals: Eliminate all hostiles
+
+NOTE / SPOILER: two of the choppers will escape, you can't do
+anything about it. Even if you manage to bring lots of LAWs and
+you DID kill every chopper, you will go to the next mission.
+
+Suggested outfit: M4 w/ GL, etc.
+
+Suggested tactics: nothing really to it, just kill everyone you
+find in the base
+
+Walkthru: Engage the patrols, follow the waypoints, and engage
+enemy in the camp. At least two of the choppers will take off.
+Doesn't matter if you bring them down or not. Kill all hostiles,
+destroy all the tents and such you see. Eventually you'll get the
+order to evacuate, as there's nothing here. Just follow the other
+guys, who'll gun down the folks trying to ambush your way home.
+Run to the polynya (ice hole) where the sub conning tower is...
+And the mission should end.
+
+Go to next mission: AIR MAIL
+
+
+9.3   AIR MAIL
+
+Briefing: A terrorist group named Da'nil seems to be responsible
+for the attack and theft of the biocontaminant. They have been
+tracked to Uganda, to this small airport. Infiltrate the place
+and search each building and plane for the package.
+
+Situation: Sunny jungle of Africa... Lots of visibility, though
+tangos now wear green camo.
+
+Goals: search all buildings, search all planes, kill all hostiles
+
+NOTE: Watch for pungi stick traps at the bottom of some hills.
+
+Suggested outfit: sniper rifle, maybe extra ammo
+
+Suggested tactics: Sneak and snipe, sneak and snipe
+
+Walkthru: Move forward and follow waypoints until you spot the
+two LARGE watchtowers. Take out the guards on the towers from
+here, then find a spot and go prone to snipe everybody in the
+airport. Figure about 2 dozen tangos on the airport premise.
+Displace laterally to look for targets hiding behind buildings
+and such. When clear, check the 2 planes, but be careful as there
+may still be tangos hiding inside the buildings.
+
+Select from following choices: DEMOLITION 101, or BLIND SIDE
+
+
+9.4   DEMOLITION 101
+
+Briefing: Da'Nil's motor pool (vehicle yard) has been located.
+Get in there and destroy all trucks, boats, and the helicopter.
+
+Situation: Hilly African jungle terrain, some grass but not much,
+some cover available
+
+Goals: Destroy all vehicles, destroy all boats, destroy
+helicopter, escape to extraction point
+
+NOTE: Limited fire support available, use wisely!
+
+Suggested outfit: You MAY want extra laser designators, or even a
+few LAWs, along with your M4 w/ GL.
+
+Suggested tactics: Sneak and designate.
+
+Walkthru: Follow the waypoints, and either kill the patrols or
+sneak around them. You should come to the ridge overlooking the
+vehicle yard. Designate the helicopter first, then the boat, then
+the trucks. Snipe all the visible tangos. Move slightly to the
+right and take out the tangos on the boat on your side of the
+river. Jump on the boat and it will take you across.
+(Alternatively, you can swim across yourself) Remember to save
+one fire mission for the boat itself.  Destroy the rest of the
+trucks and/or BRDMs, if any had survive the previous barrages, or
+were hidden between buildings and thus unseen till now. Kill more
+tangos if you find them, then it's time to go.
+
+Go to either BLIND SIDE (if not completed) or HOLD UP
+
+
+9.5   BLIND SIDE
+
+Briefing: Take out the comm center in the area to stop their
+coordination.
+
+Situation: Night mission, hilly terrain, enemy has lots of
+patrols and such.
+
+Goals: Destroy 2 long range antennas, destroy 3 satellite dishes,
+get to extraction point
+
+NOTE:
+
+Suggested outfit: Bring 2+ LAWs, and sniper rifle or M4 w/ GL
+
+Suggested tactics: sneak as much as possible. No need to engage
+enemy troops except to cut down on enemy reactions.
+
+Walkthru: Easiest way is to follow the waypoint and take out the
+patrols until you can see the watchtower. Sneak up to it, and
+climb onto it, and kill the tangos on the top floor with the
+silenced pistol. Use the top floor as your launch platform. You
+can see the 3 satellite dishes and the 2 antennas on top of the
+hill. Shoot one LAW at the antenna to the RIGHT, and the
+explosion should take out both antennas. Duck back a bit and move
+around. Then put the other LAW into the middle satellite dish.
+Boom! Mission accomplished. Now, take out the sniper rifle and
+take out all the visible enemies. There are little sandbagged
+positions at each entrance, and shooters are in each one. More
+shooters running inside the camp, and hiding along the fences,
+plus one or two inside the buildings. Take them all out. Then
+move to extraction, where friendlies should have cleared a path
+for you.
+
+Go to DEMOLITIONS 101 (if not completed) or HOLD UP
+
+
+9.6   HOLD UP
+
+Briefing: We spotted a convoy that may be carrying the virus.
+Stop the convoy, take out all escorts, and check the trucks.
+
+Situation: Heavy fog in the area, use corner of your eye to spot
+targets, and react quickly to new targets. Use the minimap to
+warn yourself about enemies. Remember to sidestep.
+
+Goals: Stop the convoy, eliminate escorts, inspect each truck
+
+Suggested outfit: Bring at least 2 LAWs, and M4 w/ GL
+
+Suggested tactics: run really fast until you can see patrols,
+take care of them, then intercept the convoy, put a LAW into the
+leading BRDM, then another into the middle one, then shoot all
+the guards. Zoom out on the minimap and use that to orient your
+ambush.
+
+Walkthru: Not much to it, really. Either engage the 3-men patrol
+to your front or skirt them. Follow the waypoints quickly and
+engage any guards you spot. You'll soon come to the road where
+the convoy will pass. Put a LAW into the lead BRDM, then another
+into the one in the middle of the convoy (may want to wait until
+the convoy stops). Then engage the guards running up from behind.
+Kill all the guards, and walk up to each truck. Nothing found.
+Head for the extraction point, kill a couple more tangos, and
+that's it.
+
+Go to SPECIAL DELIVERY (if not completed) or POWER TRIP
+
+
+9.7   SPECIAL DELIVERY
+
+Briefing: Virus package has been split, and one of the pieces is
+at Objective Mamba. Secure the site so a CDC team can drop in and
+secure the package. Do NOT let ANY vehicles escape.
+
+Situation: Large base with lots of tangos, approaching vehicles
+that will leave later, so destroy them ASAP with LAWs.
+
+Goals: Secure perimeter and eliminate hostiles, do NOT let any
+vehicles escape
+
+NOTE: Do NOT pick up the virus briefcase! It'll have a bio-hazard
+sign on it, easily recognizable.
+
+Suggested outfit: Sniper Rifle, and at least 2 LAW rockets. Extra
+ammo may help.
+
+Suggested tactics: Sneak and snipe all the way, too many enemies
+
+Walkthru: Crouch, then move over the hill and take out the guard
+at the cabin, the go through and take out the next guard. Go up
+the tower and silence the guard on top. Then turn left into the
+valley and take out some more guards. Now you need to decide: get
+more kills, or get into position earlier. I suggest get into
+position earlier, since that little convoy may leave later, and
+you need to stop it, and it's easier to stop them when they are,
+well, stopped. Follow the waypoints until you're above the
+objective, on the ridge. There are quite a few shooters on the
+opposite ridge and they can be big problem if you don't find some
+cover. Put a LAW into the 2 stopped LandRovers (aim carefully so
+one shot will take out both jeeps), then keep the remaining LAW
+for other uses. Shoot everyone you can see, including those in
+buildings. Keep moving and circle the base, looking for more
+tangos to shoot. Head down to the large building where Objective
+Mamba is. Kill the guards inside, and under the table is the
+package you're looking for. Do NOT enter the building! Kill more
+tangos in surrounding buildings and wait for the choppers to
+arrive. At least three will land and CDC folks in isolation suits
+will go in a secure the package. Then just head toward extraction
+point and the mission's over.
+
+Go to POWER TRIP
+
+
+9.8   POWER TRIP
+
+Briefing: We spotted a Da'Nil lieutenant in a nearby base. Head
+in there, cut off his escape, and capture him.
+
+Situation: The base has quite a few defenders, and a chopper is
+scheduled to pick him up in a few minutes. Be quick about it!
+
+Goals: Capture the lieutenant, get lieutenant to the boat, the
+boat must make to extraction point
+
+Suggested outfit: Bring at least 2 LAWs, and sniper rifle or M4
+w/ GL
+
+Suggested tactics: this one is speed, and a bit of running around
+enemies
+
+Walkthru: This one is tough until you figure out the right
+approach. At the beginning, go crouch, then turn left slightly
+and go to the LEFT side of the hill. You'll see a hut in the
+distance. Turn to aim for its left corner, then a little further
+left of that. Run past the hut (enemies near the hut!) BELOW the
+main level. Yes, you can run when the ground's THAT steep. Then
+keep running at that altitude on the side of the hill until the
+hill start to run out. Then turn right and look for a bunch of
+palm trees. You should see two of them tight together forming a
+U. That's your objective. Go prone there, and start picking off
+each and every tango you can see in the camp. There are 4 on the
+boat, all the ones in those little sandbag positions near the
+pier, the ones running around, the ones near the tents, and so
+on. Shoot all of them. If a chopper comes in and is about to
+land, put a LAW into it and have it crash into the camp. Watch
+for enemy patrols coming up behind you. When you're pretty sure
+you cleared out the camp, head down into camp carefully. You need
+to take out one solider in the Lieutenant's tent (the middle
+one). Once that's done, head inside, and the Lieutenant will
+kneel on the ground with hands behind his head. Walk back to him
+and he'll run for the boat, so the camp better be clear! Head to
+the boat, jump on, and the boat will leave for the alternate
+pier. Kill all tangos on the pier as they come into view from the
+boat. Once you killed all of them, the mission ends.
+
+
+9.9   COUNTER PUNCH
+
+Briefing: Hostiles seem to have moved operations to ex Soviet
+Republic of Georgia. Destroy enemy base and kill all hostiles.
+
+Situation: Night mission, green hills
+
+Goals:  kill all hostiles
+
+Suggested outfit: M4 w/ Grenade Launcher, Extra Ammo, and 2 LAWs
+
+Suggested tactics: sneak and snipe, watch for prone enemies
+
+Walkthru: Crouch, and move forward, and take out the patrol next
+to the hut. Continue and you should see the base. Find a good
+position to go prone and start sniping. Charlie will say that "An
+APC is escaping" or something like that. Look for it, kill it if
+you can. Then start sniping soldiers inside the base. Watch for
+hostiles behind you (watch the minimap periodically) and move
+after every couple shots. Try to shoot some grenades into the
+tents and such. Much safer than heading down there yourself. When
+you got everybody, the mission ends.
+
+
+9.10  SLEIGHT OF HAND
+
+Briefing: Hostile convoy will be leaving the base. Attack it when
+it is at the designated location.
+
+Situation:  Day time attack, lots of hostiles on patrol and in
+base, enemy has armor support, and possibly air support as well.
+
+Goals: Attack the convoy when King Six says so.
+
+Suggested outfit:  Bring at 2 LAWs and sniper rifle
+
+Suggested tactics: Take out all patrols encountered, snipe at the
+base a little, then advance to shadow the convoy, but do NOT
+attack it, until you see Black Widow arriving at your location.
+Run for extraction, put a LAW into the convoy in the last second.
+
+Walkthru:  This one can be tough if actually followed the
+instructions. Go past the hill and engage patrols and guards with
+sniper rifle. Clear out that little outpost with one building a
+one truck (have up to 4 guards) Then continue down the path and
+engage those guards on hill, then on the road below, many of whom
+are prone and shooting. They may be engaging the other two teams,
+so help them out a bit. Feel free to eliminate any guards inside
+the base itself that you can see. However, do NOT attack the
+convoy. Follow the waypoints until you reach this depression next
+to the road, (watch for ambusher on the back hill, and guards
+that shoot down from the base!) Parallel the road and follow the
+convoy. Shoot guards along the route as you see them. You'll go
+all the way up to the extraction waypoint. Go there, climb onto
+the road, and turn around. Soon King Six will state that it's a
+trap, too many hostiles at the area. The convoy will go up to the
+checkpoint and stop. Double back and you can catch the enemy
+soldiers from behind. Take them out, put a LAW into the truck,
+then run for extraction, which should be next to you. Then end
+the mission quickly, because 2 choppers just appeared and they
+are gunning for you!
+
+
+9.11  WHISTLE STOP
+
+Briefing: Da'Nil has hijacked a munitions train from Turkey and
+plans to take it into Georgia. Stop the train at all costs.
+
+Situation: Get in Black Widow and be dropped off at the train.
+Secure the train, and take care of any chasers (possibly helos as
+well) and wait until the train stops at a friendly checkpoint.
+
+Goals: Kill all hostiles on the train, survive until the train
+stops
+
+Suggested outfit: M4 w/ GL, maybe some LAWs if you want to try to
+hit the choppers.
+
+Suggested tactics: Nothing, really.
+
+Walkthru: Jump into the chopper and crouch. After it takes off,
+go prone, and go as far out the door without falling out. When
+the chopper's over the train, slide out, and hopefully you land
+on one of the platform cars. Shoot the guard, then climb up the
+ladder and shoot the next car down, jump down, repeat. If you see
+trucks chasing you from the side... That's why you brought the
+grenade launcher. Keep going up, down, shoot more tangos, until
+you reach the 3 train cars that has a roof. You should have
+cleared the train by now. If not, go forward and shoot more
+tangos. Go prone and "hide" as close to the starboard edge
+(that's to the LEFT if you're facing front of the train). If you
+see some vehicles to the side, pop up and feed them a grenade,
+but if you see a chopper, HIDE! If you are extremely brave, go to
+a flat car and try to hit the chopper with a LAW, but it's
+completely optional. More pickups will chase you, each carrying 2
+gunmen, but they can't jump onboard. Either kill the gunmen or
+grenade the truck, it's your choice. Keep hiding and/or engaging
+until the train stops, and that's it!
+
+
+9.12  HOURGLASS
+
+Briefing: The remaining virus has been hidden in a bomb somewhere
+in this refinery. The refinery is full of volatile liquids and
+one wrong shot can ignite the whole place. Hostiles are expected
+to hide snipers and such to make sure we don't find the bomb
+until it's too late.
+
+Situation: Day time, snipers about, some civilians. Don't shoot
+any barrels as that can cause a chain reaction to blow up
+everything.
+
+Goals: Locate the bomb in the refinery, do NOT destroy the
+refinery or allow it to be destroyed.
+
+Suggested outfit: sniper rifle
+
+Suggested tactics: fast, but accurate, as time is short.
+
+Walkthru: This one can be messy. Crouch and move forward, stop
+when you see the raised road. You'll find multiple tangos on the
+road, and some civilians trying to escape, and the tangos are
+shooting at the civilians! Shoot the tangos patrolling, and on
+the other side of the road. Two trucks should approach from the
+left, but they'll get blown up. Move up there and stop just
+behind the two burnt out trucks, and use that as cover to take
+out the next few tangos on the road. Keep moving toward the
+refinery. Do NOT shoot into the refinery unless you are VERY sure
+of your target! One stray shot, one barrel explodes, and the
+whole plant goes POOF, along with the virus! Look on high
+platforms and kill tangos if you see them. Stop when you come to
+the houses just to right of the path. Your buddies should have
+arrived, stop a bit further back from them. In a little bit,
+Alpha should say the tangos are leaving. If so, don't shoot them.
+You don't want Charlie to blow up the refinery. Sometimes Charlie
+can hit a couple tangos, blow up one of the small buildings, but
+the refinery did not explode. At other times, it did. So it's
+partly by chance. Switch to silenced pistol or pistol, and stand
+up straight. It's time to do a search. The bomb is one of the
+barrels, and it's usually near one of those tall distillers.
+There's no need to climb any platforms or stairs or ladders.
+However, there are two or three snipers hiding in the base, so be
+careful when you move. One's prone on the ground if you go past
+the buildings and go left, another is hiding in the bed of a
+truck parked in the base.  Basically, run around every distiller
+and look on top of all the visible barrels. When you see one that
+looks like it has wires on top, that's the one. Walk up to it,
+and the mission should end.
+
+Congratulations: you have defeated the bio-terrorism threat!
+
+
+
+10   Campaign 2: Operation Global Enforcement
+
+We have reports that a new terrorist group is trying to obtain
+uranium... the old-fashioned way. Clearly, that is unacceptable.
+
+
+10.1  CLAIM JUMPER
+
+Briefing: New terrorist group United Freedom has taken over an
+uranium mine in Chad. Take it back without destroying it.
+
+Situation: day-time, hills to hide, lots of enemies
+
+Goals: Eliminate all hostiles
+
+Suggested outfit:  Bring at least one LAW, sniper rifle or M4 w/
+grenade launcher
+
+Suggested tactics: Sneak and snipe, as usual. Use the LAW on any
+armored cars you see.
+
+Walkthru: Follow the waypoints and take out any BRDMs and patrols
+that you see. Soon you'll spot the mine itself. Slowly peek for
+enemies and take them out one by one, esp. those down at the
+sandbagged positions. Circle the base to spot more tangos. When
+it's clear, head down into the base and clear the buildings one
+by one.
+
+Go to either CRITICAL MASS or SUPERNOVA
+
+
+10.2  CRITICAL MASS
+
+Briefing: UF has kidnapped some scientists when they pulled out.
+Find and rescue them.
+
+Situation: Day-time mission again, lots of hostiles, including
+armor
+
+Goals: Rescue the scientists (2-3 of them, random placement), all
+must survive evacuation
+
+Suggested outfit: M4 w/ grenade launcher, silenced pistol, at
+least 2 LAWs.
+
+Suggested tactics: sneaking is VERY important. Clear out all
+visible enemies and other buildings before attempting to rescue
+the scientists.
+
+Walkthru: Head up the hill a bit and engage the guards carefully,
+beware of other patrols coming at your back! Once front is clear,
+clear the sides, then take out the BRDMs at the front entrance.
+Clear inside, but go around each building first. Your buddies
+should run in and help you defend the place, but they will stay
+at the entrance. They will defend the base from any enemy
+reinforcements coming in from the east. Sneak around each
+building and shoot more tangos, then sneak around each building
+and go inside for more tangos. If you see the hostages, do NOT
+rescue them yet. Clear the rest of the buildings, use grenades if
+you have to, but try not to unless you've already found the
+hostages. Hostages are either in the far-left building, or the
+near-right building, if you're facing the entrance. When clear,
+go ahead and touch the hostages, and they'll run out of the camp.
+Run ahead of them and be ready to engage all hostiles, who'll be
+popping up in your path. Shoot them down before they can harm the
+ex-hostages. When you reach extraction point, and Black Widow
+arrives, that's it.
+
+
+10.3  SUPER NOVA
+
+Briefing: UF have taken over a refinery to process their Uranium
+ore. Take it back.
+
+Reality note: Uranium can only be processed by centrifuge, not an
+oil refinery!
+
+Situation: Day-time again, LOTS of enemy snipers, beware!
+
+Goals: Kill all hostiles
+
+Suggested outfit: sniper rifle for sure
+
+Suggested tactics: snipe VERY carefully, VERY deliberately.
+
+Walkthru: Approach SLOWLY and watch for snipers, as there are a
+LOT of them. Kill the first patrol, then get up to a vantage
+point where you can see the whole refinery, go prone, find a good
+hide spot, and start picking off one tango at a time.  When you
+think you hit all that's visible, do a lateral displacement and
+look into the plant from a different angle, and slowly spiral in,
+looking for more tangos. Finally, get inside the refinery itself
+and clear it. Watch for tangos at upper level. Probably go in
+prone and use pistol only.
+
+
+10.4  FALLOUT
+
+Briefing: UF have taken over an airport to take out their haul.
+Do NOT let that happen. Kill all hostiles on the map.
+
+Situation: Day-time again, LOTS of enemy snipers, beware!
+
+Goals: Kill all hostiles
+
+Suggested outfit: sniper rifle for sure
+
+Suggested tactics: snipe VERY carefully, VERY deliberately.
+
+Walkthru: Nothing really to this mission. Walk up to the
+waypoints and take out any patrols (using silenced pistol if
+possible) so you can get into position with a good vantage point,
+prone. Then start picking off each and every tango that's
+visible. Wait for a little while, wait some more, and start doing
+lateral displacements until you've pretty much circled the base,
+and spiral in. Check every hangar for more tangos, and every
+building. When it's all clear, go head out to the extract, and
+kill some more tangos in your way.
+
+
+10.5  BROKEN ARROW
+
+Briefing: A shipment of uranium is on its way to a terrorist
+camp. Stop the convoy, eliminate all hostiles.
+
+Situation: Day-time again, convoy has armored cars as escorts
+
+Goals: Kill all hostiles
+
+Suggested outfit: At least 3 LAWs, sniper rifle or M4 with GL
+
+Suggested tactics: Kill patrols, then head forward and nail the
+first BRDM, then nail the subsequent BRDMs and the soldiers on
+foot, and that's it!
+
+Walkthru: Head over the hill and take out one patrol (2 men),
+then look left and right for 2 more patrol groups. Finally, head
+over the hill (follow your waypoints) for one more set of patrol,
+and you should be near the convoy. Put a LAW into the lead BRDM,
+then one more LAW into the other BRDMs. Then find a good spot and
+snipe off the soldiers, move to other side of convoy and do the
+same, and that's it!
+
+
+10.6  VOODOO
+
+Briefing: UF have taken over an decommissioned Soviet base. Take
+down the base (kill everybody), and wipe out the soldiers in the
+barracks below the comm center.
+
+Situation: Night mission, visibility is minimal.
+
+Goals: Kill all hostiles at comm center, kill all hostiles at
+barracks
+
+Suggested outfit: sniper rifle with extra ammo, or M4/ w/ GL
+launcher and extra ammo
+
+Suggested tactics: snipe VERY carefully, VERY deliberately.
+
+Walkthru: Take out the patrol near you using your silenced
+pistol, then get across the bridge and sneak up on the comm
+center. Take out as many guards as you can from outside, as well
+as the guards on the towers, and any one shooting at you from the
+barracks area. Also take out the guards next to the chopper, and
+grenade the chopper, and maybe the SAM site as well, but that's
+optional. Slowly move into the comm center and clear it one room
+at a time, silenced pistol preferred. When that's done, search
+the perimeter again if OBJ has not been met. Then head down to
+the barracks and repeat. You may want to put a grenade into each
+window first. Watch for hostiles hiding NEAR but not in the
+barracks. When you clear out both, you win!
+
+
+10.7  SUPPLY LINE
+
+Briefing: We have located the main UF fuel and munitions depot,
+kill all hostiles inside.
+
+Situation: Day-time, surprise helicopter!
+
+Goals: Kill all hostiles
+
+Suggested outfit: M4 w/ GL, or sniper rifle, at least 2 LAWs
+
+Suggested tactics: snipe, snipe, snipe.
+
+Walkthru: Head forward and take out the patrols. When you hear
+that chopper's coming in, arm LAW and hide behind a hill, then
+nail the chopper when it flies by. Then it's just a matter of
+patience as you take out tango after tango from afar.
+
+
+10.8  PINPOINT
+
+Briefing: UF senior officer has been spotted in the area carrying
+a laptop. We must capture it and decode the intelligence stored
+inside. Charlie will create a diversion, while Bravo run in and
+steal the laptop.
+
+Situation: Night mission, be careful!
+
+Goals: Get the laptop, escape to extraction point
+
+Suggested outfit: Keep the SAW, add maybe 2 LAWs
+
+Suggested tactics: wait until Charlie start the diversion, then
+run inside the base and nail as many hostiles as you can, grab
+the laptop, and run.
+
+Walkthru: Head up waypoint, take out a few snipers and patrols,
+and wait on this side of the ridge until Charlie starts their
+attack. Most enemies should run toward Charlie's attack. Run down
+hill and start zig-zaging and shooting at the defenders. Run
+sideways and walk your shots across the target. The laptop is on
+the far side of the base. There are like 5 barrack buildings, in
+groups of 3, and 2. Take out the guards, take the laptop (just
+run into it), and run for extraction point. Shoot some more
+tangos in your way (just hose them with your SAW), arrive at
+extraction point, and this mission should be over.
+
+
+10.9  KNOCKOUT
+
+Briefing: UF SAMs have been bothering our pilots. Take out the
+SAM launchers, and then stop long enough to capture the UF
+general, also on the base.
+
+Situation: Day-time again, LOTS of enemy snipers, and even a
+chopper! Beware!
+
+Goals: Destroy SAM radar trailers, destroy chopper, capture
+general
+
+Suggested outfit: sniper rifle for sure, at least 2 LAWs,
+probably more
+
+Suggested tactics: snipe VERY carefully, VERY deliberately.
+
+Walkthru: Go a bit to the right and ignore the waypoints for now.
+Head up to the hill. There should be a BRDM to your left with at
+least 2 tangos. Nail it if you wish, else run past it. Go up the
+hill and hide behind some trees to engage the hostiles. Look out
+toward enemy SAM launchers, and kill any guards that are in your
+way. Enemy chopper will come around the hill, so arm LAW, and
+when it flies over your head, destroy it! Remember to take out
+BOTH radar trailers with either artillery or LAW. When that's
+done, Charlie team will parachute in.  Follow them into the
+compound, shoot the tangos in towers and on hills. Shoot more
+tangos, then move into the building where the General is hiding.
+Clear it of guards, and the general is hiding on 2nd floor in the
+corner. He walks slowly, but with a little patience, you'll see
+him get onto the chopper. Follow the chopper to the 2nd LZ, and
+that's the end.
+
+
+10.10      STEEL COFFIN
+
+Briefing: UF armor were spotted. Destroy all UF armor by calling
+in fire support.
+
+Situation: Day-time again, LOTS of enemy snipers, no need to kill
+everybody!
+
+Goals: Destroy all armored vehicles, including tanks and BRDMs.
+
+Suggested outfit: sniper rifle, 2 LAWs as "backup", and 2 satchel
+charges as further backup
+
+Suggested tactics: First take out the tanks visible from the edge
+of the base, then get to the southern entrance and take out the
+rest.
+
+Walkthru: Go a bit to the RIGHT of the waypoint and head up the
+hill, but do NOT go over. Snipers are deadly here and if you
+follow the waypoints blindly you'll get killed. Find a spot to
+designate the tanks and BRDMs parked outside. Should only need
+like 2 hits to take out all four vehicles outside. Go around the
+hill so you can sneak up on the base's southern flank (take out
+the guards on the towers first). Go prone at the southern
+perimeter and look into the hangars, and you'll see BRDMs and a
+tank. Call in some artillery on them. If you're out of artillery,
+shoot a LAW yourself. Use laser designator on tanks first since
+
+BRDMs only takes one LAW hit to destroy. If you still have
+targets left over, you'll have to sneak in and use satchel
+charges on the remaining vehicles.
+
+
+10.11      BROKEN WING
+
+Briefing: UF have accumulated some MiG fighters. Destroy them
+before they get off the ground.
+
+Situation: Day-time again, LOTS of enemy snipers, beware!
+
+Goals: Kill all hostiles in the airbase, demolish the 2 MiGs,
+escape to extraction point
+
+Suggested outfit: sniper rifle for sure
+
+Suggested tactics: snipe VERY carefully, VERY deliberately.
+
+Walkthru: As you move toward your first waypoint, a Russian HIND
+chopper will patrol the canyon. Just hide and wait until it flies
+past the base. Once it past the base, it won't come back! (Or you
+can shoot it with a LAW as it go by, up to you)  Continue to
+waypoint, find a location to snipe the tangos inside the base.
+Circle the base and continue to eliminate tangos. When ready,
+sneak inside, eliminate more tangos, and put a satchel charge
+next to each MiG (one's in the open, the other is in a hangar).
+Run to extraction point and hit the detonator en route. Boom!
+
+
+10.12      MISSION CONTROL
+
+Briefing: UF have taken over a missile launch facility and we
+must rescue hostages from the facility to secure some
+intelligence.
+
+Situation: Night mission, stay as quiet as possible!
+
+Goals: Kill all hostiles, hostages must survive
+
+Suggested outfit: MP5-SD3, silenced pistol, armor or ghillie suit
+
+Suggested tactics: be VERY, VERY quiet, we're hunting tangos
+
+Walkthru: Go RIGHT 45 degrees and start running. You want to
+follow Charlie team, basically. You COULD go through your
+original waypoints by taking out the small outpost, but if you
+make ANY mistake you may compromise the mission. So it's better
+to follow Charlie. Any way, go past Charlie and when you're close
+to the camp, start going prone and head in with your MP5-SD3.
+When ready, shoot at everybody that you see. Move slowly and
+clear each and every structure, but do NOT use grenades. Watch
+for enemies hiding next to BRDMs, inside structures shooting out,
+and so on. Stay prone, move slowly. Your objective is the large
+structure's BACK DOOR (the door facing the valley wall). Before
+you get there, take out the two tangos in the house next door, as
+well as the tango next to the BRDM, and so on. Shoot at the fuel
+drums before you reach the back door, and all enemies will focus
+on it. There are three guards inside the main compound, one in
+the middle, one near the front door to left, and one on the left
+rear window. Stay prone, and head into the door. The middle guy
+will turn around and spot you. Kill him with a 3-round burst,
+then kill the main door guy with another burst, then turn left
+and shoot at the window to kill the third guy, and you've secured
+the hostages. If you don't kill all the guards, they will kill
+all the hostages, and your mission fails. If you succeed, you now
+need to take out the rest of the hostiles. The hostages won't
+move, so don't worry about them. Head out the main door, still
+prone, and look for more tangos. At least one is in that
+camouflage structure ahead. Turn around and look up the valley
+wall, and you should spot at least one or two guys. (Use binocs
+to see them.) Shoot them. Another two will probably shoot at you
+from the clump of trees to left. Take cover and shoot back! Once
+you've eliminated all the tangos the mission is a success.
+
+
+10.13      SCORCHED EARTH
+
+Briefing: United Freedom has control of the launch facility and
+the missile is almost finished. Take over the launch facility,
+kill all hostiles, then kill all hostiles at the missile gantry
+to make sure they cannot launch the missile manually.
+
+Situation: Day-time again, LOTS of enemy snipers, lots of enemy
+bunkers. Beware!
+
+Goals: Kill all hostiles at launch complex, kill all hostiles at
+gantry
+
+Suggested outfit: M4 with grenade launcher, as you need the
+firepower, 2 LAWs for BRDM busting, and extra ammo.
+
+Suggested tactics: snipe VERY carefully, VERY deliberately. Put a
+grenade into every bunker. Sneak up to the main building, clear
+it, then the tower, clear it. Find a place to snipe at the
+gantry, then head down and clean out the rest.
+
+Walkthru: Arm LAW, and climb to the surface of the road, and nail
+that BRDM ahead of you. Then hide back down and shoot all the
+guards near it. Run to the other side of the road, climb hill,
+and hide behind the tree. Snipe from the tree at the various
+guards that are visible. Take out the guards at the main complex
+door. Try to snipe at the guards (yes, there are TWO of them)
+inside the bunker just to left, and on the tower behind. There
+are some tangos at a lower level you can take out too, plus more
+at lower left to left. Come back down the hill and head right of
+the hill, which leads to a small valley, which takes you to the
+hill of the control complex. If any of alpha team survived,
+they'll go there. Climb up to launch complex. Arm assault rifle
+and be ready as a guard will run out the bunker to right, and
+another one may be just inside. Once you take out two guards,
+Scan right to the bunker, and put a grenade into the rear door.
+Boom! No more tango inside. Go in prone and clear out room by
+room (only one other tango inside, really), but watch for other
+tangos outside shooting in. As you have a broken window, use that
+to put a grenade into the other two bunkers. You should hear
+screams. Continue and shoot into that "barracks" next door,
+should be at few tangos inside, just shoot through the window and
+break the glass to reveal them. When cleared, it's time to clear
+the upstairs. Go prone and go up the outside stairs by going back
+out the door you came in, turn left (past the bunker you nuked),
+and stop at corner. Look up to control tower and nail a sniper if
+you haven't done so. Go around corner and look left to take out
+more tangos. Climb stair slowly, turn RIGHT at stairs, and go
+prone. Move right so you're in the middle of the window. Throw a
+grenade a bit to the left into the far-left corner of the room.
+Boom! Top guard's gone. Verify that. Now it's time to clear the
+control tower. Run down to ground level, then run up to the
+control tower. Go around the left side. Stop before the corner,
+then go prone, go around the building, and kill the guy at the
+door, then one more inside to right of stairs, and one more to
+the left through the door. No need to climb the stairs, as
+there's nobody else up there. Come back out, and look right, and
+there's one guy hiding just around the corner. Take him out, and
+the launch complex is clear. Look for a way down into the valley
+of the gantry, but usually you have to come WEST of the complex.
+You may even run into a BRDM, but that's why you saved that last
+LAW for it. Shoot more guards and patrols, and keep going. The
+gantry itself has quite a few tangos hiding on it, and nearby has
+even more. Go prone and pick them off one at a time. Then circle
+it for some more tangos you can't see before. Once you eliminate
+all tangos at the gantry the mission is over.
+
+Congratulations, you've protected the world from nuclear
+holocaust!
+
+
+
+11   Miscellaneous
+
+
+11.1  CHEAT CODES
+
+Press ~ (tilde) to bring down the console prompt, and enter any
+of these codes:
+
+thetrooper     God mode, can't die
+
+sunandsteel    Full ammo
+
+diewithyourbootson  Unlimited Ammo
+
+stilllife Invisibility
+
+superjump Jump very high
+
+revelation     gives 8 airstrike/laser rounds
+
+gamma x   (where x is a digit from 0-9) different grenade smoke
+colors
+
+resetgames     resets current game
+
+NOTE: yes, capitals DO matter. Must be re-entered every mission.
+
+
+11.2  EDITOR
+
+I can offer no help about the editor. Sorry!
+
+
+11.3  MULTIPLAYER
+
+As this game is ancient and cheating was never really resolved, I
+won't be covering multiplayer at all.
+
+
+11.4 OTHER QUICK MISSIONS
+
+There are other fan-made quick missions, some of which are
+EXTREMELY hard... but fun! See the next section for website,
+where you can find the downloads.
+
+
+11.5 RELATED WEBSITES AND FANSITES
+
+http://www.dfbarracks.com
+
+http://www.dfarena.com
+
+--THE END--

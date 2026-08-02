@@ -82,12 +82,21 @@ Everything below `src/df2/` is the Phase-1 spike. The target layout is `05` §7
 | `Heightfield.ts` | CPU elevation field: `sample()`, `normal()` | **Three.js** — keep it import-free of the renderer |
 | `terrainGeometry.ts` | one chunk's `BufferGeometry` (grid + skirt) | chunk placement, LOD policy |
 | `TerrainMaterial.ts` | TSL colormap / biome material | geometry |
-| `GrassMaterial.ts` | TSL columnar grass (march + depth) | geometry, chunk layout |
+| `GrassMaterial.ts` | TSL columnar grass (march + depth) | geometry, chunk layout; **no longer owns the canopy samplers** — they moved to `grassField.ts` |
+| `grassField.ts` | THE canopy field as TSL samplers: `columnTop`, `groundAt` (with its half-texel correction), `meshMipAt`, `canopyBase`/`canopyNorm`, `strandHash` | which layer is drawing |
+| `BladeMaterial.ts` | near-field instanced blades: vertex-stage placement, wind, player parting, sun modulation | coverage — it OVERLAYS the march and must never replace it; gameplay queries |
+| `bladeGeometry.ts` | one tapered blade primitive; `bladeVertexData` is Three-free and unit-tested | instancing, placement, materials |
+| `colorGrade.ts` | the `.trn` grade — `filter`/`gamma`/`saturation` — as one term applied by terrain, march and blades | fog, which must come after it |
+| `fog.ts` | distance fog, the height slab, and the smoke volumes, as one shared term | **smoke will have to leave**: it is about to become an authoritative, networked, concealment-readable system and cannot live in a file that imports `three/webgpu` |
+| `weather.ts` | presets: sky, grade, fog, precipitation, measured from the skyboxes | rendering |
+| `noiseTexture.ts` | one baked tiling 3D noise, four octaves in four channels | its consumers |
+| `Precipitation.ts` | camera-local instanced rain/snow, ported from three-geospatial | the scene; it is placed by a rig |
+| `components/WeatherDebug.tsx` | live weather, fog, rain and blade sliders; writes `uniform.value` directly | material internals |
 | `loadTerrain.ts` | fetch + decode prepared assets, grass provenance | rendering |
 | `Terrain.tsx` | infinite chunk window, LOD selection, geometry cache | what a chunk looks like |
 | `FlyControls.tsx` | camera rig, stance eye heights, pointer-lock look | scene contents; `src/fps` beyond an OPTIONAL injected sensitivity curve (type-only import, so the terrain spike still runs with no game layer present) |
 | `PerfMonitor.tsx` | frame time, draw calls, backend | UI |
-| `DF2Scene.tsx` | composition: lights, fog, water, wiring | UI layout |
+| `DF2Scene.tsx` | composition: lights, water, wiring, and construction of every shared field object (grade, fog, noise, precipitation) | UI layout |
 | `components/GameCanvas.tsx` | async WebGPU init, camera planes | the scene |
 | `components/Hud.tsx` | all UI | rendering internals |
 | `grassJitter.ts` | CPU bake of the per-column jitter/tone field | rendering |
@@ -98,7 +107,16 @@ Everything below `src/df2/` is the Phase-1 spike. The target layout is `05` §7
 | `fps/TestTargets.tsx` | human-scale contrast ladder, `?targets=1` | anything but the heightfield |
 
 `Heightfield.ts` being Three-free is a **rule, not a preference**. It is the seed of the
-gameplay field, which must be samplable on a server with no renderer present.
+gameplay field, which must be samplable on a server with no renderer present. The same
+rule is why `bladeGeometry.ts` splits its vertex data out of its `BufferGeometry`, and it
+is the reason smoke cannot stay in `fog.ts` once it answers gameplay queries.
+
+**One field, many consumers** is now the load-bearing pattern here, applied four times:
+`grassField.ts` (march + blades), `colorGrade.ts` (terrain + march + blades), `fog.ts`
+(terrain + march + sky) and `noiseTexture.ts` (fog + smoke + blade wind). Each exists
+because the alternative — two implementations agreeing by hand — has failed in this
+codebase every time it was tried. Anything that samples the colormap or the canopy joins
+the existing term; it does not add a second one.
 
 ---
 
@@ -332,6 +350,15 @@ Anything else reading `info` per frame needs the same treatment.
 | `HEIGHT_SMOOTH_PASSES` | 2 | reconstructs relief lost to 8-bit quantisation (`07` §9). **Coupled to `HEIGHT_SCALE`** — re-derive when that is calibrated; 0 restores the raw surface |
 | `GRASS_SCALE` | 0.0047 | derived from reference screenshots (`07` §2): tallest canopy ≈ 1.2 m |
 | `GRASS_CELL` | 0.03 | measured against the references; slider floor is now 0.002 |
+| `GRASS_BLADE_COUNT` | 250000 | **measured, not guessed.** `03` §4.4 proposed 4,000 on the assumption the layer was expensive; it is not, and the cost is sublinear (`09` §0.2) |
+| `GRASS_BLADE_RADIUS` | 12 | metres. **PLACEHOLDER-COUPLED** — a metre value, so it re-derives with `METERS_PER_TEXEL`. Paired with the count through the cell they imply: below `GRASS_CELL` blades share a column and stop adding variation |
+| `GRASS_BLADE_THIN_START` | 2.5 | metres; same coupling. Thinning ends at the field extent by construction, so there is deliberately no second constant |
+| `GRASS_BLADE_WIDTH` | `GRASS_CELL * 1.7` | **derived, not a metre literal** — the layer exists because a column is too wide to read, so a width tuned in metres would silently stop being "wider than a column" |
+| `GRASS_BLADE_LIFT` | 2.0 | brightness of the layer against the march. Read WITH `GRASS_BLADE_SHADE_BASE`: the ramp multiplies in, so a root sits at 1.1 and only the tip reaches 2.9. Neither number means anything alone |
+| `GRASS_BLADE_SHADE_BASE` | 0.55 | root brightness; tip gets `2 - this`. Contrast along one blade, which is NOT the same dial as the lift |
+| `GRASS_BLADE_SUN` | 0.25 | sun-facing modulation. Direction is `SUN_DIRECTION`, which is a **GUESS** — nobody has measured the azimuth baked into the colormap. Recoverable by correlating colormap luminance against heightmap slope |
+| `GRASS_BLADE_PUSH_STRENGTH` | 0.55 | **a fairness bound, not a look dial** — see `§8` invariant 6. Grass pushed away from the eye is grass the player can see through |
+| `GRASS_BLADE_NOISE_SCALE` | 0.1 | **UNIT CHANGED** with the shared noise texture: this is now WRAPS PER METRE, the reciprocal of the tiling distance, not lattice units per metre. The reference's 0.48 in the old unit shrinks a gust to half a metre |
 | `GRASS_TONE_VARIATION` | 1.5 | set by eye after the field gained real contrast (`07` §9) |
 | `GRASS_SHADE_BASE` | 0.78 | base-to-tip ramp, centred on 1.0. h/v ≈ 1.9 against the references' ~1.6 |
 | `GRASS_STRAND_MIX` | 0.35 | per-strand height from the ALU hash vs the texture. **The only visual dial with real frame cost** — height is evaluated per march sample, tone once at the hit |
@@ -410,6 +437,19 @@ can follow the surface the mesh drew. See §11's "three surfaces" trap.
 
 ---
 
+### 7.1 Weather, fog and smoke constants
+
+These live in `weather.ts` and `fog.ts` rather than `config.ts`, because a preset is data
+and there are thirteen of them. Two calibration notes carry:
+
+- **The fog slab's heights are ABSOLUTE world metres**, so every preset's `groundFogTop`
+  is scoped to Green Mile's 5–174 m range. A preset for another map wants its own, and
+  they all re-derive when `METERS_PER_TEXEL` and `HEIGHT_SCALE` are calibrated.
+- **Preset grades are measured, not authored.** A generator reads each skybox and derives
+  the grade from the sky's own luminance and chroma; the rules and their justifications
+  are in `weather.ts`'s own comment. The check that the method is right is that `clear`
+  comes out exactly neutral — it is the sky the colormap was baked under.
+
 ## 8. Invariants that break silently
 
 Nothing throws when these break. Check them after touching `config.ts`.
@@ -432,8 +472,21 @@ Nothing throws when these break. Check them after touching `config.ts`.
    queried analytically against the field (`04` §2), so a target prone in distant grass counts
    as concealed no matter what the screen draws. Any rendering limit that silently drops distant
    grass therefore hands the player who triggers it free vision of concealed targets — and the
-   cheapest way to trigger it is to go prone, which is also the strongest position. Three limits
-   have already done exactly this:
+   cheapest way to trigger it is to go prone, which is also the strongest position.
+
+   **THE INVARIANT RUNS BOTH WAYS, and the weather work added examples of each direction.**
+   Fog and smoke conceal MORE than the field claims, which is the safe side — they can only
+   cost a player vision they were entitled to, never grant it. Grass parting around the player
+   (`GRASS_BLADE_PUSH_STRENGTH`) is the unsafe side: it opens a hole the field does not know
+   about, which is why its strength is bounded at parting rather than clearing, and why
+   anything large enough to genuinely see through has to feed `grassHeightField` too.
+
+   Smoke is currently on neither side, which is its own problem: it conceals on screen and
+   nothing else knows it exists, so a player standing in a wall of it is fully visible to the
+   concealment query and to any AI. That is the same break inverted, and it is why smoke is
+   scoped as a rendering prototype rather than a mechanic.
+
+   Three limits have already done exactly this:
    - `sEnter = inside ? nearClip : fragDistance` with `hitS <= sEnter + span` and
      `span <= GRASS_MAX_SPAN` put a hard 49 m ceiling on every hit on screen the moment the eye
      entered the canopy. Fixed by computing the entry per fragment and searching a near interval
@@ -795,9 +848,11 @@ discoverable by reading `bench.ts`, and half of them exist specifically to make 
 visible that is otherwise invisible.
 
 **Gate.** Most are read only under `?bench=1`, which also pins the camera to a fixed vantage
-and publishes each frame to `window.__perf`. Four work without it, deliberately, because each
-answers a question you need a camera you can steer to ask: `?debug=`, `?canopyall=`,
-`?blades=`, and the blade tuning dials.
+and publishes each frame to `window.__perf`. A set of them work WITHOUT it, deliberately,
+because each answers a question you need a camera you can steer to ask: `?debug=`,
+`?canopyall=`, `?blades=` and every blade tuning dial. That set is built as one object in
+`bench.ts` and spread into both return branches — the policy lives in one place precisely so
+a new dial cannot end up silently bench-only.
 
 ### Measurement
 
@@ -825,6 +880,7 @@ milliseconds that mean nothing (`09` §0.2).
 | `?debug=1` | Live slider panel for the grass uniforms. Independent of `?bench=1` |
 | `?bladedebug=1` | Blade keep mask: draws EVERY instance, green where the existence test kept it, magenta where canopy or distance rejected it. The only way to see a pool being wasted, since a rejected blade collapses to zero area and vanishes |
 | `?bladedebug=2` | Blade distance: red at the eye through blue at the field edge |
+| `?smoke=` | Drop a smoke volume this many metres ahead of the eye on the first rendered frame. A thrown puff cannot be screenshotted twice the same way |
 | `?targets=1` | Human-scale figures as a contrast reference. Needs the untracked `testmodels/` |
 | `?shotdebug=1` | Shot trajectory overlay |
 | `?impacttest=1` | Impact effect test harness |
@@ -845,14 +901,31 @@ All four sweep by eye and none needs `?bench=1`. Settled defaults live in `confi
 
 | Parameter | Default | Effect |
 |---|---|---|
-| `?bladecount=` | 30000 | Instance pool. Rounded to a square lattice. ~0.04 ms per thousand |
-| `?bladeradius=` | 6 | Half-extent of the field, metres. **Raising it lowers density** at a fixed count, and density is what reads — 100k over 20 m looks thinner than 30k over 6 m |
+| `?bladecount=` | 250000 | Instance pool. Rounded to a square lattice. Cost is SUBLINEAR — 2.7 ms at this count, against 1.46 ms at 40,000 — because fragment work saturates once blades occlude one another (`09` §0.2) |
+| `?bladeradius=` | 12 | Half-extent of the field, metres. **Raising it lowers density** at a fixed count. Paired with the count through the cell they imply: below `GRASS_CELL` neighbouring blades share a column and stop adding variation |
 | `?bladeshade=` | 0.55 | Root brightness; the tip gets `2 - this`. Contrast along ONE blade |
 | `?bladelift=` | 2.0 | Brightness of the whole layer against the march behind it. The dial that decides whether blades read at standing height at all |
+| `?bladesun=` | 0.25 | How much a blade facing the sun outshines one edge-on to it. A modulation around 1, never illumination — the colormap is already lit |
+| `?bladepush=` | 0.55 | How far grass leans away from the player, as a fraction of blade height. A FAIRNESS bound, not a look dial: grass pushed aside is grass you can see through |
+| `?bladepushradius=` | 0.9 | Radius of that lean, metres |
 
 `?bladeshade=` and `?bladelift=` are not interchangeable and neither works alone. Widening the
 ramp darkens roots as much as it brightens tips, so the layer stays exactly as dark as the
 canopy behind it and reads as texture; the lift is what separates the two layers.
+
+### Weather, atmosphere and water
+
+| Parameter | Default | Effect |
+|---|---|---|
+| `?weather=` | `day` | Preset: `clear`, `classic`, `overcast`, `dusk`, `moody`, `dawn`, `apocalypse`, `sinister`, `techno`, `netherworld`, `night`, `space`. Sky, grade, fog and precipitation together |
+| `?fogtop=` | per preset | Top of the fog slab, ABSOLUTE world metres |
+| `?fogbase=` | per preset | Bottom of it. Below the terrain's minimum this is ordinary ground fog; raised above the valley floor the layer lifts into a BAND — clear below, clear above, blind at one altitude |
+| `?fogdensity=` | per preset | Extinction per metre inside the layer. Optical depth reaches 1 at `1/density` metres, so mild lives between 0.001 and 0.004 |
+| `?water=` | none | Force a water level in world metres. Every `.trn` in this pack ships `water_height` 0, below the terrain's own minimum, so the plane never draws and nothing downstream of it has ever run |
+
+A fog BAND is a pose as much as a setting — it only reads from a vantage where the layer
+cuts the terrain — which is why these three are reachable in the same URL that fixes the
+camera, and not only from the panel.
 
 ### Ballistics and input
 

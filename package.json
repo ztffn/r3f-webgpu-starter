@@ -15,7 +15,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "test": "node --experimental-strip-types --experimental-specifier-resolution=node --test tests/fps/*.test.ts",
+    "test": "node --experimental-strip-types --experimental-specifier-resolution=node --test tests/*/*.test.ts",
     "preview": "vite preview --host",
     "typecheck": "tsc --noEmit"
   },

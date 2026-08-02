@@ -10,28 +10,36 @@
 // (syntheticMaps.ts) so it can take this same path.
 
 import * as THREE from "three/webgpu";
-import { vec3, texture, uv } from "three/tsl";
+import { texture, uv } from "three/tsl";
+import type { Atmosphere } from "./atmosphere";
 
 export interface TerrainMaterialOptions {
   /** Colormap: extracted for a real map, CPU-baked for the synthetic fallback. */
   colorMap: THREE.Texture;
-  /** `filter` RGB from the .trn manifest (0-255 each, 128 = neutral). */
-  filter?: [number, number, number];
+  /**
+   * The shared grade and fog, composed (atmosphere.ts).
+   *
+   * The .trn `filter` used to be applied here alone, which was invisible only because
+   * every extracted map ships the neutral 128. The march and the blade layer sample the
+   * same colormap, so a graded map would have shown ground and grass in different
+   * colours the moment a preset made it non-neutral.
+   */
+  atmosphere: Atmosphere;
 }
 
 export function createTerrainMaterial(
   opts: TerrainMaterialOptions
 ): THREE.MeshBasicNodeMaterial {
-  const { colorMap, filter } = opts;
+  const { colorMap, atmosphere } = opts;
 
   const material = new THREE.MeshBasicNodeMaterial();
 
-  const sampled = texture(colorMap, uv());
-  // .trn `filter` is an RGB tint where 128 is neutral.
-  const neutral = !filter || (filter[0] === 128 && filter[1] === 128 && filter[2] === 128);
-  material.colorNode = neutral
-    ? sampled
-    : sampled.mul(vec3(filter[0] / 128, filter[1] / 128, filter[2] / 128));
+  material.colorNode = atmosphere.shade(texture(colorMap, uv()));
+  // three's AUTOMATIC fog is off, and not as an optimisation: three fogs from the
+  // rasterised fragment's depth while the march fogs from its ray hit, which sits
+  // somewhere else entirely. The two agreed only while both were plain linear distance;
+  // a height-dependent term made the disagreement visible along every skyline.
+  material.fog = false;
 
   // Double-sided so LOD-crack skirts fill gaps regardless of winding
   // (terrainGeometry.ts). Being unlit, a back face now shows terrain colour rather

@@ -28,7 +28,7 @@ player instinctively recognise this?* — applies to features, not to whether a 
 | `10-fps-combat-implementation-spec.md` | **As-built FPS ownership, frame order, controls, performance, and deferred work** |
 | `11-weapon-ballistics-and-modifier-system-spec.md` | **Trigger-to-impact contracts, formulas, budgets, and attachment/perk extension rules** |
 
-## Current state (July 2026)
+## Current state (August 2026)
 
 - **Stack:** Vite 8 + TypeScript (strict) + React 19 + R3F v9 + drei v10 + three 0.185
   `WebGPURenderer` with TSL shaders (auto WebGL2 fallback). Not CRA — that was removed.
@@ -41,11 +41,21 @@ player instinctively recognise this?* — applies to features, not to whether a 
   decodes PCX and bakes the canopy field; validated against real archives.
 - **Columnar grass, first pass:** per-fragment march writing its own depth. Still measurably
   flatter than the reference (`07-...md` §7).
+- **Near-field blade layer:** 250k instanced blades over the march, placed from the world cell
+  so the pattern is stationary; wind, player parting and a synthesised normal for sun.
+- **Weather and atmosphere:** 18 presets (13 measured from the retro skyboxes, 5 from a CC0
+  Kenney pack), one shared colour grade, distance fog + an absolute height SLAB that can lift
+  into a band, analytic smoke volumes, and camera-local rain/snow. Distance haze fades to the
+  **sky cubemap sampled along the view ray**, not to a constant — see `08-...md` §7.1.
+- **`atmosphere.ts` is the one call a scene material makes** — `shade(rgb, worldPos?)`, grade
+  then fog. Read `08-...md` §8 invariant 7 before adding any material, and note it only works
+  for UNLIT materials; lit props need the term after lighting and that variant does not exist.
 - **Test build:** free-fly / on-foot camera with stances, instrument HUD, `netlify.toml`.
   Deploy with `npx netlify deploy --prod --dir=dist` from a machine that has prepared assets —
   or via a Git-connected build — prepared assets are committed, so both render the real map.
 - **Open:** skirt artifact at eye height (`07-...md` §9), floating grass along ridgelines
-  (same §), and scale calibration.
+  (same §), and scale calibration — calibrate scale BEFORE placing any authored asset, or
+  every placement has to be redone.
 - **Next up (`01-...md` Phase 1.6):** human-test Green Mile, then runtime map switching.
   Note that **the real grass data path has never been run** — Green Mile's strip is missing so
   it renders a stand-in canopy, but egypt / R66 / blizzard / vul001 ship their own strips and

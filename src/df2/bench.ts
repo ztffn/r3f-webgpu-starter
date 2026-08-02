@@ -97,6 +97,16 @@ export interface BenchConfig {
   fogTop?: number;
   fogDensity?: number;
   /**
+   * Distance fog range in metres — `?fognear=10&fogfar=350`.
+   *
+   * Here because a short range is where the haze is stressed hardest: it drives the term
+   * to full on terrain that is still well BELOW eye level, which is the geometry that
+   * exposed the haze sampling the skybox's baked ground. That case was reachable only by
+   * dragging two panel sliders, so it could be shown but not reproduced.
+   */
+  fogNear?: number;
+  fogFar?: number;
+  /**
    * Drop a smoke volume this many metres ahead of the eye at load — `?smoke=15`.
    *
    * A thrown puff cannot be screenshotted twice the same way, and smoke is judged
@@ -193,6 +203,8 @@ function parse(): BenchConfig {
     fogBase: num("fogbase"),
     fogTop: num("fogtop"),
     fogDensity: num("fogdensity"),
+    fogNear: num("fognear"),
+    fogFar: num("fogfar"),
     smoke: num("smoke"),
     rain: num("rain"),
     snow: num("snow"),

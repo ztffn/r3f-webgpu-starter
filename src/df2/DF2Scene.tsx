@@ -22,6 +22,7 @@ import { createFog } from "./fog";
 import { bakeNoiseTexture } from "./noiseTexture";
 import { cubeTexture, normalWorldGeometry } from "three/tsl";
 import { WEATHER_PRESETS, readWeather, type WeatherPreset } from "./weather";
+import { createAtmosphere } from "./atmosphere";
 import { createPrecipitation } from "./Precipitation";
 import { buildBladeGeometry } from "./bladeGeometry";
 import { readBallisticEnvironment } from "../fps/combat/BallisticEnvironment";
@@ -99,6 +100,19 @@ const SUN_DISTANCE = 2000;
 /** Signal smoke is colour-coded; white is the screening kind. */
 const SMOKE_COLORS = ["#e8e8ea", "#7b3fa0", "#d8c53a", "#c23a2a", "#3aa04a"];
 
+/**
+ * The fog range actually in force — the preset's, unless a bench flag overrides it.
+ *
+ * ONE resolver, because three separate things read this range: the shared term, three's
+ * own declarative scene fog (which the water uses), and the water plane's own extent.
+ * `?fogfar=` applied at only the first of those pulled terrain in to 350 m while the
+ * water beside it stayed on the preset's 2200, so the two fogged on different curves —
+ * a second artifact layered on whatever was being investigated.
+ */
+function fogRangeOf(w: WeatherPreset): { near: number; far: number } {
+  return { near: BENCH.fogNear ?? w.fogNear, far: BENCH.fogFar ?? w.fogFar };
+}
+
 /** A preset's fog, in the shape `createFog` takes. */
 function fogSettings(
   w: WeatherPreset,
@@ -109,8 +123,7 @@ function fogSettings(
     noise,
     wind,
     color: w.fogColor,
-    near: w.fogNear,
-    far: w.fogFar,
+    ...fogRangeOf(w),
     groundTop: BENCH.fogTop ?? w.groundFogTop,
     // Below the terrain's own minimum, so every preset is ordinary ground fog until
     // something raises it. A band is a deliberate act, not a default.
@@ -372,7 +385,16 @@ export function DF2Scene({
   // author graded the colormap for.
   const grade = useMemo(() => createColorGrade(weatherRef.current), []);
   const fog = useMemo(() => createFog(fogSettings(weatherRef.current, noise, windVector)), [noise]);
+  // THE ONE THING A SCENE MATERIAL ASKS FOR. Grade and fog are still separate modules and
+  // still separately dialled; this is the composition, so no material can get the order
+  // wrong and none can quietly go without.
+  const atmosphere = useMemo(() => createAtmosphere(grade, fog), [grade, fog]);
 
+  // `weather` IS A DEPENDENCY, and leaving it out is what made preset buttons look dead.
+  // The grade and the fog are written imperatively into live uniforms, so an effect that
+  // never re-runs leaves both frozen at whatever the URL loaded with — the sky still
+  // swapped, because that effect lists `weather`, so a preset appeared to half-work:
+  // new sky, same graded ground, same fog range.
   useEffect(() => {
     grade.set(
       world?.filter && weather.id === "day"
@@ -380,7 +402,7 @@ export function DF2Scene({
         : weather
     );
     fog.set(fogSettings(weather, noise, windVector));
-  }, [fog, grade, world]);
+  }, [fog, grade, noise, weather, windVector, world]);
 
   /**
    * The preset's sky, as a cubemap.
@@ -435,6 +457,9 @@ export function DF2Scene({
   // horizon it crosses an unbounded amount of it.
   const scene = useThree((s) => s.scene);
   useEffect(() => {
+    // The SAME cubemap the fog fades toward, so terrain and sky meet with no seam. Set
+    // before the background, since applySky reads the haze the fog is holding.
+    fog.setSky(skyBox);
     if (!skyBox) {
       scene.background = new THREE.Color(weather.skyColor);
       return;
@@ -445,9 +470,9 @@ export function DF2Scene({
   const material = useMemo(
     () =>
       world?.colorMap
-        ? createTerrainMaterial({ colorMap: world.colorMap, grade, fog })
+        ? createTerrainMaterial({ colorMap: world.colorMap, atmosphere })
         : null,
-    [fog, grade, world]
+    [atmosphere, world]
   );
   useEffect(() => () => material?.dispose(), [material]);
 
@@ -475,8 +500,7 @@ export function DF2Scene({
       ...lodSchedule(world.heightfield.worldSize),
       texelSize: world.heightfield.cellSize,
       colorMap: world.colorMap,
-      grade,
-      fog,
+      atmosphere,
       worldSize: world.heightfield.worldSize,
       grassScale: GRASS_SCALE,
       // ?steps= raises the compiled CEILING as well as the running value, so asking for
@@ -498,14 +522,9 @@ export function DF2Scene({
       fadeStart: GRASS_FADE_START,
       fadeEnd: GRASS_FADE_END,
       referenceP11: REFERENCE_P11,
-      // Fog is applied by the material from the hit distance, not by three from the
-      // shell depth, so it needs the scene's fog values.
-      fogColor: weather.fogColor,
-      fogNear: weather.fogNear,
-      fogFar: weather.fogFar,
     });
     return { ...kit, heightTex, jitterTex: jitter };
-  }, [fog, grade, world]);
+  }, [atmosphere, world]);
 
   useEffect(
     () => () => {
@@ -531,7 +550,7 @@ export function DF2Scene({
     const blade = createBladeMaterial({
       field: grassKit.field,
       colorMap: world.colorMap,
-      grade,
+      atmosphere,
       count: BENCH.bladeCount ?? GRASS_BLADE_COUNT,
       radius: BENCH.bladeRadius ?? GRASS_BLADE_RADIUS,
       thinStart: GRASS_BLADE_THIN_START,
@@ -568,7 +587,7 @@ export function DF2Scene({
       blade.count
     );
     return { mesh: createBladeMesh(geometry, blade), uniforms: blade.uniforms };
-  }, [grade, grassKit, noise, windVector, world]);
+  }, [atmosphere, grassKit, noise, windVector, world]);
 
   useEffect(
     () => () => {
@@ -627,7 +646,7 @@ export function DF2Scene({
   const showWater = !!heightfield && waterLevel > heightfield.minHeight;
   // Follows the camera, so it only has to out-reach the fog, not the world — and the
   // preset's fog, since a weather preset can pull the far distance in.
-  const waterSpan = weather.fogFar * 3;
+  const waterSpan = fogRangeOf(weather).far * 3;
 
   return (
     <>
@@ -638,7 +657,10 @@ export function DF2Scene({
       {/* Scene fog stays declared for anything using three's automatic path — the
           water, and any object added later. Terrain and grass take the shared term
           instead, which the scene fog cannot express. */}
-      <fog attach="fog" args={[weather.fogColor, weather.fogNear, weather.fogFar]} />
+      <fog
+        attach="fog"
+        args={[weather.fogColor, fogRangeOf(weather).near, fogRangeOf(weather).far]}
+      />
 
       {/* Sun. The terrain is unlit (its colormap is pre-shaded); this lights the
           water and anything else added to the scene later. */}

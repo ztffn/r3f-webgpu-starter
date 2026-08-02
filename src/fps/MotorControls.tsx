@@ -12,7 +12,7 @@
 
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type * as THREE from "three/webgpu";
+import * as THREE from "three/webgpu";
 import type RAPIER from "@dimforge/rapier3d-compat";
 import type { Heightfield } from "../df2/Heightfield";
 import type { FlyState, Stance } from "../df2/FlyControls";
@@ -76,6 +76,13 @@ function readTuning(): MotorTuning {
 
 const DRAG_RADIANS_PER_PIXEL = 0.0032;
 const PITCH_LIMIT = 1.5;
+const THIRD_PERSON_DISTANCE = 4.5;
+/**
+ * The proxy capsule is built once at these dimensions and scaled per stance,
+ * so a stance change costs a scale write rather than rebuilding geometry.
+ */
+const PROXY_RADIUS = 0.5;
+const PROXY_HEIGHT = 2;
 const TICK_SECONDS = DEFAULT_MOTOR_TUNING.fixedTimestepSeconds;
 /** Ticks one frame may simulate. Bounds the catch-up after a hitch or a tab switch. */
 const MAX_CATCHUP_TICKS = 5;
@@ -103,9 +110,40 @@ export function MotorControls({
       report: 0,
       stanceIntent: "stand" as PlayerStance,
       reportedStance: "stand" as PlayerStance,
+      thirdPerson: false,
       tick: 0,
     }),
     []
+  );
+  const bodyRef = useRef<THREE.Mesh | null>(null);
+
+  /**
+   * The collider proxy, drawn so the body the motor actually simulates is
+   * visible. Unlit and deliberately not run through `atmosphere.shade` — this
+   * is a diagnostic overlay, and fogging it would hide the thing being
+   * diagnosed. Do not copy this into scene content; see docs/08 §8 invariant 7.
+   */
+  const proxy = useMemo(() => {
+    const geometry = new THREE.CapsuleGeometry(
+      PROXY_RADIUS,
+      PROXY_HEIGHT - PROXY_RADIUS * 2,
+      6,
+      16
+    );
+    const material = new THREE.MeshBasicMaterial({
+      color: 0x63c68a,
+      wireframe: true,
+      depthTest: true,
+    });
+    return { geometry, material };
+  }, []);
+
+  useEffect(
+    () => () => {
+      proxy.geometry.dispose();
+      proxy.material.dispose();
+    },
+    [proxy]
   );
   // `PlayerCommand` is readonly because it is wire data; this one scratch
   // instance is rewritten every tick so the hot path allocates nothing.
@@ -155,6 +193,9 @@ export function MotorControls({
       if (event.code === "KeyX") rig.stanceIntent = "stand";
       if (event.code === "KeyC") rig.stanceIntent = rig.stanceIntent === "crouch" ? "stand" : "crouch";
       if (event.code === "KeyZ") rig.stanceIntent = rig.stanceIntent === "prone" ? "stand" : "prone";
+      // Third person exists to watch the collider, not as a camera mode: it is
+      // how you see the capsule stand, crouch, go prone and climb.
+      if (event.code === "KeyV") rig.thirdPerson = !rig.thirdPerson;
     };
     const up = (event: KeyboardEvent) => rig.keys.delete(event.code);
     const blur = () => {
@@ -259,14 +300,49 @@ export function MotorControls({
     eye.x = state.position.x;
     eye.y = state.position.y + eyeHeightFor(state, tuning);
     eye.z = state.position.z;
-    camera.position.set(eye.x, eye.y, eye.z);
+
     // Yaw 0 faces -Z, matching the motor's movement basis.
     const cosPitch = Math.cos(rig.pitch);
-    camera.lookAt(
-      eye.x - Math.sin(rig.yaw) * cosPitch,
-      eye.y + Math.sin(rig.pitch),
-      eye.z - Math.cos(rig.yaw) * cosPitch
-    );
+    const forwardX = -Math.sin(rig.yaw) * cosPitch;
+    const forwardY = Math.sin(rig.pitch);
+    const forwardZ = -Math.cos(rig.yaw) * cosPitch;
+
+    const body = bodyRef.current;
+    if (body !== null) {
+      body.visible = rig.thirdPerson;
+      if (rig.thirdPerson) {
+        const dimensions = tuning.stances[state.stance];
+        body.position.set(
+          state.position.x,
+          state.position.y + dimensions.height / 2,
+          state.position.z
+        );
+        body.rotation.y = rig.yaw;
+        body.scale.set(
+          dimensions.radius / PROXY_RADIUS,
+          dimensions.height / PROXY_HEIGHT,
+          dimensions.radius / PROXY_RADIUS
+        );
+      }
+    }
+
+    if (rig.thirdPerson) {
+      // Pull straight back along the view ray and keep the camera out of the
+      // ground; no collision sweep, because this is a diagnostic view.
+      const ground = heightfield.sample(
+        eye.x - forwardX * THIRD_PERSON_DISTANCE,
+        eye.z - forwardZ * THIRD_PERSON_DISTANCE
+      );
+      camera.position.set(
+        eye.x - forwardX * THIRD_PERSON_DISTANCE,
+        Math.max(eye.y - forwardY * THIRD_PERSON_DISTANCE, ground + 0.5),
+        eye.z - forwardZ * THIRD_PERSON_DISTANCE
+      );
+      camera.lookAt(eye.x, eye.y, eye.z);
+    } else {
+      camera.position.set(eye.x, eye.y, eye.z);
+      camera.lookAt(eye.x + forwardX, eye.y + forwardY, eye.z + forwardZ);
+    }
 
     // The motor refuses a stand-up with no headroom, so its stance is the truth
     // and the app's copy follows it rather than driving it.
@@ -291,7 +367,15 @@ export function MotorControls({
     }
   });
 
-  return null;
+  return (
+    <mesh
+      ref={bodyRef}
+      geometry={proxy.geometry}
+      material={proxy.material}
+      visible={false}
+      frustumCulled={false}
+    />
+  );
 }
 
 function buttonsFrom(keys: ReadonlySet<string>, stance: PlayerStance): number {

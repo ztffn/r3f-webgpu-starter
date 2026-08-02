@@ -204,6 +204,8 @@ function PrecipitationRig({
  */
 export interface SceneHandles {
   preset: WeatherPreset;
+  /** Current rain, so the panel can seed its dial — the uniform is no longer readable. */
+  rain: number;
   setPreset: (id: string) => void;
   grade: ReturnType<typeof createColorGrade>;
   fog: ReturnType<typeof createFog>;
@@ -407,6 +409,9 @@ export function DF2Scene({
     return createPrecipitation({
       intensity: weatherRef.current.rain,
       mode: weatherRef.current.snow,
+      maxCount: BENCH.rainCount,
+      area: BENCH.rainArea,
+      height: BENCH.rainHeight,
       // The one wind vector, not a second read of it — three transcriptions of "they
       // cannot disagree" is agreement by hand, which is the thing being avoided.
       wind: windVector,
@@ -417,13 +422,11 @@ export function DF2Scene({
   // either way, and a preset switch that had to construct one would stall the frame it
   // is being judged on.
   useEffect(() => {
-    precipitation.uniforms.intensity.value = weather.rain;
-    precipitation.uniforms.mode.value = weather.snow;
-    // Trim the DRAWN range too, not just the shader's visibility test. Rejected drops
-    // collapse to zero area, but only after their vertex shader has run four hashes, six
-    // trig calls and a normalize — 48,000 wasted invocations every frame on a dry preset.
-    // The pool stays allocated, so a preset switch still costs nothing.
-    precipitation.setDrawn(weather.rain);
+    // `?rain=` and `?snow=` override the preset, so weather can be had WITHOUT its sky —
+    // a downpour under a clear sky is a legitimate thing to want to look at, and tying
+    // precipitation to the preset made it reachable only by changing the whole scene.
+    precipitation.setIntensity(BENCH.rain ?? weather.rain);
+    precipitation.uniforms.mode.value = BENCH.snow ?? weather.snow;
   }, [precipitation, weather]);
 
   // The sky as a NODE, not a texture, so the ground fog can reach it. Standing inside a
@@ -586,6 +589,7 @@ export function DF2Scene({
   useEffect(() => {
     onSceneReady?.({
       preset: weather,
+      rain: BENCH.rain ?? weather.rain,
       setPreset,
       grade,
       fog,

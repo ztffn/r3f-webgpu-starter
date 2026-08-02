@@ -34,9 +34,18 @@ type NodeArg = any;
 const V3 = vec3 as unknown as (x: NodeArg, y: NodeArg, z: NodeArg) => NodeArg;
 
 export interface PrecipitationOptions {
-  /** Instance pool. Only `intensity * maxCount` of them are ever drawn. */
+  /**
+   * Instance pool. Only `intensity * maxCount` of them are ever drawn.
+   *
+   * PAIRED WITH `area`, exactly as the blade count is paired with its radius: the box
+   * volume divided by the count is the drop spacing, so widening the box at a fixed count
+   * thins the rain. The difference from blades is that the extra volume is nearly all far
+   * drops, which are sub-pixel — so reach costs density and buys very little, and the
+   * reason to widen it at all is that a visible edge where rain stops is worse than
+   * slightly thinner rain.
+   */
   maxCount?: number;
-  /** Half-width of the box the drops loop inside, metres. */
+  /** Width of the box the drops loop inside, metres. Drops span +/- half of it. */
   area?: number;
   /** Height of that box, metres. */
   height?: number;
@@ -50,8 +59,6 @@ export interface PrecipitationOptions {
 }
 
 export interface PrecipitationUniforms {
-  /** Fraction of the pool drawn, 0-1. The density dial. */
-  intensity: NodeArg;
   /** 0 rain, 1 snow; between them, sleet. */
   mode: NodeArg;
   opacity: NodeArg;
@@ -64,13 +71,21 @@ export interface Precipitation {
   uniforms: PrecipitationUniforms;
   /** Move the field onto the camera. Call every frame. */
   update: (camera: THREE.Camera) => void;
-  /** Trim the drawn instance range to what `intensity` actually shows. */
-  setDrawn: (intensity: number) => void;
+  /**
+   * Set the density — the uniform AND the drawn instance range, together.
+   *
+   * ONE call, deliberately. They were briefly separate and the panel drove only the
+   * uniform, so the draw range stayed pinned to whatever the preset had last set: the
+   * slider could not exceed its preset's rain, and on a dry preset it did nothing at all,
+   * which read as rain being gated behind the weather. Any dial that moves one must move
+   * the other.
+   */
+  setIntensity: (intensity: number) => void;
   dispose: () => void;
 }
 
 export function createPrecipitation(opts: PrecipitationOptions = {}): Precipitation {
-  const maxCount = opts.maxCount ?? 12000;
+  const maxCount = opts.maxCount ?? 24000;
   const wind = opts.wind ?? { x: 0, z: 0 };
 
   const u = {
@@ -84,8 +99,8 @@ export function createPrecipitation(opts: PrecipitationOptions = {}): Precipitat
     // effect at all. Scalars reassign like any other number.
     windX: uniform(wind.x),
     windZ: uniform(wind.z),
-    area: uniform(opts.area ?? 35),
-    height: uniform(opts.height ?? 45),
+    area: uniform(opts.area ?? 60),
+    height: uniform(opts.height ?? 55),
     dropLength: uniform(0.9),
     dropWidth: uniform(0.04),
     flakeSize: uniform(0.25),
@@ -216,7 +231,6 @@ export function createPrecipitation(opts: PrecipitationOptions = {}): Precipitat
   return {
     object3D: mesh,
     uniforms: {
-      intensity: u.intensity,
       mode: u.mode,
       opacity: u.opacity,
       fallSpeedRain: u.fallSpeedRain,
@@ -225,9 +239,15 @@ export function createPrecipitation(opts: PrecipitationOptions = {}): Precipitat
       camera.getWorldPosition(position);
       mesh.position.copy(position);
     },
-    setDrawn: (intensity) => {
-      geometry.instanceCount = Math.min(maxCount, Math.ceil(maxCount * Math.max(0, intensity)));
-      mesh.visible = intensity > 0;
+    setIntensity: (intensity) => {
+      const v = Math.max(0, Math.min(1, intensity));
+      u.intensity.value = v;
+      // Rejected drops collapse to zero area, but only after their vertex shader has run
+      // four hashes, six trig calls and a normalize — so the drawn range is trimmed too,
+      // not just the shader's visibility test. The pool stays allocated, so raising the
+      // slider again costs nothing.
+      geometry.instanceCount = Math.min(maxCount, Math.ceil(maxCount * v));
+      mesh.visible = v > 0;
     },
     dispose: () => {
       geometry.dispose();

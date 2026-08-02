@@ -103,6 +103,19 @@ export interface BenchConfig {
    * entirely on how it sits against terrain at a given range.
    */
   smoke?: number;
+  /** Precipitation independent of the preset — `?rain=0.8&snow=1`. */
+  rain?: number;
+  snow?: number;
+  /**
+   * The rain box — `?raincount=`, `?rainarea=`, `?rainheight=`.
+   *
+   * Drops exist only inside a box centred on the camera, so `rainarea` is where rain
+   * visibly stops. Widening it at a fixed count thins the rain, since the added volume is
+   * almost all far drops that are sub-pixel; raise the count with it.
+   */
+  rainCount?: number;
+  rainArea?: number;
+  rainHeight?: number;
   /** Per-texel share of the baked height field. Baked, so reload to change. */
   strand?: number;
   /** Longest span a ray searches, metres. Sets step size for grazing rays. */
@@ -181,6 +194,11 @@ function parse(): BenchConfig {
     fogTop: num("fogtop"),
     fogDensity: num("fogdensity"),
     smoke: num("smoke"),
+    rain: num("rain"),
+    snow: num("snow"),
+    rainCount: num("raincount"),
+    rainArea: num("rainarea"),
+    rainHeight: num("rainheight"),
   };
 
   if (q.get("bench") !== "1") {

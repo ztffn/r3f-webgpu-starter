@@ -88,9 +88,11 @@ const PRECIPITATION: Dial[] = [
     min: 0,
     max: 1,
     step: 0.01,
-    get: (s) => Number(s.precipitation.uniforms.intensity.value),
-    set: (s, v) => (s.precipitation.uniforms.intensity.value = v),
-    hint: "fraction of the drop pool drawn",
+    get: (s) => s.rain,
+    // Through setIntensity, never the uniform: the drawn instance range has to move with
+    // it or the slider is capped at whatever the preset last set.
+    set: (s, v) => s.precipitation.setIntensity(v),
+    hint: "fraction of the drop pool drawn — independent of the preset's sky",
   },
   {
     label: "Snow",

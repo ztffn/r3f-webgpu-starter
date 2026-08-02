@@ -88,17 +88,47 @@ export interface WeaponPrototypeProps {
   lookSensitivity: LookSensitivityController;
 }
 
-function disposeObject(root: THREE.Object3D, preservedMaterial?: THREE.Material) {
+function collectTextures(material: THREE.Material, into: Set<THREE.Texture>) {
+  for (const value of Object.values(material)) {
+    if (value && (value as THREE.Texture).isTexture) into.add(value as THREE.Texture);
+  }
+}
+
+/**
+ * Releases the GPU resources a loaded rig owns. Three.js material disposal does
+ * not touch referenced textures, and both materials and geometries can be
+ * shared between meshes, so each is collected once and disposed once.
+ * `preservedMaterial` is created and disposed by this component; neither it nor
+ * its textures belong to the rig. `replacedMaterials` are rig materials that
+ * were swapped out at load time and would otherwise never be reachable again.
+ */
+function disposeObject(
+  root: THREE.Object3D,
+  preservedMaterial?: THREE.Material,
+  replacedMaterials: readonly THREE.Material[] = []
+) {
+  const geometries = new Set<THREE.BufferGeometry>();
+  const materials = new Set<THREE.Material>(replacedMaterials);
   root.traverse((object) => {
     const mesh = object as THREE.Mesh;
-    mesh.geometry?.dispose();
+    if (mesh.geometry) geometries.add(mesh.geometry);
     const material = mesh.material;
-    if (Array.isArray(material)) {
-      material.forEach((item) => {
-        if (item !== preservedMaterial) item.dispose();
-      });
-    } else if (material !== preservedMaterial) material?.dispose();
+    if (Array.isArray(material)) for (const item of material) materials.add(item);
+    else if (material) materials.add(material);
   });
+  if (preservedMaterial) materials.delete(preservedMaterial);
+
+  const preservedTextures = new Set<THREE.Texture>();
+  if (preservedMaterial) collectTextures(preservedMaterial, preservedTextures);
+  const textures = new Set<THREE.Texture>();
+  for (const material of materials) {
+    collectTextures(material, textures);
+    material.dispose();
+  }
+  for (const geometry of geometries) geometry.dispose();
+  for (const texture of textures) {
+    if (!preservedTextures.has(texture)) texture.dispose();
+  }
 }
 
 // TSL's uniform node generic is erased when passed across a helper boundary.
@@ -602,6 +632,9 @@ export function WeaponPrototype({
     let alive = true;
     optic.current = null;
     hasOptic.current = false;
+    // Materials this component swaps out of the loaded rig. Nothing else can
+    // reach them afterwards, so teardown owns their disposal.
+    const replacedMaterials: THREE.Material[] = [];
     const loader = new GLTFLoader();
     loader.load(
       presentation.modelUrl,
@@ -628,6 +661,10 @@ export function WeaponPrototype({
           const scopeLens = gltf.scene.getObjectByName("SCOPE_Lens") as THREE.Mesh | undefined;
           const scopeCameraTarget = gltf.scene.getObjectByName("ScopeCam_Target");
           if (scopeLens?.geometry && scopeCameraTarget) {
+            const authoredLensMaterial = scopeLens.material;
+            if (Array.isArray(authoredLensMaterial)) {
+              replacedMaterials.push(...authoredLensMaterial);
+            } else if (authoredLensMaterial) replacedMaterials.push(authoredLensMaterial);
             scopeLens.material = lensMaterial;
             scopeLens.renderOrder = 1;
             optic.current = scopeCameraTarget;
@@ -683,7 +720,8 @@ export function WeaponPrototype({
       activeAction.current = null;
       optic.current = null;
       hasOptic.current = false;
-      disposeObject(rig, lensMaterial);
+      disposeObject(rig, lensMaterial, replacedMaterials);
+      replacedMaterials.length = 0;
       rig.clear();
     };
   }, [aimOffset, lensMaterial, opticLocal, presentation, rig, scopeDemo]);

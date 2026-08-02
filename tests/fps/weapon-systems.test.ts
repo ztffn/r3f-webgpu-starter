@@ -103,25 +103,25 @@ test("weapon definitions keep authored ammunition and fire modes in gameplay dat
 test("weapon handling definitions reject invalid bloom and recoil capacity", () => {
   assert.throws(
     () =>
-      new WeaponSystem({
-        ...M4_DEFINITION,
-        accuracy: { ...M4_DEFINITION.accuracy, maxBloomRadians: 0 },
-      }),
+      new WeaponSystem(
+        { ...M4_DEFINITION, accuracy: { ...M4_DEFINITION.accuracy, maxBloomRadians: 0 } },
+        1
+      ),
     /bloom recovery or capacity/
   );
   assert.throws(
     () =>
-      new WeaponSystem({
-        ...M4_DEFINITION,
-        recoil: { ...M4_DEFINITION.recoil, recoveryPerSecond: Number.NaN },
-      }),
+      new WeaponSystem(
+        { ...M4_DEFINITION, recoil: { ...M4_DEFINITION.recoil, recoveryPerSecond: Number.NaN } },
+        1
+      ),
     /finite non-negative recoil/
   );
 });
 
 test("definition validation rejects hostile authored runtime values", () => {
   const build = (patch: Partial<WeaponDefinition>) => () =>
-    new WeaponSystem({ ...M4_DEFINITION, ...patch });
+    new WeaponSystem({ ...M4_DEFINITION, ...patch }, 1);
   const shot = (patch: Partial<WeaponDefinition["shot"]>) => ({
     shot: { ...M4_DEFINITION.shot, ...patch },
   });
@@ -289,7 +289,7 @@ test("flat handling modifiers deterministically affect spread, recoil, bloom, an
 });
 
 test("semi-auto fires once per trigger-down edge and never repeats while held", () => {
-  const weapon = new WeaponSystem(SNIPER_DEFINITION);
+  const weapon = new WeaponSystem(SNIPER_DEFINITION, 21);
   weaponCommand(weapon, { type: "triggerDown" });
   const firstShot = drainWeapon(weapon)[0];
   assert.equal(firstShot?.type, "shot");
@@ -307,7 +307,7 @@ test("semi-auto fires once per trigger-down edge and never repeats while held", 
 });
 
 test("one burst edge completes three rounds after release", () => {
-  const weapon = new WeaponSystem(M4_DEFINITION);
+  const weapon = new WeaponSystem(M4_DEFINITION, 22);
   weaponCommand(weapon, { type: "selectFireMode" });
   assert.equal(drainWeapon(weapon)[0]?.type, "fire-mode-changed");
   assert.equal(weapon.getSnapshot().fireMode, "burst");
@@ -324,7 +324,7 @@ test("one burst edge completes three rounds after release", () => {
 });
 
 test("reload and fire-mode changes cancel incomplete bursts without resetting cooldown", () => {
-  const reloadCancel = new WeaponSystem(M4_DEFINITION);
+  const reloadCancel = new WeaponSystem(M4_DEFINITION, 23);
   weaponCommand(reloadCancel, { type: "selectFireMode" });
   drainWeapon(reloadCancel);
   weaponCommand(reloadCancel, { type: "triggerDown" });
@@ -333,7 +333,7 @@ test("reload and fire-mode changes cancel incomplete bursts without resetting co
   assert.equal(reloadEvents.filter((event) => event.type === "shot").length, 1);
   assert.equal(reloadCancel.phase, "reloading");
 
-  const modeCancel = new WeaponSystem(M4_DEFINITION);
+  const modeCancel = new WeaponSystem(M4_DEFINITION, 24);
   weaponCommand(modeCancel, { type: "selectFireMode" });
   drainWeapon(modeCancel);
   weaponCommand(modeCancel, { type: "triggerDown" });
@@ -351,7 +351,7 @@ test("reload and fire-mode changes cancel incomplete bursts without resetting co
 });
 
 test("automatic fire advances every cadence boundary and stops on trigger up", () => {
-  const weapon = new WeaponSystem(SAW_DEFINITION);
+  const weapon = new WeaponSystem(SAW_DEFINITION, 25);
   weaponCommand(weapon, { type: "triggerDown" });
   assert.equal(drainWeapon(weapon).filter((event) => event.type === "shot").length, 1);
 
@@ -428,7 +428,7 @@ test("accepted shots report the cadence offset inside the update that accepted t
 });
 
 test("an empty automatic weapon dry-fires once per trigger press", () => {
-  const weapon = new WeaponSystem(SAW_DEFINITION);
+  const weapon = new WeaponSystem(SAW_DEFINITION, 26);
   weapon.magazine = 0;
   weaponCommand(weapon, { type: "triggerDown" });
   const heldEvents = [...drainWeapon(weapon), ...advanceWeapon(weapon, 1)];
@@ -440,7 +440,7 @@ test("an empty automatic weapon dry-fires once per trigger press", () => {
 });
 
 test("reload is explicit and locks accepted shots through the proxy clip", () => {
-  const weapon = new WeaponSystem(SNIPER_DEFINITION);
+  const weapon = new WeaponSystem(SNIPER_DEFINITION, 27);
   weapon.magazine = 0;
   weaponCommand(weapon, { type: "triggerDown" });
   assert.equal(drainWeapon(weapon)[0]?.type, "dry-fire");
@@ -459,8 +459,8 @@ test("reload is explicit and locks accepted shots through the proxy clip", () =>
 });
 
 test("numeric loadout switching cancels source actions and drains accepted source events", () => {
-  const primary = new WeaponSystem(M4_DEFINITION);
-  const secondary = new WeaponSystem(SNIPER_DEFINITION);
+  const primary = new WeaponSystem(M4_DEFINITION, 28);
+  const secondary = new WeaponSystem(SNIPER_DEFINITION, 29);
   const loadout = new LoadoutSystem(
     [
       { inputSlot: 1, id: "primary", weapon: primary },
@@ -518,6 +518,34 @@ test("an invalid switch duration is rejected without touching switching state", 
   loadout.update(0.2);
   assert.equal(loadout.getSnapshot().equippedSlot, "sidearm");
   assert.equal(loadout.getSnapshot().switchingTo, null);
+});
+
+test("loadout weapons get distinct but replayable instance seeds", () => {
+  const seeds = (loadout: LoadoutSystem) =>
+    [1, 2, 3, 4].map((inputSlot) => {
+      loadout.requestEquipInputSlot(inputSlot, 0);
+      return loadout.equippedWeapon.getSnapshot().instanceSeed;
+    });
+  const alpha = seeds(createDevelopmentLoadout(1));
+  const alphaReplay = seeds(createDevelopmentLoadout(1));
+  const bravo = seeds(createDevelopmentLoadout(2));
+
+  assert.deepEqual(alphaReplay, alpha, "one shooter seed must replay exactly");
+  assert.equal(new Set(alpha).size, 4, "slots within a loadout must not share a pattern");
+  for (let index = 0; index < alpha.length; index += 1) {
+    assert.notEqual(bravo[index], alpha[index], `slot ${index} shares a seed across shooters`);
+  }
+
+  // Two shooters carrying the same definition must not fire one pattern.
+  const alphaShot = firstShot(M4_DEFINITION, alpha[1]);
+  const bravoShot = firstShot(M4_DEFINITION, bravo[1]);
+  assert.notDeepEqual(
+    [alphaShot.dispersionPitchRadians, alphaShot.dispersionYawRadians],
+    [bravoShot.dispersionPitchRadians, bravoShot.dispersionYawRadians]
+  );
+
+  assert.throws(() => new WeaponSystem(M4_DEFINITION, Number.NaN), /integer instance seed/);
+  assert.throws(() => new WeaponSystem(M4_DEFINITION, 1.5), /integer instance seed/);
 });
 
 test("development slot 4 equips the automatic SAW definition", () => {
@@ -717,7 +745,7 @@ test("32 complete automatic weapon systems are deterministic at 30, 60, and 144 
 });
 
 test("weapon simulation clamps hitches instead of producing an unbounded catch-up burst", () => {
-  const weapon = new WeaponSystem(SAW_DEFINITION);
+  const weapon = new WeaponSystem(SAW_DEFINITION, 30);
   weaponCommand(weapon, { type: "triggerDown" });
   drainWeapon(weapon);
   weapon.update(60);

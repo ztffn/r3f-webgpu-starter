@@ -21,7 +21,7 @@ import {
   SAW_DEFINITION,
   SNIPER_DEFINITION,
 } from "./weapons/weaponDefinitions";
-import { createDevelopmentLoadout } from "./weapons/developmentLoadout";
+import { createDevelopmentLoadout, LOCAL_PLAYER_SEED } from "./weapons/developmentLoadout";
 import { ammunitionFromSearch } from "./weapons/AmmunitionDefinition";
 import { combatTelemetry } from "./ui/CombatTelemetry";
 import { shotDebugStore } from "./debug/ShotDebugStore";
@@ -221,7 +221,10 @@ export function WeaponPrototype({
     }),
     [ammunition]
   );
-  const loadout = useMemo(() => createDevelopmentLoadout(sniperDefinition), [sniperDefinition]);
+  const loadout = useMemo(
+    () => createDevelopmentLoadout(LOCAL_PLAYER_SEED, sniperDefinition),
+    [sniperDefinition]
+  );
   const [presentationWeaponId, setPresentationWeaponId] = useState(sniperDefinition.id);
   const presentation = weaponPresentationFor(presentationWeaponId);
   const ballisticEnvironment = useMemo(

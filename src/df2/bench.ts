@@ -85,6 +85,17 @@ export interface BenchConfig {
    * set to the surface, and the precipitation system's submerged morph.
    */
   water?: number;
+  /**
+   * Fog layer overrides, world metres and per-metre extinction — `?fogbase=`,
+   * `?fogtop=`, `?fogdensity=`.
+   *
+   * The panel has all three, but a fog band is a POSE as much as a setting: it only
+   * reads from a vantage where the layer cuts the terrain, so it needs to be reachable
+   * in the same URL that fixes the camera.
+   */
+  fogBase?: number;
+  fogTop?: number;
+  fogDensity?: number;
   /** Per-texel share of the baked height field. Baked, so reload to change. */
   strand?: number;
   /** Longest span a ray searches, metres. Sets step size for grazing rays. */
@@ -159,6 +170,9 @@ function parse(): BenchConfig {
     bladePushRadius: num("bladepushradius"),
     bladeSun: num("bladesun"),
     water: num("water"),
+    fogBase: num("fogbase"),
+    fogTop: num("fogtop"),
+    fogDensity: num("fogdensity"),
   };
 
   if (q.get("bench") !== "1") {

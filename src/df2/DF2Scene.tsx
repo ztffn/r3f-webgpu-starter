@@ -101,12 +101,15 @@ function fogSettings(w: WeatherPreset) {
     color: w.fogColor,
     near: w.fogNear,
     far: w.fogFar,
-    groundLevel: w.groundFogTop,
+    groundTop: BENCH.fogTop ?? w.groundFogTop,
+    // Below the terrain's own minimum, so every preset is ordinary ground fog until
+    // something raises it. A band is a deliberate act, not a default.
+    groundBase: BENCH.fogBase ?? w.groundFogBase,
     // Generous by default. A short scale height is a lid you can see the underside of;
     // 25 m puts the layer's own gradient well below the size of the terrain features it
     // is filling, which is what makes it read as air rather than as a surface.
     groundScale: 25,
-    groundDensity: w.groundFogDensity,
+    groundDensity: BENCH.fogDensity ?? w.groundFogDensity,
     groundNoiseScale: 0.02,
     groundNoiseAmount: 0.35,
     groundDrift: 0.03,

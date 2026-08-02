@@ -43,6 +43,14 @@ export interface WeatherPreset extends ColorGradeSettings {
    * permanent feature.
    */
   groundFogTop: number;
+  /**
+   * The bottom of the slab. Below the terrain's own minimum — 0 on this map — it is
+   * ordinary ground fog. Raised above the valley floor, the layer lifts off the ground
+   * into a band lying against the hillsides: clear underneath, clear above, and blind at
+   * one altitude, which takes a ridge out of use as a firing position while leaving the
+   * valley below it open.
+   */
+  groundFogBase: number;
   groundFogDensity: number;
   /** Fraction of the precipitation pool drawn, 0-1. 0 is dry. */
   rain: number;
@@ -62,6 +70,7 @@ const DAY: WeatherPreset = {
   gamma: 128,
   saturation: 128,
   groundFogTop: 0,
+  groundFogBase: 0,
   groundFogDensity: 0,
   rain: 0,
   snow: 0,
@@ -107,6 +116,7 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
     gamma: 128,
     saturation: 122,
     groundFogTop: 0,
+    groundFogBase: 0,
     groundFogDensity: 0.0,
     rain: 0,
     snow: 0,
@@ -122,6 +132,7 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
     gamma: 128,
     saturation: 128,
     groundFogTop: 0,
+    groundFogBase: 0,
     groundFogDensity: 0.0,
     rain: 0,
     snow: 0,
@@ -137,6 +148,7 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
     gamma: 128,
     saturation: 72,
     groundFogTop: 128,
+    groundFogBase: 0,
     groundFogDensity: 0.0022,
     rain: 0.25,
     snow: 0,
@@ -152,6 +164,7 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
     gamma: 128,
     saturation: 174,
     groundFogTop: 128,
+    groundFogBase: 0,
     groundFogDensity: 0.0013,
     rain: 0.3,
     snow: 0,
@@ -167,6 +180,7 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
     gamma: 128,
     saturation: 76,
     groundFogTop: 126,
+    groundFogBase: 0,
     groundFogDensity: 0.0018,
     rain: 0.12,
     snow: 0,
@@ -182,6 +196,7 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
     gamma: 128,
     saturation: 77,
     groundFogTop: 132,
+    groundFogBase: 0,
     groundFogDensity: 0.0044,
     rain: 0.55,
     snow: 0,
@@ -197,6 +212,7 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
     gamma: 128,
     saturation: 190,
     groundFogTop: 130,
+    groundFogBase: 0,
     groundFogDensity: 0.0035,
     rain: 0,
     snow: 0,
@@ -212,6 +228,7 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
     gamma: 128,
     saturation: 119,
     groundFogTop: 136,
+    groundFogBase: 0,
     groundFogDensity: 0.0062,
     rain: 0.8,
     snow: 0,
@@ -227,6 +244,7 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
     gamma: 128,
     saturation: 98,
     groundFogTop: 0,
+    groundFogBase: 0,
     groundFogDensity: 0.0,
     rain: 0.2,
     snow: 0,
@@ -242,6 +260,7 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
     gamma: 128,
     saturation: 82,
     groundFogTop: 140,
+    groundFogBase: 0,
     groundFogDensity: 0.0066,
     rain: 0.4,
     snow: 1,
@@ -257,6 +276,7 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
     gamma: 128,
     saturation: 82,
     groundFogTop: 128,
+    groundFogBase: 0,
     groundFogDensity: 0.0026,
     rain: 0,
     snow: 0,
@@ -272,6 +292,7 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
     gamma: 128,
     saturation: 82,
     groundFogTop: 0,
+    groundFogBase: 0,
     groundFogDensity: 0.0,
     rain: 0,
     snow: 0,

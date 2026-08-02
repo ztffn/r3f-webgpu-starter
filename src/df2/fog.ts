@@ -27,15 +27,23 @@ export interface FogSettings {
   near: number;
   far: number;
   /**
-   * World height, metres, where the ground layer is thickest. Density falls off
-   * exponentially above it over `groundScale` metres.
+   * The fog SLAB, in absolute world metres: full density between base and top, fading
+   * exponentially outside both over `groundScale` metres.
    *
    * ABSOLUTE, not relative to the terrain under you — that is the whole point. Fog
-   * settles to a level, so it fills hollows and leaves ridges clear, and a player
+   * settles to a height, so it fills hollows and leaves ridges clear, and a player
    * dropping into a gully genuinely disappears into it.
+   *
+   * A base BELOW the terrain's own minimum gives ordinary ground fog, which is what most
+   * presets want. Raising it above the valley floor lifts the slab off the ground into a
+   * band — a valley inversion or a stratus deck lying against the hillsides, clear
+   * underneath and clear above. That is the commoner sight in real terrain, and it does
+   * something no ground layer can: it cuts sightlines at ONE altitude, so a ridge that
+   * was a firing position is blind while the valley below it stays open.
    */
-  groundLevel: number;
-  /** Metres over which density falls by 1/e above the level. The layer's softness. */
+  groundBase: number;
+  groundTop: number;
+  /** Metres over which density falls by 1/e outside the slab. The layer's softness. */
   groundScale: number;
   /** Extinction per metre travelled through the layer. 0 disables it entirely. */
   groundDensity: number;
@@ -52,7 +60,8 @@ export interface Fog {
     color: NodeArg;
     near: NodeArg;
     far: NodeArg;
-    groundLevel: NodeArg;
+    groundBase: NodeArg;
+    groundTop: NodeArg;
     groundScale: NodeArg;
     groundDensity: NodeArg;
   };
@@ -85,7 +94,8 @@ export function createFog(settings: FogSettings): Fog {
   const uColor = uniform(new THREE.Color(settings.color));
   const uNear = uniform(settings.near);
   const uFar = uniform(settings.far);
-  const uLevel = uniform(settings.groundLevel);
+  const uBase = uniform(settings.groundBase);
+  const uTop = uniform(settings.groundTop);
   const uScale = uniform(Math.max(0.5, settings.groundScale));
   const uDensity = uniform(settings.groundDensity);
   const uNoiseScale = uniform(settings.groundNoiseScale);
@@ -127,18 +137,34 @@ export function createFog(settings: FogSettings): Fog {
     //
     // differentiates to the profile, so the optical depth over the ray is the difference
     // of F at its ends, scaled by how much path each metre of height buys.
-    const level = uLevel;
+    // Ordered, so dragging base past top in the panel folds the slab to nothing rather
+    // than inverting it into negative optical depth.
+    const base = uBase.min(uTop);
+    const top = uBase.max(uTop);
     const scale = uScale;
+    // F differentiates to the profile: an exponential tail below the base, full density
+    // through the slab, an exponential tail above the top. Every exponent is clamped
+    // NEGATIVE, which is the whole reason this is written as an antiderivative — the
+    // factored form overflows to a NaN wall at small softness values.
     const antiderivative = (y: NodeArg): NodeArg =>
-      y.min(level).sub(scale.mul(y.max(level).sub(level).div(scale).negate().exp()));
+      scale
+        .mul(base.sub(y).max(float(0)).div(scale).negate().exp())
+        .add(y.clamp(base, top).sub(base))
+        .add(scale.mul(y.sub(top).max(float(0)).div(scale).negate().exp().oneMinus()));
     const dy = worldPos.y.sub(cameraPosition.y);
     // Metres of path per metre of height. A level ray buys infinite path per metre, which
     // is the case the limit below covers.
     const perHeight = viewZ.div(dy.abs().max(float(1e-4)));
     const integral = antiderivative(worldPos.y).sub(antiderivative(cameraPosition.y)).abs();
-    // The limit for a near-level ray: uniform density at the eye's own height over the
-    // whole path, which is what the integral tends to and what the division cannot express.
-    const profileAtEye = cameraPosition.y.sub(level).max(float(0)).div(scale).negate().exp();
+    // The limit for a near-level ray: the density at the eye's own height over the whole
+    // path, which is what the integral tends to and what the division cannot express.
+    const profileAtEye = cameraPosition.y
+      .sub(top)
+      .max(base.sub(cameraPosition.y))
+      .max(float(0))
+      .div(scale)
+      .negate()
+      .exp();
     const throughLayer = dy
       .abs()
       .lessThan(float(1e-3))
@@ -165,9 +191,18 @@ export function createFog(settings: FogSettings): Fog {
   // column above the eye has a closed form rather than needing a far point invented for
   // it. Below the level that column grows as you sink into the layer; above it, it decays.
   const columnAbove = (): NodeArg => {
+    const base = uBase.min(uTop);
+    const top = uBase.max(uTop);
     const F = (y: NodeArg): NodeArg =>
-      y.min(uLevel).sub(uScale.mul(y.max(uLevel).sub(uLevel).div(uScale).negate().exp()));
-    return uLevel.sub(F(cameraPosition.y)).max(float(0));
+      uScale
+        .mul(base.sub(y).max(float(0)).div(uScale).negate().exp())
+        .add(y.clamp(base, top).sub(base))
+        .add(uScale.mul(y.sub(top).max(float(0)).div(uScale).negate().exp().oneMinus()));
+    // F at infinity: both tails saturate, so the whole air column is the slab's own
+    // thickness plus one softness length at each end. Finite, which is why looking
+    // straight up out of a fog bank is hazy rather than opaque.
+    const atInfinity = uScale.mul(2).add(top.sub(base));
+    return atInfinity.sub(F(cameraPosition.y)).max(float(0));
   };
 
   const applySky = (rgb: NodeArg, direction: NodeArg): NodeArg => {
@@ -189,7 +224,8 @@ export function createFog(settings: FogSettings): Fog {
       color: uColor,
       near: uNear,
       far: uFar,
-      groundLevel: uLevel,
+      groundBase: uBase,
+      groundTop: uTop,
       groundScale: uScale,
       groundDensity: uDensity,
     },
@@ -199,7 +235,8 @@ export function createFog(settings: FogSettings): Fog {
       uColor.value.set(next.color);
       uNear.value = next.near;
       uFar.value = next.far;
-      uLevel.value = next.groundLevel;
+      uBase.value = next.groundBase;
+      uTop.value = next.groundTop;
       uScale.value = Math.max(0.5, next.groundScale);
       uDensity.value = next.groundDensity;
       uNoiseScale.value = next.groundNoiseScale;

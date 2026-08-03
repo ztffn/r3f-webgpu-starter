@@ -28,9 +28,28 @@ DOM input
   -> weapon presentation / target presentation / HUD
 ```
 
-The existing `FlyControls` remains the temporary camera motor. Each frame its
-camera pose is copied into `LocalPlayerController`; gameplay code does not read
-the weapon mesh, optic, or character bones.
+Two things can drive the player, and which one is mounted changes what weapon
+handling is allowed to believe.
+
+`FlyControls` is the default and remains a camera motor: it clamps the eye to
+the terrain, so `grounded` is only the app's fly/on-foot toggle and planar
+speed is a differentiated camera position.
+
+`MotorControls` (`?scene=motor`, or `&motor=1` alongside any scene) runs the
+real character motor from `src/motor`. It publishes authoritative stance,
+velocity, grounded and sprinting state, and rounds leave the motor's eye rather
+than the camera — which matters the moment a third-person camera is not at the
+eye. See
+[`docs/12-character-motor-and-networking-spec.md`](../../docs/12-character-motor-and-networking-spec.md).
+
+Across that seam, INTENT travels weapon-to-motor (aiming, reloading, each a
+speed penalty) and RESOLVED STATE travels motor-to-weapon (sprinting, grounded,
+stance, speed). Do not cross them: movement must be replayable by a server from
+the command stream alone, and the weapon must block on resolved sprint rather
+than the raw input bit, or holding Shift while standing still disables the gun.
+
+Either way, gameplay code does not read the weapon mesh, optic, or character
+bones.
 
 `CompositeWorldQuery` keeps gameplay collision independent of rendering. Terrain
 segments are solved analytically against the canonical CPU heightfield;
@@ -98,9 +117,10 @@ semi/automatic 900 RPM SAW. B cycles each definition's authored mode order.
 Click the canvas once to capture the pointer;
 that capture click does not fire. Mouse movement then aims without holding a
 button, Escape releases it, left mouse down/up sends trigger edges, and right
-click toggles ADS. Shift boosts movement and, while ADS is active, also holds
-breath; firing remains available while moving or sprinting. R reloads, and T
-resets targets. Blur, pointer-lock loss, and teardown release held-trigger state.
+click toggles ADS. Shift sprints and, while ADS is active, also holds breath. Firing stays
+available while moving, but **sprinting refuses the shot outright** — the
+authored animation set has no sprint-and-fire pose, so this is a content
+constraint, not a balance one. R reloads, and T resets targets. Blur, pointer-lock loss, and teardown release held-trigger state.
 
 All selectable weapons currently use the same clearly labelled
 `testmodels/fps_rig.glb` proxy. Gameplay definitions contain no asset URL or
@@ -120,9 +140,8 @@ empty automatic weapon emits one dry-fire event per press.
 
 Spread and recoil are authoritative weapon state. Each definition separately
 authors mechanical dispersion, hip/movement/airborne handling error, bounded
-bloom, pitch/yaw recoil, caps, and recovery. Stance, measured planar speed
-(including a bounded extra sprint penalty),
-grounded state, ADS, and breath stabilization resolve into the cone; going prone
+bloom, pitch/yaw recoil, caps, and recovery. Stance, measured planar speed, grounded state, ADS, and breath stabilization
+resolve into the cone; going prone
 does not erase a weapon's mechanical grouping limit. Every accepted shot samples
 that cone from a deterministic weapon-instance seed and shot sequence, captures
 the recoil left by earlier rounds, and only then applies its own recoil/bloom for
@@ -144,7 +163,8 @@ resets both turrets. The default .308 profile spans 100–1,300 m; slower
 diagnostic profiles expose only zeros they can reach within the weapon's flight
 lifetime. Page Up/Down mirror elevation on full keyboards. Matching keydown
 events are consumed only in that scope context; keyup remains available to
-clear the arrow-key movement fallback. Z/X continue to control magnification.
+clear the arrow-key movement fallback. `[` and `]` control magnification; they
+moved off Z/X because those are stance keys and collide with a real motor.
 
 Pointer-lock sensitivity is FOV-scaled through the live ADS transition and
 variable optic zoom. At 1,300 m the default optic resolves to roughly 6.5 cm per

@@ -581,10 +581,23 @@ export function WeaponPrototype({
       event.stopImmediatePropagation();
     };
     const adjustMagnification = (event: KeyboardEvent) => {
-      // Z/X retain their normal stance bindings except while looking through
-      // the optic, where they are dedicated to variable magnification.
-      if (!player.wantsAds || (event.code !== "KeyZ" && event.code !== "KeyX") || event.repeat) return;
-      const direction = event.code === "KeyZ" ? -1 : 1;
+      // Brackets, NOT Z/X.
+      //
+      // Z and X were fine while a camera rig owned stance, because the optic
+      // could borrow them whenever the player was aiming. With a real motor
+      // mounted they collide outright: aiming and pressing Z zoomed the scope
+      // AND dropped the player prone. Stance wins that argument — going prone
+      // while aiming is the mechanic this project is built around — so
+      // magnification moved, rather than becoming conditional on which rig
+      // happens to be mounted.
+      if (
+        !player.wantsAds ||
+        (event.code !== "BracketLeft" && event.code !== "BracketRight") ||
+        event.repeat
+      ) {
+        return;
+      }
+      const direction = event.code === "BracketLeft" ? -1 : 1;
       scopeFov.current = THREE.MathUtils.clamp(
         scopeFov.current + direction * SCOPE_FOV_STEP,
         SCOPE_FOV_MIN,

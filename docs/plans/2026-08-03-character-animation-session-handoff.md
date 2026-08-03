@@ -20,9 +20,27 @@ netcode) is merged; main is the working base. Written 2026-08-03.
   `docs/df2_grass_1..6.*`, `docs/df2_hud_moderncomparison.jpg` (uncommitted deletions on
   main). Resolve with them before committing doc work.
 
+## Inserted 2026-08-03: admin visual dials — DONE
+
+Not one of the four below; added by the user during the weather-authority session. All 25
+live dials can now be driven room-wide by an admin (`DF2_ADMIN=1` on the server), on top of
+the replicated preset. Measured as not perf-gated: no dial allocates, and the only two that
+move a drawn count are bounded by per-client pools allocated at load. Rules, traps and the
+load-bearing effect order are `docs/12-...md` §8.2. Sequencing was the user's call: this
+went ahead of items 3 and 4.
+
 ## The four work items, in the user's own priority order
 
-### 1. Weather and fog are not server-authoritative
+### 1. Weather and fog are not server-authoritative — DONE 2026-08-03
+
+Landed, with one approved divergence from the direction below: it rides the **codec** as
+`PacketType.WorldState` owned by `GameServer`, not Colyseus Schema. Reasons and the traps it
+is shaped around are recorded in `docs/12-...md` §8.1; the short version is that weather has
+a gameplay consumer coming (fog is concealment), so it belongs with the simulation rather
+than in the room shell, and a packet is reachable by the Node loopback suite while Schema is
+not. Server picks it with `DF2_WEATHER=<id>|random|rotate`. Original direction below, kept
+as the record.
+
 
 Weather is per-client state: `readWeather(window.location.search)` in `DF2Scene`
 (`src/df2/weather.ts`), switchable live from the debug panel. Two clients in one match can
@@ -40,6 +58,10 @@ the relevant spec.
 
 ### 2. Missing animations (prone, deaths, turn-in-place)
 
+- **Prone is BLOCKED ON SOURCE CLIPS** (confirmed 2026-08-03 against the 49-clip manifest:
+  6 deaths, turn-in-place, crouch and sprint sets, nothing prone). Nothing can be baked
+  until prone source animation is bought or authored, so this item was deliberately skipped
+  and items 3+4 taken instead. The prone capsule special case in `RemotePlayers.tsx` stands.
 - **Prone is the priority** — prone-and-snipe is the game's core pillar (docs/00), and
   today a prone remote renders as the stance-scaled capsule (honest silhouette, ugly).
   The pack has no prone clips; the bake path is the runbook §4 world-space retarget

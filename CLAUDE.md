@@ -48,6 +48,10 @@ player instinctively recognise this?* — applies to features, not to whether a 
   Kenney pack), one shared colour grade, distance fog + an absolute height SLAB that can lift
   into a band, analytic smoke volumes, and camera-local rain/snow. Distance haze fades to the
   **sky cubemap sampled along the view ray**, not to a constant — see `08-...md` §7.1.
+  Networked, the **room owns the weather** and `?weather=` is ignored, because fog is
+  concealment — `12-...md` §8.1 for the packet and why it is not Colyseus Schema. The 25
+  live dials stay local offline and become **room-wide for an admin** (`DF2_ADMIN=1` on the
+  server); the shared table is `src/df2/visualDials.ts` and the rules are `12-...md` §8.2.
 - **`atmosphere.ts` is the one call a scene material makes** — `shade(rgb, worldPos?)`, grade
   then fog. Read `08-...md` §8 invariant 7 before adding any material, and note it only works
   for UNLIT materials; lit props need the term after lighting and that variant does not exist.

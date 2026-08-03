@@ -6,7 +6,11 @@
 // confirmed but no authored example survives; these presets are ours, in that shape.
 
 import type { ColorGradeSettings } from "./colorGrade";
-import { FOG_COLOR, FOG_FAR, FOG_NEAR, SKY_COLOR } from "./config";
+// EXPLICIT .ts, because this module is now loaded by Node as well as by Vite: the
+// authoritative server picks a room's preset from it and the session test pins the
+// wire order. Node's ESM resolver does not guess extensions, so an extensionless
+// specifier here fails at import time on the server while working in the browser.
+import { FOG_COLOR, FOG_FAR, FOG_NEAR, SKY_COLOR } from "./config.ts";
 
 export interface WeatherPreset extends ColorGradeSettings {
   id: string;
@@ -394,4 +398,38 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
 export function readWeather(search: string): WeatherPreset {
   const requested = new URLSearchParams(search).get("weather");
   return (requested && WEATHER_PRESETS[requested]) || DAY;
+}
+
+/**
+ * WIRE ORDER for the authoritative preset, and it is APPEND-ONLY.
+ *
+ * The server replicates its room's weather as an index into this list rather than
+ * as a string, so reordering or removing an entry above silently repoints every
+ * connected client at a different sky — the kind of break that shows up as "the
+ * other player sees different fog" rather than as an error. New presets go on the
+ * end, and `tests/motor/session.test.ts` pins the order so a reorder fails there
+ * instead of in a match. Index 0 is the neutral `day`, which is also the fallback.
+ *
+ * Derived from the table rather than written out twice: two lists that must agree
+ * is agreement by hand, and this file already says why that is the thing to avoid.
+ */
+export const WEATHER_PRESET_IDS: readonly string[] = Object.keys(WEATHER_PRESETS);
+
+/** Unknown ids resolve to `day` — the server logs its own miss, see game-server. */
+export function weatherPresetIndex(id: string): number {
+  const at = WEATHER_PRESET_IDS.indexOf(id);
+  return at < 0 ? 0 : at;
+}
+
+/**
+ * The preset a wire index names.
+ *
+ * Falls back to `day` on an index this build has never heard of, which is the
+ * real case rather than a defensive one: a server on a newer build can name a
+ * preset that shipped after the client did, and the honest answer to that is
+ * neutral daylight rather than a crash or a random sky.
+ */
+export function weatherPresetAt(index: number): WeatherPreset {
+  const id = WEATHER_PRESET_IDS[index];
+  return (id !== undefined && WEATHER_PRESETS[id]) || DAY;
 }

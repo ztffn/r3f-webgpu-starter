@@ -33,6 +33,8 @@ import { loadTerrain, type LoadedTerrain } from "./loadTerrain";
 import { WeaponPrototype } from "../fps/WeaponPrototype";
 import { MotorControls } from "../fps/MotorControls";
 import { useGameClient } from "../fps/useGameClient";
+import { useRoomVisuals, type RoomVisuals } from "../fps/useRoomVisuals";
+import { applyVisualDials } from "./visualDials";
 import { RemotePlayers } from "../fps/RemotePlayers";
 import { CompositeWorldQuery } from "../fps/core/WorldQuery";
 import type {
@@ -227,6 +229,22 @@ export interface SceneHandles {
   /** Current rain, so the panel can seed its dial — the uniform is no longer readable. */
   rain: number;
   setPreset: (id: string) => void;
+  /**
+   * The room owns the weather, so `setPreset` is inert. The panel must SAY so
+   * rather than silently doing nothing — a dead button with no explanation is
+   * indistinguishable from a bug, and this is the one state where it is correct.
+   */
+  presetLocked: boolean;
+  /**
+   * The room's dial channel when networked, null when playing alone.
+   *
+   * Its presence is what switches a dial from writing a uniform to asking the
+   * server. The panel needs both this and `dialsLocked`, because "there is a room"
+   * and "I may change it" are different facts.
+   */
+  roomDials: RoomVisuals | null;
+  /** Networked into a room that does not accept client dial changes. */
+  dialsLocked: boolean;
   grade: ReturnType<typeof createColorGrade>;
   fog: ReturnType<typeof createFog>;
   precipitation: ReturnType<typeof createPrecipitation>;
@@ -387,6 +405,24 @@ export function DF2Scene({
     };
   }, [loaded]);
 
+  const heightfield = world?.heightfield ?? null;
+  // The networked client's lifetime belongs to this scene, not to
+  // MotorControls: RemotePlayers consumes the same instance, and an effect-owned
+  // client is what guarantees a leaked join cannot outlive its component.
+  // DECLARED BEFORE THE WEATHER BLOCK, because weather is now downstream of it:
+  // when networked, the room's preset is authoritative and the URL's is not.
+  const gameClient = useGameClient(motorDemo && netDemo, heightfield);
+  /**
+   * The room's visuals, or null when playing alone.
+   *
+   * Weather is AUTHORITATIVE when networked and that is a gameplay decision, not
+   * tidiness: fog is concealment in this game, so two players in one match under
+   * different fog ranges is a fairness bug. Same reasoning that makes the URL's
+   * motor tuning overrides inert networked (docs/12 §9).
+   */
+  const room = useRoomVisuals(gameClient);
+  const netWeather = room?.preset ?? null;
+
   // --- weather ---------------------------------------------------------------
   // ONE grade object for the three materials that sample the colormap, so a preset
   // moves ground, columns and blades together. Applying it per material is what made
@@ -403,6 +439,11 @@ export function DF2Scene({
   // state value so those constructions do not list `weather` as a dependency and rebuild
   // on every switch — which is the whole thing this arrangement exists to avoid.
   const weatherRef = useRef(weather);
+  // The room's preset wins the moment it arrives. Everything downstream already
+  // handles a live switch — this is the same path the debug panel drives.
+  useEffect(() => {
+    if (netWeather !== null) setWeather(netWeather);
+  }, [netWeather]);
   // ONE noise texture for the whole renderer — fog, smoke and the blades' wind. They
   // cannot share a noise VALUE, since each samples at its own world position, but they
   // share this texture and therefore its cache. See noiseTexture.ts for why baking beats
@@ -638,21 +679,55 @@ export function DF2Scene({
     onGrassReady?.(grassKit?.uniforms ?? null);
   }, [grassKit, onGrassReady]);
 
-  const setPreset = useCallback((id: string) => {
-    setWeather(WEATHER_PRESETS[id] ?? WEATHER_PRESETS.day);
-  }, []);
+  /**
+   * The room's dial overrides, applied ON TOP of the preset.
+   *
+   * DECLARED AFTER the grade/fog and precipitation effects on purpose. Those write
+   * the same uniforms from the preset, so effect order is the whole correctness
+   * argument here: React runs effects in source order within a commit, and a preset
+   * change re-runs them together, which is exactly when the overrides have to land
+   * last. Move this above either of them and a preset switch silently wipes the
+   * room's dialled-in fog.
+   */
+  useEffect(() => {
+    if (room === null) return;
+    applyVisualDials(
+      {
+        rain: BENCH.rain ?? weather.rain,
+        grade,
+        fog,
+        precipitation,
+        blades: bladeKit?.uniforms ?? null,
+      },
+      room.overrides
+    );
+  }, [bladeKit, fog, grade, precipitation, room, weather]);
+
+  // A local switch is REFUSED, not merely overwritten, once the room owns the
+  // weather: the server broadcasts on change only, so nothing would ever arrive
+  // to correct it and the two players would sit in different fog indefinitely.
+  const setPreset = useCallback(
+    (id: string) => {
+      if (netWeather !== null) return;
+      setWeather(WEATHER_PRESETS[id] ?? WEATHER_PRESETS.day);
+    },
+    [netWeather]
+  );
 
   useEffect(() => {
     onSceneReady?.({
       preset: weather,
       rain: BENCH.rain ?? weather.rain,
       setPreset,
+      presetLocked: netWeather !== null,
+      roomDials: room,
+      dialsLocked: room !== null && !room.dialsAllowed,
       grade,
       fog,
       precipitation,
       blades: bladeKit?.uniforms ?? null,
     });
-  }, [bladeKit, fog, grade, onSceneReady, precipitation, setPreset, weather]);
+  }, [bladeKit, fog, grade, netWeather, onSceneReady, precipitation, room, setPreset, weather]);
 
   // Stable identity so Terrain's slot memo does not rebuild; reads the uniform at
   // call time so the canopy slider takes effect without a React render.
@@ -671,11 +746,6 @@ export function DF2Scene({
   }, []);
   useEffect(() => () => waterMaterial.dispose(), [waterMaterial]);
 
-  const heightfield = world?.heightfield ?? null;
-  // The networked client's lifetime belongs to this scene, not to
-  // MotorControls: RemotePlayers consumes the same instance, and an effect-owned
-  // client is what guarantees a leaked join cannot outlive its component.
-  const gameClient = useGameClient(motorDemo && netDemo, heightfield);
   // Gameplay collision reads the canonical CPU heightfield, never Terrain's
   // transient LOD meshes or shader-only grass proxies.
   const worldQuery = useMemo(() => new CompositeWorldQuery(heightfield, 0), [heightfield]);

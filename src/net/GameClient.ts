@@ -22,11 +22,15 @@ import {
 import {
   PacketType,
   decodeSnapshot,
+  decodeVisualDials,
   decodeWelcome,
+  decodeWorldState,
   encodeCommands,
+  encodeSetVisualDial,
   packetTypeOf,
   quantiseCommand,
   wrapPi,
+  type WorldState,
 } from "./SnapshotCodec.ts";
 import type { ClientTransport } from "./Transport.ts";
 
@@ -80,6 +84,34 @@ export class GameClient {
   replayedCommands = 0;
   /** The transport dropped. Prediction keeps running locally; sends stay gated. */
   connectionLost = false;
+
+  /**
+   * The room's world state, or null until the server has said.
+   *
+   * Null rather than a default value, and that distinction is visible: a client
+   * that joined with `?weather=moody` would otherwise snap to neutral daylight
+   * for the packet's flight time and then back again. Retained here as well as
+   * handed to `onWorldState` because the packet arrives immediately after the
+   * welcome and can easily land before a UI has subscribed.
+   */
+  worldState: WorldState | null = null;
+  /**
+   * Called when world state arrives. ONE consumer — assigning a second handler
+   * replaces the first. A plain callback field rather than an emitter because
+   * `src/net` imports no React and owes nothing to a framework.
+   */
+  onWorldState: ((state: WorldState) => void) | null = null;
+
+  /**
+   * The room's visual dial overrides, on top of its weather preset. Sparse — an
+   * untouched room holds none, which is the ordinary case.
+   *
+   * Mutated in place as deltas arrive, so a consumer must not hold the map as a
+   * value to compare against; `onVisualDials` is the change signal.
+   */
+  readonly visualDials = new Map<number, number>();
+  /** Called after `visualDials` changes. ONE consumer, same rule as above. */
+  onVisualDials: (() => void) | null = null;
 
   /** Public so a UI host can adopt the client's tuning instead of its own —
    * a client tuned differently from the server reconciles every tick. */
@@ -154,6 +186,17 @@ export class GameClient {
     return this.localState;
   }
 
+  /**
+   * Asks the server to change a room dial. An ASK, not a set: the value that lands
+   * is whatever comes back in the next `VisualDials` packet, clamped by the server.
+   * Nothing is applied locally here, so a refused write shows as a slider that does
+   * not move rather than as a client and server that disagree.
+   */
+  setVisualDial(id: number, value: number): void {
+    if (!this.transport.connected) return;
+    this.transport.send(encodeSetVisualDial(id, value));
+  }
+
   private receive(bytes: Uint8Array): void {
     const type = packetTypeOf(bytes);
     if (type === PacketType.Welcome) {
@@ -162,6 +205,22 @@ export class GameClient {
       this.playerId = welcome.playerId;
       this.localId = String(welcome.playerId);
       this.room.add(this.localId, welcome.spawn);
+      return;
+    }
+    if (type === PacketType.WorldState) {
+      const state = decodeWorldState(bytes);
+      if (state === null) return;
+      this.worldState = state;
+      this.onWorldState?.(state);
+      return;
+    }
+    if (type === PacketType.VisualDials) {
+      const { complete, overrides } = decodeVisualDials(bytes);
+      // COMPLETE REPLACES, a delta merges. A reset arrives as an empty complete
+      // set, and merging that would leave every override still applied.
+      if (complete) this.visualDials.clear();
+      for (const [id, value] of overrides) this.visualDials.set(id, value);
+      this.onVisualDials?.();
       return;
     }
     if (type !== PacketType.Snapshot) return;

@@ -8,6 +8,11 @@
 //
 // Run: npm run game:server   (or: node --experimental-strip-types
 //        --experimental-specifier-resolution=node tools/game-server/server.ts [port])
+//
+// Weather is the room's, not the client's: DF2_WEATHER=<preset id> picks one for
+// every room, =random gives each room its own, =rotate cycles it every minute.
+// DF2_ADMIN=1 additionally lets any connected client dial the room's visuals for
+// everyone — a development flag, never a public one.
 
 import { Room, Server, type Client } from "@colyseus/core";
 import { WebSocketTransport } from "@colyseus/ws-transport";
@@ -21,6 +26,8 @@ import { createMotorWorld, initRapier } from "../../src/motor/MotorWorld.ts";
 import { DEFAULT_MOTOR_TUNING } from "../../src/motor/MotorTypes.ts";
 import type { ServerConnection, ServerTransport } from "../../src/net/Transport.ts";
 import { TERRAIN_SLUG } from "../../src/df2/config.ts";
+import { WEATHER_PRESET_IDS, weatherPresetIndex } from "../../src/df2/weather.ts";
+import { VISUAL_DIAL_RANGES } from "../../src/df2/visualDials.ts";
 import { loadServerTerrain } from "./terrain.ts";
 
 const PORT = Number(process.argv[2] ?? 2567);
@@ -28,6 +35,51 @@ const PATCH_HZ = 20;
 /** The whole tile: the client walks an endlessly tiling map, the server's
  * static collider has real edges, so cover all of it. */
 const SURFACE_SPAN_METRES = 2048;
+
+/**
+ * `DF2_WEATHER` — a preset id, `random` for one per room, or `rotate` to cycle.
+ * Defaults to the neutral daylight preset, so nothing changes visually unless it
+ * is asked for.
+ *
+ * An env var rather than argv because `npm run game:server` already owns argv[2]
+ * for the port and `npm run x -- 2567 moody` reads worse than a named variable.
+ *
+ * `rotate` exists so the CHANGE half of replication is verifiable by looking at
+ * it: with a fixed preset the join path is all a live session can exercise, and
+ * "the sky changed in both windows at the same moment" is the only check that
+ * proves a change reaches an already-connected client.
+ */
+const WEATHER = process.env.DF2_WEATHER ?? "day";
+const WEATHER_RANDOM = WEATHER === "random";
+const WEATHER_ROTATE = WEATHER === "rotate";
+const ROTATE_SECONDS = 60;
+if (!WEATHER_RANDOM && !WEATHER_ROTATE && !WEATHER_PRESET_IDS.includes(WEATHER)) {
+  // A silent fallback to daylight after a typo is an hour spent wondering why
+  // the sky did not change. Say it, then carry on with the neutral preset.
+  console.warn(
+    `unknown DF2_WEATHER "${WEATHER}" — using day. ` +
+      `known: random, rotate, ${WEATHER_PRESET_IDS.join(", ")}`
+  );
+}
+
+/**
+ * `DF2_ADMIN=1` — let connected clients dial this server's rooms for everyone.
+ *
+ * A DEVELOPMENT FLAG, off by default and deliberately blunt: with it set, every
+ * client in the room is an admin. That is the right shape for tuning visuals with
+ * two windows open on one machine and the wrong shape for anything reachable by
+ * someone else, because the fog an admin can lift is the concealment the game is
+ * built on. A real credential belongs behind this same gate when there is a reason
+ * for one; nothing above the gate changes when it arrives.
+ */
+const ADMIN = process.env.DF2_ADMIN === "1";
+
+/** Per ROOM, so `random` means each match has its own sky rather than the process. */
+function pickWeatherIndex(): number {
+  return WEATHER_RANDOM || WEATHER_ROTATE
+    ? Math.floor(Math.random() * WEATHER_PRESET_IDS.length)
+    : weatherPresetIndex(WEATHER);
+}
 
 const RAPIER = await initRapier();
 const terrain = loadServerTerrain(TERRAIN_SLUG);
@@ -63,10 +115,24 @@ class GameRoom extends Room {
   private game!: GameServer;
 
   onCreate(): void {
+    const weatherIndex = pickWeatherIndex();
     this.game = new GameServer(RAPIER, createMotorWorld(RAPIER), terrain, this.bridge, {
       sharedSurfaceSpanMetres: SURFACE_SPAN_METRES,
       patchHz: PATCH_HZ,
+      weatherIndex,
+      visualDialRanges: VISUAL_DIAL_RANGES,
+      allowClientVisualDials: ADMIN,
     });
+    console.log(`[${this.roomId}] weather: ${WEATHER_PRESET_IDS[weatherIndex]}`);
+    if (WEATHER_ROTATE) {
+      // The room clock, like the telemetry interval below, so a disposed room
+      // does not keep changing the weather of a match that no longer exists.
+      this.clock.setInterval(() => {
+        const next = (this.game.weatherIndex + 1) % WEATHER_PRESET_IDS.length;
+        this.game.setWeather(next);
+        console.log(`[${this.roomId}] weather -> ${WEATHER_PRESET_IDS[next]}`);
+      }, ROTATE_SECONDS * 1000);
+    }
     this.onMessageBytes(COMMANDS_UP, (client: Client, bytes: Uint8Array) => {
       const connection = this.connections.get(client.sessionId);
       if (connection !== undefined) this.bridge.messageHandler?.(connection, bytes);
@@ -121,7 +187,14 @@ server.define(GAME_ROOM, GameRoom);
 await server.listen(PORT);
 console.log(
   `game server on ws://localhost:${PORT} — ${TERRAIN_SLUG}, ` +
-    `${Math.round(1000 / tickMs)} Hz tick, ${PATCH_HZ} Hz patch`
+    `${Math.round(1000 / tickMs)} Hz tick, ${PATCH_HZ} Hz patch, ` +
+    `weather ${
+      WEATHER_ROTATE
+        ? `rotating every ${ROTATE_SECONDS}s`
+        : WEATHER_RANDOM
+          ? "random per room"
+          : WEATHER
+    }` + (ADMIN ? ", CLIENT DIALS ALLOWED (DF2_ADMIN=1)" : "")
 );
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {

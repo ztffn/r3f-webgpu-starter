@@ -40,13 +40,15 @@ animation. On the weapon side, recoil does not push the body.
 | `motor/MotorWorld.ts` | Rapier bootstrap and world construction | gameplay |
 | `net/Transport.ts` | the four-method transport seam | framing semantics, packet meaning |
 | `net/SnapshotCodec.ts` | hand-packed binary and angle quantisation | when to send |
-| `net/GameServer.ts` | authority: command intake, tick, broadcast | which socket library is in use |
-| `net/GameClient.ts` | prediction, reconciliation, remote interpolation | rendering, input devices |
+| `net/GameServer.ts` | authority: command intake, tick, broadcast, room-scope world state | which socket library is in use |
+| `net/GameClient.ts` | prediction, reconciliation, remote interpolation, latest world state | rendering, input devices |
 | `net/LoopbackTransport.ts` | an in-process link with simulated latency and loss | production use |
 | `net/ColyseusProtocol.ts` | the room name and message envelopes, SDK-free | any Colyseus import |
 | `net/ColyseusTransport.ts` | the ClientTransport over `@colyseus/sdk` | packet meaning |
 | `tools/game-server/` | the authoritative Colyseus server on the real prepared terrain | gameplay logic beyond GameServer |
 | `fps/MotorControls.tsx` | DOM input to commands, motor state to camera | any simulation |
+| `fps/useRoomVisuals.ts` | world state as a React value, so nothing above the seam knows Colyseus | deciding the weather |
+| `df2/visualDials.ts` | the 25 dials: wire identity, legal range, and how to read/write each | knowing about the network |
 
 ## 3. The one rule that keeps this shared
 
@@ -194,6 +196,89 @@ input, and a u8 there does not fail — it silently drops the bit, so the server
 sees that input. `tests/motor/session.test.ts` round-trips the whole bitfield rather than a
 sample, so the next bit added cannot repeat it.
 
+### 8.1 World state — the low-frequency packet (2026-08-03)
+
+`PacketType.WorldState` is 2 bytes: the type, and the room's weather as a u8 index into
+`WEATHER_PRESET_IDS` (`src/df2/weather.ts`). Sent **on connection, immediately after the
+welcome, and again only when it changes** — there is no periodic rebroadcast, so a client
+that loses the packet keeps the old sky until it reconnects. That is the right trade for
+something that changes a handful of times a match; the alternative is paying for it at the
+patch rate forever to say nothing happened.
+
+**Why the codec and not Colyseus Schema,** which is what the adoption record reserved for
+lobby-scope state. Three reasons, and they generalise to items still to come:
+
+1. **Ownership.** Weather here is not cosmetic — fog IS concealment, and the plausible
+   endgame is the server consulting it in a visibility check. That logic lives in the
+   transport-agnostic authority layer, so the state has to live where a gameplay consumer
+   can reach it, not in the Colyseus room shell where only the transport can see it.
+2. **Testability.** A packet flows through the `ServerTransport` seam, so the Node loopback
+   suite covers join sync, change broadcast and short-buffer hardening end to end. Schema
+   sync bypasses that seam and would have been the first piece of server state invisible to
+   the harness.
+3. **The adoption decision is intact.** Its rule was that the 60 Hz hot path never rides
+   Schema; it permitted Schema for metadata and never mandated it. A packet sent on join and
+   on change is nowhere near the hot path.
+
+Two traps this packet is already shaped around. The **wire order of `WEATHER_PRESET_IDS` is
+append-only**, because the index is the wire value: reordering or deleting an entry
+repoints every connected client at a different sky, and it fails as "the other player sees
+different fog", never as an error — `session.test.ts` pins the list so the reorder fails
+there instead. And the decoder **reports an unknown index raw rather than clamping it**: a
+newer server can legitimately name a preset that shipped after this client, so
+`weatherPresetAt` falls back to neutral daylight and the codec stays dumb.
+
+Time of day and a wind seed are the likeliest fields to join it. This is the packet that
+grows for them, and damage and world-object state are the next things that will need a
+low-frequency channel of the same shape.
+
+### 8.2 Admin visual dials (2026-08-03)
+
+The preset is the BASE layer; the 25 dials in `src/df2/visualDials.ts` are a sparse
+OVERRIDE layer on top of it. An admin moves a dial, the server clamps and stores it, and
+every client in the room gets the result. `PacketType.VisualDials` carries it down and
+`PacketType.SetVisualDial` carries one asked-for change up.
+
+**One table, not two.** The dial's index in `VISUAL_DIALS` is its wire identity, its range
+is what the server clamps against, and its accessors are what the panel writes — all in one
+array, because a server clamping to a range the panel does not show appears only as "the
+slider stops responding near the top". The array is **append-only** for the same reason
+`WEATHER_PRESET_IDS` is. The module is Node-safe: every type import in it is `import type`,
+so the game server reads `VISUAL_DIAL_RANGES` without loading Three.
+
+Four things this is shaped around, each of which was a bug waiting to happen:
+
+1. **A delta cannot express a reset.** An id absent from the payload means "unchanged", so
+   clearing the overrides has to travel as a COMPLETE set — hence the `complete` byte, and
+   why a reset is an empty complete set rather than a sentinel value per dial.
+2. **Writes are coalesced to the patch tick.** A dragged slider fires an input event per
+   pixel; forwarding each one is a send per client per event, roughly 3800 a second at 64
+   players from one mouse. Batching in `GameServer` bounds it to the patch rate regardless
+   of how fast a client talks, which also stops a hostile client using it as an amplifier.
+3. **The capability is advertised, not discovered.** Refusals are silent, so without the
+   `clientDialsAllowed` bit in the world-state packet a panel cannot tell "refused" from
+   "not applied yet" and an ordinary player sees live-looking sliders that do nothing.
+4. **Two gates, not one:** `allowClientVisualDials` AND a non-empty range table. A server
+   handed no ranges refuses everything, so the capability has to be wired on purpose. The
+   client path is gated; `GameServer.setVisualDial` is the trusted server-side entry point
+   and game code calls it directly.
+
+Networked, a panel dial is an **ask, not a write** — nothing is applied locally, so a
+clamped value shows as the slider settling somewhere else rather than as the picture and
+the room disagreeing. The one exception is the readout, which moves optimistically while a
+slider is held, because the echo lags by up to a patch and adopting it mid-drag reads as
+the control fighting back.
+
+**Effect order in `DF2Scene` is load-bearing.** The preset writes the same uniforms the
+dials do, so the override effect is declared AFTER the grade/fog and precipitation effects;
+React runs effects in source order within a commit, and a preset change re-runs them
+together. Moved above either one, a preset switch silently wipes the room's dialled fog.
+
+Not replicated, deliberately: `?bladecount=`, which is baked at load and needs a reload. Of
+what is replicated, only rain intensity and blade field radius move a *drawn* count, and
+both are bounded by a pool allocated per client at load — an admin can push a client to its
+own ceiling and no further.
+
 At 64 players and a 20 Hz patch rate with no visibility culling, that is about 35 KB/s per
 client, against roughly 1.28 MB/s for the same content as JSON.
 
@@ -217,6 +302,36 @@ overrides the URL). Both sides sample the same prepared terrain — the browser 
 `loadTerrain`, the server through `tools/game-server/terrain.ts` — because any terrain
 disagreement reconciles forever. URL tuning overrides are ignored networked, for the same
 reason.
+
+**`?weather=` is also ignored networked** (2026-08-03), and for a gameplay reason rather
+than a consistency one: fog is concealment, so two players in one match under different fog
+ranges is a fairness bug. The room's preset arrives right after the welcome and overrides
+whatever the URL asked for, and the debug panel's preset buttons go **disabled with a note
+saying why** — they are refused rather than reverted, because nothing rebroadcasts to
+correct a local switch. The panel's dials still work; they write uniforms locally and change
+nothing anyone else sees.
+
+Server side, the room picks it: `DF2_WEATHER=<preset id>` fixes one for every room,
+`=random` gives each room its own, `=rotate` cycles every 60 s. Rotate exists to make the
+CHANGE half verifiable by looking at it — with a fixed preset a live session only ever
+exercises the join path, and "the sky changed in both windows at the same moment" is the
+only check that proves a change reaches an already-connected client.
+
+**The 25 dials ARE available networked, to an admin** (§8.2). `DF2_ADMIN=1` on the server
+makes every client in that server's rooms an admin, and the panel then changes the room for
+everyone instead of just the local view. It is a development flag and deliberately blunt:
+right for two windows on one machine, wrong for anything someone else can reach, because
+the fog an admin can lift is the concealment the game is built on. Without the flag the
+sliders go read-only and say so. Offline — no `&net=1` — every dial writes its uniform
+directly exactly as before, which is still the right loop for authoring numbers to commit
+back into `weather.ts`.
+
+| Server env | Effect |
+| --- | --- |
+| `DF2_WEATHER=<id>` | every room runs that preset |
+| `DF2_WEATHER=random` | each room picks its own at creation |
+| `DF2_WEATHER=rotate` | each room cycles preset every 60 s |
+| `DF2_ADMIN=1` | connected clients may dial the room's visuals for everyone |
 
 | Input | Effect |
 | --- | --- |

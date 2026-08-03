@@ -12,8 +12,9 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { CollapsiblePanel } from "./CollapsiblePanel";
 import type { SceneHandles } from "../df2/DF2Scene";
-import { WEATHER_PRESETS } from "../df2/weather";
+import { WEATHER_PRESET_IDS } from "../df2/weather";
 import { VISUAL_DIALS, type VisualDialGroup } from "../df2/visualDials";
+import type { RoomVisuals } from "../fps/useRoomVisuals";
 
 export interface WeatherDebugProps {
   scene: SceneHandles | null;
@@ -26,6 +27,18 @@ const GROUPED: Record<VisualDialGroup, number[]> = {
   blades: [],
 };
 VISUAL_DIALS.forEach((dial, id) => GROUPED[dial.group].push(id));
+
+/**
+ * What a dial currently reads: the room's override if it has one, else the live
+ * uniform the preset last wrote.
+ *
+ * Shared by the seed and the resync below, which is the point — written twice, a
+ * change to the precedence makes a slider seed from one rule and resync to another,
+ * visible only as a readout that jumps on the first packet after mount.
+ */
+function dialValue(room: RoomVisuals | null, scene: SceneHandles, id: number): number {
+  return room?.overrides.get(id) ?? VISUAL_DIALS[id]!.get(scene);
+}
 
 function Group({
   title,
@@ -44,7 +57,7 @@ function Group({
   // remounts and re-runs this initializer — an effect doing the same job could only ever
   // fire redundantly.
   const [vals, setVals] = useState<number[]>(() =>
-    ids.map((id) => room?.overrides.get(id) ?? VISUAL_DIALS[id]!.get(scene))
+    ids.map((id) => dialValue(room, scene, id))
   );
 
   /**
@@ -60,12 +73,21 @@ function Group({
 
   useEffect(() => {
     if (room === null) return;
-    setVals((previous) =>
-      ids.map((id, index) => {
-        if (held.current === id) return previous[index]!;
-        return room.overrides.get(id) ?? VISUAL_DIALS[id]!.get(scene);
-      })
-    );
+    setVals((previous) => {
+      // RETURN THE SAME ARRAY when nothing moved, so React bails out instead of
+      // committing a render. Nothing-moved is the NORMAL case for the group being
+      // dragged — the held dial keeps its local value and its neighbours did not
+      // change — so without this every packet costs a wasted render pass per group.
+      let changed = false;
+      const next = ids.map((id, index) => {
+        const was = previous[index]!;
+        if (held.current === id) return was;
+        const now = dialValue(room, scene, id);
+        if (now !== was) changed = true;
+        return now;
+      });
+      return changed ? next : previous;
+    });
     // `room` is a fresh object per server packet, which is what makes this fire.
   }, [room, ids, scene]);
 
@@ -88,7 +110,7 @@ function Group({
               max={d.max}
               step={d.step}
               value={vals[i] ?? d.min}
-              disabled={scene.dialsLocked}
+              disabled={room !== null && !room.dialsAllowed}
               onPointerDown={() => (held.current = id)}
               onPointerUp={() => (held.current = null)}
               onFocus={() => (held.current = id)}
@@ -121,39 +143,43 @@ export const WeatherDebug = memo(function WeatherDebug({
   scene,
 }: WeatherDebugProps): React.ReactElement | null {
   if (!scene) return null;
-  const presetIds = Object.keys(WEATHER_PRESETS);
+  // The room owns the weather when there is one, so a local switch is refused; and
+  // whether the dials may be moved is on that object. Both DERIVED here rather than
+  // published as separate flags — they are the same fact told three ways.
+  const room = scene.roomDials;
 
   return (
     <CollapsiblePanel id="weatherdebug" title="Weather (live)">
       <div className="btns">
-        {presetIds.map((id) => (
+        {WEATHER_PRESET_IDS.map((id) => (
           <button
             key={id}
             aria-pressed={scene.preset.id === id}
-            disabled={scene.presetLocked}
+            disabled={room !== null}
             onClick={() => scene.setPreset(id)}
           >
             {id}
           </button>
         ))}
       </div>
-      {scene.presetLocked && (
+      {room !== null && (
         <p className="note">
-          The server picks the weather for this room, so the buttons are inert — fog is
-          concealment here, and two players under different fog ranges is a fairness bug.
-        </p>
-      )}
-      {scene.roomDials !== null && !scene.dialsLocked && (
-        <p className="note">
-          <b>Admin.</b> The dials below change the room for <em>everyone</em> — they go to
-          the server, which clamps them and broadcasts the result, so a slider that settles
-          somewhere other than where you left it was clamped rather than ignored.
-        </p>
-      )}
-      {scene.dialsLocked && (
-        <p className="note">
-          Read-only: the server owns this room's visuals and did not start with the admin
-          flag set. The sliders show what the room is running.
+          The server picks the weather for this room, so the buttons above are inert — fog
+          is concealment here, and two players under different fog ranges is a fairness
+          bug.
+          <br />
+          {room.dialsAllowed ? (
+            <>
+              <b>Admin.</b> The dials below change the room for <em>everyone</em>. They go
+              to the server, which clamps them and broadcasts the result, so a slider that
+              settles somewhere other than where you left it was clamped, not ignored.
+            </>
+          ) : (
+            <>
+              The dials are read-only: this server did not start with the admin flag set.
+              They show what the room is running.
+            </>
+          )}
         </p>
       )}
 

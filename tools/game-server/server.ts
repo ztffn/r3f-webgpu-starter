@@ -27,7 +27,7 @@ import { DEFAULT_MOTOR_TUNING } from "../../src/motor/MotorTypes.ts";
 import type { ServerConnection, ServerTransport } from "../../src/net/Transport.ts";
 import { TERRAIN_SLUG } from "../../src/df2/config.ts";
 import { WEATHER_PRESET_IDS, weatherPresetIndex } from "../../src/df2/weather.ts";
-import { VISUAL_DIAL_RANGES } from "../../src/df2/visualDials.ts";
+import { clampVisualDial } from "../../src/df2/visualDials.ts";
 import { loadServerTerrain } from "./terrain.ts";
 
 const PORT = Number(process.argv[2] ?? 2567);
@@ -53,6 +53,12 @@ const WEATHER = process.env.DF2_WEATHER ?? "day";
 const WEATHER_RANDOM = WEATHER === "random";
 const WEATHER_ROTATE = WEATHER === "rotate";
 const ROTATE_SECONDS = 60;
+/** Resolved once, so the startup banner is a flat interpolation rather than nested. */
+const WEATHER_LABEL = WEATHER_ROTATE
+  ? `rotating every ${ROTATE_SECONDS}s`
+  : WEATHER_RANDOM
+    ? "random per room"
+    : WEATHER;
 if (!WEATHER_RANDOM && !WEATHER_ROTATE && !WEATHER_PRESET_IDS.includes(WEATHER)) {
   // A silent fallback to daylight after a typo is an hour spent wondering why
   // the sky did not change. Say it, then carry on with the neutral preset.
@@ -120,7 +126,7 @@ class GameRoom extends Room {
       sharedSurfaceSpanMetres: SURFACE_SPAN_METRES,
       patchHz: PATCH_HZ,
       weatherIndex,
-      visualDialRanges: VISUAL_DIAL_RANGES,
+      clampVisualDial,
       allowClientVisualDials: ADMIN,
     });
     console.log(`[${this.roomId}] weather: ${WEATHER_PRESET_IDS[weatherIndex]}`);
@@ -187,14 +193,8 @@ server.define(GAME_ROOM, GameRoom);
 await server.listen(PORT);
 console.log(
   `game server on ws://localhost:${PORT} — ${TERRAIN_SLUG}, ` +
-    `${Math.round(1000 / tickMs)} Hz tick, ${PATCH_HZ} Hz patch, ` +
-    `weather ${
-      WEATHER_ROTATE
-        ? `rotating every ${ROTATE_SECONDS}s`
-        : WEATHER_RANDOM
-          ? "random per room"
-          : WEATHER
-    }` + (ADMIN ? ", CLIENT DIALS ALLOWED (DF2_ADMIN=1)" : "")
+    `${Math.round(1000 / tickMs)} Hz tick, ${PATCH_HZ} Hz patch, weather ${WEATHER_LABEL}` +
+    (ADMIN ? ", CLIENT DIALS ALLOWED (DF2_ADMIN=1)" : "")
 );
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {

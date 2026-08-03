@@ -15,11 +15,10 @@ export const PacketType = {
   Commands: 1,
   Snapshot: 2,
   Welcome: 3,
-  WorldState: 4,
-  /** Down: the room's visual dial overrides, sparse. */
-  VisualDials: 5,
+  /** Down: everything about the room that is not per-player. */
+  RoomState: 4,
   /** Up: an admin asking for one dial change. Refused unless the server allows it. */
-  SetVisualDial: 6,
+  SetVisualDial: 5,
 } as const;
 
 /** tick u32 + buttons u16 + yaw i16 + pitch i16. Buttons outgrew a byte when
@@ -264,26 +263,49 @@ export function decodeWelcome(bytes: Uint8Array): {
 }
 
 /**
- * Room-scope state that is not per-player and not per-tick: today, the weather.
+ * ROOM-SCOPE STATE: everything the server owns that is neither per-player nor
+ * per-tick. Today that is the weather preset and a sparse set of visual dial
+ * overrides layered on top of it.
  *
- * Sent once on connection and again only when it changes. It is NOT folded into
- * the snapshot on purpose — this changes a handful of times a match, and carrying
- * it at the patch rate would be 20 packets a second per player spent saying
- * nothing happened.
+ * ONE PACKET, not one per kind of setting, and that was the second attempt. Weather
+ * and dials shipped as two packet families first, and the split leaked immediately:
+ * the bit that gates DIALS had to travel in the WEATHER packet, a join sent two
+ * packets to describe one room, the client needed two single-consumer callbacks that
+ * published the same object, and the server ran two broadcast disciplines for one
+ * class of state. They are one concept — state the server owns, sent on join and on
+ * change — so they are one packet.
+ *
+ * Sent on connection and on change only. There is no periodic rebroadcast, so a
+ * client that loses this keeps the old room until it reconnects; that is the right
+ * trade for something that changes a handful of times a match, against paying for it
+ * every patch to say nothing happened.
  *
  * It rides the codec rather than the room framework's own state sync because
  * `GameServer` is the authority. Weather is not cosmetic here: fog IS concealment,
  * so a visibility check consulting it has to reach this from the transport-agnostic
  * layer, and the Node loopback suite has to be able to see it.
  *
- * One byte of payload today. Time of day and a wind seed are the likeliest fields
- * to join it, and this is the packet that grows for them.
+ * `type u8 + flags u8 + weather u8 + dial count u8 + (dial id u8 + value f32) * n`.
+ *
+ * ALWAYS THE COMPLETE DIAL SET, never a delta, and that is a deliberate trade for
+ * simplicity over bytes. A delta cannot express a dial being CLEARED — an absent id
+ * means "unchanged" — so supporting one costs a complete-versus-delta flag on the
+ * wire, a merge-or-replace branch on the client, and a dirty set beside the values
+ * on the server. Sending everything costs 5 bytes per dial anyone has touched: 128
+ * bytes if all 25 are in play, at the patch rate, only while an admin is dragging.
+ * Against the ~35 KB/s a single client already spends on snapshots, the delta was
+ * buying nothing and charging three pieces of state that had to agree.
+ *
+ * Time of day and a wind seed are the likeliest fields to join it. Damage and
+ * world-object state are NOT — they need per-player attribution and entity lifetimes
+ * that a sparse id-to-float map cannot carry, so they want their own shape.
  */
-const WORLD_STATE_BYTES = 3;
+const ROOM_STATE_HEADER_BYTES = 4;
+const BYTES_PER_DIAL = 5;
 /** Bit 0 of the flags byte: this room accepts dial changes from its clients. */
-const WORLD_FLAG_CLIENT_DIALS = 1 << 0;
+const ROOM_FLAG_CLIENT_DIALS = 1 << 0;
 
-export interface WorldState {
+export interface RoomState {
   /** Index into `WEATHER_PRESET_IDS`; the presentation side resolves the meaning. */
   readonly weatherIndex: number;
   /**
@@ -295,100 +317,69 @@ export interface WorldState {
    * nothing. Room-wide rather than per-player: it reflects a server flag.
    */
   readonly clientDialsAllowed: boolean;
+  /**
+   * Sparse dial overrides on the room's preset, by id. An untouched room holds
+   * none, which is the ordinary case.
+   *
+   * Replaced wholesale on every packet rather than mutated, so it is safe to hand
+   * straight to a React consumer as a snapshot — no defensive copy, and no chance
+   * of a holder comparing a map against its own mutated self.
+   */
+  readonly dials: ReadonlyMap<number, number>;
 }
 
-export function encodeWorldState(state: WorldState): Uint8Array {
-  const bytes = new Uint8Array(WORLD_STATE_BYTES);
-  bytes[0] = PacketType.WorldState;
-  bytes[1] = state.weatherIndex & 0xff;
-  bytes[2] = state.clientDialsAllowed ? WORLD_FLAG_CLIENT_DIALS : 0;
-  return bytes;
-}
-
-/**
- * Null when the packet is too short, same rule as `decodeWelcome` — a hostile
- * server is a peer too, and every decoder here is hardened against a short buffer.
- *
- * The index is reported RAW rather than clamped to a preset this build knows: a
- * newer server can legitimately name one that shipped after this client, and
- * substituting something here would hide that. `weatherPresetAt` falls back.
- */
-export function decodeWorldState(bytes: Uint8Array): WorldState | null {
-  if (bytes.byteLength < WORLD_STATE_BYTES) return null;
-  return {
-    weatherIndex: bytes[1]!,
-    clientDialsAllowed: (bytes[2]! & WORLD_FLAG_CLIENT_DIALS) !== 0,
-  };
-}
-
-/**
- * Visual dial overrides, SPARSE: only the dials an admin has actually moved.
- *
- * Sparse rather than a fixed 25-slot struct because the common case is a room
- * nobody has touched, which costs two bytes instead of a hundred and fifty. The
- * full set goes out on join; a change goes out carrying only what changed.
- *
- * `type u8 + complete u8 + count u8 + (dial id u8 + value f32) * count`. The value
- * is a full float rather than a quantised one because every dial has its own range
- * — ground fog density lives in thousandths while fog far runs to 4000, and one
- * shared scale cannot serve both.
- *
- * `complete` is load-bearing and was not obvious. A delta cannot express a dial
- * being CLEARED: an id absent from the payload means "unchanged", so a reset sent
- * as a delta leaves every client still applying an override the room no longer
- * holds. A complete set says "replace yours with this", which makes a reset an
- * empty complete set and needs no sentinel value.
- */
-const DIAL_HEADER_BYTES = 3;
-const BYTES_PER_DIAL = 5;
-
-export interface DecodedVisualDials {
-  /** Replace the local set with this. False means merge it as a delta. */
-  readonly complete: boolean;
-  readonly overrides: Map<number, number>;
-}
-
-export function encodeVisualDials(
-  overrides: ReadonlyMap<number, number>,
-  complete: boolean
-): Uint8Array {
-  const entries = [...overrides].slice(0, 0xff);
-  const buffer = new ArrayBuffer(DIAL_HEADER_BYTES + entries.length * BYTES_PER_DIAL);
+export function encodeRoomState(state: RoomState): Uint8Array {
+  const count = Math.min(state.dials.size, 0xff);
+  const buffer = new ArrayBuffer(ROOM_STATE_HEADER_BYTES + count * BYTES_PER_DIAL);
   const view = new DataView(buffer);
-  view.setUint8(0, PacketType.VisualDials);
-  view.setUint8(1, complete ? 1 : 0);
-  view.setUint8(2, entries.length);
-  let at = DIAL_HEADER_BYTES;
-  for (const [id, value] of entries) {
+  view.setUint8(0, PacketType.RoomState);
+  view.setUint8(1, state.clientDialsAllowed ? ROOM_FLAG_CLIENT_DIALS : 0);
+  view.setUint8(2, state.weatherIndex & 0xff);
+  view.setUint8(3, count);
+  let at = ROOM_STATE_HEADER_BYTES;
+  let written = 0;
+  for (const [id, value] of state.dials) {
+    if (written === count) break;
     view.setUint8(at, id & 0xff);
     view.setFloat32(at + 1, value);
     at += BYTES_PER_DIAL;
+    written += 1;
   }
   return new Uint8Array(buffer);
 }
 
 /**
- * Same untrusted-input rule as the rest: the declared count is a claim, clamped to
- * what actually arrived, and a short header yields an empty set rather than throwing.
+ * Null on a short header; otherwise the same untrusted-input rule as the rest of
+ * this file — the declared dial count is a claim, clamped to what actually arrived.
  *
- * Non-finite values are DROPPED HERE rather than reported. Everywhere else in this
- * file a hostile value travels as it arrived and is judged upstream, but a NaN
- * headed for a uniform does not throw — it silently blanks whatever term it feeds,
- * and the symptom surfaces somewhere unrelated. This is the cheapest place to stop it.
+ * Non-finite dial values are DROPPED HERE rather than reported. Everywhere else a
+ * hostile value travels as it arrived and is judged upstream, but a NaN headed for
+ * a uniform does not throw — it silently blanks whatever term it feeds, and the
+ * symptom surfaces somewhere unrelated. This is the cheapest place to stop it.
+ *
+ * The weather index, by contrast, IS reported raw: a newer server can legitimately
+ * name a preset that shipped after this client, and `weatherPresetAt` falls back to
+ * neutral daylight rather than the codec inventing a substitute.
  */
-export function decodeVisualDials(bytes: Uint8Array): DecodedVisualDials {
-  const overrides = new Map<number, number>();
-  if (bytes.byteLength < DIAL_HEADER_BYTES) return { complete: false, overrides };
+export function decodeRoomState(bytes: Uint8Array): RoomState | null {
+  if (bytes.byteLength < ROOM_STATE_HEADER_BYTES) return null;
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const available = Math.floor((bytes.byteLength - DIAL_HEADER_BYTES) / BYTES_PER_DIAL);
-  const count = Math.min(view.getUint8(2), available);
-  let at = DIAL_HEADER_BYTES;
+  const available = Math.floor(
+    (bytes.byteLength - ROOM_STATE_HEADER_BYTES) / BYTES_PER_DIAL
+  );
+  const count = Math.min(view.getUint8(3), available);
+  const dials = new Map<number, number>();
+  let at = ROOM_STATE_HEADER_BYTES;
   for (let index = 0; index < count; index += 1) {
     const value = view.getFloat32(at + 1);
-    if (Number.isFinite(value)) overrides.set(view.getUint8(at), value);
+    if (Number.isFinite(value)) dials.set(view.getUint8(at), value);
     at += BYTES_PER_DIAL;
   }
-  return { complete: view.getUint8(1) !== 0, overrides };
+  return {
+    weatherIndex: view.getUint8(2),
+    clientDialsAllowed: (view.getUint8(1) & ROOM_FLAG_CLIENT_DIALS) !== 0,
+    dials,
+  };
 }
 
 /** Upstream: one dial, one value. A drag becomes a stream of these. */

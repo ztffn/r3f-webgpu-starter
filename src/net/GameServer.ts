@@ -20,11 +20,11 @@ import {
   PacketType,
   decodeCommands,
   decodeSetVisualDial,
+  encodeRoomState,
   encodeSnapshot,
-  encodeVisualDials,
   encodeWelcome,
-  encodeWorldState,
   packetTypeOf,
+  type RoomState,
   type SnapshotPlayer,
 } from "./SnapshotCodec.ts";
 import type { ServerConnection, ServerTransport } from "./Transport.ts";
@@ -43,15 +43,21 @@ export interface GameServerOptions {
    */
   readonly weatherIndex?: number;
   /**
-   * Legal range per visual dial id, from `VISUAL_DIAL_RANGES` in
+   * Clamps a dial write, or returns null to reject it — `clampVisualDial` from
    * `src/df2/visualDials.ts`. Injected rather than imported for the same reason
    * `weatherIndex` is a number: the authority layer stays free of the render side.
    *
-   * Its ABSENCE is also the off switch. A dial write is refused when there is no
-   * range to check it against, so a server that has not been handed these cannot
-   * be talked into setting anything — the capability has to be wired on purpose.
+   * THE FUNCTION, not the range table it reads, because the server clamps on the
+   * way in and the presentation side clamps again on the way out. Two copies of
+   * that arithmetic diverge the moment either gains a rule — step snapping, a
+   * per-dial default — and the only symptom is a slider settling somewhere the
+   * room never asked for.
+   *
+   * Its ABSENCE is also the off switch. A write is refused when there is nothing
+   * to check it against, so a server that was not handed this cannot be talked
+   * into setting anything: the capability has to be wired on purpose.
    */
-  readonly visualDialRanges?: readonly { readonly min: number; readonly max: number }[];
+  readonly clampVisualDial?: (id: number, value: number) => number | null;
   /**
    * Let connected clients change the room's visual dials.
    *
@@ -106,8 +112,8 @@ export class GameServer {
   malformedPacketsDropped = 0;
   /** Client dial writes refused: not allowed, unknown id, or out of range. */
   visualDialWritesRefused = 0;
-  /** Dial packets broadcast. One per patch tick at most, however fast a client talks. */
-  visualDialPacketsSent = 0;
+  /** Room packets broadcast. One per patch tick at most, however fast a client talks. */
+  roomStatePacketsSent = 0;
 
   private readonly transport: ServerTransport;
   private readonly peers = new Map<number, Peer>();
@@ -117,23 +123,24 @@ export class GameServer {
   private readonly ticksPerPatch: number;
   private timer: ReturnType<typeof setInterval> | null = null;
   private weather: number;
-  private readonly visualDialRanges: readonly { readonly min: number; readonly max: number }[];
+  private readonly clampDial: ((id: number, value: number) => number | null) | null;
   private readonly allowClientVisualDials: boolean;
   /** Only the dials somebody has actually moved. An untouched room holds none. */
   private readonly visualDials = new Map<number, number>();
   /**
-   * Changed dials awaiting a broadcast.
+   * Room state changed and has not been sent yet.
    *
-   * COALESCED TO THE PATCH TICK rather than sent per message, and that is the
-   * whole reason this set exists: a dragged slider fires an input event per pixel,
-   * so forwarding each one immediately costs one send per client per event — about
-   * 3800 sends a second at 64 players from one admin's mouse. Batching here bounds
-   * it to the patch rate no matter how fast a client talks, which also means a
-   * hostile client cannot use this as an amplifier.
+   * ONE FLAG rather than a per-dial dirty set, because the packet always carries
+   * the complete state — see the codec for why the delta was not worth the three
+   * pieces of agreeing bookkeeping it needed.
+   *
+   * COALESCED TO THE PATCH TICK rather than sent per message: a dragged slider
+   * fires an input event per pixel, so forwarding each one costs a send per client
+   * per event, about 3800 a second at 64 players from one admin's mouse. Batching
+   * bounds it to the patch rate however fast a client talks, which also stops a
+   * hostile client using it as an amplifier.
    */
-  private readonly dirtyVisualDials = new Set<number>();
-  /** A reset happened; the next flush must replace rather than merge. */
-  private resendCompleteVisualDials = false;
+  private roomStateDirty = false;
 
   constructor(
     rapier: typeof RAPIER,
@@ -157,7 +164,7 @@ export class GameServer {
     });
     const spawn = options.spawn ?? defaultSpawn;
     this.weather = (options.weatherIndex ?? 0) & 0xff;
-    this.visualDialRanges = options.visualDialRanges ?? [];
+    this.clampDial = options.clampVisualDial ?? null;
     this.allowClientVisualDials = options.allowClientVisualDials ?? false;
 
     transport.onConnection((connection) => {
@@ -177,13 +184,9 @@ export class GameServer {
       // Right after the welcome, because the client needs the room's sky before
       // its first frame. Fog is concealment in this game, so two players in one
       // match seeing different fog ranges is a fairness bug, not a cosmetic one.
-      connection.send(encodeWorldState(this.describeWorld()));
-      // The FULL override set, so a late joiner sees the room as it has been
-      // dialled rather than as its preset alone describes. Empty in the ordinary
-      // case, which costs two bytes.
-      if (this.visualDials.size > 0) {
-        connection.send(encodeVisualDials(this.visualDials, true));
-      }
+      // One packet describes the whole room: its sky and any dials that have been
+      // moved, so a late joiner sees it as dialled rather than as its preset alone.
+      connection.send(encodeRoomState(this.describeRoom()));
     });
 
     transport.onMessage((connection, bytes) => {
@@ -235,14 +238,15 @@ export class GameServer {
     return this.weather;
   }
 
-  /** One place the world-state packet is described, so join and change cannot drift. */
-  private describeWorld(): { weatherIndex: number; clientDialsAllowed: boolean } {
+  /** One place the room packet is described, so join and change cannot drift. */
+  private describeRoom(): RoomState {
     return {
       weatherIndex: this.weather,
       // BOTH conditions, the same pair `receiveVisualDial` enforces. Advertising a
       // capability the intake would refuse is worse than not having it: the panel
       // would present live-looking sliders that silently do nothing.
-      clientDialsAllowed: this.allowClientVisualDials && this.visualDialRanges.length > 0,
+      clientDialsAllowed: this.allowClientVisualDials && this.clampDial !== null,
+      dials: this.visualDials,
     };
   }
 
@@ -258,8 +262,7 @@ export class GameServer {
     const next = index & 0xff;
     if (next === this.weather) return;
     this.weather = next;
-    const bytes = encodeWorldState(this.describeWorld());
-    for (const peer of this.peers.values()) peer.connection.send(bytes);
+    this.roomStateDirty = true;
   }
 
   /** The room's visual dial overrides. Sparse: only what has been moved. */
@@ -274,26 +277,19 @@ export class GameServer {
    * here. Returns the clamped value, or null if the id or value was unusable.
    */
   setVisualDial(id: number, value: number): number | null {
-    const range = this.visualDialRanges[id];
-    if (range === undefined || !Number.isFinite(value)) return null;
-    const clamped = Math.min(range.max, Math.max(range.min, value));
+    const clamped = this.clampDial?.(id, value) ?? null;
+    if (clamped === null) return null;
     if (this.visualDials.get(id) === clamped) return clamped;
     this.visualDials.set(id, clamped);
-    this.dirtyVisualDials.add(id);
+    this.roomStateDirty = true;
     return clamped;
   }
 
-  /**
-   * Drops every override, returning the room to its preset.
-   *
-   * Broadcast as a COMPLETE set rather than a delta, because a delta cannot say
-   * "this dial is no longer overridden" — an absent id means unchanged.
-   */
+  /** Drops every override, returning the room to its preset. */
   resetVisualDials(): void {
     if (this.visualDials.size === 0) return;
     this.visualDials.clear();
-    this.dirtyVisualDials.clear();
-    this.resendCompleteVisualDials = true;
+    this.roomStateDirty = true;
   }
 
   /**
@@ -364,10 +360,10 @@ export class GameServer {
   }
 
   private broadcast(): void {
-    // BEFORE the snapshot, and outside its early return: a dial change has to go
+    // BEFORE the snapshot, and outside its early return: a room change has to go
     // out even on a patch tick where no motor produced a snapshot, or an admin
     // dialling an empty room silently loses the edit.
-    this.flushVisualDials();
+    this.flushRoomState();
 
     this.snapshotPlayers.length = 0;
     for (const peer of this.peers.values()) {
@@ -387,26 +383,15 @@ export class GameServer {
     }
   }
 
-  /** Sends whatever changed since the last patch tick, to everyone. */
-  private flushVisualDials(): void {
-    let bytes: Uint8Array;
-    if (this.resendCompleteVisualDials) {
-      this.resendCompleteVisualDials = false;
-      this.dirtyVisualDials.clear();
-      bytes = encodeVisualDials(this.visualDials, true);
-    } else if (this.dirtyVisualDials.size > 0) {
-      const changed = new Map<number, number>();
-      for (const id of this.dirtyVisualDials) {
-        const value = this.visualDials.get(id);
-        if (value !== undefined) changed.set(id, value);
-      }
-      this.dirtyVisualDials.clear();
-      bytes = encodeVisualDials(changed, false);
-    } else {
-      return;
-    }
+  /** Sends the room to everyone, if it changed since the last patch tick. */
+  private flushRoomState(): void {
+    if (!this.roomStateDirty) return;
+    this.roomStateDirty = false;
+    // Encoded ONCE and shared, unlike the snapshot, which carries a per-peer
+    // acknowledgement and therefore cannot be.
+    const bytes = encodeRoomState(this.describeRoom());
     for (const peer of this.peers.values()) peer.connection.send(bytes);
-    this.visualDialPacketsSent += 1;
+    this.roomStatePacketsSent += 1;
   }
 }
 

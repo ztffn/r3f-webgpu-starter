@@ -21,16 +21,15 @@ import {
 } from "../motor/MotorTypes.ts";
 import {
   PacketType,
+  decodeRoomState,
   decodeSnapshot,
-  decodeVisualDials,
   decodeWelcome,
-  decodeWorldState,
   encodeCommands,
   encodeSetVisualDial,
   packetTypeOf,
   quantiseCommand,
   wrapPi,
-  type WorldState,
+  type RoomState,
 } from "./SnapshotCodec.ts";
 import type { ClientTransport } from "./Transport.ts";
 
@@ -86,32 +85,34 @@ export class GameClient {
   connectionLost = false;
 
   /**
-   * The room's world state, or null until the server has said.
+   * The room's weather and dials, or null until the server has said.
    *
    * Null rather than a default value, and that distinction is visible: a client
-   * that joined with `?weather=moody` would otherwise snap to neutral daylight
-   * for the packet's flight time and then back again. Retained here as well as
-   * handed to `onWorldState` because the packet arrives immediately after the
-   * welcome and can easily land before a UI has subscribed.
+   * that joined with `?weather=moody` would otherwise snap to neutral daylight for
+   * the packet's flight time and then back again.
+   *
+   * REPLACED WHOLESALE, never mutated, which is what makes it a valid snapshot for
+   * `useSyncExternalStore`: identity changes exactly when the content does, so a
+   * consumer can compare references and a holder cannot be surprised by the object
+   * it already read changing underneath it.
    */
-  worldState: WorldState | null = null;
-  /**
-   * Called when world state arrives. ONE consumer — assigning a second handler
-   * replaces the first. A plain callback field rather than an emitter because
-   * `src/net` imports no React and owes nothing to a framework.
-   */
-  onWorldState: ((state: WorldState) => void) | null = null;
+  private roomStateValue: RoomState | null = null;
+  private readonly roomStateListeners = new Set<() => void>();
 
   /**
-   * The room's visual dial overrides, on top of its weather preset. Sparse — an
-   * untouched room holds none, which is the ordinary case.
-   *
-   * Mutated in place as deltas arrive, so a consumer must not hold the map as a
-   * value to compare against; `onVisualDials` is the change signal.
+   * Subscribe / getSnapshot rather than a single callback field, following
+   * `CombatTelemetry`. A lone assignable handler is a trap here: room state has
+   * more than one interested reader — the weather panel today, a HUD line or the
+   * concealment reader tomorrow — and the second one to arrive would silently
+   * unsubscribe the first, which reads as "the sky stopped changing" with no error.
+   * Arrow properties so they can be passed straight to a React hook.
    */
-  readonly visualDials = new Map<number, number>();
-  /** Called after `visualDials` changes. ONE consumer, same rule as above. */
-  onVisualDials: (() => void) | null = null;
+  readonly subscribeRoomState = (listener: () => void): (() => void) => {
+    this.roomStateListeners.add(listener);
+    return () => this.roomStateListeners.delete(listener);
+  };
+
+  readonly getRoomState = (): RoomState | null => this.roomStateValue;
 
   /** Public so a UI host can adopt the client's tuning instead of its own —
    * a client tuned differently from the server reconciles every tick. */
@@ -207,20 +208,11 @@ export class GameClient {
       this.room.add(this.localId, welcome.spawn);
       return;
     }
-    if (type === PacketType.WorldState) {
-      const state = decodeWorldState(bytes);
+    if (type === PacketType.RoomState) {
+      const state = decodeRoomState(bytes);
       if (state === null) return;
-      this.worldState = state;
-      this.onWorldState?.(state);
-      return;
-    }
-    if (type === PacketType.VisualDials) {
-      const { complete, overrides } = decodeVisualDials(bytes);
-      // COMPLETE REPLACES, a delta merges. A reset arrives as an empty complete
-      // set, and merging that would leave every override still applied.
-      if (complete) this.visualDials.clear();
-      for (const [id, value] of overrides) this.visualDials.set(id, value);
-      this.onVisualDials?.();
+      this.roomStateValue = state;
+      for (const listener of this.roomStateListeners) listener();
       return;
     }
     if (type !== PacketType.Snapshot) return;
@@ -322,6 +314,7 @@ export class GameClient {
   }
 
   dispose(): void {
+    this.roomStateListeners.clear();
     this.transport.close();
     this.room.dispose();
   }

@@ -17,7 +17,7 @@ implementation behind it, and a two-client session harness.
 
 - Playable in the game with `?scene=motor`.
 - Two browser clients share one authoritative room over real sockets.
-- 36 headless tests under `tests/motor/`, running in bare Node with no browser globals.
+- 45 headless tests under `tests/motor/`, running in bare Node with no browser globals.
 
 Weapon handling reads the motor: `?scene=scope&motor=1` carries the weapon on a collided
 body, and `WeaponHandlingContext` gets stance, planar speed and real grounded state from
@@ -40,15 +40,15 @@ animation. On the weapon side, recoil does not push the body.
 | `motor/MotorWorld.ts` | Rapier bootstrap and world construction | gameplay |
 | `net/Transport.ts` | the four-method transport seam | framing semantics, packet meaning |
 | `net/SnapshotCodec.ts` | hand-packed binary and angle quantisation | when to send |
-| `net/GameServer.ts` | authority: command intake, tick, broadcast, room-scope world state | which socket library is in use |
-| `net/GameClient.ts` | prediction, reconciliation, remote interpolation, latest world state | rendering, input devices |
+| `net/GameServer.ts` | authority: command intake, tick, broadcast, room-scope state | which socket library is in use |
+| `net/GameClient.ts` | prediction, reconciliation, remote interpolation, the room-state snapshot | rendering, input devices |
 | `net/LoopbackTransport.ts` | an in-process link with simulated latency and loss | production use |
 | `net/ColyseusProtocol.ts` | the room name and message envelopes, SDK-free | any Colyseus import |
 | `net/ColyseusTransport.ts` | the ClientTransport over `@colyseus/sdk` | packet meaning |
 | `tools/game-server/` | the authoritative Colyseus server on the real prepared terrain | gameplay logic beyond GameServer |
 | `fps/MotorControls.tsx` | DOM input to commands, motor state to camera | any simulation |
-| `fps/useRoomVisuals.ts` | world state as a React value, so nothing above the seam knows Colyseus | deciding the weather |
-| `df2/visualDials.ts` | the 25 dials: wire identity, legal range, and how to read/write each | knowing about the network |
+| `fps/useRoomVisuals.ts` | room state as a React value, so nothing above the seam knows Colyseus | deciding the weather |
+| `df2/visualDials.ts` | the 25 dials: wire identity, legal range, clamp, and how to read/write each | knowing about the network |
 
 ## 3. The one rule that keeps this shared
 
@@ -58,6 +58,14 @@ identical code, and `tests/motor/*.test.ts` enforce it by loading these modules 
 Node — if a runtime Three.js import appears, those files stop loading.
 
 `fps/MotorControls.tsx` is the only adapter, and it is presentation only.
+
+**Two `src/df2` modules are now under the same rule**, because the Node server imports
+them: `weather.ts` (the preset table and wire order) and `visualDials.ts` (the dial
+table and the clamp). Both are Three-free at runtime only because every Three-touching
+import in them is `import type`. A value import from one of those breaks the server,
+and `tests/motor/session.test.ts` loading both in bare Node is what enforces it —
+that check already caught `weather.ts` importing `./config` without a file extension,
+which Vite resolves and Node does not.
 
 ## 4. Tick and frame contract
 
@@ -196,95 +204,129 @@ input, and a u8 there does not fail — it silently drops the bit, so the server
 sees that input. `tests/motor/session.test.ts` round-trips the whole bitfield rather than a
 sample, so the next bit added cannot repeat it.
 
-### 8.1 World state — the low-frequency packet (2026-08-03)
+### 8.1 Room state — the low-frequency packet (2026-08-03)
 
-`PacketType.WorldState` is 2 bytes: the type, and the room's weather as a u8 index into
-`WEATHER_PRESET_IDS` (`src/df2/weather.ts`). Sent **on connection, immediately after the
-welcome, and again only when it changes** — there is no periodic rebroadcast, so a client
-that loses the packet keeps the old sky until it reconnects. That is the right trade for
-something that changes a handful of times a match; the alternative is paying for it at the
-patch rate forever to say nothing happened.
+`PacketType.RoomState` carries everything the server owns that is neither per-player
+nor per-tick: `type u8 + flags u8 + weather u8 + dial count u8 + (dial id u8 + value
+f32) * n`. The weather is an index into `WEATHER_PRESET_IDS` (`src/df2/weather.ts`),
+flags bit 0 says whether this room accepts dial changes from its clients, and the
+dials are a sparse override layer on the preset (§8.2). Sent **on connection, right
+after the welcome, and again only when something changes** — there is no periodic
+rebroadcast, so a client that loses the packet keeps the old room until it
+reconnects. That is the right trade for something that changes a handful of times a
+match; the alternative is paying for it at the patch rate forever to say nothing
+happened.
 
-**Why the codec and not Colyseus Schema,** which is what the adoption record reserved for
-lobby-scope state. Three reasons, and they generalise to items still to come:
+**One packet, and that was the second attempt.** Weather and dials shipped as two
+packet families first and the split leaked immediately: the bit that gates DIALS had
+to travel in the WEATHER packet, a join sent two packets to describe one room, the
+client needed two single-consumer callbacks that published the same object, and the
+server ran two broadcast disciplines for one class of state. They are one concept, so
+they are one packet.
+
+**Why the codec and not Colyseus Schema,** which is what the adoption record reserved
+for lobby-scope state. Three reasons, and they generalise:
 
 1. **Ownership.** Weather here is not cosmetic — fog IS concealment, and the plausible
    endgame is the server consulting it in a visibility check. That logic lives in the
-   transport-agnostic authority layer, so the state has to live where a gameplay consumer
-   can reach it, not in the Colyseus room shell where only the transport can see it.
-2. **Testability.** A packet flows through the `ServerTransport` seam, so the Node loopback
-   suite covers join sync, change broadcast and short-buffer hardening end to end. Schema
-   sync bypasses that seam and would have been the first piece of server state invisible to
-   the harness.
-3. **The adoption decision is intact.** Its rule was that the 60 Hz hot path never rides
-   Schema; it permitted Schema for metadata and never mandated it. A packet sent on join and
-   on change is nowhere near the hot path.
+   transport-agnostic authority layer, so the state has to live where a gameplay
+   consumer can reach it, not in the Colyseus room shell where only the transport can.
+2. **Testability.** A packet flows through the `ServerTransport` seam, so the Node
+   loopback suite covers join sync, change broadcast and short-buffer hardening end to
+   end. Schema sync bypasses that seam and would have been the first piece of server
+   state invisible to the harness.
+3. **The adoption decision is intact.** Its rule was that the 60 Hz hot path never
+   rides Schema; it permitted Schema for metadata and never mandated it. A packet sent
+   on join and on change is nowhere near the hot path.
 
-Two traps this packet is already shaped around. The **wire order of `WEATHER_PRESET_IDS` is
-append-only**, because the index is the wire value: reordering or deleting an entry
-repoints every connected client at a different sky, and it fails as "the other player sees
-different fog", never as an error — `session.test.ts` pins the list so the reorder fails
-there instead. And the decoder **reports an unknown index raw rather than clamping it**: a
-newer server can legitimately name a preset that shipped after this client, so
-`weatherPresetAt` falls back to neutral daylight and the codec stays dumb.
+Two traps this packet is already shaped around. **Both wire orders are append-only** —
+`WEATHER_PRESET_IDS` and `VISUAL_DIALS` — because an entry's index IS its wire value:
+reordering or deleting one repoints every connected client at a different sky or a
+different dial, and it fails as "the other player sees different fog", never as an
+error. `session.test.ts` pins both. And the decoder **reports an unknown weather index
+raw rather than clamping it**: a newer server can legitimately name a preset that
+shipped after this client, so `weatherPresetAt` falls back to neutral daylight and the
+codec stays dumb.
 
-Time of day and a wind seed are the likeliest fields to join it. This is the packet that
-grows for them, and damage and world-object state are the next things that will need a
-low-frequency channel of the same shape.
+Time of day and a wind seed are the likeliest fields to join it. **Damage and
+world-object state are not** — they need per-player attribution and entity lifetimes
+that a sparse id-to-float map cannot carry, so they want their own shape rather than a
+premature general channel built from two samples that are both global scalars.
 
 ### 8.2 Admin visual dials (2026-08-03)
 
 The preset is the BASE layer; the 25 dials in `src/df2/visualDials.ts` are a sparse
-OVERRIDE layer on top of it. An admin moves a dial, the server clamps and stores it, and
-every client in the room gets the result. `PacketType.VisualDials` carries it down and
-`PacketType.SetVisualDial` carries one asked-for change up.
+OVERRIDE layer on top. An admin moves a dial, the server clamps and stores it, and
+every client in the room gets the result on the next patch tick.
+`PacketType.SetVisualDial` carries one asked-for change up; the result comes back in
+the room packet.
 
-**One table, not two.** The dial's index in `VISUAL_DIALS` is its wire identity, its range
-is what the server clamps against, and its accessors are what the panel writes — all in one
-array, because a server clamping to a range the panel does not show appears only as "the
-slider stops responding near the top". The array is **append-only** for the same reason
-`WEATHER_PRESET_IDS` is. The module is Node-safe: every type import in it is `import type`,
-so the game server reads `VISUAL_DIAL_RANGES` without loading Three.
+**One table, not two.** A dial's index in `VISUAL_DIALS` is its wire identity, its
+range bounds the clamp, and its accessors are what the panel reads and writes — all in
+one array, because a server clamping to a range the panel does not show appears only
+as "the slider stops responding near the top". The module is Node-safe: every type
+import in it is `import type`, so the server pulls no Three. **A value import from any
+of those four modules breaks the server, and only the Node tests will tell you** —
+which is exactly how `weather.ts`'s extensionless `./config` import was caught, having
+worked fine in Vite.
 
-Four things this is shaped around, each of which was a bug waiting to happen:
+**The clamp is injected as a FUNCTION, not as a range table.** The server clamps on
+the way in and `applyVisualDials` clamps again on the way out, so two copies of that
+arithmetic diverge the moment either gains a rule — step snapping, a per-dial default
+— and the only symptom is a slider settling somewhere the room never asked for.
+`src/net` cannot import `src/df2`, so `GameServerOptions.clampVisualDial` takes the
+one implementation across the seam.
 
-1. **A delta cannot express a reset.** An id absent from the payload means "unchanged", so
-   clearing the overrides has to travel as a COMPLETE set — hence the `complete` byte, and
-   why a reset is an empty complete set rather than a sentinel value per dial.
-2. **Writes are coalesced to the patch tick.** A dragged slider fires an input event per
-   pixel; forwarding each one is a send per client per event, roughly 3800 a second at 64
-   players from one mouse. Batching in `GameServer` bounds it to the patch rate regardless
-   of how fast a client talks, which also stops a hostile client using it as an amplifier.
-3. **The capability is advertised, not discovered.** Refusals are silent, so without the
-   `clientDialsAllowed` bit in the world-state packet a panel cannot tell "refused" from
-   "not applied yet" and an ordinary player sees live-looking sliders that do nothing.
-4. **Two gates, not one:** `allowClientVisualDials` AND a non-empty range table. A server
-   handed no ranges refuses everything, so the capability has to be wired on purpose. The
-   client path is gated; `GameServer.setVisualDial` is the trusted server-side entry point
-   and game code calls it directly.
+Four things this is shaped around, each a bug rather than a preference:
+
+1. **The packet always carries the COMPLETE dial set, never a delta.** A delta cannot
+   express a dial being cleared — an absent id means "unchanged" — so supporting one
+   cost a complete-versus-delta flag on the wire, a merge-or-replace branch on the
+   client, and a dirty set beside the values on the server. Sending everything costs 5
+   bytes per dial anyone has touched, at most 128 bytes, at the patch rate, only while
+   an admin is dragging. Against the ~35 KB/s a single client already spends on
+   snapshots the delta was buying nothing and charging three pieces of state that had
+   to agree.
+2. **Writes are coalesced to the patch tick.** A dragged slider fires an input event
+   per pixel; forwarding each is a send per client per event, roughly 3800 a second at
+   64 players from one mouse. Batching in `GameServer` bounds it to the patch rate
+   regardless of how fast a client talks, which also stops a hostile client using it
+   as an amplifier. **Weather shares that path**, so a change lands within one patch
+   rather than instantly — irrelevant at 50 ms, and one flush path instead of two.
+3. **The capability is advertised, not discovered.** Refusals are silent, so without
+   the flags bit a panel cannot tell "refused" from "not applied yet" and an ordinary
+   player sees live-looking sliders that do nothing.
+4. **Two gates, not one:** `allowClientVisualDials` AND an injected clamp. A server
+   handed no clamp refuses everything, so the capability has to be wired on purpose.
+   The client path is gated; `GameServer.setVisualDial` is the trusted server-side
+   entry point and game code calls it directly.
+
+**The client exposes `subscribeRoomState` / `getRoomState`, not an assignable
+handler** — the pair `CombatTelemetry` established. Room state has more than one
+interested reader (the weather panel today, a HUD line or the concealment reader
+tomorrow) and a lone callback field lets the second silently displace the first, which
+reads as "the sky stopped changing" with no error. The state object is replaced
+wholesale rather than mutated, which is what makes it a valid `useSyncExternalStore`
+snapshot and lets `useRoomVisuals` hand its map straight out with no defensive copy.
 
 Networked, a panel dial is an **ask, not a write** — nothing is applied locally, so a
-clamped value shows as the slider settling somewhere else rather than as the picture and
-the room disagreeing. The one exception is the readout, which moves optimistically while a
-slider is held, because the echo lags by up to a patch and adopting it mid-drag reads as
-the control fighting back.
+clamped value shows as the slider settling somewhere else rather than as the picture
+and the room disagreeing. Two exceptions, both deliberate: the readout moves
+optimistically while a slider is held, because the echo lags by up to a patch and
+adopting it mid-drag reads as the control fighting back; and the resync returns the
+same array when nothing moved, so React bails out instead of committing a render on
+every packet.
 
-**Effect order in `DF2Scene` is load-bearing.** The preset writes the same uniforms the
-dials do, so the override effect is declared AFTER the grade/fog and precipitation effects;
-React runs effects in source order within a commit, and a preset change re-runs them
-together. Moved above either one, a preset switch silently wipes the room's dialled fog.
+**`DF2Scene` writes the room's visuals in ONE effect**, preset first and overrides
+second, as two adjacent statements. It was three effects sequenced only by their
+position in the file, enforced by a comment: these uniforms are shared, there is no
+lint rule here to catch a reordered hook, and the failure is silent — a preset switch
+wipes the room's dialled fog.
 
-Not replicated, deliberately: `?bladecount=`, which is baked at load and needs a reload. Of
-what is replicated, only rain intensity and blade field radius move a *drawn* count, and
-both are bounded by a pool allocated per client at load — an admin can push a client to its
-own ceiling and no further.
-
-At 64 players and a 20 Hz patch rate with no visibility culling, that is about 35 KB/s per
-client, against roughly 1.28 MB/s for the same content as JSON.
-
-The transport interface has four methods and nothing above it knows which implementation is
-in use. The `ws` implementation and the harness are **explicitly disposable**; §5 of the
-decision record defers the session framework until the measurements exist.
+Not replicated, deliberately: `?bladecount=`, which is baked at load and needs a
+reload. Of what is replicated, only rain intensity and blade field radius move a
+*drawn* count, and both are bounded by a pool allocated per client at load — an admin
+can push a client to its own ceiling and no further.
 
 ## 9. Controls and URLs
 
@@ -356,7 +398,7 @@ the game server above is the one that runs the real map.
 
 ## 10. Verification
 
-- `npm test` — 36 motor and networking tests inside the suite.
+- `npm test` — 45 motor and networking tests inside the suite (134 in total).
 - `npm run motor:bench` — dense-room cost.
 - `tools/motor-bench/prediction-quality.ts` — correction rate under latency and loss.
 - `tools/motor-bench/collision-agreement.ts` — the two-representation disagreement.

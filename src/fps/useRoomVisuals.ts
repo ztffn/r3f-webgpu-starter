@@ -1,17 +1,14 @@
 // The room's authoritative visuals, as a React value: preset, dial overrides, and
 // whether this client may change them.
 //
-// ONE hook for the whole world-state family, not one per packet, and that is forced
-// rather than tidy: GameClient's callbacks are single-consumer, so two hooks both
-// wanting `onWorldState` would silently unsubscribe each other. It is also the right
-// shape — the preset is the base layer and the dials override it, so a consumer that
-// has one always wants the other.
-//
-// This is the only place world state crosses from src/net into the render tree, which
-// is what keeps Colyseus invisible above the transport seam. Lives in src/fps because
-// it imports React; src/net stays React-free.
+// The only place room state crosses from src/net into the render tree, which is what
+// keeps Colyseus invisible above the transport seam. GameClient exposes the
+// subscribe/getSnapshot pair CombatTelemetry established, so this is one
+// useSyncExternalStore call rather than an effect mirroring into local state — no
+// seeding dance, and any number of readers can subscribe without displacing each
+// other. Lives in src/fps because it imports React; src/net stays React-free.
 
-import { useEffect, useState } from "react";
+import { useCallback, useMemo, useSyncExternalStore } from "react";
 import type { GameClient } from "../net/GameClient.ts";
 import { weatherPresetAt, type WeatherPreset } from "../df2/weather";
 
@@ -20,11 +17,14 @@ export interface RoomVisuals {
   readonly preset: WeatherPreset;
   /** The server accepts dial changes from this client. False for an ordinary player. */
   readonly dialsAllowed: boolean;
-  /** Sparse dial overrides on top of the preset. A consumer must not mutate it. */
+  /** Sparse dial overrides on top of the preset. Never mutated, so safe to hold. */
   readonly overrides: ReadonlyMap<number, number>;
   /** Asks the server for a change. Refused writes simply never come back. */
   readonly setDial: (id: number, value: number) => void;
 }
+
+/** Shared so a null client subscribes to something stable rather than a new closure. */
+const NO_SUBSCRIPTION = (): (() => void) => () => {};
 
 /**
  * Null when there is no networked client, or before the room has said anything —
@@ -32,37 +32,23 @@ export interface RoomVisuals {
  * than flashing a default.
  */
 export function useRoomVisuals(client: GameClient | null): RoomVisuals | null {
-  const [visuals, setVisuals] = useState<RoomVisuals | null>(null);
+  const subscribe = client?.subscribeRoomState ?? NO_SUBSCRIPTION;
+  const getSnapshot = useCallback(() => client?.getRoomState() ?? null, [client]);
+  const state = useSyncExternalStore(subscribe, getSnapshot);
 
-  useEffect(() => {
-    if (client === null) {
-      setVisuals(null);
-      return;
-    }
-    const publish = (): void => {
-      const state = client.worldState;
-      if (state === null) return;
-      setVisuals({
-        preset: weatherPresetAt(state.weatherIndex),
-        dialsAllowed: state.clientDialsAllowed,
-        // A NEW MAP EACH TIME, because `client.visualDials` is mutated in place:
-        // handing the live map over would give React an unchanged identity on every
-        // change, and nothing downstream would re-render.
-        overrides: new Map(client.visualDials),
-        setDial: (id, value) => client.setVisualDial(id, value),
-      });
-    };
-    // SEED FIRST. World state is sent immediately after the welcome, so it routinely
-    // arrives before this effect runs; subscribing without seeding leaves the room's
-    // weather unapplied until it next changes, which for a fixed preset is forever.
-    publish();
-    client.onWorldState = publish;
-    client.onVisualDials = publish;
-    return () => {
-      client.onWorldState = null;
-      client.onVisualDials = null;
-    };
-  }, [client]);
-
-  return visuals;
+  // Derived, so the returned identity changes exactly when the packet did — which
+  // is what lets DF2Scene list this as an effect dependency without re-running per
+  // frame, and what keeps the panel's memo meaningful between changes.
+  return useMemo(
+    () =>
+      state === null || client === null
+        ? null
+        : {
+            preset: weatherPresetAt(state.weatherIndex),
+            dialsAllowed: state.clientDialsAllowed,
+            overrides: state.dials,
+            setDial: client.setVisualDial.bind(client),
+          },
+    [client, state]
+  );
 }

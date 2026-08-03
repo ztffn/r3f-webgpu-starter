@@ -34,7 +34,7 @@ import { WeaponPrototype } from "../fps/WeaponPrototype";
 import { MotorControls } from "../fps/MotorControls";
 import { useGameClient } from "../fps/useGameClient";
 import { useRoomVisuals, type RoomVisuals } from "../fps/useRoomVisuals";
-import { applyVisualDials } from "./visualDials";
+import { applyVisualDials, type VisualDialTargets } from "./visualDials";
 import { RemotePlayers } from "../fps/RemotePlayers";
 import { CompositeWorldQuery } from "../fps/core/WorldQuery";
 import type {
@@ -230,21 +230,16 @@ export interface SceneHandles {
   rain: number;
   setPreset: (id: string) => void;
   /**
-   * The room owns the weather, so `setPreset` is inert. The panel must SAY so
-   * rather than silently doing nothing — a dead button with no explanation is
-   * indistinguishable from a bug, and this is the one state where it is correct.
-   */
-  presetLocked: boolean;
-  /**
-   * The room's dial channel when networked, null when playing alone.
+   * The room's authority over this scene's visuals, or null when playing alone.
    *
-   * Its presence is what switches a dial from writing a uniform to asking the
-   * server. The panel needs both this and `dialsLocked`, because "there is a room"
-   * and "I may change it" are different facts.
+   * ONE object rather than sibling booleans. Its presence means the room owns the
+   * weather — so `setPreset` is inert and the panel must SAY so, since a dead button
+   * with no explanation is indistinguishable from a bug — and it also switches a dial
+   * from writing a uniform to asking the server. Whether that ask is permitted is
+   * `dialsAllowed` on the object itself. Every one of those is derivable from this,
+   * so publishing them separately was three fields encoding one fact.
    */
   roomDials: RoomVisuals | null;
-  /** Networked into a room that does not accept client dial changes. */
-  dialsLocked: boolean;
   grade: ReturnType<typeof createColorGrade>;
   fog: ReturnType<typeof createFog>;
   precipitation: ReturnType<typeof createPrecipitation>;
@@ -468,20 +463,6 @@ export function DF2Scene({
   // wrong and none can quietly go without.
   const atmosphere = useMemo(() => createAtmosphere(grade, fog), [grade, fog]);
 
-  // `weather` IS A DEPENDENCY, and leaving it out is what made preset buttons look dead.
-  // The grade and the fog are written imperatively into live uniforms, so an effect that
-  // never re-runs leaves both frozen at whatever the URL loaded with — the sky still
-  // swapped, because that effect lists `weather`, so a preset appeared to half-work:
-  // new sky, same graded ground, same fog range.
-  useEffect(() => {
-    grade.set(
-      world?.filter && weather.id === "day"
-        ? { filter: world.filter, gamma: 128, saturation: 128 }
-        : weather
-    );
-    fog.set(fogSettings(weather, noise, windVector));
-  }, [fog, grade, noise, weather, windVector, world]);
-
   /**
    * The preset's sky, as a cubemap.
    *
@@ -518,16 +499,6 @@ export function DF2Scene({
     });
   }, [windVector]);
   useEffect(() => () => precipitation.dispose(), [precipitation]);
-  // Built once and left in the scene at zero intensity when dry: the pool is allocated
-  // either way, and a preset switch that had to construct one would stall the frame it
-  // is being judged on.
-  useEffect(() => {
-    // `?rain=` and `?snow=` override the preset, so weather can be had WITHOUT its sky —
-    // a downpour under a clear sky is a legitimate thing to want to look at, and tying
-    // precipitation to the preset made it reachable only by changing the whole scene.
-    precipitation.setIntensity(BENCH.rain ?? weather.rain);
-    precipitation.uniforms.mode.value = BENCH.snow ?? weather.snow;
-  }, [precipitation, weather]);
 
   // The sky as a NODE, not a texture, so the ground fog can reach it. Standing inside a
   // fog bank and seeing clear sky overhead is the tell that fog is painted on the terrain
@@ -680,28 +651,56 @@ export function DF2Scene({
   }, [grassKit, onGrassReady]);
 
   /**
-   * The room's dial overrides, applied ON TOP of the preset.
+   * Everything the dials can also write, in one object.
    *
-   * DECLARED AFTER the grade/fog and precipitation effects on purpose. Those write
-   * the same uniforms from the preset, so effect order is the whole correctness
-   * argument here: React runs effects in source order within a commit, and a preset
-   * change re-runs them together, which is exactly when the overrides have to land
-   * last. Move this above either of them and a preset switch silently wipes the
-   * room's dialled-in fog.
+   * ONE literal, because the panel READS through it (`VISUAL_DIALS[id].get`) and the
+   * room WRITES through it — two hand-kept lists of the same five fields is exactly
+   * the drift `visualDials.ts` exists to prevent.
+   */
+  const dialTargets = useMemo<VisualDialTargets>(
+    () => ({
+      rain: BENCH.rain ?? weather.rain,
+      grade,
+      fog,
+      precipitation,
+      blades: bladeKit?.uniforms ?? null,
+    }),
+    [bladeKit, fog, grade, precipitation, weather]
+  );
+
+  /**
+   * THE ONE PLACE the room's visuals are written: preset first, then the room's dial
+   * overrides on top.
+   *
+   * One effect rather than three, and the ordering is why. These uniforms are shared
+   * — the preset rewrites the same fog and grade values a dial overrides — so with
+   * separate effects the only thing sequencing them was their position in this file,
+   * 200 lines apart, enforced by a comment. There is no lint rule here to catch a
+   * reordered hook, and the failure is silent: a preset switch wipes the room's
+   * dialled fog. Two adjacent statements cannot be reordered by accident.
+   *
+   * `weather` IS A DEPENDENCY, and leaving it out is what made the preset buttons
+   * look dead. These are imperative writes into live uniforms, so an effect that
+   * never re-runs leaves them frozen at whatever the URL loaded with — while the sky
+   * still swapped, because that memo does list `weather`. A preset appeared to
+   * half-work: new sky, same graded ground, same fog range.
    */
   useEffect(() => {
-    if (room === null) return;
-    applyVisualDials(
-      {
-        rain: BENCH.rain ?? weather.rain,
-        grade,
-        fog,
-        precipitation,
-        blades: bladeKit?.uniforms ?? null,
-      },
-      room.overrides
+    // A real map's own .trn values win over a neutral preset's, since they are what
+    // the author graded the colormap for.
+    grade.set(
+      world?.filter && weather.id === "day"
+        ? { filter: world.filter, gamma: 128, saturation: 128 }
+        : weather
     );
-  }, [bladeKit, fog, grade, precipitation, room, weather]);
+    fog.set(fogSettings(weather, noise, windVector));
+    // `?rain=` and `?snow=` override the preset, so weather can be had WITHOUT its sky —
+    // a downpour under a clear sky is a legitimate thing to want to look at, and tying
+    // precipitation to the preset made it reachable only by changing the whole scene.
+    precipitation.setIntensity(BENCH.rain ?? weather.rain);
+    precipitation.uniforms.mode.value = BENCH.snow ?? weather.snow;
+    if (room !== null) applyVisualDials(dialTargets, room.overrides);
+  }, [dialTargets, fog, grade, noise, precipitation, room, weather, windVector, world]);
 
   // A local switch is REFUSED, not merely overwritten, once the room owns the
   // weather: the server broadcasts on change only, so nothing would ever arrive
@@ -719,15 +718,13 @@ export function DF2Scene({
       preset: weather,
       rain: BENCH.rain ?? weather.rain,
       setPreset,
-      presetLocked: netWeather !== null,
       roomDials: room,
-      dialsLocked: room !== null && !room.dialsAllowed,
       grade,
       fog,
       precipitation,
       blades: bladeKit?.uniforms ?? null,
     });
-  }, [bladeKit, fog, grade, netWeather, onSceneReady, precipitation, room, setPreset, weather]);
+  }, [bladeKit, fog, grade, onSceneReady, precipitation, room, setPreset, weather]);
 
   // Stable identity so Terrain's slot memo does not rebuild; reads the uniform at
   // call time so the canopy slider takes effect without a React render.

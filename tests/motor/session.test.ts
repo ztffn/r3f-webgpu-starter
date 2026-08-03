@@ -14,11 +14,10 @@ import {
   BYTES_PER_COMMAND,
   PacketType,
   decodeCommands,
+  decodeRoomState,
   decodeSetVisualDial,
   decodeSnapshot,
-  decodeVisualDials,
   decodeWelcome,
-  decodeWorldState,
   encodeCommands,
   encodeSnapshot,
   quantiseCommand,
@@ -28,11 +27,7 @@ import {
   weatherPresetAt,
   weatherPresetIndex,
 } from "../../src/df2/weather.ts";
-import {
-  VISUAL_DIALS,
-  VISUAL_DIAL_RANGES,
-  clampVisualDial,
-} from "../../src/df2/visualDials.ts";
+import { VISUAL_DIALS, clampVisualDial } from "../../src/df2/visualDials.ts";
 import { createMotorWorld, flatHeightSource, initRapier } from "../../src/motor/MotorWorld.ts";
 import {
   DEFAULT_MOTOR_TUNING,
@@ -54,24 +49,28 @@ function seeded(seed: number): () => number {
   };
 }
 
-function makeSession(
-  clientCount: number,
-  conditions: LinkConditions = {},
-  weatherIndex = 0,
-  allowClientVisualDials = false
-) {
+interface SessionOptions {
+  readonly conditions?: LinkConditions;
+  readonly weatherIndex?: number;
+  readonly allowClientVisualDials?: boolean;
+}
+
+/** An options bag rather than positionals: `makeSession(2, {}, 0, true)` told a
+ * reader nothing, and the next server flag would have been a fifth argument. */
+function makeSession(clientCount: number, options: SessionOptions = {}) {
   const network = new LoopbackNetwork();
   const server = new GameServer(RAPIER, createMotorWorld(RAPIER), GROUND, network, {
     sharedSurfaceSpanMetres: 512,
     patchHz: 20,
-    weatherIndex,
-    // Wired by default so the refusal test proves the FLAG is what gates it, not a
-    // missing range table — two conditions guard this and they must be told apart.
-    visualDialRanges: VISUAL_DIAL_RANGES,
-    allowClientVisualDials,
+    weatherIndex: options.weatherIndex ?? 0,
+    // Wired by DEFAULT so the refusal test proves the FLAG is what gates a client
+    // write, not a missing clamp — two conditions guard this and they must be told
+    // apart, or "refused" could be passing for the wrong reason.
+    clampVisualDial,
+    allowClientVisualDials: options.allowClientVisualDials ?? false,
   });
   const clients = Array.from({ length: clientCount }, () => {
-    const transport = network.connect(conditions);
+    const transport = network.connect(options.conditions ?? {});
     return new GameClient(RAPIER, createMotorWorld(RAPIER), GROUND, transport);
   });
   return { network, server, clients };
@@ -173,7 +172,8 @@ test("a malformed packet is survived, not thrown on", () => {
     ],
     ["snapshot claims 255 players, carries none", new Uint8Array([2, 0, 0, 0, 0, 0, 0, 0, 0, 0xff])],
     ["welcome truncated", new Uint8Array([3, 0, 1])],
-    ["world state carries no payload", new Uint8Array([PacketType.WorldState])],
+    ["room state carries no payload", new Uint8Array([PacketType.RoomState])],
+    ["room state claims 255 dials, carries none", new Uint8Array([PacketType.RoomState, 0, 0, 0xff])],
   ];
 
   for (const [label, bytes] of hostile) {
@@ -182,7 +182,7 @@ test("a malformed packet is survived, not thrown on", () => {
     assert.doesNotThrow(() => decodeWelcome(bytes), `decodeWelcome threw on ${label}`);
     // Every decoder here is hardened against a short buffer, and a new packet
     // type must not be the exception — it is reached from the same handler.
-    assert.doesNotThrow(() => decodeWorldState(bytes), `decodeWorldState threw on ${label}`);
+    assert.doesNotThrow(() => decodeRoomState(bytes), `decodeRoomState threw on ${label}`);
   }
 
   // Clamped to what arrived, not to what was claimed.
@@ -194,7 +194,7 @@ test("a malformed packet is survived, not thrown on", () => {
     1
   );
   assert.equal(decodeWelcome(new Uint8Array([3, 0, 1])), null);
-  assert.equal(decodeWorldState(new Uint8Array([PacketType.WorldState, 4])), null);
+  assert.equal(decodeRoomState(new Uint8Array([PacketType.RoomState, 0, 4])), null);
   assert.equal(decodeSetVisualDial(new Uint8Array([PacketType.SetVisualDial, 0, 1])), null);
 
   // An index this build has never heard of is NOT clamped by the decoder — it is
@@ -202,23 +202,23 @@ test("a malformed packet is survived, not thrown on", () => {
   // that shipped after this client. The presentation side is where it lands on a
   // real sky, and that fallback is neutral daylight rather than a random one.
   assert.equal(
-    decodeWorldState(new Uint8Array([PacketType.WorldState, 250, 0]))!.weatherIndex,
+    decodeRoomState(new Uint8Array([PacketType.RoomState, 0, 250, 0]))!.weatherIndex,
     250
   );
   assert.equal(weatherPresetAt(250).id, "day", "an unknown preset index invented a sky");
 
   // Dials claim a count too, and the same clamp applies.
   assert.equal(
-    decodeVisualDials(new Uint8Array([PacketType.VisualDials, 0, 0xff])).overrides.size,
+    decodeRoomState(new Uint8Array([PacketType.RoomState, 0, 0, 0xff]))!.dials.size,
     0
   );
   // A NaN dial value is dropped rather than carried: assigned to a uniform it does
   // not throw, it blanks whatever term it feeds, and the symptom appears elsewhere.
-  const withNaN = new Uint8Array(3 + 5);
-  withNaN[0] = PacketType.VisualDials;
-  withNaN[2] = 1;
-  new DataView(withNaN.buffer).setFloat32(4, Number.NaN);
-  assert.equal(decodeVisualDials(withNaN).overrides.size, 0, "a NaN dial value survived");
+  const withNaN = new Uint8Array(4 + 5);
+  withNaN[0] = PacketType.RoomState;
+  withNaN[3] = 1;
+  new DataView(withNaN.buffer).setFloat32(5, Number.NaN);
+  assert.equal(decodeRoomState(withNaN)!.dials.size, 0, "a NaN dial value survived");
   const upstreamNaN = new Uint8Array(6);
   upstreamNaN[0] = PacketType.SetVisualDial;
   new DataView(upstreamNaN.buffer).setFloat32(2, Number.POSITIVE_INFINITY);
@@ -229,14 +229,14 @@ test("a room dial change reaches every client, clamped, and coalesced", () => {
   const FOG_FAR = VISUAL_DIALS.findIndex((dial) => dial.label === "Fog far");
   assert.ok(FOG_FAR > 0, "the fixture dial is gone; this test needs updating");
 
-  const session = makeSession(2, {}, 0, true);
+  const session = makeSession(2, { allowClientVisualDials: true });
   session.network.advance(TICK_MS);
   session.server.tick();
   session.network.advance(TICK_MS);
 
   // The room advertises the capability, so a panel can tell refused from pending.
   for (const client of session.clients) {
-    assert.equal(client.worldState?.clientDialsAllowed, true);
+    assert.equal(client.getRoomState()?.clientDialsAllowed, true);
   }
 
   // Asked for well past the dial's own maximum: the server clamps to the SAME range
@@ -248,7 +248,7 @@ test("a room dial change reaches every client, clamped, and coalesced", () => {
   const expected = VISUAL_DIALS[FOG_FAR]!.max;
   for (const client of session.clients) {
     assert.equal(
-      client.visualDials.get(FOG_FAR),
+      client.getRoomState()?.dials.get(FOG_FAR),
       expected,
       "a dial change did not reach a client, or was not clamped"
     );
@@ -256,7 +256,7 @@ test("a room dial change reaches every client, clamped, and coalesced", () => {
 
   // COALESCED: a drag's worth of values inside one patch window costs one packet,
   // not one per event. Without this, one admin's mouse is 64 sends per event.
-  const before = session.server.visualDialPacketsSent;
+  const before = session.server.roomStatePacketsSent;
   for (let step = 0; step < 40; step += 1) {
     session.clients[0]!.setVisualDial(FOG_FAR, 1000 + step);
   }
@@ -264,19 +264,20 @@ test("a room dial change reaches every client, clamped, and coalesced", () => {
   session.server.tick();
   session.network.advance(TICK_MS);
   assert.equal(
-    session.server.visualDialPacketsSent - before,
+    session.server.roomStatePacketsSent - before,
     1,
     "40 dial writes in one patch window sent more than one packet"
   );
   // The last value wins, not the first.
   assert.equal(session.server.visualDialOverrides.get(FOG_FAR), 1039);
 
-  // A RESET must clear on the client, which a delta cannot express — an absent id
-  // means unchanged, so this only works because the packet says "complete".
+  // A RESET must clear on the client, which is the case the always-complete packet
+  // exists for: a delta cannot say "no longer overridden", because an absent id
+  // means unchanged.
   session.server.resetVisualDials();
   drive(session, 4, () => ({ buttons: 0, yaw: 0 }));
   for (const client of session.clients) {
-    assert.equal(client.visualDials.size, 0, "a reset left an override applied");
+    assert.equal(client.getRoomState()?.dials.size, 0, "a reset left an override applied");
   }
 });
 
@@ -289,7 +290,7 @@ test("a client cannot dial a room that did not opt in", () => {
   session.network.advance(TICK_MS);
 
   assert.equal(
-    session.clients[0]!.worldState?.clientDialsAllowed,
+    session.clients[0]!.getRoomState()?.clientDialsAllowed,
     false,
     "a room without the admin flag advertised the capability anyway"
   );
@@ -297,14 +298,14 @@ test("a client cannot dial a room that did not opt in", () => {
   session.clients[0]!.setVisualDial(FOG_FAR, 500);
   drive(session, 4, () => ({ buttons: 0, yaw: 0 }));
   assert.equal(session.server.visualDialOverrides.size, 0, "an unauthorised dial write landed");
-  assert.equal(session.clients[0]!.visualDials.size, 0);
+  assert.equal(session.clients[0]!.getRoomState()?.dials.size, 0);
   assert.ok(session.server.visualDialWritesRefused > 0, "the refusal was not counted");
 
   // Server-side game code is trusted and is NOT gated by the client flag — that
   // distinction is the point of having two paths.
   assert.equal(session.server.setVisualDial(FOG_FAR, 500), 500);
   drive(session, 4, () => ({ buttons: 0, yaw: 0 }));
-  assert.equal(session.clients[0]!.visualDials.get(FOG_FAR), 500);
+  assert.equal(session.clients[0]!.getRoomState()?.dials.get(FOG_FAR), 500);
 });
 
 test("the visual dial wire order is append-only and every range is usable", () => {
@@ -330,14 +331,19 @@ test("the room's weather reaches every client on join and again on change", () =
   const moody = weatherPresetIndex("moody");
   assert.ok(moody > 0, "the fixture preset is the default, so this test proves nothing");
 
-  const session = makeSession(2, {}, moody);
+  const session = makeSession(2, { weatherIndex: moody });
   // Nobody has been told anything before the welcome lands, and the client says
   // so with null rather than a default — a client that joined with ?weather= must
   // keep its own sky for the packet's flight rather than flashing daylight.
-  assert.equal(session.clients[0]!.worldState, null);
+  assert.equal(session.clients[0]!.getRoomState(), null);
 
+  // Through subscribe rather than an assignable handler: more than one reader wants
+  // room state, and a lone callback field would let the second silently displace the
+  // first. This also proves the subscription fires, not just that the field is set.
   const seen: number[] = [];
-  session.clients[0]!.onWorldState = (state) => seen.push(state.weatherIndex);
+  const unsubscribe = session.clients[0]!.subscribeRoomState(() => {
+    seen.push(session.clients[0]!.getRoomState()!.weatherIndex);
+  });
 
   session.network.advance(TICK_MS);
   session.server.tick();
@@ -345,18 +351,23 @@ test("the room's weather reaches every client on join and again on change", () =
 
   for (const client of session.clients) {
     assert.equal(
-      client.worldState?.weatherIndex,
+      client.getRoomState()?.weatherIndex,
       moody,
       "a client joined without being told the room's weather"
     );
   }
 
-  // On CHANGE, to everyone already connected.
+  // On CHANGE, to everyone already connected — at the next patch tick, since room
+  // state shares the coalescing path with the dials rather than sending immediately.
   const night = weatherPresetIndex("night");
   session.server.setWeather(night);
-  session.network.advance(TICK_MS);
+  drive(session, 4, () => ({ buttons: 0, yaw: 0 }));
   for (const client of session.clients) {
-    assert.equal(client.worldState?.weatherIndex, night, "a weather change did not arrive");
+    assert.equal(
+      client.getRoomState()?.weatherIndex,
+      night,
+      "a weather change did not arrive"
+    );
   }
   assert.equal(session.server.weatherIndex, night);
 
@@ -364,7 +375,8 @@ test("the room's weather reaches every client on join and again on change", () =
   // rides the codec precisely so it costs nothing while the weather holds.
   session.server.setWeather(night);
   drive(session, 60, () => ({ buttons: 0, yaw: 0 }));
-  assert.deepEqual(seen, [moody, night], "world state was re-sent without changing");
+  assert.deepEqual(seen, [moody, night], "room state was re-sent without changing");
+  unsubscribe();
 });
 
 test("the weather preset wire order is append-only", () => {
@@ -558,10 +570,12 @@ test("a forced disagreement is measured, not silently read as zero", () => {
 
 test("prediction survives latency, jitter and packet loss", () => {
   const session = makeSession(1, {
-    latencyMs: 60,
-    jitterMs: 20,
-    loss: 0.05,
-    random: seeded(0xc0ffee),
+    conditions: {
+      latencyMs: 60,
+      jitterMs: 20,
+      loss: 0.05,
+      random: seeded(0xc0ffee),
+    },
   });
   drive(session, 600, (_, tick) => ({
     buttons: MotorInput.Forward | (tick % 120 === 0 ? MotorInput.Jump : 0),
@@ -592,7 +606,7 @@ test("prediction survives latency, jitter and packet loss", () => {
 });
 
 test("the server drops redundant resends instead of replaying them", () => {
-  const session = makeSession(1, { latencyMs: 40 });
+  const session = makeSession(1, { conditions: { latencyMs: 40 } });
   drive(session, 200, () => ({ buttons: MotorInput.Forward, yaw: 0 }));
   assert.ok(
     session.server.staleCommandsDropped > 0,

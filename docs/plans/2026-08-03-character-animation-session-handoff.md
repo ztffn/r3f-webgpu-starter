@@ -24,17 +24,17 @@ netcode) is merged; main is the working base. Written 2026-08-03.
 
 Not one of the four below; added by the user during the weather-authority session. All 25
 live dials can now be driven room-wide by an admin (`DF2_ADMIN=1` on the server), on top of
-the replicated preset. Measured as not perf-gated: no dial allocates, and the only two that
-move a drawn count are bounded by per-client pools allocated at load. Rules, traps and the
-load-bearing effect order are `docs/12-...md` §8.2. Sequencing was the user's call: this
-went ahead of items 3 and 4.
+the replicated preset — both on ONE `RoomState` packet. Measured as not perf-gated: no dial
+allocates, and the only two that move a drawn count are bounded by per-client pools
+allocated at load. Rules and traps are `docs/12-...md` §8.1-8.2. Sequencing was the user's
+call: this went ahead of items 3 and 4.
 
 ## The four work items, in the user's own priority order
 
 ### 1. Weather and fog are not server-authoritative — DONE 2026-08-03
 
 Landed, with one approved divergence from the direction below: it rides the **codec** as
-`PacketType.WorldState` owned by `GameServer`, not Colyseus Schema. Reasons and the traps it
+`PacketType.RoomState` owned by `GameServer`, not Colyseus Schema. Reasons and the traps it
 is shaped around are recorded in `docs/12-...md` §8.1; the short version is that weather has
 a gameplay consumer coming (fog is concealment), so it belongs with the simulation rather
 than in the room shell, and a packet is reachable by the Node loopback suite while Schema is

@@ -5,8 +5,10 @@
 // read and write it. Two tables keyed by hand is the drift this file exists to
 // prevent: the server clamps to the same range the panel shows.
 //
-// Node-safe at runtime. Every type import here is `import type`, so the game
-// server can read the ranges without loading Three.
+// Node-safe at runtime, and it has to stay that way: the authoritative server
+// imports `clampVisualDial` from here. Every type import below is `import type` so
+// nothing pulls Three into Node — a value import from any of them breaks the server,
+// and only the Node tests will tell you.
 
 import type { BladeUniforms } from "./BladeMaterial";
 import type { createColorGrade } from "./colorGrade";
@@ -44,8 +46,8 @@ export interface VisualDial {
  * WIRE ORDER, and it is APPEND-ONLY for the same reason `WEATHER_PRESET_IDS` is:
  * a dial's index in this array IS its identity on the wire, so inserting or
  * removing an entry silently repoints an admin's fog setting at somebody's blade
- * twist. New dials go on the END. `tests/motor/visual-dials.test.ts` pins the
- * order and the count so a reorder fails there rather than in a room.
+ * twist. New dials go on the END. `tests/motor/session.test.ts` pins the order and
+ * the count so a reorder fails there rather than in a room.
  *
  * Grouped for the panel's benefit, but the groups are contiguous only by
  * convention — nothing reads them positionally.
@@ -311,19 +313,19 @@ export const VISUAL_DIALS: readonly VisualDial[] = [
   },
 ];
 
-/**
- * Legal ranges by dial id, for the authoritative server to clamp against.
- *
- * The server needs the ranges and nothing else — not the labels, not the
- * accessors — so this is what gets handed across the seam. Derived from the one
- * table rather than restated, because a server clamping to a range the panel does
- * not show is a bug that only appears as "the slider stops responding near the top".
- */
-export const VISUAL_DIAL_RANGES: readonly { readonly min: number; readonly max: number }[] =
+/** Bounds by dial id, so the clamp below is one array lookup rather than a scan. */
+const VISUAL_DIAL_RANGES: readonly { readonly min: number; readonly max: number }[] =
   VISUAL_DIALS.map((dial) => ({ min: dial.min, max: dial.max }));
 
 /**
  * Clamps a dial write, or returns null if there is nothing legal to write.
+ *
+ * THE ONE COPY of this arithmetic, and it is handed to the authoritative server
+ * rather than reimplemented there — the server clamps on the way in and
+ * `applyVisualDials` clamps again on the way out, so two versions would diverge the
+ * moment either gained a rule and the only symptom would be a slider settling
+ * somewhere the room never asked for. `src/net` cannot import this module, so
+ * `GameServerOptions.clampVisualDial` takes the function.
  *
  * Null for an unknown id (a newer peer naming a dial this build lacks) and for a
  * non-finite value, which is the case that matters: NaN assigned to a uniform does

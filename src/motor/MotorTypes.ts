@@ -188,13 +188,22 @@ export function createPlayerCommand(tick = 0): PlayerCommand {
 }
 
 /**
- * Eye height above the feet for a state's blended stance. Pure, so a client
+ * A stance dimension blended across the current transition. Pure, so a client
  * can call it on an interpolated snapshot of a remote player it does not
  * simulate.
  */
-export function eyeHeightFor(state: MotorState, tuning: MotorTuning): number {
-  const from = tuning.stances[state.previousStance].eye;
-  const to = tuning.stances[state.stance].eye;
+export function blendedStanceDimension(
+  state: MotorState,
+  tuning: MotorTuning,
+  dimension: "height" | "radius" | "eye"
+): number {
+  const from = tuning.stances[state.previousStance][dimension];
+  const to = tuning.stances[state.stance][dimension];
   const t = state.stanceProgress < 0 ? 0 : state.stanceProgress > 1 ? 1 : state.stanceProgress;
   return from + (to - from) * t;
+}
+
+/** Eye height above the feet for a state's blended stance. */
+export function eyeHeightFor(state: MotorState, tuning: MotorTuning): number {
+  return blendedStanceDimension(state, tuning, "eye");
 }

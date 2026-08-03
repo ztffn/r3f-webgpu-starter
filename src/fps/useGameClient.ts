@@ -8,11 +8,11 @@
 // Lives in src/fps because it imports React; src/net stays React-free.
 
 import { useEffect, useState } from "react";
-import type RAPIER from "@dimforge/rapier3d-compat";
 import type { Heightfield } from "../df2/Heightfield.ts";
 import { GameClient } from "../net/GameClient.ts";
 import { ColyseusClientTransport } from "../net/ColyseusTransport.ts";
-import { createMotorWorld, initRapier } from "../motor/MotorWorld.ts";
+import { createMotorWorld } from "../motor/MotorWorld.ts";
+import { useRapier } from "./useRapier.ts";
 
 /** `?server=` override, following the diagnostic-URL convention. */
 function readServerUrl(): string {
@@ -24,18 +24,7 @@ export function useGameClient(
   enabled: boolean,
   heightfield: Heightfield | null
 ): GameClient | null {
-  const [rapier, setRapier] = useState<typeof RAPIER | null>(null);
-  useEffect(() => {
-    if (!enabled) return;
-    let alive = true;
-    void initRapier().then((loaded) => {
-      if (alive) setRapier(loaded);
-    });
-    return () => {
-      alive = false;
-    };
-  }, [enabled]);
-
+  const rapier = useRapier(enabled);
   const [client, setClient] = useState<GameClient | null>(null);
   useEffect(() => {
     if (!enabled || rapier === null || heightfield === null) return;

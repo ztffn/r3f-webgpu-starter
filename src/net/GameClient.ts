@@ -26,6 +26,7 @@ import {
   encodeCommands,
   packetTypeOf,
   quantiseCommand,
+  wrapPi,
 } from "./SnapshotCodec.ts";
 import type { ClientTransport } from "./Transport.ts";
 
@@ -33,6 +34,7 @@ export interface RemotePlayer {
   readonly id: number;
   /** Interpolated presentation pose. Never authoritative. */
   readonly position: Vec3;
+  /** Interpolated presentation yaw; the wire target is `state.yawRadians`. */
   yawRadians: number;
   state: MotorState;
 }
@@ -113,6 +115,12 @@ export class GameClient {
     return this.localId === null ? null : (this.room.get(this.localId)?.state ?? null);
   }
 
+  /** Connection phase for a UI. The inputs live here, so the mapping does too. */
+  get phase(): "connecting" | "playing" | "dropped" {
+    if (this.connectionLost) return "dropped";
+    return this.playerId < 0 ? "connecting" : "playing";
+  }
+
   get remotePlayers(): IterableIterator<RemotePlayer> {
     return this.remotes.values();
   }
@@ -174,7 +182,6 @@ export class GameClient {
         });
       } else {
         existing.state = player.state;
-        existing.yawRadians = player.state.yawRadians;
       }
     }
 
@@ -195,6 +202,9 @@ export class GameClient {
       remote.position.x += (remote.state.position.x - remote.position.x) * blend;
       remote.position.y += (remote.state.position.y - remote.position.y) * blend;
       remote.position.z += (remote.state.position.z - remote.position.z) * blend;
+      // Wire yaw snaps at the patch rate; shortest-arc so a 350°-to-10° turn
+      // does not spin the long way round.
+      remote.yawRadians += wrapPi(remote.state.yawRadians - remote.yawRadians) * blend;
     }
   }
 

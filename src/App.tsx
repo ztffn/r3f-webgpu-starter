@@ -10,7 +10,8 @@ import type { LoadedTerrain } from "./df2/loadTerrain";
 import type { PerfSample } from "./df2/PerfMonitor";
 import { BENCH, publish } from "./df2/bench";
 
-const requestedScene = new URLSearchParams(window.location.search).get("scene");
+const urlParams = new URLSearchParams(window.location.search);
+const requestedScene = urlParams.get("scene");
 const scopeDemo = requestedScene === "scope";
 const weaponDemo = requestedScene === "weapon";
 /**
@@ -21,17 +22,14 @@ const weaponDemo = requestedScene === "weapon";
  * a body that actually collides, so stance, speed and being airborne reach
  * weapon handling instead of being inferred from the camera.
  */
-const motorDemo =
-  requestedScene === "motor" ||
-  new URLSearchParams(window.location.search).get("motor") === "1";
+const motorDemo = requestedScene === "motor" || urlParams.get("motor") === "1";
 /**
  * Networked play: the motor predicts against the authoritative game server and
  * remote players appear in the world. `?scene=scope&motor=1&net=1`, with an
  * optional `server=` URL override (default ws://localhost:2567). Requires the
  * motor — there is nothing to network without it.
  */
-const netDemo =
-  motorDemo && new URLSearchParams(window.location.search).get("net") === "1";
+const netDemo = motorDemo && urlParams.get("net") === "1";
 
 export default function App() {
   const [wireframe, setWireframe] = useState(false);

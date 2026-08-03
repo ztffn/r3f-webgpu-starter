@@ -14,16 +14,7 @@ import { join } from "node:path";
 import { inflateSync } from "node:zlib";
 import { Heightfield } from "../../src/df2/Heightfield.ts";
 import { HEIGHT_SCALE, METERS_PER_TEXEL } from "../../src/df2/config.ts";
-
-interface TerrainManifest {
-  readonly assets?: {
-    readonly height?: {
-      readonly file: string;
-      readonly width: number;
-      readonly height: number;
-    };
-  };
-}
+import type { TerrainMeta } from "../../src/df2/loadTerrain.ts";
 
 export function loadServerTerrain(
   slug: string,
@@ -32,7 +23,7 @@ export function loadServerTerrain(
   const base = join(assetRoot, slug);
   const manifest = JSON.parse(
     readFileSync(join(base, "terrain.json"), "utf8")
-  ) as TerrainManifest;
+  ) as TerrainMeta;
   const heightAsset = manifest.assets?.height;
   if (heightAsset === undefined) {
     throw new Error(`${slug}: terrain.json carries no assets.height`);

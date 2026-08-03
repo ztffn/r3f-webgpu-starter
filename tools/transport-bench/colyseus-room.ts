@@ -6,11 +6,8 @@
 
 import { Room, Server, type Client } from "@colyseus/core";
 import { WebSocketTransport } from "@colyseus/ws-transport";
+import { COMMANDS_UP, PACKET_DOWN } from "../../src/net/ColyseusProtocol.ts";
 import type { ServerConnection, ServerTransport } from "../../src/net/Transport.ts";
-
-/** Message types on the wire; the payload stays the project's own codec bytes. */
-const COMMANDS_UP = 1;
-const PACKET_DOWN = 2;
 
 class BridgeTransport implements ServerTransport {
   connectionHandler: ((connection: ServerConnection) => void) | null = null;

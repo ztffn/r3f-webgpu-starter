@@ -29,6 +29,7 @@ const ANGLE_SCALE = 32767 / Math.PI;
 const VELOCITY_SCALE = 32767 / 64;
 
 const STANCES: readonly PlayerStance[] = ["stand", "crouch", "prone"];
+const STANCE_BITS: Record<PlayerStance, number> = { stand: 0, crouch: 1, prone: 2 };
 
 function packAngle(radians: number): number {
   return clampInt16(Math.round(wrapPi(radians) * ANGLE_SCALE));
@@ -38,7 +39,8 @@ function unpackAngle(raw: number): number {
   return raw / ANGLE_SCALE;
 }
 
-function wrapPi(radians: number): number {
+/** Wrap into (-pi, pi]. Exported as the one angle-wrap shared with consumers. */
+export function wrapPi(radians: number): number {
   if (!Number.isFinite(radians)) return 0;
   const wrapped = (radians + Math.PI) % (2 * Math.PI);
   return (wrapped < 0 ? wrapped + 2 * Math.PI : wrapped) - Math.PI;
@@ -147,8 +149,8 @@ export function encodeSnapshot(
     view.setInt16(at + 16, clampInt16(Math.round(state.velocity.y * VELOCITY_SCALE)));
     view.setInt16(at + 18, clampInt16(Math.round(state.velocity.z * VELOCITY_SCALE)));
     view.setInt16(at + 20, packAngle(state.yawRadians));
-    const stanceBits = Math.max(0, STANCES.indexOf(state.stance));
-    const previousStanceBits = Math.max(0, STANCES.indexOf(state.previousStance));
+    const stanceBits = STANCE_BITS[state.stance];
+    const previousStanceBits = STANCE_BITS[state.previousStance];
     view.setUint8(
       at + 22,
       stanceBits |

@@ -13,12 +13,9 @@ import * as THREE from "three/webgpu";
 import { color } from "three/tsl";
 import type { GameClient } from "../net/GameClient.ts";
 import type { Atmosphere } from "../df2/atmosphere";
+import { blendedStanceDimension } from "../motor/MotorTypes.ts";
+import { PROXY_HEIGHT, PROXY_RADIUS } from "./MotorControls";
 
-/** Unit capsule the per-stance dimensions scale; matches the local proxy. */
-const REFERENCE_RADIUS = 0.5;
-const REFERENCE_HEIGHT = 2;
-/** Wire yaw snaps at the patch rate; smooth it at the position smoother's rate. */
-const YAW_RATE = 12;
 const REMOTE_COLOR = 0xb8563f;
 
 export interface RemotePlayersProps {
@@ -26,20 +23,17 @@ export interface RemotePlayersProps {
   atmosphere: Atmosphere;
 }
 
-interface PooledRemote {
-  readonly mesh: THREE.Mesh;
-  yawRadians: number;
-}
-
 export function RemotePlayers({ client, atmosphere }: RemotePlayersProps) {
   const groupRef = useRef<THREE.Group | null>(null);
-  const pool = useMemo(() => new Map<number, PooledRemote>(), []);
+  const pool = useMemo(() => new Map<number, THREE.Mesh>(), []);
   const seen = useMemo(() => new Set<number>(), []);
 
+  // The same unit capsule the local collider proxy scales, so the two cannot
+  // drift apart in reference dimensions; only the material differs.
   const shared = useMemo(() => {
     const geometry = new THREE.CapsuleGeometry(
-      REFERENCE_RADIUS,
-      REFERENCE_HEIGHT - REFERENCE_RADIUS * 2,
+      PROXY_RADIUS,
+      PROXY_HEIGHT - PROXY_RADIUS * 2,
       6,
       16
     );
@@ -60,53 +54,44 @@ export function RemotePlayers({ client, atmosphere }: RemotePlayersProps) {
   useFrame((_, delta) => {
     const group = groupRef.current;
     if (group === null) return;
-    const clamped = Math.min(delta, 0.1);
-    client.interpolateRemotes(clamped);
-    const blend = 1 - Math.exp(-YAW_RATE * clamped);
-    const stances = client.tuning.stances;
+    client.interpolateRemotes(Math.min(delta, 0.1));
 
     seen.clear();
     for (const remote of client.remotePlayers) {
       seen.add(remote.id);
-      let entry = pool.get(remote.id);
-      if (entry === undefined) {
-        const mesh = new THREE.Mesh(shared.geometry, shared.material);
+      let mesh = pool.get(remote.id);
+      if (mesh === undefined) {
+        mesh = new THREE.Mesh(shared.geometry, shared.material);
         group.add(mesh);
-        entry = { mesh, yawRadians: remote.yawRadians };
-        pool.set(remote.id, entry);
+        pool.set(remote.id, mesh);
       }
-      // The wire now carries the stance blend; use it, or every remote stance
+      // The wire carries the stance blend; use it, or every remote stance
       // change pops instead of ducking the way the local capsule does.
-      const from = stances[remote.state.previousStance];
-      const to = stances[remote.state.stance];
-      const progress = remote.state.stanceProgress;
-      const height = from.height + (to.height - from.height) * progress;
-      const radius = from.radius + (to.radius - from.radius) * progress;
-      entry.yawRadians += shortestArc(remote.yawRadians - entry.yawRadians) * blend;
-      entry.mesh.position.set(
+      const height = blendedStanceDimension(remote.state, client.tuning, "height");
+      const radius = blendedStanceDimension(remote.state, client.tuning, "radius");
+      mesh.position.set(
         remote.position.x,
         remote.position.y + height / 2,
         remote.position.z
       );
-      entry.mesh.rotation.y = entry.yawRadians;
-      entry.mesh.scale.set(
-        radius / REFERENCE_RADIUS,
-        height / REFERENCE_HEIGHT,
-        radius / REFERENCE_RADIUS
+      mesh.rotation.y = remote.yawRadians;
+      mesh.scale.set(
+        radius / PROXY_RADIUS,
+        height / PROXY_HEIGHT,
+        radius / PROXY_RADIUS
       );
     }
 
-    for (const [id, entry] of pool) {
-      if (seen.has(id)) continue;
-      group.remove(entry.mesh);
-      pool.delete(id);
+    // The pool is always a superset of `seen`, so equal sizes proves there is
+    // nothing to remove — the sweep only runs on the frame someone leaves.
+    if (pool.size !== seen.size) {
+      pool.forEach((mesh, id) => {
+        if (seen.has(id)) return;
+        group.remove(mesh);
+        pool.delete(id);
+      });
     }
   });
 
   return <group ref={groupRef} />;
-}
-
-function shortestArc(deltaRadians: number): number {
-  const wrapped = (deltaRadians + Math.PI) % (2 * Math.PI);
-  return (wrapped < 0 ? wrapped + 2 * Math.PI : wrapped) - Math.PI;
 }

@@ -5,6 +5,7 @@
 // the bench wants one dense room, not several sparse ones.
 
 import { Client } from "@colyseus/sdk";
+import { COMMANDS_UP, PACKET_DOWN } from "../../src/net/ColyseusProtocol.ts";
 
 export interface BenchClientOptions {
   sendHz: number;
@@ -14,9 +15,6 @@ export interface BenchClientOptions {
   onConnected: () => void;
   onMessageBytes: (bytes: Uint8Array) => void;
 }
-
-const COMMANDS_UP = 1;
-const PACKET_DOWN = 2;
 
 export async function joinBenchRoom(
   url: string,

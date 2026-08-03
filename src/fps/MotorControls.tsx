@@ -11,16 +11,16 @@
 // and the resulting state onto the camera.
 
 import { useFrame, useThree } from "@react-three/fiber";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three/webgpu";
-import type RAPIER from "@dimforge/rapier3d-compat";
 import type { Heightfield } from "../df2/Heightfield";
 import type { FlyState, Stance } from "../df2/FlyControls";
 import type { LookSensitivityController } from "./core/LookSensitivityController";
 import type { PlayerMotorSnapshotTarget, PlayerWeaponIntent } from "./core/PlayerMotor.ts";
 import type { GameClient } from "../net/GameClient.ts";
 import { MotorRoom } from "../motor/MotorRoom.ts";
-import { createMotorWorld, initRapier } from "../motor/MotorWorld.ts";
+import { createMotorWorld } from "../motor/MotorWorld.ts";
+import { useRapier } from "./useRapier.ts";
 import {
   DEFAULT_MOTOR_TUNING,
   MotorInput,
@@ -97,9 +97,10 @@ const THIRD_PERSON_DISTANCE = 4.5;
 /**
  * The proxy capsule is built once at these dimensions and scaled per stance,
  * so a stance change costs a scale write rather than rebuilding geometry.
+ * Exported so remote-player capsules share the same reference dimensions.
  */
-const PROXY_RADIUS = 0.5;
-const PROXY_HEIGHT = 2;
+export const PROXY_RADIUS = 0.5;
+export const PROXY_HEIGHT = 2;
 const TICK_SECONDS = DEFAULT_MOTOR_TUNING.fixedTimestepSeconds;
 /** Ticks one frame may simulate. Bounds the catch-up after a hitch or a tab switch. */
 const MAX_CATCHUP_TICKS = 5;
@@ -116,7 +117,9 @@ export function MotorControls({
   weaponIntent,
 }: MotorControlsProps) {
   const { camera, gl } = useThree();
-  const [rapier, setRapier] = useState<typeof RAPIER | null>(null);
+  // Networked, the client already owns a room; the local physics module is
+  // only needed when this component simulates for itself.
+  const rapier = useRapier(client === null);
 
   const rig = useMemo(
     () => ({
@@ -175,17 +178,6 @@ export function MotorControls({
   });
   const commands = useMemo(() => new Map<string, PlayerCommand>(), []);
   const eye = useMemo(() => ({ x: 0, y: 0, z: 0 }), []);
-
-  useEffect(() => {
-    if (client !== null) return;
-    let alive = true;
-    void initRapier().then((loaded) => {
-      if (alive) setRapier(loaded);
-    });
-    return () => {
-      alive = false;
-    };
-  }, [client]);
 
   // Networked, the client's tuning is the truth: a URL-tuned client would
   // steer differently from the server and reconcile every single tick.
@@ -312,24 +304,6 @@ export function MotorControls({
     const motor = room?.get(LOCAL_ID);
     if (client === null && motor === undefined) return;
 
-    // Networked but not yet welcomed: nothing to simulate or aim the camera
-    // with. Keep the throttled report alive so a stuck join reads as
-    // "connecting" on the HUD rather than being indistinguishable from a hang.
-    if (client !== null && client.localState === null) {
-      rig.report += delta;
-      if (rig.report > 0.15) {
-        rig.report = 0;
-        onState?.({
-          position: camera.position.clone() as THREE.Vector3,
-          agl: 0,
-          speed: 0,
-          grounded: false,
-          net: netPhaseOf(client),
-        });
-      }
-      return;
-    }
-
     rig.accumulator += Math.min(delta, 0.25);
     let budget = MAX_CATCHUP_TICKS;
     while (rig.accumulator >= TICK_SECONDS && budget > 0) {
@@ -354,88 +328,100 @@ export function MotorControls({
     // than compounding it into the next one.
     if (rig.accumulator > TICK_SECONDS) rig.accumulator = 0;
 
-    const state = client !== null ? client.localState : motor!.state;
-    if (state === null) return;
-    eye.x = state.position.x;
-    eye.y = state.position.y + eyeHeightFor(state, tuning);
-    eye.z = state.position.z;
+    // Null only while networked and not yet welcomed. The report below still
+    // runs, so a stuck join reads as "connecting" on the HUD rather than being
+    // indistinguishable from a hang.
+    const state = client !== null ? client.localState : (motor?.state ?? null);
+    if (state !== null) {
+      eye.x = state.position.x;
+      eye.y = state.position.y + eyeHeightFor(state, tuning);
+      eye.z = state.position.z;
 
-    // Yaw 0 faces -Z, matching the motor's movement basis.
-    const cosPitch = Math.cos(rig.pitch);
-    const forwardX = -Math.sin(rig.yaw) * cosPitch;
-    const forwardY = Math.sin(rig.pitch);
-    const forwardZ = -Math.cos(rig.yaw) * cosPitch;
+      // Yaw 0 faces -Z, matching the motor's movement basis.
+      const cosPitch = Math.cos(rig.pitch);
+      const forwardX = -Math.sin(rig.yaw) * cosPitch;
+      const forwardY = Math.sin(rig.pitch);
+      const forwardZ = -Math.cos(rig.yaw) * cosPitch;
 
-    const body = bodyRef.current;
-    if (body !== null) {
-      body.visible = rig.thirdPerson;
-      if (rig.thirdPerson) {
-        const dimensions = tuning.stances[state.stance];
-        body.position.set(
-          state.position.x,
-          state.position.y + dimensions.height / 2,
-          state.position.z
-        );
-        body.rotation.y = rig.yaw;
-        body.scale.set(
-          dimensions.radius / PROXY_RADIUS,
-          dimensions.height / PROXY_HEIGHT,
-          dimensions.radius / PROXY_RADIUS
-        );
+      const body = bodyRef.current;
+      if (body !== null) {
+        body.visible = rig.thirdPerson;
+        if (rig.thirdPerson) {
+          const dimensions = tuning.stances[state.stance];
+          body.position.set(
+            state.position.x,
+            state.position.y + dimensions.height / 2,
+            state.position.z
+          );
+          body.rotation.y = rig.yaw;
+          body.scale.set(
+            dimensions.radius / PROXY_RADIUS,
+            dimensions.height / PROXY_HEIGHT,
+            dimensions.radius / PROXY_RADIUS
+          );
+        }
       }
-    }
 
-    if (rig.thirdPerson) {
-      // Pull straight back along the view ray and keep the camera out of the
-      // ground; no collision sweep, because this is a diagnostic view.
-      const ground = heightfield.sample(
-        eye.x - forwardX * THIRD_PERSON_DISTANCE,
-        eye.z - forwardZ * THIRD_PERSON_DISTANCE
-      );
-      camera.position.set(
-        eye.x - forwardX * THIRD_PERSON_DISTANCE,
-        Math.max(eye.y - forwardY * THIRD_PERSON_DISTANCE, ground + 0.5),
-        eye.z - forwardZ * THIRD_PERSON_DISTANCE
-      );
-      camera.lookAt(eye.x, eye.y, eye.z);
-    } else {
-      camera.position.set(eye.x, eye.y, eye.z);
-      camera.lookAt(eye.x + forwardX, eye.y + forwardY, eye.z + forwardZ);
-    }
+      if (rig.thirdPerson) {
+        // Pull straight back along the view ray and keep the camera out of the
+        // ground; no collision sweep, because this is a diagnostic view.
+        const ground = heightfield.sample(
+          eye.x - forwardX * THIRD_PERSON_DISTANCE,
+          eye.z - forwardZ * THIRD_PERSON_DISTANCE
+        );
+        camera.position.set(
+          eye.x - forwardX * THIRD_PERSON_DISTANCE,
+          Math.max(eye.y - forwardY * THIRD_PERSON_DISTANCE, ground + 0.5),
+          eye.z - forwardZ * THIRD_PERSON_DISTANCE
+        );
+        camera.lookAt(eye.x, eye.y, eye.z);
+      } else {
+        camera.position.set(eye.x, eye.y, eye.z);
+        camera.lookAt(eye.x + forwardX, eye.y + forwardY, eye.z + forwardZ);
+      }
 
-    // Mounted ahead of the weapon host so this lands first, but nothing depends
-    // on that: the object persists, so the worst case is handling context one
-    // frame stale, which is already sampled once per frame anyway. Position is
-    // the EYE, matching what the weapon host uses as a shot origin.
-    if (pose != null) {
-      pose.position.set(eye.x, eye.y, eye.z);
-      pose.stance = state.stance;
-      pose.grounded = state.grounded;
-      pose.sprinting = state.sprinting;
-      pose.planarSpeedMetresPerSecond = Math.hypot(state.velocity.x, state.velocity.z);
-    }
+      // Mounted ahead of the weapon host so this lands first, but nothing depends
+      // on that: the object persists, so the worst case is handling context one
+      // frame stale, which is already sampled once per frame anyway. Position is
+      // the EYE, matching what the weapon host uses as a shot origin.
+      if (pose != null) {
+        pose.position.set(eye.x, eye.y, eye.z);
+        pose.stance = state.stance;
+        pose.grounded = state.grounded;
+        pose.sprinting = state.sprinting;
+        pose.planarSpeedMetresPerSecond = Math.hypot(state.velocity.x, state.velocity.z);
+      }
 
-    // The motor refuses a stand-up with no headroom, so its stance is the truth
-    // and the app's copy follows it rather than driving it.
-    if (state.stance !== rig.reportedStance) {
-      rig.reportedStance = state.stance;
-      rig.stanceIntent = state.stance;
-      onStance?.(state.stance);
+      // The motor refuses a stand-up with no headroom, so its stance is the truth
+      // and the app's copy follows it rather than driving it.
+      if (state.stance !== rig.reportedStance) {
+        rig.reportedStance = state.stance;
+        rig.stanceIntent = state.stance;
+        onStance?.(state.stance);
+      }
     }
 
     rig.report += delta;
     if (rig.report > 0.15) {
       rig.report = 0;
-      const report: FlyState = {
-        position: camera.position.clone() as THREE.Vector3,
-        // AGL is the EYE above ground, matching what FlyControls reports and
-        // what `position` above already is. Reporting the feet instead makes
-        // the readout sit at 0.0 m whenever the player is standing on anything.
-        agl: eye.y - heightfield.sample(state.position.x, state.position.z),
-        speed: Math.hypot(state.velocity.x, state.velocity.z),
-        grounded: state.grounded,
-      };
-      if (client !== null) report.net = netPhaseOf(client);
+      const report: FlyState =
+        state !== null
+          ? {
+              position: camera.position.clone() as THREE.Vector3,
+              // AGL is the EYE above ground, matching what FlyControls reports
+              // and what `position` above already is. Reporting the feet makes
+              // the readout sit at 0.0 m whenever the player stands on anything.
+              agl: eye.y - heightfield.sample(state.position.x, state.position.z),
+              speed: Math.hypot(state.velocity.x, state.velocity.z),
+              grounded: state.grounded,
+            }
+          : {
+              position: camera.position.clone() as THREE.Vector3,
+              agl: 0,
+              speed: 0,
+              grounded: false,
+            };
+      if (client !== null) report.net = { phase: client.phase, playerId: client.playerId };
       onState?.(report);
     }
   });
@@ -449,17 +435,6 @@ export function MotorControls({
       frustumCulled={false}
     />
   );
-}
-
-function netPhaseOf(client: GameClient): NonNullable<FlyState["net"]> {
-  return {
-    phase: client.connectionLost
-      ? "dropped"
-      : client.playerId < 0
-        ? "connecting"
-        : "playing",
-    playerId: client.playerId,
-  };
 }
 
 function buttonsFrom(

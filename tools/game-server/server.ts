@@ -16,7 +16,7 @@ import {
   COMMANDS_UP,
   GAME_ROOM,
   PACKET_DOWN,
-} from "../../src/net/ColyseusTransport.ts";
+} from "../../src/net/ColyseusProtocol.ts";
 import { createMotorWorld, initRapier } from "../../src/motor/MotorWorld.ts";
 import { DEFAULT_MOTOR_TUNING } from "../../src/motor/MotorTypes.ts";
 import type { ServerConnection, ServerTransport } from "../../src/net/Transport.ts";

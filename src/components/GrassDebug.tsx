@@ -9,6 +9,7 @@
 // and are listed at the bottom as URL parameters needing a reload.
 
 import { useEffect, useRef, useState } from "react";
+import { CollapsiblePanel } from "./CollapsiblePanel";
 import type { GrassUniforms } from "../df2/GrassMaterial";
 import { GRASS_STEPS } from "../df2/config";
 import { BENCH } from "../df2/bench";
@@ -148,8 +149,7 @@ export function GrassDebug({ uniforms }: GrassDebugProps) {
   };
 
   return (
-    <section className="panel" id="grassdebug">
-      <span className="eyebrow">Grass (live)</span>
+    <CollapsiblePanel id="grassdebug" title="Grass (live)">
 
       {DIALS.map((d) => (
         <label key={d.key} className="dial">
@@ -236,6 +236,6 @@ export function GrassDebug({ uniforms }: GrassDebugProps) {
         <code>?dpr=2</code> to push the frame off the cap when you need to see the
         difference a dial actually makes.
       </p>
-    </section>
+    </CollapsiblePanel>
   );
 }

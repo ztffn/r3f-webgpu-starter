@@ -34,13 +34,19 @@
     "node": ">=22.6"
   },
   "devDependencies": {
+    "@colyseus/core": "^0.17.46",
+    "@colyseus/sdk": "^0.17.43",
+    "@colyseus/uwebsockets-transport": "^0.17.21",
+    "@colyseus/ws-transport": "^0.17.13",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@types/three": "^0.185.1",
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^6.0.4",
     "@webgpu/types": "^0.1.60",
+    "express": "^5.2.1",
     "typescript": "^5.9.0",
+    "uwebsockets-express": "^2.0.4",
     "vite": "^8.1.5",
     "ws": "^8.21.1"
   }

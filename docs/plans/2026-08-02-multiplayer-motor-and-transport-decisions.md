@@ -114,6 +114,12 @@ public benchmark resembling a 64-player FPS room was found; community reports ra
 16 players per room to a few hundred across all rooms. **This is the single unvalidated
 assumption in the stack and it is why the framework choice is deferred rather than made.**
 
+> **Resolved 2026-08-03** — measured, and the evidence supports **adoption** (pending
+> sign-off): Colyseus 0.17 with the hot path on raw bytes and `patchRate: null` adds
+> +0.11 ms tick wall / +0.20 ms CPU per tick over raw `ws` at 64 clients, an order of
+> magnitude under the ~2 ms criterion. Full evidence, method and scope in
+> `2026-08-03-colyseus-transport-evaluation.md`.
+
 ## 6. Decision: two collision representations, with a stated tolerance
 
 Character collision will be Rapier. Bullets stay on `CompositeWorldQuery` — the analytic

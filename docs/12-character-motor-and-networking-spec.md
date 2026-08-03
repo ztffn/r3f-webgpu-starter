@@ -231,10 +231,21 @@ gradients rather than sample one.
 
 ## 11. Deferred
 
-Cross-runtime divergence on genuinely different hardware, dense-room cost under a real
-server process, correction behaviour for a whole room rather than one player, client cost of
-64 interpolated remotes, and collision agreement measured on real extracted terrain rather
-than a synthetic grid. All are listed with their blockers in the measurements document.
+Cross-runtime divergence on genuinely different hardware, correction behaviour for a whole
+room rather than one player, client cost of 64 interpolated remotes, and collision
+agreement measured on real extracted terrain rather than a synthetic grid. All are listed
+with their blockers in the measurements document. Dense-room cost under a real server
+process is answered: `tools/transport-bench/run.ts`, recorded in
+`plans/2026-08-03-colyseus-transport-evaluation.md`.
+
+**The catch-up drain can spiral unrecoverably.** One stall that pushes every peer past
+`TARGET_BUFFER_DEPTH` at once makes each later tick run a full room step per backed-up
+peer — 65 × ~2.1 ms ≈ 137 ms per tick at 64 players, measured — while consumption stays
+below the 60 Hz arrival rate, so the queues pin and discard input forever. A ~200 ms GC
+pause could trigger it in production. Deferred fix: a global catch-up budget per tick, or
+catch-up steps that step only the lagging motor. Evidence in the 2026-08-03 evaluation
+record §4.
 
 Beyond measurement: vehicles, animation on the capsule, weapon integration, and the session
-framework choice itself.
+framework choice itself — resolved 2026-08-03 in favour of Colyseus (pending sign-off), see
+the evaluation record.

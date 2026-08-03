@@ -74,6 +74,12 @@ hot path on hand-packed binary rather than Colyseus Schema.
 **Still missing:** behaviour as tick and patch rates diverge, and the same run under an
 actual server process with sockets attached rather than a bare loop.
 
+> **Update 2026-08-03:** the sockets-attached run now exists —
+> `tools/transport-bench/run.ts` measures 64 players over real WebSockets at 4.29 ms mean
+> per tick (59 ticks/s held), and the same harness measured Colyseus's overhead at
+> +0.11 ms. See `2026-08-03-colyseus-transport-evaluation.md`. Tick/patch divergence
+> remains open.
+
 ## §7.1 Cross-runtime divergence — first result, 3.4 cm
 
 Two Chrome tabs running the real client against the Node server over real WebSockets, on

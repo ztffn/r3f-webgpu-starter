@@ -19,9 +19,16 @@ implementation behind it, and a two-client session harness.
 - Two browser clients share one authoritative room over real sockets.
 - 36 headless tests under `tests/motor/`, running in bare Node with no browser globals.
 
-What does **not** exist: matchmaking, reconnection, persistence, anti-cheat, vehicles,
-animation, and any weapon integration. The motor and the weapon path are still separate;
-nothing feeds motor stance or speed into weapon handling yet.
+Weapon handling reads the motor: `?scene=scope&motor=1` carries the weapon on a collided
+body, and `WeaponHandlingContext` gets stance, planar speed and real grounded state from
+`MotorState` instead of inferring them from the camera. That last one is the point — camera
+differentiation cannot tell you the player is airborne, so before this `grounded` was
+whatever the app's fly/on-foot toggle said and `airborneDispersionRadians` never applied.
+
+What does **not** exist: matchmaking, reconnection, persistence, anti-cheat, vehicles, and
+animation. On the weapon side the motor still does not own the shot origin (the camera
+does), recoil does not push the body, and movement is not constrained while reloading or
+aiming.
 
 ## 2. Module map
 
@@ -175,8 +182,10 @@ decision record defers the session framework until the measurements exist.
 
 ## 9. Controls and URLs
 
-`?scene=motor` walks the motor instead of the terrain spike's fly camera. The two are
-mutually exclusive because both write the camera every frame.
+The motor is selected independently of the scene. `?scene=motor` is movement alone;
+**`?scene=scope&motor=1`** is the weapon carried on a collided body, which is the
+combination worth playing. Either way the motor replaces the terrain spike's fly camera —
+the two are mutually exclusive because both write the camera every frame.
 
 | Input | Effect |
 | --- | --- |

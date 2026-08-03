@@ -410,9 +410,12 @@ that the test script fails in a way that does not name the version as the cause.
   is currently closed by assumption rather than evidence. See
   `plans/2026-08-01-ecctrl-player-vehicle-controller-spike-design.md`;
 - vehicles of any kind;
-- **joining the motor to the weapon path.** They are separate today: `?scene=motor` walks a
-  collided body and `?scene=scope` fires a weapon, and movement does not feed stance,
-  planar speed or grounded state into weapon handling;
+- weapon integration BEYOND the handling context. `?scene=scope&motor=1` now carries the
+  weapon on a collided body, and stance, planar speed and real grounded state reach
+  `WeaponHandlingContext` from the motor rather than being inferred from the camera. What
+  is still missing: the motor does not own the weapon's shot origin (that is still the
+  camera), recoil does not push the body, and nothing stops or slows movement while
+  reloading or aiming;
 - animation on the character, a bot harness, and a 32/64-rig browser benchmark. A
   third-person collider proxy exists (`?scene=motor`, then V) but it is a diagnostic
   wireframe capsule, not a character host, and `CharacterAimRig` remains unmounted;

@@ -10,7 +10,7 @@ import { float, mix, positionGeometry, smoothstep, texture, uniform, vec2, vec3 
 import { CAMERA_FAR, CAMERA_FOV, CAMERA_NEAR } from "../df2/config";
 import { publishRange, type RangeSample } from "./rangeTelemetry";
 import { LocalPlayerController, type LocalPlayerCommands } from "./core/LocalPlayerController";
-import type { PlayerStance } from "./core/PlayerMotor";
+import type { PlayerStance, PlayerMotorSnapshotTarget } from "./core/PlayerMotor";
 import type { RegisteredWorldQuery } from "./core/WorldQuery";
 import { BallisticProjectileSystem, type BallisticResult } from "./combat/BallisticProjectileSystem";
 import { readBallisticEnvironment } from "./combat/BallisticEnvironment";
@@ -86,6 +86,13 @@ export interface WeaponPrototypeProps {
   stance?: PlayerStance;
   grounded?: boolean;
   lookSensitivity: LookSensitivityController;
+  /**
+   * Authoritative player state from a real character motor, published earlier
+   * this frame. When present it REPLACES the `stance` and `grounded` props and
+   * the camera-differentiated speed — see the frame body for why grounded in
+   * particular cannot be inferred without it.
+   */
+  motorPose?: PlayerMotorSnapshotTarget | null;
 }
 
 function collectTextures(material: THREE.Material, into: Set<THREE.Texture>) {
@@ -235,6 +242,7 @@ export function WeaponPrototype({
   stance = "stand",
   grounded = false,
   lookSensitivity,
+  motorPose = null,
 }: WeaponPrototypeProps) {
   const { camera, gl, scene, size } = useThree();
   const player = useMemo(() => new LocalPlayerController(), []);
@@ -796,8 +804,23 @@ export function WeaponPrototype({
     framePreviousQuaternion.copy(camera.quaternion);
     framePoseReady.current = true;
 
-    playerPose.stance = stance;
-    playerPose.grounded = grounded;
+    if (motorPose !== null) {
+      // A real motor knows things the camera cannot express. `grounded`
+      // especially: differentiating camera position cannot tell you the player
+      // is airborne, so without this it stays true through a jump and
+      // `airborneDispersionRadians` never applies. Speed comes from the motor's
+      // own velocity rather than a differentiated position, which also drops
+      // the frame-rate-dependent noise in that estimate.
+      playerPose.stance = motorPose.stance;
+      playerPose.grounded = motorPose.grounded;
+      playerPose.planarSpeedMetresPerSecond = Math.min(
+        MAX_TRANSITIONAL_SPEED_METRES_PER_SECOND,
+        motorPose.planarSpeedMetresPerSecond
+      );
+    } else {
+      playerPose.stance = stance;
+      playerPose.grounded = grounded;
+    }
     player.syncMotorPose(playerPose);
     handlingContext.stance = player.stance;
     handlingContext.grounded = player.grounded;

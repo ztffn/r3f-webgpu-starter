@@ -17,6 +17,7 @@ import type RAPIER from "@dimforge/rapier3d-compat";
 import type { Heightfield } from "../df2/Heightfield";
 import type { FlyState, Stance } from "../df2/FlyControls";
 import type { LookSensitivityController } from "./core/LookSensitivityController";
+import type { PlayerMotorSnapshotTarget } from "./core/PlayerMotor.ts";
 import { MotorRoom } from "../motor/MotorRoom.ts";
 import { createMotorWorld, initRapier } from "../motor/MotorWorld.ts";
 import {
@@ -35,6 +36,12 @@ export interface MotorControlsProps {
   onState?: (state: FlyState) => void;
   /** Fired when the motor's own stance changes, so the HUD and grass follow it. */
   onStance?: (stance: Stance) => void;
+  /**
+   * Written every frame, before the weapon host reads it. Supplying this is
+   * what lets weapon handling use real grounded state and real velocity instead
+   * of inferring both from the camera.
+   */
+  pose?: PlayerMotorSnapshotTarget | null;
 }
 
 /**
@@ -94,6 +101,7 @@ export function MotorControls({
   lookSensitivity,
   onState,
   onStance,
+  pose,
 }: MotorControlsProps) {
   const { camera, gl } = useThree();
   const [rapier, setRapier] = useState<typeof RAPIER | null>(null);
@@ -342,6 +350,17 @@ export function MotorControls({
     } else {
       camera.position.set(eye.x, eye.y, eye.z);
       camera.lookAt(eye.x + forwardX, eye.y + forwardY, eye.z + forwardZ);
+    }
+
+    // Mounted ahead of the weapon host so this lands first, but nothing depends
+    // on that: the object persists, so the worst case is handling context one
+    // frame stale, which is already sampled once per frame anyway. Position is
+    // the EYE, matching what the weapon host uses as a shot origin.
+    if (pose != null) {
+      pose.position.set(eye.x, eye.y, eye.z);
+      pose.stance = state.stance;
+      pose.grounded = state.grounded;
+      pose.planarSpeedMetresPerSecond = Math.hypot(state.velocity.x, state.velocity.z);
     }
 
     // The motor refuses a stand-up with no headroom, so its stance is the truth

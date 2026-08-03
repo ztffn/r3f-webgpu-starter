@@ -33,6 +33,7 @@ import { loadTerrain, type LoadedTerrain } from "./loadTerrain";
 import { WeaponPrototype } from "../fps/WeaponPrototype";
 import { MotorControls } from "../fps/MotorControls";
 import { CompositeWorldQuery } from "../fps/core/WorldQuery";
+import type { PlayerMotorSnapshotTarget } from "../fps/core/PlayerMotor";
 import { FPS_DEBUG } from "../fps/debug/debugConfig";
 import { LookSensitivityController } from "../fps/core/LookSensitivityController";
 // Lazily imported so the three multi-megabyte debug models are code-split out of the
@@ -301,6 +302,16 @@ export function DF2Scene({
   motorDemo = false,
 }: DF2SceneProps) {
   const lookSensitivity = useMemo(() => new LookSensitivityController(), []);
+  /** Written by MotorControls each frame, read by WeaponPrototype the same frame. */
+  const motorPose = useMemo<PlayerMotorSnapshotTarget>(
+    () => ({
+      position: new THREE.Vector3(),
+      stance: "stand",
+      grounded: false,
+      planarSpeedMetresPerSecond: 0,
+    }),
+    []
+  );
   // undefined = still loading, null = no assets (synthetic), object = real map
   const [loaded, setLoaded] = useState<LoadedTerrain | null | undefined>(undefined);
 
@@ -756,6 +767,9 @@ export function DF2Scene({
         />
       )}
 
+      {/* Mounted before WeaponPrototype so the pose is published first. Not a
+          correctness requirement — a one-frame lag would be imperceptible — but
+          free to get right. */}
       {heightfield && motorDemo && (
         <MotorControls
           heightfield={heightfield}
@@ -763,10 +777,13 @@ export function DF2Scene({
           lookSensitivity={lookSensitivity}
           onState={onFly}
           onStance={onStance}
+          pose={motorPose}
         />
       )}
 
-      {/* Kept opt-in while the existing terrain visual work remains the default. */}
+      {/* Kept opt-in while the existing terrain visual work remains the default.
+          `?scene=scope&motor=1` mounts both, which is the combination that makes
+          movement actually affect the weapon. */}
       {(scopeDemo || weaponDemo) && (
         <WeaponPrototype
           scopeDemo={scopeDemo}
@@ -774,6 +791,7 @@ export function DF2Scene({
           stance={stance}
           grounded={grounded}
           lookSensitivity={lookSensitivity}
+          motorPose={motorDemo ? motorPose : null}
         />
       )}
     </>

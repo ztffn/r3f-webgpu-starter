@@ -13,8 +13,17 @@ import { BENCH, publish } from "./df2/bench";
 const requestedScene = new URLSearchParams(window.location.search).get("scene");
 const scopeDemo = requestedScene === "scope";
 const weaponDemo = requestedScene === "weapon";
-/** Walk the shared character motor instead of the terrain spike's camera rig. */
-const motorDemo = requestedScene === "motor";
+/**
+ * Walk the shared character motor instead of the terrain spike's camera rig.
+ *
+ * Orthogonal to the scene on purpose: `?scene=motor` is movement alone, and
+ * `?scene=scope&motor=1` is the combination that matters — a weapon carried by
+ * a body that actually collides, so stance, speed and being airborne reach
+ * weapon handling instead of being inferred from the camera.
+ */
+const motorDemo =
+  requestedScene === "motor" ||
+  new URLSearchParams(window.location.search).get("motor") === "1";
 
 export default function App() {
   const [wireframe, setWireframe] = useState(false);

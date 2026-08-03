@@ -215,7 +215,7 @@ export class GameServer {
     }
     if (this.snapshotPlayers.length === 0) return;
     // Each client needs its own acknowledgement, so the payload is re-encoded
-    // per peer. At 24 bytes a player this is cheaper than a shared buffer plus
+    // per peer. At 27 bytes a player this is cheaper than a shared buffer plus
     // a patch, and it keeps the format single-branch.
     for (const peer of this.peers.values()) {
       peer.connection.send(

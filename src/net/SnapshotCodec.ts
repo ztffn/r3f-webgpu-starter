@@ -2,7 +2,7 @@
 //
 // §5 of the multiplayer decision record keeps the hot path off a general state
 // sync tool, so this is a fixed layout with no field names on the wire: 10 bytes
-// per command up, 24 bytes per player down.
+// per command up, 27 bytes per player down.
 //
 // One rule matters more than the packing. Look angles are QUANTISED, and the
 // client must predict using the same quantised value it transmits — otherwise
@@ -16,7 +16,10 @@ export const PacketType = { Commands: 1, Snapshot: 2, Welcome: 3 } as const;
 /** tick u32 + buttons u16 + yaw i16 + pitch i16. Buttons outgrew a byte when
  * aim intent became a movement input; a u8 here truncates it to nothing. */
 export const BYTES_PER_COMMAND = 10;
-export const BYTES_PER_PLAYER = 24;
+/** id u16 + position 3xf32 + velocity 3xi16 + yaw i16 + flags u8 (stance 0-1,
+ * grounded 2, sprinting 3, previous stance 4-5) + contact u8 + pitch i16 +
+ * stance progress u8. */
+export const BYTES_PER_PLAYER = 27;
 const COMMAND_HEADER_BYTES = 3;
 const SNAPSHOT_HEADER_BYTES = 10;
 
@@ -43,6 +46,11 @@ function wrapPi(radians: number): number {
 
 function clampInt16(value: number): number {
   return value < -32768 ? -32768 : value > 32767 ? 32767 : value;
+}
+
+/** Stance progress rides as u8; 1/255 is far below anything visible in a blend. */
+function packProgress(progress: number): number {
+  return Math.round(Math.min(1, Math.max(0, progress)) * 255);
 }
 
 /**
@@ -140,11 +148,17 @@ export function encodeSnapshot(
     view.setInt16(at + 18, clampInt16(Math.round(state.velocity.z * VELOCITY_SCALE)));
     view.setInt16(at + 20, packAngle(state.yawRadians));
     const stanceBits = Math.max(0, STANCES.indexOf(state.stance));
+    const previousStanceBits = Math.max(0, STANCES.indexOf(state.previousStance));
     view.setUint8(
       at + 22,
-      stanceBits | (state.grounded ? 1 << 2 : 0) | (state.sprinting ? 1 << 3 : 0)
+      stanceBits |
+        (state.grounded ? 1 << 2 : 0) |
+        (state.sprinting ? 1 << 3 : 0) |
+        (previousStanceBits << 4)
     );
     view.setUint8(at + 23, state.contactFlags & 0xff);
+    view.setInt16(at + 24, packAngle(state.pitchRadians));
+    view.setUint8(at + 26, packProgress(state.stanceProgress));
     at += BYTES_PER_PLAYER;
   }
   return new Uint8Array(buffer);
@@ -177,10 +191,10 @@ export function decodeSnapshot(bytes: Uint8Array): DecodedSnapshot {
           z: view.getInt16(at + 18) / VELOCITY_SCALE,
         },
         yawRadians: unpackAngle(view.getInt16(at + 20)),
-        pitchRadians: 0,
+        pitchRadians: unpackAngle(view.getInt16(at + 24)),
         stance: STANCES[flags & 0b11] ?? "stand",
-        previousStance: STANCES[flags & 0b11] ?? "stand",
-        stanceProgress: 1,
+        previousStance: STANCES[(flags >> 4) & 0b11] ?? "stand",
+        stanceProgress: view.getUint8(at + 26) / 255,
         grounded: (flags & (1 << 2)) !== 0,
         sprinting: (flags & (1 << 3)) !== 0,
         contactFlags: view.getUint8(at + 23),

@@ -176,15 +176,18 @@ Rifle rounds never become Rapier bodies.
 
 ## 8. Wire format
 
-10 bytes per command up, 24 bytes per player down, no field names. Look angles and velocities
-ride as int16; positions as float32 because quantising them needs an agreed origin.
+10 bytes per command up, 27 bytes per player down, no field names. Look angles and velocities
+ride as int16; positions as float32 because quantising them needs an agreed origin. Pitch and
+the stance blend (`previousStance`, `stanceProgress`) ride in the snapshot since 2026-08-03 —
+they were decode-side fakes before that, which was harmless for capsules and wrong the moment
+a remote had an aim direction.
 
 **Input bits are u16, not u8.** They outgrew a byte the moment aim intent became a movement
 input, and a u8 there does not fail — it silently drops the bit, so the server simply never
 sees that input. `tests/motor/session.test.ts` round-trips the whole bitfield rather than a
 sample, so the next bit added cannot repeat it.
 
-At 64 players and a 20 Hz patch rate with no visibility culling, that is about 31 KB/s per
+At 64 players and a 20 Hz patch rate with no visibility culling, that is about 35 KB/s per
 client, against roughly 1.28 MB/s for the same content as JSON.
 
 The transport interface has four methods and nothing above it knows which implementation is

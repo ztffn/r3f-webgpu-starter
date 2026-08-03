@@ -15,6 +15,7 @@ import {
   type MotorHeightSource,
   type PlayerCommand,
 } from "../../src/motor/MotorTypes.ts";
+import { BYTES_PER_PLAYER } from "../../src/net/SnapshotCodec.ts";
 
 const RAPIER = await initRapier();
 
@@ -51,7 +52,6 @@ function scriptedCommand(tick: number, seat: number): PlayerCommand {
 }
 
 /** Hand-packed binary, the format §5 says the hot path should use. */
-const BYTES_PER_PLAYER = 2 + 12 + 6 + 2 + 1 + 1; // id, pos, vel, yaw, stance+flags, pad
 function packedSnapshotBytes(players: number): number {
   return 4 + players * BYTES_PER_PLAYER;
 }

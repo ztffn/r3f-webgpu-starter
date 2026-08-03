@@ -96,6 +96,12 @@ test("command and snapshot packets survive a codec round trip", () => {
   state.velocity.x = 5.5;
   state.stance = "prone";
   state.grounded = true;
+  // Pitch and the stance blend were once decode-side fakes (pitch 0, progress
+  // 1) and nothing asserted them, so a wrong-offset write would have passed the
+  // whole suite. Assert every presentation field the snapshot claims to carry.
+  state.pitchRadians = -0.6;
+  state.previousStance = "crouch";
+  state.stanceProgress = 0.4;
   const snapshot = encodeSnapshot(99, 42, [{ id: 7, state }]);
   assert.equal(snapshot.length, 10 + BYTES_PER_PLAYER);
 
@@ -107,6 +113,9 @@ test("command and snapshot packets survive a codec round trip", () => {
   assert.equal(back.players[0]!.state.grounded, true);
   assert.ok(Math.abs(back.players[0]!.state.position.z - 4096.75) < 1e-2);
   assert.ok(Math.abs(back.players[0]!.state.velocity.x - 5.5) < 1e-2);
+  assert.ok(Math.abs(back.players[0]!.state.pitchRadians - -0.6) < 1e-3);
+  assert.equal(back.players[0]!.state.previousStance, "crouch");
+  assert.ok(Math.abs(back.players[0]!.state.stanceProgress - 0.4) < 1 / 255);
 });
 
 test("every input bit survives the wire, including the ones past a byte", () => {

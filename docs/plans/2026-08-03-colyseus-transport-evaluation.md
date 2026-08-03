@@ -38,7 +38,8 @@ per-room cost is comparable to the simulation itself.
   hooks, matchmaking verbs with filters, seat reservation, consented-vs-drop leave codes.
 - **Transport.** `@colyseus/uwebsockets-transport` 0.17.21 (2026-07-24) is current and the
   docs' "recommended transport for production". Caveats: 4096-byte default max payload (our
-  largest packet, a 64-player snapshot, is 1,546 bytes) and a `uwebsockets-express` peer
+  largest packet, a 64-player snapshot, is 1,738 bytes as of the 27-byte player) and a
+  `uwebsockets-express` peer
   dependency; the default ws transport needs `express`. At our scale the two measured
   identically, so the default is fine to start and uWS is a config swap.
 - **No public dense-room benchmark exists** — no colyseus/benchmarks repo, no CPU-per-tick

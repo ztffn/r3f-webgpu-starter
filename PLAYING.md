@@ -88,7 +88,7 @@ click does not fire**. `Escape` releases it.
 | `R` | reload |
 | `1` `2` `3` `4` | sniper / M4 / Glock / SAW |
 | `B` | cycle fire mode |
-| `[` `]` while aiming | zoom in / out |
+| `,` `.` while aiming | zoom in / out |
 | `X` `C` `Z` | stand / crouch / prone |
 | `Space` | jump |
 | `V` | third-person collision capsule |

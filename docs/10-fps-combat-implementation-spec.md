@@ -286,7 +286,7 @@ capture click does not fire. Escape releases the pointer.
 | T | reset targets and husks |
 | 1 / 2 / 3 / 4 | equip sniper / M4 / Glock / SAW (900 RPM automatic default) |
 | B | cycle the equipped weapon's supported fire modes |
-| `[` / `]` while ADS | increase / decrease magnification |
+| `,` / `.` while ADS | increase / decrease magnification |
 | Arrow Up / Down | increase / decrease elevation zero |
 | Arrow Left / Right | 0.1 mrad windage clicks |
 | Page Up / Page Down | full-keyboard elevation aliases |
@@ -295,9 +295,11 @@ capture click does not fire. Escape releases the pointer.
 | 1–8 in `scene=weapon&weaponanim=1` | directly inspect authored GLB animation segments |
 
 Turret keys are consumed only while ADS, pointer-locked, and in the scope scene,
-so compact Mac keyboards do not need Page Up/Down. Magnification is on brackets
+so compact Mac keyboards do not need Page Up/Down. Magnification is on comma/period
 rather than `Z`/`X`: those are stance keys, and with a real motor mounted
-(`&motor=1`) aiming and pressing `Z` both zoomed and went prone. Reload is authored animation
+(`&motor=1`) aiming and pressing `Z` both zoomed and went prone. Brackets were
+tried first and rejected — `event.code` is physical position, so `BracketLeft`
+is the `Å` key on a Nordic layout. Reload is authored animation
 segment 4 (10.833333–15.0 s); gameplay reload lasts 4.2 s so a newly accepted
 shot cannot cut the clip short.
 

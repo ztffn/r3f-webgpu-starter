@@ -581,23 +581,25 @@ export function WeaponPrototype({
       event.stopImmediatePropagation();
     };
     const adjustMagnification = (event: KeyboardEvent) => {
-      // Brackets, NOT Z/X.
+      // Comma and period, NOT Z/X and NOT brackets.
       //
-      // Z and X were fine while a camera rig owned stance, because the optic
-      // could borrow them whenever the player was aiming. With a real motor
-      // mounted they collide outright: aiming and pressing Z zoomed the scope
-      // AND dropped the player prone. Stance wins that argument — going prone
-      // while aiming is the mechanic this project is built around — so
-      // magnification moved, rather than becoming conditional on which rig
-      // happens to be mounted.
+      // Z and X were fine while a camera rig owned stance; with a real motor
+      // mounted they collide outright, since aiming and pressing Z zoomed the
+      // optic AND dropped the player prone. Stance wins that argument.
+      //
+      // Brackets were the first fix and were worse in a quieter way: `event.code`
+      // is PHYSICAL position, so `BracketLeft` is whatever key sits right of P —
+      // labelled `Å` on a Norwegian keyboard, not `[`. A control documented as
+      // one key and pressed as another is a trap. Comma and period carry the
+      // same label on US and Nordic layouts, so the docs and the keycap agree.
       if (
         !player.wantsAds ||
-        (event.code !== "BracketLeft" && event.code !== "BracketRight") ||
+        (event.code !== "Comma" && event.code !== "Period") ||
         event.repeat
       ) {
         return;
       }
-      const direction = event.code === "BracketLeft" ? -1 : 1;
+      const direction = event.code === "Comma" ? -1 : 1;
       scopeFov.current = THREE.MathUtils.clamp(
         scopeFov.current + direction * SCOPE_FOV_STEP,
         SCOPE_FOV_MIN,

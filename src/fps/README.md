@@ -163,8 +163,9 @@ resets both turrets. The default .308 profile spans 100–1,300 m; slower
 diagnostic profiles expose only zeros they can reach within the weapon's flight
 lifetime. Page Up/Down mirror elevation on full keyboards. Matching keydown
 events are consumed only in that scope context; keyup remains available to
-clear the arrow-key movement fallback. `[` and `]` control magnification; they
-moved off Z/X because those are stance keys and collide with a real motor.
+clear the arrow-key movement fallback. `,` and `.` control magnification; they
+moved off Z/X because those are stance keys and collide with a real motor, and
+off brackets because `event.code` makes those the `Å` key on Nordic layouts.
 
 Pointer-lock sensitivity is FOV-scaled through the live ADS transition and
 variable optic zoom. At 1,300 m the default optic resolves to roughly 6.5 cm per

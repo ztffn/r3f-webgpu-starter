@@ -76,9 +76,19 @@ export function encodeCommands(commands: readonly PlayerCommand[]): Uint8Array {
   return new Uint8Array(buffer);
 }
 
+/**
+ * Decodes a command batch from an UNTRUSTED peer.
+ *
+ * The declared count is a claim, not a fact. Believing it and reading past the
+ * buffer throws a RangeError out of the socket handler, which on a server is an
+ * uncaught exception and a dead room — three bytes from any client. The count is
+ * therefore clamped to what actually arrived, and a short header yields nothing.
+ */
 export function decodeCommands(bytes: Uint8Array): PlayerCommand[] {
+  if (bytes.byteLength < COMMAND_HEADER_BYTES) return [];
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const count = view.getUint16(1);
+  const available = Math.floor((bytes.byteLength - COMMAND_HEADER_BYTES) / BYTES_PER_COMMAND);
+  const count = Math.min(view.getUint16(1), available);
   const commands: PlayerCommand[] = [];
   let at = COMMAND_HEADER_BYTES;
   for (let index = 0; index < count; index += 1) {
@@ -140,9 +150,14 @@ export function encodeSnapshot(
   return new Uint8Array(buffer);
 }
 
+/** Same untrusted-input rule as `decodeCommands`; a hostile server is a peer too. */
 export function decodeSnapshot(bytes: Uint8Array): DecodedSnapshot {
+  if (bytes.byteLength < SNAPSHOT_HEADER_BYTES) {
+    return { tick: 0, acknowledgedCommandTick: 0, players: [] };
+  }
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const count = view.getUint8(9);
+  const available = Math.floor((bytes.byteLength - SNAPSHOT_HEADER_BYTES) / BYTES_PER_PLAYER);
+  const count = Math.min(view.getUint8(9), available);
   const players: SnapshotPlayer[] = [];
   let at = SNAPSHOT_HEADER_BYTES;
   for (let index = 0; index < count; index += 1) {
@@ -188,12 +203,14 @@ export function decodeSnapshot(bytes: Uint8Array): DecodedSnapshot {
  * own starting point, and every join begins with a teleport the width of the
  * guess — measured at 6 m against a ring spawn before this field existed.
  */
+const WELCOME_BYTES = 19;
+
 export function encodeWelcome(
   playerId: number,
   tick: number,
   spawn: { x: number; y: number; z: number }
 ): Uint8Array {
-  const buffer = new ArrayBuffer(19);
+  const buffer = new ArrayBuffer(WELCOME_BYTES);
   const view = new DataView(buffer);
   view.setUint8(0, PacketType.Welcome);
   view.setUint16(1, playerId & 0xffff);
@@ -204,11 +221,13 @@ export function encodeWelcome(
   return new Uint8Array(buffer);
 }
 
+/** Null when the packet is too short to be a welcome; callers must ignore it. */
 export function decodeWelcome(bytes: Uint8Array): {
   playerId: number;
   tick: number;
   spawn: { x: number; y: number; z: number };
-} {
+} | null {
+  if (bytes.byteLength < WELCOME_BYTES) return null;
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   return {
     playerId: view.getUint16(1),

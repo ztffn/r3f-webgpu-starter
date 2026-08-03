@@ -142,6 +142,7 @@ export class GameClient {
     const type = packetTypeOf(bytes);
     if (type === PacketType.Welcome) {
       const welcome = decodeWelcome(bytes);
+      if (welcome === null) return;
       this.playerId = welcome.playerId;
       this.localId = String(welcome.playerId);
       this.room.add(this.localId, welcome.spawn);

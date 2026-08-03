@@ -72,6 +72,8 @@ export class GameServer {
   staleCommandsDropped = 0;
   /** Inputs thrown away because a client's queue overflowed. Should stay at 0. */
   commandsDiscarded = 0;
+  /** Packets a peer sent that could not be parsed at all. */
+  malformedPacketsDropped = 0;
 
   private readonly transport: ServerTransport;
   private readonly peers = new Map<number, Peer>();
@@ -123,7 +125,17 @@ export class GameServer {
       if (packetTypeOf(bytes) !== PacketType.Commands) return;
       const peer = this.peers.get(connection.id);
       if (peer === undefined) return;
-      for (const command of decodeCommands(bytes)) {
+      // The codec clamps to the buffer, but this is a socket handler: anything
+      // that escapes it is an uncaught exception and a dead room for everyone.
+      // Belt and braces, deliberately.
+      let incoming: PlayerCommand[];
+      try {
+        incoming = decodeCommands(bytes);
+      } catch {
+        this.malformedPacketsDropped += 1;
+        return;
+      }
+      for (const command of incoming) {
         // Redundant resends are normal — a client repeats unacknowledged
         // commands — so anything already consumed OR already queued is dropped.
         if (command.tick <= peer.highestQueuedTick) {
@@ -132,6 +144,12 @@ export class GameServer {
         }
         peer.highestQueuedTick = command.tick;
         peer.queue.push(command);
+      }
+      // Trimmed here as well as in `tick`, or a burst inside one tick window
+      // allocates without limit and pays an O(n log n) sort for the privilege.
+      if (peer.queue.length > MAX_QUEUED_COMMANDS) {
+        this.commandsDiscarded += peer.queue.length - MAX_QUEUED_COMMANDS;
+        peer.queue.splice(0, peer.queue.length - MAX_QUEUED_COMMANDS);
       }
       peer.queue.sort((left, right) => left.tick - right.tick);
     });

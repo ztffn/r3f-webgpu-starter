@@ -11,8 +11,11 @@ import { GameServer } from "../../src/net/GameServer.ts";
 import { LoopbackNetwork, type LinkConditions } from "../../src/net/LoopbackTransport.ts";
 import {
   BYTES_PER_PLAYER,
+  BYTES_PER_COMMAND,
+  PacketType,
   decodeCommands,
   decodeSnapshot,
+  decodeWelcome,
   encodeCommands,
   encodeSnapshot,
   quantiseCommand,
@@ -120,6 +123,73 @@ test("every input bit survives the wire, including the ones past a byte", () => 
   for (const [name, bit] of Object.entries(MotorInput)) {
     assert.ok((decoded.buttons & bit) !== 0, `${name} did not survive the round trip`);
   }
+});
+
+test("a malformed packet is survived, not thrown on", () => {
+  // This is the test whose absence let a remote crash ship. Every other codec
+  // test round-trips something the encoder produced, so nothing ever fed the
+  // decoder a hostile buffer — and the decoder believed the declared count and
+  // read past the end. On a server that RangeError escapes the socket handler
+  // and takes the room down, from three bytes, sent by any client.
+  const hostile: Array<[string, Uint8Array]> = [
+    ["empty", new Uint8Array(0)],
+    ["type byte only", new Uint8Array([PacketType.Commands])],
+    ["header truncated", new Uint8Array([PacketType.Commands, 0])],
+    ["claims 65535 commands, carries none", new Uint8Array([PacketType.Commands, 0xff, 0xff])],
+    [
+      "claims 3, carries 1",
+      new Uint8Array([PacketType.Commands, 0, 3, ...new Array(BYTES_PER_COMMAND).fill(7)]),
+    ],
+    ["snapshot claims 255 players, carries none", new Uint8Array([2, 0, 0, 0, 0, 0, 0, 0, 0, 0xff])],
+    ["welcome truncated", new Uint8Array([3, 0, 1])],
+  ];
+
+  for (const [label, bytes] of hostile) {
+    assert.doesNotThrow(() => decodeCommands(bytes), `decodeCommands threw on ${label}`);
+    assert.doesNotThrow(() => decodeSnapshot(bytes), `decodeSnapshot threw on ${label}`);
+    assert.doesNotThrow(() => decodeWelcome(bytes), `decodeWelcome threw on ${label}`);
+  }
+
+  // Clamped to what arrived, not to what was claimed.
+  assert.equal(decodeCommands(new Uint8Array([PacketType.Commands, 0xff, 0xff])).length, 0);
+  assert.equal(
+    decodeCommands(
+      new Uint8Array([PacketType.Commands, 0, 3, ...new Array(BYTES_PER_COMMAND).fill(7)])
+    ).length,
+    1
+  );
+  assert.equal(decodeWelcome(new Uint8Array([3, 0, 1])), null);
+});
+
+test("a hostile client cannot crash the server or flood its queue", () => {
+  const session = makeSession(1);
+  drive(session, 30, () => ({ buttons: 0, yaw: 0 }));
+
+  const socket = session.network.connect({});
+  const attacker = [...session.server.room.playerIds].length;
+  assert.ok(attacker > 0, "no peer to attack from");
+
+  for (const bytes of [
+    new Uint8Array([PacketType.Commands, 0xff, 0xff]),
+    new Uint8Array([PacketType.Commands]),
+    new Uint8Array(0),
+  ]) {
+    assert.doesNotThrow(() => {
+      socket.send(bytes);
+      session.network.advance(TICK_MS);
+      session.server.tick();
+    }, "a malformed packet reached the server and threw");
+  }
+
+  // A burst inside one tick window must not accumulate without limit.
+  const flood: PlayerCommand[] = [];
+  for (let tick = 0; tick < 4000; tick += 1) {
+    flood.push({ tick, buttons: 1, yawRadians: 0, pitchRadians: 0 });
+  }
+  socket.send(encodeCommands(flood));
+  session.network.advance(TICK_MS);
+  session.server.tick();
+  assert.ok(session.server.room.size >= 1, "the room did not survive the flood");
 });
 
 test("quantising a command is idempotent, so prediction matches the wire", () => {

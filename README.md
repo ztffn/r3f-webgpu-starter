@@ -23,6 +23,12 @@ fallback path). The legacy Create React App / react-scripts setup has been remov
 columnar grass. With prepared assets present it renders a real DF-era map; without them it
 falls back to synthetic fBm and needs no game data at all.
 
+**Multiplayer movement and characters are in** (August 2026): a shared fixed-tick
+character motor with client prediction against an authoritative Colyseus server running
+the real terrain, and an animated soldier for remote players and the third-person view.
+Combat is still local-only; the authority work is queued in
+[`docs/plans/2026-08-03-character-animation-session-handoff.md`](./docs/plans/2026-08-03-character-animation-session-handoff.md).
+
 A local-first FPS combat slice is also available at `?scene=scope`: pointer-lock
 long-range aiming, authoritative stance/breath sway, scope zero and windage,
 fixed-step gravity/drag/wind ballistics, material penetration, resettable targets,

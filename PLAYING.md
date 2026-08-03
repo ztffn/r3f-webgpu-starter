@@ -123,20 +123,48 @@ two windows show each other moving smoothly there, the movement and the networki
 right, and anything still wrong is drawing. Putting the real renderer here would make a
 network fault and a rendering fault look identical.
 
+### See each other — `/?scene=scope&motor=1&net=1`
+
+```shell
+npm run game:server
+```
+
+Run that in a second terminal (it simulates the real map on an authoritative server), then
+open the URL above in **two separate windows** — windows, not tabs, because a hidden tab
+gets zero animation frames and its player freezes. Each window is a player in the same
+match: the other appears as an animated soldier that walks, runs, strafes, crouches, jumps
+and aims where its player is looking. `V` shows your own body in third person, standing
+inside its wireframe collision capsule. A prone player deliberately shows as the low
+capsule instead of the soldier — the animation set has no prone clips yet, and an honest
+low silhouette beats a kneeling one that betrays your concealment.
+
+## FAQ
+
+- **Can we shoot each other?** Not yet. Shooting and damage still run entirely inside your
+  own browser; nothing about a shot reaches the server. Server-authoritative combat is the
+  next major work item (`docs/plans/2026-08-03-character-animation-session-handoff.md`).
+- **I killed a target and the other window didn't notice.** Same reason: target health is
+  local to each browser until world state gets a server owner.
+- **We see different weather.** Weather is currently chosen per client (URL and debug
+  panel), not by the server — also queued in the same handoff.
+- **The other soldier looks flat or too dark in fog.** The soldier is a lit model in a
+  world of pre-shaded terrain, and the atmosphere term for lit materials does not exist
+  yet (docs/08 knows). He pops through haze more than he should.
+- **Multiplayer over the internet?** Untested; everything so far is localhost/LAN
+  (`&server=ws://host:2567` points a client elsewhere).
+
 ## What is not here yet
 
 Being clear about this is more useful than a feature list.
 
-- **You cannot see another player in the game world.** The multiplayer session and the game
-  are still separate programs; remote players exist as dots in the harness above, not as
-  bodies in the world.
+- **No player-versus-player damage.** You can see each other; you cannot hurt each other.
 - **There are no opponents.** No AI, no bots, nothing that shoots back.
 - **Grass concealment is not a mechanic yet.** Grass genuinely hides you from a human
   looking at a screen — a prone player measures zero visible pixels even through a scope at
   300 m — but nothing in the game *knows* that, so nothing can act on it.
 - **Every weapon uses the same placeholder model,** clearly labelled as a proxy.
-- **There is no character to look at.** The third-person view shows a wireframe capsule,
-  which is the collision shape, not a person.
+- **Prone has no animation** (capsule stand-in), and nobody dies on screen — the death
+  clips exist but wait on damage being real.
 - **No objectives, score, match, menu or settings screen.**
 
 ## If something looks wrong

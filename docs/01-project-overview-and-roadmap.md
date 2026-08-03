@@ -250,7 +250,7 @@ and immediately answers "does this feel like DF2?".
   distances from measured deviation against a stated bound instead. LOD 0 everywhere is
   exact and measured 17.5 ms against 9 ms, so it is not the answer.
 
-### Phase 4 — Integration (🟡 local FPS combat slice built)
+### Phase 4 — Integration (🟡 combat slice local-only; multiplayer movement and animated characters in as of 2026-08-03 — see docs/12 and the character-animation handoff brief)
 - ✅ Local-first controller/weapon/loadout contracts, resettable test targets, structured
   hit reports, and opt-in latest-shot diagnostics are built. The legacy hitscan resolver
   remains tested as a generic adapter, but the mounted sniper no longer fires hitscan.

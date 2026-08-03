@@ -58,13 +58,26 @@ player instinctively recognise this?* — applies to features, not to whether a 
   `src/net/` import **no Three.js and no React at runtime** — that is what makes them
   shared, and the Node tests enforce it. Read `12-...md` before touching either; its §6
   lists bugs that were each invisible until something was measured.
+- **Multiplayer spine (Aug 2026):** shared fixed-tick character motor (`src/motor/`,
+  Rapier) with client prediction/reconciliation (`src/net/GameClient.ts`), **Colyseus**
+  rooms with the hot path on hand-packed binary (evidence:
+  `docs/plans/2026-08-03-colyseus-transport-evaluation.md`), and an authoritative server
+  simulating the real prepared terrain (`npm run game:server`, `tools/game-server/`).
+  Play: `?scene=scope&motor=1&net=1`, two visible windows. Read `docs/12` first.
+- **Character (Aug 2026):** animated soldier for remote players and the V third-person
+  view (`src/fps/presentation/Character*`), aim rig driven by wire pitch, 49-clip
+  Draco GLB in `public/assets/characters/`. Prone deliberately renders as the capsule
+  (no prone clips baked yet). Combat/damage is still client-local — authority work is
+  briefed in `docs/plans/2026-08-03-character-animation-session-handoff.md`.
 - **Test build:** free-fly / on-foot camera with stances, instrument HUD, `netlify.toml`.
   Deploy with `npx netlify deploy --prod --dir=dist` from a machine that has prepared assets —
   or via a Git-connected build — prepared assets are committed, so both render the real map.
 - **Open:** skirt artifact at eye height (`07-...md` §9), floating grass along ridgelines
   (same §), and scale calibration — calibrate scale BEFORE placing any authored asset, or
   every placement has to be redone.
-- **Next up (`01-...md` Phase 1.6):** human-test Green Mile, then runtime map switching.
+- **Next up (combat authority):** server-authoritative damage, weather and world state —
+  the worked brief is `docs/plans/2026-08-03-character-animation-session-handoff.md`.
+  Also still queued (`01-...md` Phase 1.6): human-test Green Mile, then runtime map switching.
   Note that **the real grass data path has never been run** — Green Mile's strip is missing so
   it renders a stand-in canopy, but egypt / R66 / blizzard / vul001 ship their own strips and
   load as `grassSource: "real"` (`06-...md` §7). Preparing one of those is the cheapest way to

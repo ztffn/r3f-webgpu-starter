@@ -43,6 +43,9 @@ animation. On the weapon side, recoil does not push the body.
 | `net/GameServer.ts` | authority: command intake, tick, broadcast | which socket library is in use |
 | `net/GameClient.ts` | prediction, reconciliation, remote interpolation | rendering, input devices |
 | `net/LoopbackTransport.ts` | an in-process link with simulated latency and loss | production use |
+| `net/ColyseusProtocol.ts` | the room name and message envelopes, SDK-free | any Colyseus import |
+| `net/ColyseusTransport.ts` | the ClientTransport over `@colyseus/sdk` | packet meaning |
+| `tools/game-server/` | the authoritative Colyseus server on the real prepared terrain | gameplay logic beyond GameServer |
 | `fps/MotorControls.tsx` | DOM input to commands, motor state to camera | any simulation |
 
 ## 3. The one rule that keeps this shared

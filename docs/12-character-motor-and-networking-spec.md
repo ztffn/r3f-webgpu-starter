@@ -201,6 +201,15 @@ The motor is selected independently of the scene. `?scene=motor` is movement alo
 combination worth playing. Either way the motor replaces the terrain spike's fly camera —
 the two are mutually exclusive because both write the camera every frame.
 
+**`&net=1`** puts the motor on the authoritative game server: `MotorControls` predicts
+through `GameClient` over the Colyseus transport, remote players render as stance-blended
+capsules (`src/fps/RemotePlayers.tsx`), and the HUD gains a `Net` row (connecting /
+playing / dropped). Start the server with `npm run game:server` (port 2567; `&server=`
+overrides the URL). Both sides sample the same prepared terrain — the browser through
+`loadTerrain`, the server through `tools/game-server/terrain.ts` — because any terrain
+disagreement reconciles forever. URL tuning overrides are ignored networked, for the same
+reason.
+
 | Input | Effect |
 | --- | --- |
 | W A S D | move |
@@ -219,7 +228,8 @@ the two are mutually exclusive because both write the camera every frame.
 | `&step=<m>` | maximum step-up height |
 
 Session harness: `npm run session:server` and `npm run session:client`, then two **separate
-visible windows** — not two tabs, per §6.
+visible windows** — not two tabs, per §6. The harness stays on its synthetic sine terrain;
+the game server above is the one that runs the real map.
 
 ## 10. Verification
 

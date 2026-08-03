@@ -429,13 +429,22 @@ export function MotorControls({
           .then((asset) => {
             if (mounted.current) setCharacter(new CharacterView(asset));
           })
-          .catch((error: unknown) => console.error("soldier GLB failed to load:", error));
+          .catch((error: unknown) => {
+            console.error("soldier GLB failed to load:", error);
+            // Unlatch after a beat so a later V frame retries instead of
+            // failing silently for the whole mount.
+            setTimeout(() => {
+              characterRequested.current = false;
+            }, 5000);
+          });
       }
       if (character !== null) {
         character.setVisible(rig.thirdPerson);
         if (rig.thirdPerson) {
           fillCharacterPose(characterPose.current, state.position, rig.yaw, rig.pitch, state);
-          character.update(delta, characterPose.current);
+          // Clamp like the remote path: a hidden tab's first delta back is the
+          // whole hidden duration, and the mixer does not clamp internally.
+          character.update(Math.min(delta, 0.1), characterPose.current);
         }
       }
     }

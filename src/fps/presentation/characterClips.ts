@@ -79,8 +79,8 @@ export function localizeVelocity(
 /** Which of the 8 sectors (index into the suffix order) matches this movement. */
 export function directionSector(forward: number, left: number): number {
   const angle = Math.atan2(left, forward);
-  const sector = Math.round(angle / (Math.PI / 4)) & 7;
-  return sector < 0 ? sector + 8 : sector;
+  // `& 7` maps every int32 — negative sectors included — into 0..7.
+  return Math.round(angle / (Math.PI / 4)) & 7;
 }
 
 /** The directional suffix for a movement, for tests and diagnostics. */

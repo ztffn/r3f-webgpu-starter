@@ -13,6 +13,7 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
 import { clone as cloneWithSkeleton } from "three/addons/utils/SkeletonUtils.js";
 import { allSelectableClips } from "./characterClips.ts";
+import { measureClipSpeeds, type ClipSpeeds } from "./CharacterAnimator.ts";
 
 const SOLDIER_URL = "/assets/characters/player1/soldier.glb";
 const DRACO_PATH = "/draco/";
@@ -21,6 +22,8 @@ export interface SoldierAsset {
   /** Template scene; never added to a scene directly — clone instances. */
   readonly template: THREE.Object3D;
   readonly animations: readonly THREE.AnimationClip[];
+  /** Measured once here; every animator instance shares it. */
+  readonly clipSpeeds: ClipSpeeds;
 }
 
 let cached: Promise<SoldierAsset> | null = null;
@@ -33,12 +36,26 @@ export function loadSoldier(): Promise<SoldierAsset> {
       const names = new Set(gltf.animations.map((clip) => clip.name));
       const missing = allSelectableClips().filter((name) => !names.has(name));
       if (missing.length > 0) {
-        console.warn(`soldier GLB is missing ${missing.length} expected clip(s):`, missing);
+        // Fail the load rather than warn: a silently absent clip degrades to a
+        // remote gliding in idle. Consumers keep the capsule fallback.
+        throw new Error(
+          `soldier GLB is missing ${missing.length} expected clip(s): ${missing.join(", ")}`
+        );
       }
       gltf.scene.traverse((object) => {
         if ((object as THREE.Mesh).isMesh) object.frustumCulled = false;
       });
-      return { template: gltf.scene, animations: gltf.animations };
+      return {
+        template: gltf.scene,
+        animations: gltf.animations,
+        clipSpeeds: measureClipSpeeds(gltf.scene, gltf.animations),
+      };
+    })
+    .catch((error: unknown) => {
+      // A transient failure must not be memoized for the session; the next
+      // caller (a later join, another V press) retries the fetch.
+      cached = null;
+      throw error;
     });
   return cached;
 }

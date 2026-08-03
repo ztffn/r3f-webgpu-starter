@@ -131,7 +131,7 @@ export class CharacterView {
     model.rotation.y = Math.PI;
     this.group.add(model);
 
-    this.animator = new CharacterAnimator(model, [...asset.animations]);
+    this.animator = new CharacterAnimator(model, [...asset.animations], asset.clipSpeeds);
 
     let skeleton: THREE.Skeleton | null = null;
     model.traverse((object) => {

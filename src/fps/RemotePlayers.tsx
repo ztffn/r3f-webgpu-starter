@@ -25,9 +25,11 @@ import { loadSoldier, type SoldierAsset } from "./presentation/soldierAssets.ts"
 
 const REMOTE_COLOR = 0xb8563f;
 
-type RemoteVisual =
-  | { readonly kind: "capsule"; readonly mesh: THREE.Mesh }
-  | { readonly kind: "character"; readonly view: CharacterView };
+interface RemoteVisual {
+  /** Always exists: the pre-load stand-in AND the honest prone silhouette. */
+  readonly mesh: THREE.Mesh;
+  view: CharacterView | null;
+}
 
 export interface RemotePlayersProps {
   client: GameClient;
@@ -86,25 +88,34 @@ export function RemotePlayers({ client, atmosphere }: RemotePlayersProps) {
     client.interpolateRemotes(clamped);
 
     seen.clear();
+    let promotedThisFrame = false;
     for (const remote of client.remotePlayers) {
       seen.add(remote.id);
       let visual = pool.get(remote.id);
-
-      // Promote a capsule to the character the moment the asset exists.
-      if (asset !== null && (visual === undefined || visual.kind === "capsule")) {
-        if (visual !== undefined) group.remove(visual.mesh);
-        const view = new CharacterView(asset);
-        group.add(view.group);
-        visual = { kind: "character", view };
-        pool.set(remote.id, visual);
-      } else if (visual === undefined) {
+      if (visual === undefined) {
         const mesh = new THREE.Mesh(shared.geometry, shared.material);
         group.add(mesh);
-        visual = { kind: "capsule", mesh };
+        visual = { mesh, view: null };
         pool.set(remote.id, visual);
       }
+      // Promotions are staggered one per frame: N skeleton clones plus N
+      // animator builds on the single frame the GLB resolves is a visible
+      // hitch, and the capsule already stands in.
+      if (visual.view === null && asset !== null && !promotedThisFrame) {
+        promotedThisFrame = true;
+        visual.view = new CharacterView(asset);
+        visual.view.setVisible(false);
+        group.add(visual.view.group);
+      }
 
-      if (visual.kind === "character") {
+      // Prone has no clips in the pack: the character would render a
+      // kneel-height crouch over a prone-height collider, betraying exactly
+      // the concealment the stance exists for. Until prone clips are baked,
+      // a prone remote is the stance-scaled capsule — the honest silhouette.
+      const showCharacter = visual.view !== null && remote.state.stance !== "prone";
+      visual.mesh.visible = !showCharacter;
+      if (visual.view !== null) visual.view.setVisible(showCharacter);
+      if (showCharacter && visual.view !== null) {
         fillCharacterPose(
           pose.current,
           remote.position,
@@ -123,8 +134,8 @@ export function RemotePlayers({ client, atmosphere }: RemotePlayersProps) {
     if (pool.size !== seen.size) {
       pool.forEach((visual, id) => {
         if (seen.has(id)) return;
-        if (visual.kind === "character") visual.view.dispose();
-        else group.remove(visual.mesh);
+        visual.view?.dispose();
+        group.remove(visual.mesh);
         pool.delete(id);
       });
     }

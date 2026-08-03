@@ -270,6 +270,22 @@ button:disabled {
   bottom: 14px;
   right: 14px;
 }
+#legend .legend-toggle {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+#legend .legend-toggle:hover {
+  color: var(--accent);
+}
+/* Collapsed, the toggle is the panel's only child; drop the eyebrow's
+   bottom margin so the pill sits balanced. */
+#legend .legend-toggle:last-child {
+  margin-bottom: 0;
+}
 #legend .rows {
   gap: 3px 12px;
 }

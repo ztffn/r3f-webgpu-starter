@@ -5,7 +5,7 @@
 // the content is survey/telemetry readouts, and tabular numerals so digits stop
 // jittering as they update.
 
-import { useSyncExternalStore } from "react";
+import { useState, useSyncExternalStore } from "react";
 import type { LoadedTerrain } from "../df2/loadTerrain";
 import type { PerfSample } from "../df2/PerfMonitor";
 import type { FlyState, Stance } from "../df2/FlyControls";
@@ -50,6 +50,7 @@ export function Hud({
   setWireframe,
   fpsMode = false,
 }: HudProps) {
+  const [showControls, setShowControls] = useState(false);
   const combat = useSyncExternalStore(
     combatTelemetry.subscribe,
     combatTelemetry.getSnapshot,
@@ -360,9 +361,18 @@ export function Hud({
         <p className="note touch-note">Movement needs a keyboard — drag to look around.</p>
       </section>
 
-      {/* Controls legend */}
+      {/* Controls legend — collapsed by default: expanded, it sat on top of
+          the combat telemetry column the moment the weapon HUD grew rows. */}
       <section className="panel" id="legend">
-        <span className="eyebrow">Controls</span>
+        <button
+          type="button"
+          className="eyebrow legend-toggle"
+          aria-expanded={showControls}
+          onClick={() => setShowControls((current) => !current)}
+        >
+          Controls {showControls ? "▾" : "▸"}
+        </button>
+        {showControls && (
         <dl className="rows">
           <dt>{fpsMode ? "Mouse" : "Drag"}</dt>
           <dd>{fpsMode ? "click once, then look" : "look"}</dd>
@@ -407,6 +417,7 @@ export function Hud({
             </>
           )}
         </dl>
+        )}
       </section>
     </div>
   );

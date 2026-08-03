@@ -17,6 +17,8 @@ import { CharacterMotor } from "../../src/motor/CharacterMotor.ts";
 import { createMotorWorld, flatHeightSource, initRapier } from "../../src/motor/MotorWorld.ts";
 import { MotorInput, type MotorState, type PlayerCommand } from "../../src/motor/MotorTypes.ts";
 import { calculateDispersionConeRadians } from "../../src/fps/weapons/WeaponHandling.ts";
+import { WeaponSystem } from "../../src/fps/weapons/WeaponSystem.ts";
+import { M4_DEFINITION } from "../../src/fps/weapons/weaponDefinitions.ts";
 import type { WeaponAccuracyDefinition } from "../../src/fps/weapons/WeaponDefinition.ts";
 
 const RAPIER = await initRapier();
@@ -104,6 +106,55 @@ test("stance from the motor orders the cone the way handling intends", () => {
 
   assert.ok(cones.get("crouch")! < cones.get("stand")!);
   assert.ok(cones.get("prone")! < cones.get("crouch")!);
+});
+
+test("a sprinting motor blocks the weapon from firing at all", () => {
+  // Not a dispersion penalty — a refusal. The authored animation set has no
+  // sprint-and-fire pose, so an accepted round would have nothing to play.
+  const weapon = new WeaponSystem(M4_DEFINITION, 1);
+  const rig = makeMotor();
+  let state = rig.motor.state;
+  for (let tick = 0; tick < 90; tick += 1) state = rig.step(command(tick));
+
+  const fireFor = (buttons: number, label: string): number => {
+    let sawSprint = false;
+    let shots = 0;
+    for (let tick = 0; tick < 90; tick += 1) {
+      state = rig.step(command(tick, buttons));
+      sawSprint ||= state.sprinting;
+      weapon.setHandlingContext({
+        stance: state.stance,
+        grounded: state.grounded,
+        sprinting: state.sprinting,
+        planarSpeedMetresPerSecond: Math.hypot(state.velocity.x, state.velocity.z),
+        breathStabilization: 0,
+      });
+      weapon.handleCommand({ type: "triggerDown" });
+      weapon.update(1 / 60);
+      weapon.handleCommand({ type: "triggerUp" });
+      weapon.drainEvents((event) => {
+        if (event.type === "shot") shots += 1;
+      });
+    }
+    assert.equal(
+      sawSprint,
+      buttons === (MotorInput.Forward | MotorInput.Sprint),
+      `${label}: motor sprint state was not what the test assumes`
+    );
+    return shots;
+  };
+
+  const walkingShots = fireFor(MotorInput.Forward, "walking");
+  const magazineBefore = weapon.getSnapshot().magazine;
+  const sprintingShots = fireFor(MotorInput.Forward | MotorInput.Sprint, "sprinting");
+
+  assert.ok(walkingShots > 0, "the weapon never fired while walking, so this proves nothing");
+  assert.equal(sprintingShots, 0, `fired ${sprintingShots} rounds while sprinting`);
+  assert.equal(
+    weapon.getSnapshot().magazine,
+    magazineBefore,
+    "a refused sprint shot still consumed ammunition"
+  );
 });
 
 test("the motor's own velocity widens the cone versus standing still", () => {

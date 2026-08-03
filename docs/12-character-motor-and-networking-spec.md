@@ -22,13 +22,12 @@ implementation behind it, and a two-client session harness.
 Weapon handling reads the motor: `?scene=scope&motor=1` carries the weapon on a collided
 body, and `WeaponHandlingContext` gets stance, planar speed and real grounded state from
 `MotorState` instead of inferring them from the camera. Rounds leave the motor's eye rather
-than the camera, and aim intent slows the player. That last one is the point — camera
+than the camera, aim intent and reloading slow the player, and sprinting refuses the shot. That last one is the point — camera
 differentiation cannot tell you the player is airborne, so before this `grounded` was
 whatever the app's fly/on-foot toggle said and `airborneDispersionRadians` never applied.
 
 What does **not** exist: matchmaking, reconnection, persistence, anti-cheat, vehicles, and
-animation. On the weapon side, recoil does not push the body and reloading does not
-constrain movement.
+animation. On the weapon side, recoil does not push the body.
 
 ## 2. Module map
 
@@ -98,10 +97,13 @@ aim regardless of how many packets were lost.
 6. **Never alias mutable state when measuring a delta across a mutation.** See §6.
 7. **The motor's stance is the truth, not the app's.** It refuses a stand-up with no
    headroom, so `MotorControls` follows the motor's stance rather than driving it.
-8. **Aim intent travels in the command; ADS state does not.** `WeaponSystem` owns ADS.
-   Anything that changes movement must be replayable by a server from the command stream
-   alone, so the motor takes a single intent bit and never reads weapon state. A weapon
-   that refuses to enter ADS still slows the player, and that is the correct trade.
+8. **Weapon INTENT travels in the command; weapon STATE does not.** `WeaponSystem` owns
+   ADS and the reload. Anything that changes movement must be replayable by a server from
+   the command stream alone, so the motor takes intent bits and never reads weapon state.
+   A weapon that refuses to enter ADS still slows the player, and that is the correct
+   trade. The reverse direction is `MotorState.sprinting`, which is RESOLVED state — the
+   raw Sprint bit is not enough, because aiming, crouching and standing still all suppress
+   it, and the weapon blocks on the resolved answer.
 9. **Parameter properties are forbidden.** `--experimental-strip-types` runs in strip-only
    mode and rejects them outright. Already documented in `10-...md` §9.1; it bit again here.
 

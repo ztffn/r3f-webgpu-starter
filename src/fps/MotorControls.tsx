@@ -294,7 +294,7 @@ export function MotorControls({
     while (rig.accumulator >= TICK_SECONDS && budget > 0) {
       const entry = command.current;
       entry.tick = rig.tick;
-      entry.buttons = buttonsFrom(rig.keys, rig.stanceIntent, weaponIntent?.aiming === true);
+      entry.buttons = buttonsFrom(rig.keys, rig.stanceIntent, weaponIntent);
       entry.yawRadians = rig.yaw;
       entry.pitchRadians = rig.pitch;
       commands.set(LOCAL_ID, entry);
@@ -363,6 +363,7 @@ export function MotorControls({
       pose.position.set(eye.x, eye.y, eye.z);
       pose.stance = state.stance;
       pose.grounded = state.grounded;
+      pose.sprinting = state.sprinting;
       pose.planarSpeedMetresPerSecond = Math.hypot(state.velocity.x, state.velocity.z);
     }
 
@@ -403,7 +404,7 @@ export function MotorControls({
 function buttonsFrom(
   keys: ReadonlySet<string>,
   stance: PlayerStance,
-  aiming: boolean
+  intent: PlayerWeaponIntent | null | undefined
 ): number {
   let bits = 0;
   if (keys.has("KeyW") || keys.has("ArrowUp")) bits |= MotorInput.Forward;
@@ -414,6 +415,7 @@ function buttonsFrom(
   if (keys.has("ShiftLeft") || keys.has("ShiftRight")) bits |= MotorInput.Sprint;
   if (stance === "crouch") bits |= MotorInput.Crouch;
   if (stance === "prone") bits |= MotorInput.Prone;
-  if (aiming) bits |= MotorInput.Ads;
+  if (intent?.aiming === true) bits |= MotorInput.Ads;
+  if (intent?.reloading === true) bits |= MotorInput.Reloading;
   return bits;
 }

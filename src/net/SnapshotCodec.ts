@@ -130,7 +130,10 @@ export function encodeSnapshot(
     view.setInt16(at + 18, clampInt16(Math.round(state.velocity.z * VELOCITY_SCALE)));
     view.setInt16(at + 20, packAngle(state.yawRadians));
     const stanceBits = Math.max(0, STANCES.indexOf(state.stance));
-    view.setUint8(at + 22, stanceBits | (state.grounded ? 1 << 2 : 0));
+    view.setUint8(
+      at + 22,
+      stanceBits | (state.grounded ? 1 << 2 : 0) | (state.sprinting ? 1 << 3 : 0)
+    );
     view.setUint8(at + 23, state.contactFlags & 0xff);
     at += BYTES_PER_PLAYER;
   }
@@ -164,6 +167,7 @@ export function decodeSnapshot(bytes: Uint8Array): DecodedSnapshot {
         previousStance: STANCES[flags & 0b11] ?? "stand",
         stanceProgress: 1,
         grounded: (flags & (1 << 2)) !== 0,
+        sprinting: (flags & (1 << 3)) !== 0,
         contactFlags: view.getUint8(at + 23),
       },
     });

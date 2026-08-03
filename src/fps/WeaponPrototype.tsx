@@ -404,6 +404,7 @@ export function WeaponPrototype({
     () => ({
       stance,
       grounded,
+      sprinting: false,
       planarSpeedMetresPerSecond: 0,
       breathStabilization: 0,
     }),
@@ -852,6 +853,9 @@ export function WeaponPrototype({
     if (weaponIntent !== null) weaponIntent.aiming = player.wantsAds;
     handlingContext.stance = player.stance;
     handlingContext.grounded = player.grounded;
+    // Only a real motor can report this; without one there is no sprint state
+    // to block on, and the weapon behaves as it always did.
+    handlingContext.sprinting = motorPose !== null && motorPose.sprinting;
     handlingContext.planarSpeedMetresPerSecond = player.planarSpeedMetresPerSecond;
     handlingContext.breathStabilization = aimSway.breathStabilization;
     loadout.setHandlingContext(handlingContext);
@@ -863,6 +867,9 @@ export function WeaponPrototype({
     loadout.update(simulationDelta);
     const equippedWeapon = loadout.equippedWeapon;
     const weaponSnapshot = equippedWeapon.getSnapshot();
+    // Published here rather than with aim intent because the reload phase only
+    // exists after the weapon has updated. The motor reads it next frame.
+    if (weaponIntent !== null) weaponIntent.reloading = weaponSnapshot.phase === "reloading";
     const nextScopeAdjustments = scopeAdjustments.get(equippedWeapon.definition.id)!;
     if (activeScopeAdjustments.current !== nextScopeAdjustments) {
       activeScopeAdjustments.current = nextScopeAdjustments;

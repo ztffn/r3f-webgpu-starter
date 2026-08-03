@@ -4,6 +4,12 @@ import type { WeaponAccuracyDefinition } from "./WeaponDefinition.ts";
 export interface WeaponHandlingContext {
   readonly stance: PlayerStance;
   readonly grounded: boolean;
+  /**
+   * Blocks firing outright, not just widens the cone. The authored animation
+   * set has no sprint-and-fire pose, so a round accepted while sprinting has
+   * nothing to play; this is a content constraint expressed as a rule.
+   */
+  readonly sprinting: boolean;
   readonly planarSpeedMetresPerSecond: number;
   readonly breathStabilization: number;
 }
@@ -21,6 +27,7 @@ export interface WeaponHandlingModifiers {
 export const DEFAULT_WEAPON_HANDLING_CONTEXT: WeaponHandlingContext = {
   stance: "stand",
   grounded: true,
+  sprinting: false,
   planarSpeedMetresPerSecond: 0,
   breathStabilization: 0,
 };

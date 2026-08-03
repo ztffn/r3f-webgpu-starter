@@ -311,12 +311,16 @@ export function DF2Scene({
       position: new THREE.Vector3(),
       stance: "stand",
       grounded: false,
+      sprinting: false,
       planarSpeedMetresPerSecond: 0,
     }),
     []
   );
   /** Aim intent the other way: weapon host writes, motor reads. */
-  const weaponIntent = useMemo<PlayerWeaponIntent>(() => ({ aiming: false }), []);
+  const weaponIntent = useMemo<PlayerWeaponIntent>(
+    () => ({ aiming: false, reloading: false }),
+    []
+  );
   // undefined = still loading, null = no assets (synthetic), object = real map
   const [loaded, setLoaded] = useState<LoadedTerrain | null | undefined>(undefined);
 

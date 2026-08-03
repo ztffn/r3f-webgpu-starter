@@ -27,17 +27,19 @@ export interface PlayerMotorSnapshotTarget {
   position: THREE.Vector3;
   stance: PlayerStance;
   grounded: boolean;
+  sprinting: boolean;
   planarSpeedMetresPerSecond: number;
 }
 
 /**
  * Weapon state the MOTOR needs, published by whoever owns the weapon.
  *
- * Deliberately one boolean. `WeaponSystem` owns ADS — its progress, whether a
- * reload refuses it, all of it — and this is only the intent the motor turns
- * into a speed penalty. Reading the weapon's resolved ADS instead would put
- * gameplay state the server cannot replay into the movement path.
+ * Two booleans, and nothing more. `WeaponSystem` owns ADS and the reload — the
+ * progress, the cancellation rules, all of it — and these are only the intents
+ * the motor turns into a speed penalty. Reading resolved weapon state instead
+ * would put gameplay the server cannot replay into the movement path.
  */
 export interface PlayerWeaponIntent {
   aiming: boolean;
+  reloading: boolean;
 }

@@ -394,9 +394,14 @@ export class CharacterMotor {
       (buttons & MotorInput.Sprint) !== 0 &&
       state.stance === "stand" &&
       forward > 0;
+    const reloading = (buttons & MotorInput.Reloading) !== 0;
+    // Penalties compound rather than compete: reloading while aiming is slower
+    // than either alone, which is what makes both feel like a commitment.
+    state.sprinting = sprinting && magnitude > 0;
     const speed =
       maxSpeed *
-      (sprinting ? this.tuning.sprintMultiplier : aiming ? this.tuning.adsMultiplier : 1);
+      (sprinting ? this.tuning.sprintMultiplier : aiming ? this.tuning.adsMultiplier : 1) *
+      (reloading ? this.tuning.reloadMultiplier : 1);
     if (magnitude > 0) {
       wantX = (wantX / magnitude) * speed;
       wantZ = (wantZ / magnitude) * speed;

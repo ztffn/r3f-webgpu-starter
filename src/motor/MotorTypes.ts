@@ -38,6 +38,8 @@ export const MotorInput = {
    * slows the player, which is the correct trade: movement stays deterministic.
    */
   Ads: 1 << 8,
+  /** Reload intent. Same contract as `Ads`: intent, never resolved weapon state. */
+  Reloading: 1 << 9,
 } as const;
 
 /** Contact conditions the motor observed during a step. */
@@ -86,6 +88,8 @@ export interface MotorState {
   /** 0 = fully in `previousStance`, 1 = fully in `stance`. Presentation only. */
   stanceProgress: number;
   grounded: boolean;
+  /** Resolved, not the raw input bit: aiming or crouching suppresses it. */
+  sprinting: boolean;
   contactFlags: number;
 }
 
@@ -107,6 +111,8 @@ export interface MotorTuning {
   readonly sprintMultiplier: number;
   /** Speed scale while aiming. Aiming and running are meant to be a trade. */
   readonly adsMultiplier: number;
+  /** Speed scale while reloading. Reloading on the move should cost something. */
+  readonly reloadMultiplier: number;
   /** Ground acceleration, metres per second squared. */
   readonly acceleration: number;
   /** Ground deceleration, metres per second squared. */
@@ -135,6 +141,7 @@ export const DEFAULT_MOTOR_TUNING: MotorTuning = {
   jumpSpeedMetresPerSecond: 4.5,
   sprintMultiplier: 1.6,
   adsMultiplier: 0.45,
+  reloadMultiplier: 0.6,
   acceleration: 45,
   deceleration: 60,
   airControl: 0.25,
@@ -171,6 +178,7 @@ export function createMotorState(): MotorState {
     previousStance: "stand",
     stanceProgress: 1,
     grounded: false,
+    sprinting: false,
     contactFlags: 0,
   };
 }

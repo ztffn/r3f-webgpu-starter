@@ -381,6 +381,33 @@ test("aim intent slows the player and overrides sprint", () => {
     Math.abs(both - aiming) < 0.1,
     `sprint leaked through while aiming: ${both.toFixed(2)} vs ${aiming.toFixed(2)}`
   );
+
+  const reloading = speedWith(MotorInput.Reloading);
+  const reloadingAndAiming = speedWith(MotorInput.Reloading | MotorInput.Ads);
+  assert.ok(reloading < walking, `reloading did not slow the player: ${reloading.toFixed(2)}`);
+  // Unlike sprint versus aim, these compound — both are commitments.
+  assert.ok(
+    reloadingAndAiming < reloading && reloadingAndAiming < aiming,
+    `reload and aim did not compound: ${reloadingAndAiming.toFixed(2)}`
+  );
+});
+
+test("only the motor decides it is sprinting, and it refuses to while aiming", () => {
+  const sprintStateFor = (buttons: number): boolean => {
+    const rig = makeMotor();
+    settle(rig);
+    return run(rig, 60, buttons).sprinting;
+  };
+
+  assert.equal(sprintStateFor(MotorInput.Forward | MotorInput.Sprint), true);
+  // Standing still with sprint held is not sprinting; the weapon must still fire.
+  assert.equal(sprintStateFor(MotorInput.Sprint), false);
+  assert.equal(sprintStateFor(MotorInput.Forward | MotorInput.Sprint | MotorInput.Ads), false);
+  assert.equal(
+    sprintStateFor(MotorInput.Forward | MotorInput.Sprint | MotorInput.Crouch),
+    false,
+    "crouch-sprinting should not count as a sprint"
+  );
 });
 
 test("a wall stops horizontal travel and sets WallContact", () => {

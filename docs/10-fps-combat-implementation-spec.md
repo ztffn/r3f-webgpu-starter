@@ -406,12 +406,11 @@ that the test script fails in a way that does not name the version as the cause.
   reading it;
 - authored per-weapon GLBs, animations, sounds, and final tuning;
 - in-game ammunition/loadout selection and saved/rebindable controls;
-- the ecctrl half of the controller spike. The custom Rapier character motor is BUILT and
-  documented in `12-character-motor-and-networking-spec.md`; what ecctrl's slope, step and
-  floating-body techniques would have added was never recorded, so the adoption question
-  is currently closed by assumption rather than evidence. See
-  `plans/2026-08-01-ecctrl-player-vehicle-controller-spike-design.md`;
-- vehicles of any kind;
+- reading ecctrl for technique. The spike is CLOSED at outcome 3, custom controllers —
+  see `plans/2026-08-03-ecctrl-spike-outcome.md` — but nothing was harvested because it
+  was never read. Its floating-body suspension in particular avoids two failure modes we
+  hit; that record says where to look if the motor misbehaves;
+- vehicles of any kind. The spike's other half was not attempted;
 - weapon integration BEYOND the handling context. `?scene=scope&motor=1` now carries the
   weapon on a collided body, and stance, planar speed and real grounded state reach
   `WeaponHandlingContext` from the motor rather than being inferred from the camera. Rounds

@@ -11,9 +11,11 @@
 // and the resulting state onto the camera.
 
 import { useFrame, useThree } from "@react-three/fiber";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three/webgpu";
 import type { Heightfield } from "../df2/Heightfield";
+import { CharacterView, type CharacterPose } from "./presentation/CharacterView.ts";
+import { loadSoldier } from "./presentation/soldierAssets.ts";
 import type { FlyState, Stance } from "../df2/FlyControls";
 import type { LookSensitivityController } from "./core/LookSensitivityController";
 import type { PlayerMotorSnapshotTarget, PlayerWeaponIntent } from "./core/PlayerMotor.ts";
@@ -168,6 +170,38 @@ export function MotorControls({
     },
     [proxy]
   );
+  // The animated soldier shown in the V third-person view, alongside the
+  // wireframe collider proxy — visual body and collision capsule together is
+  // exactly the comparison that view exists for.
+  const [character, setCharacter] = useState<CharacterView | null>(null);
+  useEffect(() => {
+    let alive = true;
+    let created: CharacterView | null = null;
+    void loadSoldier().then((asset) => {
+      if (!alive) return;
+      created = new CharacterView(asset);
+      created.setVisible(false);
+      setCharacter(created);
+    });
+    return () => {
+      alive = false;
+      created?.dispose();
+      setCharacter(null);
+    };
+  }, []);
+  const characterPose = useRef<CharacterPose>({
+    positionX: 0,
+    positionY: 0,
+    positionZ: 0,
+    yawRadians: 0,
+    pitchRadians: 0,
+    velocityX: 0,
+    velocityZ: 0,
+    stance: "stand",
+    grounded: true,
+    sprinting: false,
+  });
+
   // `PlayerCommand` is readonly because it is wire data; this one scratch
   // instance is rewritten every tick so the hot path allocates nothing.
   const command = useRef<{ -readonly [K in keyof PlayerCommand]: PlayerCommand[K] }>({
@@ -399,6 +433,24 @@ export function MotorControls({
         rig.stanceIntent = state.stance;
         onStance?.(state.stance);
       }
+
+      if (character !== null) {
+        character.setVisible(rig.thirdPerson);
+        if (rig.thirdPerson) {
+          const characterState = characterPose.current;
+          characterState.positionX = state.position.x;
+          characterState.positionY = state.position.y;
+          characterState.positionZ = state.position.z;
+          characterState.yawRadians = rig.yaw;
+          characterState.pitchRadians = rig.pitch;
+          characterState.velocityX = state.velocity.x;
+          characterState.velocityZ = state.velocity.z;
+          characterState.stance = state.stance;
+          characterState.grounded = state.grounded;
+          characterState.sprinting = state.sprinting;
+          character.update(delta, characterState);
+        }
+      }
     }
 
     rig.report += delta;
@@ -427,13 +479,16 @@ export function MotorControls({
   });
 
   return (
-    <mesh
-      ref={bodyRef}
-      geometry={proxy.geometry}
-      material={proxy.material}
-      visible={false}
-      frustumCulled={false}
-    />
+    <>
+      <mesh
+        ref={bodyRef}
+        geometry={proxy.geometry}
+        material={proxy.material}
+        visible={false}
+        frustumCulled={false}
+      />
+      {character !== null && <primitive object={character.group} />}
+    </>
   );
 }
 

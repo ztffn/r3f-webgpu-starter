@@ -286,7 +286,7 @@ capture click does not fire. Escape releases the pointer.
 | T | reset targets and husks |
 | 1 / 2 / 3 / 4 | equip sniper / M4 / Glock / SAW (900 RPM automatic default) |
 | B | cycle the equipped weapon's supported fire modes |
-| Z / X while ADS | increase / decrease magnification |
+| `,` / `.` while ADS | increase / decrease magnification |
 | Arrow Up / Down | increase / decrease elevation zero |
 | Arrow Left / Right | 0.1 mrad windage clicks |
 | Page Up / Page Down | full-keyboard elevation aliases |
@@ -295,7 +295,11 @@ capture click does not fire. Escape releases the pointer.
 | 1–8 in `scene=weapon&weaponanim=1` | directly inspect authored GLB animation segments |
 
 Turret keys are consumed only while ADS, pointer-locked, and in the scope scene,
-so compact Mac keyboards do not need Page Up/Down. Reload is authored animation
+so compact Mac keyboards do not need Page Up/Down. Magnification is on comma/period
+rather than `Z`/`X`: those are stance keys, and with a real motor mounted
+(`&motor=1`) aiming and pressing `Z` both zoomed and went prone. Brackets were
+tried first and rejected — `event.code` is physical position, so `BracketLeft`
+is the `Å` key on a Nordic layout. Reload is authored animation
 segment 4 (10.833333–15.0 s); gameplay reload lasts 4.2 s so a newly accepted
 shot cannot cut the clip short.
 
@@ -404,9 +408,23 @@ that the test script fails in a way that does not name the version as the cause.
   reading it;
 - authored per-weapon GLBs, animations, sounds, and final tuning;
 - in-game ammunition/loadout selection and saved/rebindable controls;
-- Rapier-backed player collision, slopes, stance clearance, and vehicles;
-- third-person character host, bot harness, and 32/64-rig browser benchmark;
-- network authority, prediction/reconciliation, replication, and remote tracers;
+- reading ecctrl for technique. The spike is CLOSED at outcome 3, custom controllers —
+  see `plans/2026-08-03-ecctrl-spike-outcome.md` — but nothing was harvested because it
+  was never read. Its floating-body suspension in particular avoids two failure modes we
+  hit; that record says where to look if the motor misbehaves;
+- vehicles of any kind. The spike's other half was not attempted;
+- weapon integration BEYOND the handling context. `?scene=scope&motor=1` now carries the
+  weapon on a collided body, and stance, planar speed and real grounded state reach
+  `WeaponHandlingContext` from the motor rather than being inferred from the camera. Rounds
+  leave the motor's eye rather than the camera, aim intent and reloading slow the player,
+  and **sprinting refuses the shot outright** — a content constraint, since the authored
+  animation set has no sprint-and-fire pose. What is still missing: recoil does not push
+  the body;
+- animation on the character, a bot harness, and a 32/64-rig browser benchmark. A
+  third-person collider proxy exists (`?scene=motor`, then V) but it is a diagnostic
+  wireframe capsule, not a character host, and `CharacterAimRig` remains unmounted;
+- replication of anything beyond player motor state, and remote tracers. Authority,
+  prediction and reconciliation now exist for MOVEMENT only; see doc 12;
 - full piecewise drag/weather model, moving target lead aids, and wind estimation;
 - attachment inventory/slots, stamina, injury, suppression, bipods, leaning,
   supported-fire detection, and authored recoil-pattern textures;

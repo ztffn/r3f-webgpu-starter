@@ -10,15 +10,35 @@ import type { LoadedTerrain } from "./df2/loadTerrain";
 import type { PerfSample } from "./df2/PerfMonitor";
 import { BENCH, publish } from "./df2/bench";
 
-const requestedScene = new URLSearchParams(window.location.search).get("scene");
+const urlParams = new URLSearchParams(window.location.search);
+const requestedScene = urlParams.get("scene");
 const scopeDemo = requestedScene === "scope";
 const weaponDemo = requestedScene === "weapon";
+/**
+ * Walk the shared character motor instead of the terrain spike's camera rig.
+ *
+ * Orthogonal to the scene on purpose: `?scene=motor` is movement alone, and
+ * `?scene=scope&motor=1` is the combination that matters — a weapon carried by
+ * a body that actually collides, so stance, speed and being airborne reach
+ * weapon handling instead of being inferred from the camera.
+ */
+const motorDemo = requestedScene === "motor" || urlParams.get("motor") === "1";
+/**
+ * Networked play: the motor predicts against the authoritative game server and
+ * remote players appear in the world. `?scene=scope&motor=1&net=1`, with an
+ * optional `server=` URL override (default ws://localhost:2567). Requires the
+ * motor — there is nothing to network without it.
+ */
+const netDemo = motorDemo && urlParams.get("net") === "1";
 
 export default function App() {
   const [wireframe, setWireframe] = useState(false);
   const [grass, setGrass] = useState(BENCH.grass ?? true);
   // ?bench=1 always starts on foot: the ground-level frame is the one being tuned.
-  const [grounded, setGrounded] = useState(BENCH.enabled || scopeDemo || weaponDemo);
+  // The motor is always on foot — it has no fly mode to toggle out of.
+  const [grounded, setGrounded] = useState(
+    BENCH.enabled || scopeDemo || weaponDemo || motorDemo
+  );
   const [stance, setStance] = useState<Stance>(BENCH.stance ?? "stand");
 
   const [perf, setPerf] = useState<PerfSample | null>(null);
@@ -108,6 +128,8 @@ export default function App() {
           onSceneReady={onSceneReady}
           scopeDemo={scopeDemo}
           weaponDemo={weaponDemo}
+          motorDemo={motorDemo}
+          netDemo={netDemo}
         />
       </GameCanvas>
     </>

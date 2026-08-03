@@ -49,11 +49,24 @@ This is a hobby/personal reconstruction project, not a commercial release.
 > state is a multiplayer shooter, ideally 64+ players — `00` Pillar 12 names it as
 > identity-critical, so this is a **scheduling** decision, not a judgement that multiplayer
 > is optional. It stays out of v1 scope and **must not be designed for speculatively** —
-> world rendering has to be good first, and the plan has not been laid out yet. Two
-> practical consequences for anyone working now:
+> world rendering has to be good first. Two practical consequences for anyone working now:
 > **(a)** don't build networking, prediction or authority models; **(b)** don't make choices
 > that foreclose it either — in particular `Heightfield.ts` and the concealment field must
 > stay renderer-free so they can be sampled server-side (`08` §3).
+>
+> **The motor layer is now BUILT**, acting on (b). Decisions:
+> `plans/2026-08-02-multiplayer-motor-and-transport-decisions.md` settles the authority model
+> (client prediction plus snapshot reconciliation, never bitwise lockstep) and commits to one
+> shared headless character motor. As built: `12-character-motor-and-networking-spec.md`.
+> Measurements: `plans/2026-08-02-motor-measurements.md`.
+>
+> **This narrows (a) rather than lifting it.** Movement authority, prediction and
+> reconciliation exist and two clients share a room. What is still explicitly not built, and
+> must not be built speculatively, is the session framework, matchmaking, reconnection,
+> persistence, anti-cheat, and replication of anything beyond player movement. The WebSocket
+> transport in `src/net/` is disposable scaffolding for measurement, not a choice — the
+> framework decision waits on the measurements in §7 of the decision record, several of
+> which are still open.
 
 ## 3. Legal / asset-sourcing posture
 
@@ -262,9 +275,16 @@ and immediately answers "does this feel like DF2?".
   perks, and live statuses are intentionally deferred behind a typed deterministic resolver;
   see `11-weapon-ballistics-and-modifier-system-spec.md` and
   `plans/2026-08-02-weapon-ballistics-modifier-roadmap.md`.
-- ⬜ First-person collision and stance motor using Rapier; basic AI/objectives.
-  *(What exists today is a camera rig only — `FlyControls.tsx` clamps to the surface at a
-  stance eye height. No physics, no collision.)*
+- ⬜ Run the bounded **ecctrl player/vehicle controller spike** before committing to a
+  custom Rapier motor. Use primitive/proxy meshes rather than waiting for character or
+  vehicle assets, and measure three outcomes: adopt ecctrl behind project-owned adapters,
+  reuse only its Rapier techniques, or continue with custom Rapier controllers. The spike
+  must cover stance/terrain behavior, fixed-tick command input, serializable correction
+  state, headless-authority feasibility, and 32/64-entity performance; see
+  `plans/2026-08-01-ecctrl-player-vehicle-controller-spike-design.md`.
+- ⬜ First-person collision and stance motor plus a representative vehicle controller;
+  basic AI/objectives. *(What exists today is a camera rig only — `FlyControls.tsx` clamps
+  to the surface at a stance eye height. No physics, no collision.)*
 - ⬜ ECS (bitECS) as entity count grows (`05-...md` §3).
 
 The as-built FPS contracts, controls, performance claims, and remaining gaps are in

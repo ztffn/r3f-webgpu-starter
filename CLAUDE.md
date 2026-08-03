@@ -27,6 +27,7 @@ player instinctively recognise this?* — applies to features, not to whether a 
 | `08-implementation-spec.md` | **As-built: module map, contracts, invariants, traps.** Read this before touching code |
 | `10-fps-combat-implementation-spec.md` | **As-built FPS ownership, frame order, controls, performance, and deferred work** |
 | `11-weapon-ballistics-and-modifier-system-spec.md` | **Trigger-to-impact contracts, formulas, budgets, and attachment/perk extension rules** |
+| `12-character-motor-and-networking-spec.md` | **As-built shared character motor, room, transport and session test — and the traps that cost this subsystem the most time** |
 
 ## Current state (August 2026)
 
@@ -50,6 +51,13 @@ player instinctively recognise this?* — applies to features, not to whether a 
 - **`atmosphere.ts` is the one call a scene material makes** — `shade(rgb, worldPos?)`, grade
   then fog. Read `08-...md` §8 invariant 7 before adding any material, and note it only works
   for UNLIT materials; lit props need the term after lighting and that variant does not exist.
+- **Character motor and multiplayer spine:** a Rapier character motor that runs unchanged in
+  the browser for prediction and in Node for authority, a room that owns the world step, a
+  transport seam with a disposable WebSocket implementation, and a working two-client
+  session. Walk it with **`?scene=motor`** (V shows the collider capsule). `src/motor/` and
+  `src/net/` import **no Three.js and no React at runtime** — that is what makes them
+  shared, and the Node tests enforce it. Read `12-...md` before touching either; its §6
+  lists bugs that were each invisible until something was measured.
 - **Test build:** free-fly / on-foot camera with stances, instrument HUD, `netlify.toml`.
   Deploy with `npx netlify deploy --prod --dir=dist` from a machine that has prepared assets —
   or via a Git-connected build — prepared assets are committed, so both render the real map.

@@ -12,3 +12,34 @@ export interface PlayerMotorSnapshot {
   readonly grounded: boolean;
   readonly planarSpeedMetresPerSecond: number;
 }
+
+/**
+ * Writable view, published once per frame by whatever actually simulates the
+ * player and read by the weapon host.
+ *
+ * This is the seam that lets weapon handling stop inferring the player's state
+ * from the camera. Differentiating camera position gives a usable speed, but
+ * `grounded` cannot be derived that way at all — without a real motor it is
+ * whatever the app's fly/on-foot toggle says, which stays true through a jump,
+ * so airborne dispersion never applies.
+ */
+export interface PlayerMotorSnapshotTarget {
+  position: THREE.Vector3;
+  stance: PlayerStance;
+  grounded: boolean;
+  sprinting: boolean;
+  planarSpeedMetresPerSecond: number;
+}
+
+/**
+ * Weapon state the MOTOR needs, published by whoever owns the weapon.
+ *
+ * Two booleans, and nothing more. `WeaponSystem` owns ADS and the reload — the
+ * progress, the cancellation rules, all of it — and these are only the intents
+ * the motor turns into a speed penalty. Reading resolved weapon state instead
+ * would put gameplay the server cannot replay into the movement path.
+ */
+export interface PlayerWeaponIntent {
+  aiming: boolean;
+  reloading: boolean;
+}

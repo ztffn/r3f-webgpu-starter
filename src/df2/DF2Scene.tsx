@@ -31,7 +31,14 @@ import { bakeGrassJitter } from "./grassJitter";
 import { buildHeightTexture } from "./heightTexture";
 import { loadTerrain, type LoadedTerrain } from "./loadTerrain";
 import { WeaponPrototype } from "../fps/WeaponPrototype";
+import { MotorControls } from "../fps/MotorControls";
+import { useGameClient } from "../fps/useGameClient";
+import { RemotePlayers } from "../fps/RemotePlayers";
 import { CompositeWorldQuery } from "../fps/core/WorldQuery";
+import type {
+  PlayerMotorSnapshotTarget,
+  PlayerWeaponIntent,
+} from "../fps/core/PlayerMotor";
 import { FPS_DEBUG } from "../fps/debug/debugConfig";
 import { LookSensitivityController } from "../fps/core/LookSensitivityController";
 // Lazily imported so the three multi-megabyte debug models are code-split out of the
@@ -244,6 +251,18 @@ export interface DF2SceneProps {
   scopeDemo?: boolean;
   /** Isolated animated rifle-and-hands test scene. */
   weaponDemo?: boolean;
+  /**
+   * Walk on the shared character motor instead of the terrain spike's camera
+   * rig. Opt-in: `FlyControls` stays the default because free flight is still
+   * how the terrain and grass work gets judged.
+   */
+  motorDemo?: boolean;
+  /**
+   * Predict against the authoritative game server and show remote players.
+   * Only meaningful with `motorDemo`; the local motor path is untouched
+   * without it.
+   */
+  netDemo?: boolean;
 }
 
 /**
@@ -291,8 +310,26 @@ export function DF2Scene({
   onSceneReady,
   scopeDemo = false,
   weaponDemo = false,
+  motorDemo = false,
+  netDemo = false,
 }: DF2SceneProps) {
   const lookSensitivity = useMemo(() => new LookSensitivityController(), []);
+  /** Written by MotorControls each frame, read by WeaponPrototype the same frame. */
+  const motorPose = useMemo<PlayerMotorSnapshotTarget>(
+    () => ({
+      position: new THREE.Vector3(),
+      stance: "stand",
+      grounded: false,
+      sprinting: false,
+      planarSpeedMetresPerSecond: 0,
+    }),
+    []
+  );
+  /** Aim intent the other way: weapon host writes, motor reads. */
+  const weaponIntent = useMemo<PlayerWeaponIntent>(
+    () => ({ aiming: false, reloading: false }),
+    []
+  );
   // undefined = still loading, null = no assets (synthetic), object = real map
   const [loaded, setLoaded] = useState<LoadedTerrain | null | undefined>(undefined);
 
@@ -635,6 +672,10 @@ export function DF2Scene({
   useEffect(() => () => waterMaterial.dispose(), [waterMaterial]);
 
   const heightfield = world?.heightfield ?? null;
+  // The networked client's lifetime belongs to this scene, not to
+  // MotorControls: RemotePlayers consumes the same instance, and an effect-owned
+  // client is what guarantees a leaked join cannot outlive its component.
+  const gameClient = useGameClient(motorDemo && netDemo, heightfield);
   // Gameplay collision reads the canonical CPU heightfield, never Terrain's
   // transient LOD meshes or shader-only grass proxies.
   const worldQuery = useMemo(() => new CompositeWorldQuery(heightfield, 0), [heightfield]);
@@ -733,7 +774,9 @@ export function DF2Scene({
         </Suspense>
       )}
 
-      {heightfield && (
+      {/* Exactly one camera owner. Both write camera.position every frame, so
+          mounting them together makes the view fight itself. */}
+      {heightfield && !motorDemo && (
         <FlyControls
           heightfield={heightfield}
           grounded={grounded}
@@ -746,7 +789,31 @@ export function DF2Scene({
         />
       )}
 
-      {/* Kept opt-in while the existing terrain visual work remains the default. */}
+      {/* Mounted before WeaponPrototype so the pose is published first. Not a
+          correctness requirement — a one-frame lag would be imperceptible — but
+          free to get right. Networked mode withholds the mount until the client
+          exists, so MotorControls' contract stays binary: client prop present
+          means networked, absent means the unchanged local path. */}
+      {heightfield && motorDemo && (!netDemo || gameClient !== null) && (
+        <MotorControls
+          heightfield={heightfield}
+          client={netDemo ? gameClient : null}
+          pointerLock={scopeDemo}
+          lookSensitivity={lookSensitivity}
+          onState={onFly}
+          onStance={onStance}
+          pose={motorPose}
+          weaponIntent={weaponIntent}
+        />
+      )}
+
+      {netDemo && gameClient !== null && (
+        <RemotePlayers client={gameClient} atmosphere={atmosphere} />
+      )}
+
+      {/* Kept opt-in while the existing terrain visual work remains the default.
+          `?scene=scope&motor=1` mounts both, which is the combination that makes
+          movement actually affect the weapon. */}
       {(scopeDemo || weaponDemo) && (
         <WeaponPrototype
           scopeDemo={scopeDemo}
@@ -754,6 +821,8 @@ export function DF2Scene({
           stance={stance}
           grounded={grounded}
           lookSensitivity={lookSensitivity}
+          motorPose={motorDemo ? motorPose : null}
+          weaponIntent={motorDemo ? weaponIntent : null}
         />
       )}
     </>

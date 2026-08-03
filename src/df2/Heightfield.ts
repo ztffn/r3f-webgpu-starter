@@ -23,7 +23,7 @@
 // ground. A real map gets that for free because both sides come from the same
 // bytes; the synthetic path only gets it by being quantised the same way.
 
-import { fbm } from "./noise";
+import { fbm } from "./noise.ts";
 import {
   WORLD_SIZE,
   GRID_CELLS,
@@ -31,7 +31,7 @@ import {
   METERS_PER_TEXEL,
   HEIGHT_SCALE,
   HEIGHT_SMOOTH_PASSES,
-} from "./config";
+} from "./config.ts";
 
 // Lattice units the synthetic tile spans at the base octave. Integer, so the
 // noise wraps cleanly and the tile is seamless.

@@ -6,6 +6,10 @@ terrain and its signature concealing **tall grass**.
 
 This is a hobby/reconstruction project, not a commercial release.
 
+**If you just want to run it and look around, read [`PLAYING.md`](./PLAYING.md).**
+This file is the technical overview; that one is what to open, what to press, and what is
+honestly not there yet.
+
 ## Stack
 
 **Vite + TypeScript + React 19**, rendering with **Three.js `WebGPURenderer`** and **TSL**
@@ -53,7 +57,8 @@ Confirmed: colormap = JPEG 1024², heightmap = PCX 1024² 8-bit, plus a per-texe
 and 256-tile grass **stretch-height** strips. `tools/df2-extract` unpacks `.pff` archives and
 `.trn` manifests. Findings: [`docs/06`](./docs/06-asset-extraction-findings.md).
 
-Extracted assets are **not** committed (NovaLogic + community authorship).
+Community-authored expansion assets **are** committed, raw archives included; retail DF2
+data is not. The distinction is the whole policy — see [Asset policy](#asset-policy).
 
 See [`docs/`](./docs) for the full design:
 
@@ -69,6 +74,8 @@ See [`docs/`](./docs) for the full design:
 | [`07`](./docs/07-grass-visual-reference.md) | Grass measurement methodology & open artifacts |
 | [`08`](./docs/08-implementation-spec.md) | **Implementation spec (as-built)** — start here to change code |
 | [`10`](./docs/10-fps-combat-implementation-spec.md) | **FPS combat implementation spec (as-built)** — controls, contracts, performance, handoff |
+| [`11`](./docs/11-weapon-ballistics-and-modifier-system-spec.md) | Trigger-to-impact contracts, formulas, budgets, attachment seams |
+| [`12`](./docs/12-character-motor-and-networking-spec.md) | **Character motor & networking (as-built)** — the shared motor, rooms, transport, and its hard-won traps |
 
 ## Source layout
 
@@ -90,6 +97,8 @@ src/components/
   Hud.tsx            instrument-panel HUD
 src/main.tsx         entry
 src/fps/             local player, weapons, ballistics, world queries, combat presentation
+src/motor/           shared character motor over Rapier — no Three.js, no React, runs in Node
+src/net/             transport seam, binary codec, authoritative server, predicting client
 ```
 
 `src/df2/` is the current Phase-1 spike. The **target** module layout is the one in
@@ -109,7 +118,11 @@ npm run dev        # Vite dev server at localhost:3000
 npm run build      # typecheck + production build to /dist
 npm run preview    # serve the production build
 npm run typecheck  # tsc --noEmit
-npm test           # deterministic FPS systems and load tests
+npm test           # deterministic FPS, motor and networking tests
+
+npm run session:server   # authoritative multiplayer room on :8787
+npm run session:client   # two-client session harness on :3100
+npm run motor:bench      # dense-room simulation cost
 ```
 
 A WebGPU-capable browser is recommended; Three.js falls back to WebGL2 automatically where
@@ -117,6 +130,9 @@ WebGPU is unavailable. The HUD shows which backend actually initialised — wort
 before drawing any conclusion from the frame times next to it.
 
 ### Controls
+
+A fuller, mode-by-mode version of this lives in [`PLAYING.md`](./PLAYING.md).
+
 
 | | |
 | --- | --- |
@@ -165,15 +181,17 @@ that distinction, not "assets" as a blanket category, is what the policy turns o
 
 ## Roadmap (next)
 
-- **▶ Now:** close the skirt artifact above, then calibrate `HEIGHT_SCALE` /
-  `METERS_PER_TEXEL` against the real game — they are still placeholders, so "does this feel
-  like DF2?" cannot be answered honestly yet.
+- **▶ Now:** gameplay and multiplayer. The character motor and an authoritative two-client
+  session are in; next are remote players rendered in the world and concealment.
+- **Open:** the skirt artifact above. `HEIGHT_SCALE` / `METERS_PER_TEXEL` are still
+  nominally placeholders but judged close enough to build gameplay on.
 - **Phase 2** — grass: measure the current columnar march against the reference screenshots
   (it is still flatter than the real thing, `docs/07` §7), then compute-instanced near-field
   blades.
 - **Phase 3** — concealment / line-of-sight, reading the same `grassHeightField`.
-- **Phase 4** — the local combat slice is built; next are a Rapier player motor,
-  real sidearm/loadout presentation, third-person characters, then AI/objectives.
+- **Phase 4** — the local combat slice and the Rapier player motor are built, and movement
+  now feeds weapon handling. Next are real sidearm/loadout presentation, third-person
+  characters, then AI/objectives.
 
 ## Credits
 

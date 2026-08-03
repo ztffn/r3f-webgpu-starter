@@ -10,7 +10,11 @@ import { float, mix, positionGeometry, smoothstep, texture, uniform, vec2, vec3 
 import { CAMERA_FAR, CAMERA_FOV, CAMERA_NEAR } from "../df2/config";
 import { publishRange, type RangeSample } from "./rangeTelemetry";
 import { LocalPlayerController, type LocalPlayerCommands } from "./core/LocalPlayerController";
-import type { PlayerStance } from "./core/PlayerMotor";
+import type {
+  PlayerStance,
+  PlayerMotorSnapshotTarget,
+  PlayerWeaponIntent,
+} from "./core/PlayerMotor";
 import type { RegisteredWorldQuery } from "./core/WorldQuery";
 import { BallisticProjectileSystem, type BallisticResult } from "./combat/BallisticProjectileSystem";
 import { readBallisticEnvironment } from "./combat/BallisticEnvironment";
@@ -86,6 +90,18 @@ export interface WeaponPrototypeProps {
   stance?: PlayerStance;
   grounded?: boolean;
   lookSensitivity: LookSensitivityController;
+  /**
+   * Authoritative player state from a real character motor, published earlier
+   * this frame. When present it REPLACES the `stance` and `grounded` props and
+   * the camera-differentiated speed — see the frame body for why grounded in
+   * particular cannot be inferred without it.
+   */
+  motorPose?: PlayerMotorSnapshotTarget | null;
+  /**
+   * Published each frame so the motor can slow the player while aiming. This
+   * host stays the owner of ADS; only the intent crosses over.
+   */
+  weaponIntent?: PlayerWeaponIntent | null;
 }
 
 function collectTextures(material: THREE.Material, into: Set<THREE.Texture>) {
@@ -235,6 +251,8 @@ export function WeaponPrototype({
   stance = "stand",
   grounded = false,
   lookSensitivity,
+  motorPose = null,
+  weaponIntent = null,
 }: WeaponPrototypeProps) {
   const { camera, gl, scene, size } = useThree();
   const player = useMemo(() => new LocalPlayerController(), []);
@@ -356,6 +374,8 @@ export function WeaponPrototype({
   // feeds planar speed, sub-frame interpolation, and the weapon-lag impulse.
   const framePreviousPosition = useMemo(() => new THREE.Vector3(), []);
   const framePreviousQuaternion = useMemo(() => new THREE.Quaternion(), []);
+  /** Where rounds actually leave from this frame. See the frame body. */
+  const shotOrigin = useMemo(() => new THREE.Vector3(), []);
   const framePoseReady = useRef(false);
   const firingTimeline = useMemo(
     () =>
@@ -369,14 +389,22 @@ export function WeaponPrototype({
       }),
     [aimSway, ballistics, scopeAdjustments]
   );
+  // `position` is reassigned each frame to the resolved shot origin, so it must
+  // not alias the camera — see `shotOrigin`.
   const playerPose = useMemo(
-    () => ({ position: camera.position, stance, grounded, planarSpeedMetresPerSecond: 0 }),
-    [camera]
+    () => ({
+      position: new THREE.Vector3(),
+      stance,
+      grounded,
+      planarSpeedMetresPerSecond: 0,
+    }),
+    []
   );
   const handlingContext = useMemo(
     () => ({
       stance,
       grounded,
+      sprinting: false,
       planarSpeedMetresPerSecond: 0,
       breathStabilization: 0,
     }),
@@ -553,10 +581,25 @@ export function WeaponPrototype({
       event.stopImmediatePropagation();
     };
     const adjustMagnification = (event: KeyboardEvent) => {
-      // Z/X retain their normal stance bindings except while looking through
-      // the optic, where they are dedicated to variable magnification.
-      if (!player.wantsAds || (event.code !== "KeyZ" && event.code !== "KeyX") || event.repeat) return;
-      const direction = event.code === "KeyZ" ? -1 : 1;
+      // Comma and period, NOT Z/X and NOT brackets.
+      //
+      // Z and X were fine while a camera rig owned stance; with a real motor
+      // mounted they collide outright, since aiming and pressing Z zoomed the
+      // optic AND dropped the player prone. Stance wins that argument.
+      //
+      // Brackets were the first fix and were worse in a quieter way: `event.code`
+      // is PHYSICAL position, so `BracketLeft` is whatever key sits right of P —
+      // labelled `Å` on a Norwegian keyboard, not `[`. A control documented as
+      // one key and pressed as another is a trap. Comma and period carry the
+      // same label on US and Nordic layouts, so the docs and the keycap agree.
+      if (
+        !player.wantsAds ||
+        (event.code !== "Comma" && event.code !== "Period") ||
+        event.repeat
+      ) {
+        return;
+      }
+      const direction = event.code === "Comma" ? -1 : 1;
       scopeFov.current = THREE.MathUtils.clamp(
         scopeFov.current + direction * SCOPE_FOV_STEP,
         SCOPE_FOV_MIN,
@@ -769,6 +812,13 @@ export function WeaponPrototype({
     // frame's end pose is still intact. Planar speed, the timeline's sub-frame
     // interpolation, and the weapon-lag impulse all read this one capture, so
     // no future camera work inside this callback can make them disagree.
+    // Rounds leave the player's EYE, which is not always where the camera is.
+    // A third-person camera sits metres behind the body, so spawning from the
+    // camera puts the muzzle behind the player and every shot starts in the
+    // wrong place. The motor's eye is authoritative whenever it exists; the
+    // camera is only a stand-in for it.
+    shotOrigin.copy(motorPose !== null ? motorPose.position : camera.position);
+
     const hadPreviousFrame = framePoseReady.current;
     let yawDelta = 0;
     let pitchDelta = 0;
@@ -776,8 +826,8 @@ export function WeaponPrototype({
       playerPose.planarSpeedMetresPerSecond = Math.min(
         MAX_TRANSITIONAL_SPEED_METRES_PER_SECOND,
         Math.hypot(
-          camera.position.x - framePreviousPosition.x,
-          camera.position.z - framePreviousPosition.z
+          shotOrigin.x - framePreviousPosition.x,
+          shotOrigin.z - framePreviousPosition.z
         ) / delta
       );
       cameraDeltaQuaternion.copy(framePreviousQuaternion).invert().multiply(camera.quaternion);
@@ -788,19 +838,39 @@ export function WeaponPrototype({
     } else {
       playerPose.planarSpeedMetresPerSecond = 0;
     }
-    timelineFrame.startPosition.copy(hadPreviousFrame ? framePreviousPosition : camera.position);
+    timelineFrame.startPosition.copy(hadPreviousFrame ? framePreviousPosition : shotOrigin);
     timelineFrame.startOrientation.copy(
       hadPreviousFrame ? framePreviousQuaternion : camera.quaternion
     );
-    framePreviousPosition.copy(camera.position);
+    framePreviousPosition.copy(shotOrigin);
     framePreviousQuaternion.copy(camera.quaternion);
     framePoseReady.current = true;
 
-    playerPose.stance = stance;
-    playerPose.grounded = grounded;
+    if (motorPose !== null) {
+      // A real motor knows things the camera cannot express. `grounded`
+      // especially: differentiating camera position cannot tell you the player
+      // is airborne, so without this it stays true through a jump and
+      // `airborneDispersionRadians` never applies. Speed comes from the motor's
+      // own velocity rather than a differentiated position, which also drops
+      // the frame-rate-dependent noise in that estimate.
+      playerPose.stance = motorPose.stance;
+      playerPose.grounded = motorPose.grounded;
+      playerPose.planarSpeedMetresPerSecond = Math.min(
+        MAX_TRANSITIONAL_SPEED_METRES_PER_SECOND,
+        motorPose.planarSpeedMetresPerSecond
+      );
+    } else {
+      playerPose.stance = stance;
+      playerPose.grounded = grounded;
+    }
+    playerPose.position.copy(shotOrigin);
     player.syncMotorPose(playerPose);
+    if (weaponIntent !== null) weaponIntent.aiming = player.wantsAds;
     handlingContext.stance = player.stance;
     handlingContext.grounded = player.grounded;
+    // Only a real motor can report this; without one there is no sprint state
+    // to block on, and the weapon behaves as it always did.
+    handlingContext.sprinting = motorPose !== null && motorPose.sprinting;
     handlingContext.planarSpeedMetresPerSecond = player.planarSpeedMetresPerSecond;
     handlingContext.breathStabilization = aimSway.breathStabilization;
     loadout.setHandlingContext(handlingContext);
@@ -812,6 +882,9 @@ export function WeaponPrototype({
     loadout.update(simulationDelta);
     const equippedWeapon = loadout.equippedWeapon;
     const weaponSnapshot = equippedWeapon.getSnapshot();
+    // Published here rather than with aim intent because the reload phase only
+    // exists after the weapon has updated. The motor reads it next frame.
+    if (weaponIntent !== null) weaponIntent.reloading = weaponSnapshot.phase === "reloading";
     const nextScopeAdjustments = scopeAdjustments.get(equippedWeapon.definition.id)!;
     if (activeScopeAdjustments.current !== nextScopeAdjustments) {
       activeScopeAdjustments.current = nextScopeAdjustments;
@@ -821,7 +894,7 @@ export function WeaponPrototype({
     }
 
     timelineFrame.deltaSeconds = simulationDelta;
-    timelineFrame.endPosition.copy(camera.position);
+    timelineFrame.endPosition.copy(shotOrigin);
     timelineFrame.endOrientation.copy(camera.quaternion);
     timelineFrame.stance = stance;
     timelineFrame.holdingBreath = scopeDemo && commands.holdingBreath;

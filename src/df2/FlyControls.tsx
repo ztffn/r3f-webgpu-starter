@@ -23,6 +23,8 @@ export interface FlyState {
   agl: number;
   speed: number;
   grounded: boolean;
+  /** Present only when the motor is networked; FlyControls never sets it. */
+  net?: { phase: "connecting" | "playing" | "dropped"; playerId: number };
 }
 
 export interface FlyControlsProps {

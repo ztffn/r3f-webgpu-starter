@@ -166,6 +166,7 @@ export class WeaponSystem {
   private handlingStance = DEFAULT_WEAPON_HANDLING_CONTEXT.stance;
   private handlingGrounded = DEFAULT_WEAPON_HANDLING_CONTEXT.grounded;
   private handlingPlanarSpeed = DEFAULT_WEAPON_HANDLING_CONTEXT.planarSpeedMetresPerSecond;
+  private handlingSprinting = DEFAULT_WEAPON_HANDLING_CONTEXT.sprinting;
   private handlingBreath = DEFAULT_WEAPON_HANDLING_CONTEXT.breathStabilization;
   private dispersionFactor = DEFAULT_WEAPON_HANDLING_MODIFIERS.dispersionFactor;
   private recoilPitchFactor = DEFAULT_WEAPON_HANDLING_MODIFIERS.recoilPitchFactor;
@@ -208,6 +209,7 @@ export class WeaponSystem {
   }
 
   setHandlingContext(context: WeaponHandlingContext): void {
+    this.handlingSprinting = context.sprinting;
     this.handlingStance = context.stance;
     this.handlingGrounded = context.grounded;
     this.handlingPlanarSpeed = finiteNonNegative(context.planarSpeedMetresPerSecond);
@@ -429,6 +431,9 @@ export class WeaponSystem {
 
   private tryFireOnce(): boolean {
     if (this.reloadRemaining > 0 || this.cooldownRemaining > TIME_EPSILON) return false;
+    // Refused before the magazine is touched, so sprinting never consumes a
+    // round, never starts a cooldown, and never reports a dry fire.
+    if (this.handlingSprinting) return false;
     if (this.magazine <= 0) {
       if (!this.dryFireEmittedForPress) {
         this.dryFireEmittedForPress = true;

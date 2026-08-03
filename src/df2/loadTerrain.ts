@@ -9,8 +9,10 @@
 
 import * as THREE from "three/webgpu";
 
-/** Shape of terrain.json emitted by prepare-terrain.mjs. */
-interface TerrainMeta {
+/** Shape of terrain.json emitted by prepare-terrain.mjs. Exported so the Node
+ * game server types the same manifest (type-only — this module is browser-only
+ * at runtime). */
+export interface TerrainMeta {
   source: string;
   trn: {
     terrain_name?: string;

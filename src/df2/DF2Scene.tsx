@@ -33,6 +33,7 @@ import { loadTerrain, type LoadedTerrain } from "./loadTerrain";
 import { WeaponPrototype } from "../fps/WeaponPrototype";
 import { MotorControls } from "../fps/MotorControls";
 import { useGameClient } from "../fps/useGameClient";
+import { RemotePlayers } from "../fps/RemotePlayers";
 import { CompositeWorldQuery } from "../fps/core/WorldQuery";
 import type {
   PlayerMotorSnapshotTarget,
@@ -804,6 +805,10 @@ export function DF2Scene({
           pose={motorPose}
           weaponIntent={weaponIntent}
         />
+      )}
+
+      {netDemo && gameClient !== null && (
+        <RemotePlayers client={gameClient} atmosphere={atmosphere} />
       )}
 
       {/* Kept opt-in while the existing terrain visual work remains the default.

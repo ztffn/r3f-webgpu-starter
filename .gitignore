@@ -146,5 +146,10 @@ dist
 # The line that still matters: RETAIL-extracted DF2 data is personal-use-only and
 # does not go in here. See README § Asset policy and docs/01 §3.
 
+# Raw local asset staging (the vegetation pipeline's input directory and other
+# unprocessed sources). Never committed: prepared outputs go through
+# tools/vegetation into tracked locations; the raw stash lives on one machine.
+_tempAssets/
+
 # macOS Finder metadata
 .DS_Store

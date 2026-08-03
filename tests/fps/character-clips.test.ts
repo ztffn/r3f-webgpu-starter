@@ -6,6 +6,7 @@
 // visibly as a soldier running the wrong way on someone else's screen.
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import {
   CLIP_IDLE,
@@ -34,20 +35,22 @@ function sample(overrides: Partial<LocomotionSample>): LocomotionSample {
 }
 
 test("the motor basis resolves into character-local components", () => {
+  const local = { forward: 0, left: 0 };
+
   // Yaw 0 faces world -Z: moving along -Z is straight ahead.
-  const ahead = localizeVelocity(0, -5, 0);
-  assert.ok(Math.abs(ahead.forward - 5) < 1e-9);
-  assert.ok(Math.abs(ahead.left) < 1e-9);
+  localizeVelocity(0, -5, 0, local);
+  assert.ok(Math.abs(local.forward - 5) < 1e-9);
+  assert.ok(Math.abs(local.left) < 1e-9);
 
   // Facing -Z, the character's left hand points along -X.
-  const leftward = localizeVelocity(-5, 0, 0);
-  assert.ok(Math.abs(leftward.left - 5) < 1e-9);
-  assert.ok(Math.abs(leftward.forward) < 1e-9);
+  localizeVelocity(-5, 0, 0, local);
+  assert.ok(Math.abs(local.left - 5) < 1e-9);
+  assert.ok(Math.abs(local.forward) < 1e-9);
 
   // Quarter turn left (yaw +90°) faces -X; moving along -X is now forward.
-  const turned = localizeVelocity(-5, 0, Math.PI / 2);
-  assert.ok(Math.abs(turned.forward - 5) < 1e-6);
-  assert.ok(Math.abs(turned.left) < 1e-6);
+  localizeVelocity(-5, 0, Math.PI / 2, local);
+  assert.ok(Math.abs(local.forward - 5) < 1e-6);
+  assert.ok(Math.abs(local.left) < 1e-6);
 });
 
 test("the eight sectors map to the pack's suffixes, including wraparound", () => {
@@ -98,15 +101,25 @@ test("stance, gait, and airborne mapping", () => {
   assert.equal(chooseClip(sample({ grounded: false, speed: 5 }), RUN_AT), CLIP_JUMP_LOOP);
 });
 
-test("every selectable clip is in the shipped manifest's vocabulary", () => {
-  // The manifest ships 49 clips; the selector must not invent names outside
-  // the sets it owns. Spot the full cross product is well-formed.
+test("every selectable clip ships in the GLB's clip manifest", () => {
+  // Checked against the committed ground-truth listing rather than a regex
+  // restating the same cross product: this fails when a clip is renamed in a
+  // re-export, which is the mistake worth catching.
+  const manifest = readFileSync(
+    "assets/3d/characters/player1/SpecialForcesSoldier_animations.txt",
+    "utf8"
+  );
+  const shipped = new Set(
+    manifest
+      .split("\n")
+      .map((line) => /^(\w+)\s+\d+\s+[\d.]+\s*$/.exec(line)?.[1])
+      .filter((name): name is string => name !== undefined)
+  );
+  assert.ok(shipped.size >= 49, `manifest parse looks broken: ${shipped.size} clip rows`);
+
   const names = allSelectableClips();
   assert.equal(new Set(names).size, names.length, "duplicate selectable clip names");
   for (const name of names) {
-    assert.match(
-      name,
-      /^(Idle|Idle_Aiming|Idle_Crouching|Idle_Crouching_Aiming|Jump_Loop|Jump_Down|(Walk|Run|Sprint|Walk_Crouching)_(Forward|Backward|Left|Right|Forward_Left|Forward_Right|Backward_Left|Backward_Right))$/
-    );
+    assert.ok(shipped.has(name), `${name} is not in the shipped clip manifest`);
   }
 });

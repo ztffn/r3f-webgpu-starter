@@ -10,11 +10,9 @@
 import * as THREE from "three/webgpu";
 import { CharacterAnimator } from "./CharacterAnimator.ts";
 import { CharacterAimRig, type AimRigProfile } from "./CharacterAimRig.ts";
-import { CharacterAimPresentationAdapter } from "./CharacterAimPresentationAdapter.ts";
-import { AuthoritativeAimState } from "../core/AuthoritativeAimState.ts";
 import { localizeVelocity, type LocomotionSample } from "./characterClips.ts";
 import { instantiateSoldier, type SoldierAsset } from "./soldierAssets.ts";
-import type { PlayerStance } from "../../motor/MotorTypes.ts";
+import type { MotorState, PlayerStance } from "../../motor/MotorTypes.ts";
 
 /** Everything a frame of character presentation needs, derivable from a local
  * MotorState and from a remote snapshot alike. Position is the FEET. */
@@ -30,6 +28,49 @@ export interface CharacterPose {
   grounded: boolean;
   sprinting: boolean;
   aiming: boolean;
+}
+
+/** One scratch pose per consumer, filled every frame. */
+export function createCharacterPose(): CharacterPose {
+  return {
+    positionX: 0,
+    positionY: 0,
+    positionZ: 0,
+    yawRadians: 0,
+    pitchRadians: 0,
+    velocityX: 0,
+    velocityZ: 0,
+    stance: "stand",
+    grounded: true,
+    sprinting: false,
+    aiming: false,
+  };
+}
+
+/**
+ * The one place pose facts are copied out of a motor-shaped state, so a field
+ * added to CharacterPose cannot be threaded through one consumer and silently
+ * stay stale in the other. Typed structurally so presentation never imports
+ * gameplay truth beyond the fields it reads.
+ */
+export function fillCharacterPose(
+  pose: CharacterPose,
+  position: { x: number; y: number; z: number },
+  yawRadians: number,
+  pitchRadians: number,
+  state: Pick<MotorState, "velocity" | "stance" | "grounded" | "sprinting" | "aiming">
+): void {
+  pose.positionX = position.x;
+  pose.positionY = position.y;
+  pose.positionZ = position.z;
+  pose.yawRadians = yawRadians;
+  pose.pitchRadians = pitchRadians;
+  pose.velocityX = state.velocity.x;
+  pose.velocityZ = state.velocity.z;
+  pose.stance = state.stance;
+  pose.grounded = state.grounded;
+  pose.sprinting = state.sprinting;
+  pose.aiming = state.aiming;
 }
 
 /** Runtime bone names — the glTF export strips Blender's ':' from
@@ -59,6 +100,11 @@ const SOLDIER_AIM_PROFILE: AimRigProfile = {
   },
 };
 
+/** Aim-channel weight while merely looking around (not ADS): spine and chest
+ * carry this fraction of the pitch so look-around is a leaning body rather
+ * than a floating head. Tuning of the same species as the profile above. */
+const LOOK_TORSO_AIM_FRACTION = 0.35;
+
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
 
 export class CharacterView {
@@ -67,20 +113,8 @@ export class CharacterView {
 
   private readonly animator: CharacterAnimator;
   private readonly aimRig: CharacterAimRig | null;
-  private readonly adapter = new CharacterAimPresentationAdapter("+Z");
-  private readonly aimState = new AuthoritativeAimState();
   private readonly rootQuat = new THREE.Quaternion();
-  private readonly aimOrigin = new THREE.Vector3();
-  private readonly aimDirection = new THREE.Vector3();
-  private readonly sample: {
-    speed: number;
-    forward: number;
-    left: number;
-    stance: PlayerStance;
-    grounded: boolean;
-    sprinting: boolean;
-    aiming: boolean;
-  } = {
+  private readonly sample: { -readonly [K in keyof LocomotionSample]: LocomotionSample[K] } = {
     speed: 0,
     forward: 0,
     left: 0,
@@ -98,9 +132,6 @@ export class CharacterView {
     this.group.add(model);
 
     this.animator = new CharacterAnimator(model, [...asset.animations]);
-    if (this.animator.missingClips.length > 0) {
-      console.warn("character clips missing from GLB:", this.animator.missingClips);
-    }
 
     let skeleton: THREE.Skeleton | null = null;
     model.traverse((object) => {
@@ -125,46 +156,41 @@ export class CharacterView {
     this.group.position.set(pose.positionX, pose.positionY, pose.positionZ);
     this.group.rotation.y = pose.yawRadians;
 
-    const local = localizeVelocity(pose.velocityX, pose.velocityZ, pose.yawRadians);
+    localizeVelocity(pose.velocityX, pose.velocityZ, pose.yawRadians, this.sample);
     this.sample.speed = Math.hypot(pose.velocityX, pose.velocityZ);
-    this.sample.forward = local.forward;
-    this.sample.left = local.left;
     this.sample.stance = pose.stance;
     this.sample.grounded = pose.grounded;
     this.sample.sprinting = pose.sprinting;
     this.sample.aiming = pose.aiming;
 
     if (this.aimRig === null) {
-      this.animator.update(deltaSeconds, this.sample as LocomotionSample);
+      this.animator.update(deltaSeconds, this.sample);
       return;
     }
 
     this.aimRig.beginFrame();
-    this.animator.update(deltaSeconds, this.sample as LocomotionSample);
+    this.animator.update(deltaSeconds, this.sample);
 
-    // Group yaw is the only root rotation (the +Z fixup lives on the child,
-    // and the adapter reasons in authored +Z terms), so the root world
-    // quaternion is analytic — no matrix-world walk per frame.
+    // Group yaw is the only root rotation (the +Z fixup lives on the child),
+    // so the root world quaternion is analytic — no matrix-world walk.
     this.rootQuat.setFromAxisAngle(WORLD_UP, pose.yawRadians + Math.PI);
-    const cosPitch = Math.cos(pose.pitchRadians);
-    this.aimDirection.set(
-      -Math.sin(pose.yawRadians) * cosPitch,
-      Math.sin(pose.pitchRadians),
-      -Math.cos(pose.yawRadians) * cosPitch
-    );
-    this.aimState.set(this.aimOrigin, this.aimDirection);
-    const input = this.adapter.update(this.aimState, this.rootQuat, 1);
     this.aimRig.setRootWorldQuaternion(
       this.rootQuat.x,
       this.rootQuat.y,
       this.rootQuat.z,
       this.rootQuat.w
     );
-    this.aimRig.setLook(input.yaw, input.pitch, input.weight);
+    // CharacterPose cannot express an aim that deviates from body yaw, so the
+    // rig's root-local aim is exactly yaw 0 with the pose's pitch — the value
+    // CharacterAimPresentationAdapter would compute, minus the identity round
+    // trip. When a real world-space aim direction rides the pose (body lag,
+    // networked weapon aim), reintroduce the adapter here: docs/10 §2 names it
+    // the sole gameplay-to-render conversion point.
+    this.aimRig.setLook(0, pose.pitchRadians, 1);
     // The aim channel is what drives spine and chest. Committed on ADS; a
     // fraction otherwise, so plain look-around still carries some torso pitch
     // instead of a floating head on a rigid body.
-    this.aimRig.setAim(input.yaw, input.pitch, pose.aiming ? input.weight : input.weight * 0.35);
+    this.aimRig.setAim(0, pose.pitchRadians, pose.aiming ? 1 : LOOK_TORSO_AIM_FRACTION);
     this.aimRig.update(deltaSeconds);
   }
 

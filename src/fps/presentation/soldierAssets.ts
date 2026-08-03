@@ -26,26 +26,20 @@ export interface SoldierAsset {
 let cached: Promise<SoldierAsset> | null = null;
 
 export function loadSoldier(): Promise<SoldierAsset> {
-  cached ??= new Promise((resolve, reject) => {
-    const draco = new DRACOLoader().setDecoderPath(DRACO_PATH);
-    const loader = new GLTFLoader().setDRACOLoader(draco);
-    loader.load(
-      SOLDIER_URL,
-      (gltf) => {
-        const names = new Set(gltf.animations.map((clip) => clip.name));
-        const missing = allSelectableClips().filter((name) => !names.has(name));
-        if (missing.length > 0) {
-          console.warn(`soldier GLB is missing ${missing.length} expected clip(s):`, missing);
-        }
-        gltf.scene.traverse((object) => {
-          if ((object as THREE.Mesh).isMesh) object.frustumCulled = false;
-        });
-        resolve({ template: gltf.scene, animations: gltf.animations });
-      },
-      undefined,
-      (error) => reject(error instanceof Error ? error : new Error(String(error)))
-    );
-  });
+  cached ??= new GLTFLoader()
+    .setDRACOLoader(new DRACOLoader().setDecoderPath(DRACO_PATH))
+    .loadAsync(SOLDIER_URL)
+    .then((gltf) => {
+      const names = new Set(gltf.animations.map((clip) => clip.name));
+      const missing = allSelectableClips().filter((name) => !names.has(name));
+      if (missing.length > 0) {
+        console.warn(`soldier GLB is missing ${missing.length} expected clip(s):`, missing);
+      }
+      gltf.scene.traverse((object) => {
+        if ((object as THREE.Mesh).isMesh) object.frustumCulled = false;
+      });
+      return { template: gltf.scene, animations: gltf.animations };
+    });
   return cached;
 }
 

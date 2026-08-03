@@ -16,7 +16,11 @@ import type { GameClient, RemotePlayer } from "../net/GameClient.ts";
 import type { Atmosphere } from "../df2/atmosphere";
 import { blendedStanceDimension } from "../motor/MotorTypes.ts";
 import { PROXY_HEIGHT, PROXY_RADIUS } from "./MotorControls";
-import { CharacterView, type CharacterPose } from "./presentation/CharacterView.ts";
+import {
+  CharacterView,
+  createCharacterPose,
+  fillCharacterPose,
+} from "./presentation/CharacterView.ts";
 import { loadSoldier, type SoldierAsset } from "./presentation/soldierAssets.ts";
 
 const REMOTE_COLOR = 0xb8563f;
@@ -73,19 +77,7 @@ export function RemotePlayers({ client, atmosphere }: RemotePlayersProps) {
     [pool, shared]
   );
 
-  const pose = useRef<CharacterPose>({
-    positionX: 0,
-    positionY: 0,
-    positionZ: 0,
-    yawRadians: 0,
-    pitchRadians: 0,
-    velocityX: 0,
-    velocityZ: 0,
-    stance: "stand",
-    grounded: true,
-    sprinting: false,
-    aiming: false,
-  });
+  const pose = useRef(createCharacterPose());
 
   useFrame((_, delta) => {
     const group = groupRef.current;
@@ -113,19 +105,14 @@ export function RemotePlayers({ client, atmosphere }: RemotePlayersProps) {
       }
 
       if (visual.kind === "character") {
-        const state = pose.current;
-        state.positionX = remote.position.x;
-        state.positionY = remote.position.y;
-        state.positionZ = remote.position.z;
-        state.yawRadians = remote.yawRadians;
-        state.pitchRadians = remote.state.pitchRadians;
-        state.velocityX = remote.state.velocity.x;
-        state.velocityZ = remote.state.velocity.z;
-        state.stance = remote.state.stance;
-        state.grounded = remote.state.grounded;
-        state.sprinting = remote.state.sprinting;
-        state.aiming = remote.state.aiming;
-        visual.view.update(clamped, state);
+        fillCharacterPose(
+          pose.current,
+          remote.position,
+          remote.yawRadians,
+          remote.state.pitchRadians,
+          remote.state
+        );
+        visual.view.update(clamped, pose.current);
       } else {
         positionCapsule(visual.mesh, remote, client);
       }

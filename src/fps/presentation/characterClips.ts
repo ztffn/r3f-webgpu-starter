@@ -20,7 +20,9 @@ export const CLIP_JUMP_DOWN = "Jump_Down";
 
 /**
  * 8-way suffixes in sector order, 45° each, centred on straight ahead.
- * Index = round(angle / 45°) & 7 where angle = atan2(left, forward).
+ * The gait tables are prebuilt so the frame loop only ever indexes into
+ * interned constants — a template string per frame per character is exactly
+ * the allocation the zero-alloc loop convention forbids.
  */
 const SUFFIXES = [
   "Forward",
@@ -32,6 +34,11 @@ const SUFFIXES = [
   "Right",
   "Forward_Right",
 ] as const;
+
+const WALK_CLIPS = SUFFIXES.map((suffix) => `Walk_${suffix}`);
+const RUN_CLIPS = SUFFIXES.map((suffix) => `Run_${suffix}`);
+const SPRINT_CLIPS = SUFFIXES.map((suffix) => `Sprint_${suffix}`);
+const CROUCH_WALK_CLIPS = SUFFIXES.map((suffix) => `Walk_Crouching_${suffix}`);
 
 /**
  * The pose facts clip selection needs. Derivable from a local MotorState and
@@ -53,27 +60,32 @@ export interface LocomotionSample {
 
 /**
  * Motor yaw 0 faces world -Z and left is world -X (docs/12 §4 basis). Resolves
- * a world planar velocity into the character-local components selection needs.
+ * a world planar velocity into the character-local components selection needs,
+ * written into `out` so the frame loop allocates nothing.
  */
 export function localizeVelocity(
   velocityX: number,
   velocityZ: number,
-  yawRadians: number
-): { forward: number; left: number } {
+  yawRadians: number,
+  out: { forward: number; left: number }
+): void {
   const forwardX = -Math.sin(yawRadians);
   const forwardZ = -Math.cos(yawRadians);
-  return {
-    forward: velocityX * forwardX + velocityZ * forwardZ,
-    // left = up x forward
-    left: velocityX * forwardZ - velocityZ * forwardX,
-  };
+  out.forward = velocityX * forwardX + velocityZ * forwardZ;
+  // left = up x forward
+  out.left = velocityX * forwardZ - velocityZ * forwardX;
 }
 
-/** Which of the 8 directional suffixes matches this movement. */
-export function directionSuffix(forward: number, left: number): string {
+/** Which of the 8 sectors (index into the suffix order) matches this movement. */
+export function directionSector(forward: number, left: number): number {
   const angle = Math.atan2(left, forward);
   const sector = Math.round(angle / (Math.PI / 4)) & 7;
-  return SUFFIXES[sector < 0 ? sector + 8 : sector]!;
+  return sector < 0 ? sector + 8 : sector;
+}
+
+/** The directional suffix for a movement, for tests and diagnostics. */
+export function directionSuffix(forward: number, left: number): string {
+  return SUFFIXES[directionSector(forward, left)]!;
 }
 
 /**
@@ -96,24 +108,24 @@ export function chooseClip(sample: LocomotionSample, runSpeedThreshold: number):
     return sample.aiming ? CLIP_IDLE_AIM : CLIP_IDLE;
   }
 
-  const suffix = directionSuffix(sample.forward, sample.left);
-  if (crouched) return `Walk_Crouching_${suffix}`;
-  if (sample.sprinting) return `Sprint_${suffix}`;
-  return sample.speed >= runSpeedThreshold ? `Run_${suffix}` : `Walk_${suffix}`;
+  const sector = directionSector(sample.forward, sample.left);
+  if (crouched) return CROUCH_WALK_CLIPS[sector]!;
+  if (sample.sprinting) return SPRINT_CLIPS[sector]!;
+  return sample.speed >= runSpeedThreshold ? RUN_CLIPS[sector]! : WALK_CLIPS[sector]!;
 }
 
 /** Every clip `chooseClip` can return, for startup validation against the GLB. */
 export function allSelectableClips(): string[] {
-  const names = [
+  return [
     CLIP_IDLE,
     CLIP_IDLE_AIM,
     CLIP_IDLE_CROUCH,
     CLIP_IDLE_CROUCH_AIM,
     CLIP_JUMP_LOOP,
     CLIP_JUMP_DOWN,
+    ...WALK_CLIPS,
+    ...RUN_CLIPS,
+    ...SPRINT_CLIPS,
+    ...CROUCH_WALK_CLIPS,
   ];
-  for (const suffix of SUFFIXES) {
-    names.push(`Walk_${suffix}`, `Run_${suffix}`, `Sprint_${suffix}`, `Walk_Crouching_${suffix}`);
-  }
-  return names;
 }

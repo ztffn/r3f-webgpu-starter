@@ -103,7 +103,11 @@ aim regardless of how many packets were lost.
    A weapon that refuses to enter ADS still slows the player, and that is the correct
    trade. The reverse direction is `MotorState.sprinting`, which is RESOLVED state — the
    raw Sprint bit is not enough, because aiming, crouching and standing still all suppress
-   it, and the weapon blocks on the resolved answer.
+   it, and the weapon blocks on the resolved answer. `MotorState.aiming` (2026-08-03)
+   flows the same direction but with weaker semantics: it echoes the Ads intent bit
+   exactly as the motor consumed it — the bit that already scaled speed — so remote
+   presentation can raise the rifle. It is an intent MIRROR, not resolved weapon truth;
+   nothing gameplay-side may read it as ADS state.
 9. **Parameter properties are forbidden.** `--experimental-strip-types` runs in strip-only
    mode and rejects them outright. Already documented in `10-...md` §9.1; it bit again here.
 

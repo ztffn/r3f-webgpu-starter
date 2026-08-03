@@ -13,7 +13,6 @@ import {
   CLIP_IDLE,
   CLIP_JUMP_DOWN,
   CLIP_JUMP_LOOP,
-  allSelectableClips,
   chooseClip,
   type LocomotionSample,
 } from "./characterClips.ts";
@@ -27,10 +26,6 @@ const MAX_TIME_SCALE = 1.6;
 const FALLBACK_RUN_THRESHOLD = 3;
 
 export class CharacterAnimator {
-  /** Clips the selector can ask for that the GLB does not carry. Surfaced so a
-   * renamed clip shows up at startup instead of as a silent T-pose. */
-  readonly missingClips: readonly string[];
-
   private readonly mixer: THREE.AnimationMixer;
   private readonly clips = new Map<string, THREE.AnimationClip>();
   private readonly actions = new Map<string, THREE.AnimationAction>();
@@ -43,6 +38,9 @@ export class CharacterAnimator {
   private readonly runSpeedThreshold: number;
 
   private current: THREE.AnimationAction | null = null;
+  /** The playing clip's baked feet speed, cached at switch so the steady-state
+   * frame path is one multiply instead of a Map lookup. */
+  private currentNaturalSpeed = 0;
   /** The landing one-shot is in control until it finishes. */
   private landing = false;
   private wasGrounded = true;
@@ -80,8 +78,6 @@ export class CharacterAnimator {
     const run = this.naturalSpeed.get("Run_Forward") ?? 0;
     this.runSpeedThreshold = walk > 0 && run > walk ? (walk + run) / 2 : FALLBACK_RUN_THRESHOLD;
 
-    this.missingClips = allSelectableClips().filter((name) => !this.clips.has(name));
-
     this.mixer.addEventListener("finished", (event) => {
       if (this.landing && event.action === this.actions.get(CLIP_JUMP_DOWN)) {
         this.landing = false;
@@ -95,7 +91,7 @@ export class CharacterAnimator {
     // Going airborne cancels a landing that was still playing.
     if (!sample.grounded) this.landing = false;
 
-    if (sample.grounded && !this.wasGrounded && this.clips.has(CLIP_JUMP_DOWN)) {
+    if (sample.grounded && !this.wasGrounded) {
       this.landing = true;
       this.playOnce(CLIP_JUMP_DOWN, LANDING_FADE_SECONDS);
     }
@@ -105,10 +101,12 @@ export class CharacterAnimator {
       const name = chooseClip(sample, this.runSpeedThreshold);
       this.play(name, name === CLIP_JUMP_LOOP ? LANDING_FADE_SECONDS : CROSSFADE_SECONDS);
       if (this.current !== null) {
-        const natural = this.naturalSpeed.get(name) ?? 0;
         this.current.timeScale =
-          natural > 0.1
-            ? Math.min(MAX_TIME_SCALE, Math.max(MIN_TIME_SCALE, sample.speed / natural))
+          this.currentNaturalSpeed > 0.1
+            ? Math.min(
+                MAX_TIME_SCALE,
+                Math.max(MIN_TIME_SCALE, sample.speed / this.currentNaturalSpeed)
+              )
             : 1;
       }
     }
@@ -144,6 +142,7 @@ export class CharacterAnimator {
     next.reset().setLoop(THREE.LoopRepeat, Infinity).setEffectiveWeight(1).fadeIn(fadeSeconds).play();
     if (this.current !== null) this.current.fadeOut(fadeSeconds);
     this.current = next;
+    this.currentNaturalSpeed = this.naturalSpeed.get(name) ?? 0;
   }
 
   private playOnce(name: string, fadeSeconds: number): void {
@@ -156,12 +155,13 @@ export class CharacterAnimator {
     next.timeScale = 1;
     if (this.current !== null && this.current !== next) this.current.fadeOut(fadeSeconds);
     this.current = next;
+    this.currentNaturalSpeed = 0;
   }
 }
 
 /** Collected through an array because TS does not track assignments made
  * inside a traverse callback and narrows a plain local back to null. */
-export function findBySuffix(root: THREE.Object3D, suffix: RegExp): THREE.Object3D | null {
+function findBySuffix(root: THREE.Object3D, suffix: RegExp): THREE.Object3D | null {
   const matches: THREE.Object3D[] = [];
   root.traverse((object) => {
     if (matches.length === 0 && suffix.test(object.name)) matches.push(object);

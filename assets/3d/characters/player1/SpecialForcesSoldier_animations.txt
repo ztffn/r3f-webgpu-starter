@@ -1,0 +1,76 @@
+SpecialForcesSoldier.glb — Animation Clip List
+Source: SpecialForcesSoldier_AllAnims_v3.blend
+Exported: 2026-08-01
+FPS: 30
+Total clips: 49
+Source pack: assets/3d/animations/Rifle 8-Way Locomotion Pack (retargeted per runbook §4)
+
+Each name below is exactly what THREE.AnimationClip.name will be after loading the
+GLTFLoader result (gltf.animations[i].name). Use these strings directly with
+AnimationMixer.clipAction() lookups, e.g.:
+  const clip = THREE.AnimationClip.findByName(gltf.animations, "Idle");
+
+Name                                   Frames   Duration(s)
+------------------------------------------------------------
+Crouching_Turn_90_Left                 39       1.30
+Crouching_Turn_90_Right                39       1.30
+Death_Crouching_Headshot_Front         58       1.93
+Death_From_Back_Headshot               112      3.73
+Death_From_Front_Headshot              86       2.87
+Death_From_Right                       100      3.33
+Death_From_The_Back                    90       3.00
+Death_From_The_Front                   104      3.47
+Idle                                   62       2.07
+Idle_Aiming                            64       2.13
+Idle_Crouching                         64       2.13
+Idle_Crouching_Aiming                  61       2.03
+Jump_Down                              21       0.70
+Jump_Loop                              29       0.97
+Jump_Up                                17       0.57
+Run_Backward                           16       0.53
+Run_Backward_Left                      16       0.53
+Run_Backward_Right                     16       0.53
+Run_Forward                            16       0.53
+Run_Forward_Left                       16       0.53
+Run_Forward_Right                      16       0.53
+Run_Left                               16       0.53
+Run_Right                              16       0.53
+Sprint_Backward                        16       0.53
+Sprint_Backward_Left                   16       0.53
+Sprint_Backward_Right                  16       0.53
+Sprint_Forward                         16       0.53
+Sprint_Forward_Left                    16       0.53
+Sprint_Forward_Right                   16       0.53
+Sprint_Left                            16       0.53
+Sprint_Right                           16       0.53
+Turn_90_Left                           31       1.03
+Turn_90_Right                          31       1.03
+Walk_Backward                          30       1.00
+Walk_Backward_Left                     31       1.03
+Walk_Backward_Right                    31       1.03
+Walk_Crouching_Backward                31       1.03
+Walk_Crouching_Backward_Left           31       1.03
+Walk_Crouching_Backward_Right          31       1.03
+Walk_Crouching_Forward                 31       1.03
+Walk_Crouching_Forward_Left            31       1.03
+Walk_Crouching_Forward_Right           31       1.03
+Walk_Crouching_Left                    31       1.03
+Walk_Crouching_Right                   31       1.03
+Walk_Forward                           31       1.03
+Walk_Forward_Left                      31       1.03
+Walk_Forward_Right                     31       1.03
+Walk_Left                              31       1.03
+Walk_Right                             31       1.03
+
+Verification (2026-08-01):
+- All 49 clips retargeted via the runbook §4 world-space algorithm, zero errors.
+- NaN/Inf sweep: clean across all 49 actions.
+- Dot-product spot check (Idle, Sprint_Forward, Death_From_The_Back, Walk_Crouching_Left;
+  7 bones incl. both forearms/upper arms, spine, both upper legs; 5 sample frames each):
+  1.0 on every sample.
+- Rifle offset on PalmSocket_R unchanged: loc (-0.641, -0.026, 1.182),
+  rot (-2.93°, 22.86°, 1.32°) — untouched by this pass, confirmed after export.
+- GLB re-verified post-export: 49 animations present, named exactly as above.
+
+Note: SpecialForcesSoldier_AllAnims_v2.blend (83-clip grab-bag) is kept in this folder
+as history, superseded by SpecialForcesSoldier_AllAnims_v3.blend.

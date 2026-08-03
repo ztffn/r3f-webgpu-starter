@@ -18,6 +18,7 @@ import type { Heightfield } from "../df2/Heightfield";
 import type { FlyState, Stance } from "../df2/FlyControls";
 import type { LookSensitivityController } from "./core/LookSensitivityController";
 import type { PlayerMotorSnapshotTarget, PlayerWeaponIntent } from "./core/PlayerMotor.ts";
+import type { GameClient } from "../net/GameClient.ts";
 import { MotorRoom } from "../motor/MotorRoom.ts";
 import { createMotorWorld, initRapier } from "../motor/MotorWorld.ts";
 import {
@@ -31,6 +32,13 @@ import {
 
 export interface MotorControlsProps {
   heightfield: Heightfield;
+  /**
+   * Networked mode: predict through this client against the authoritative
+   * server instead of stepping a private room. Present means networked, absent
+   * means the local path — there is deliberately no in-between state; the
+   * scene withholds this mount until the client exists.
+   */
+  client?: GameClient | null;
   pointerLock?: boolean;
   lookSensitivity?: LookSensitivityController;
   onState?: (state: FlyState) => void;
@@ -99,6 +107,7 @@ const LOCAL_ID = "local";
 
 export function MotorControls({
   heightfield,
+  client = null,
   pointerLock = false,
   lookSensitivity,
   onState,
@@ -168,6 +177,7 @@ export function MotorControls({
   const eye = useMemo(() => ({ x: 0, y: 0, z: 0 }), []);
 
   useEffect(() => {
+    if (client !== null) return;
     let alive = true;
     void initRapier().then((loaded) => {
       if (alive) setRapier(loaded);
@@ -175,18 +185,20 @@ export function MotorControls({
     return () => {
       alive = false;
     };
-  }, []);
+  }, [client]);
 
-  const tuning = useMemo(readTuning, []);
+  // Networked, the client's tuning is the truth: a URL-tuned client would
+  // steer differently from the server and reconcile every single tick.
+  const tuning = useMemo(() => client?.tuning ?? readTuning(), [client]);
 
   const room = useMemo(() => {
-    if (rapier === null) return null;
+    if (client !== null || rapier === null) return null;
     const created = new MotorRoom(rapier, createMotorWorld(rapier, tuning), heightfield, {
       tuning,
     });
     created.add(LOCAL_ID, { x: 0, z: 0 });
     return created;
-  }, [rapier, heightfield, tuning]);
+  }, [client, rapier, heightfield, tuning]);
 
   useEffect(() => () => room?.dispose(), [room]);
 
@@ -212,6 +224,15 @@ export function MotorControls({
     const blur = () => {
       rig.keys.clear();
       rig.dragging = false;
+    };
+    // Chrome gives a hidden tab ZERO animation frames. On return, drop the
+    // accumulated backlog and the held keys instead of replaying a stale
+    // burst; networked, the reconciliation path absorbs the gap.
+    const visibility = () => {
+      if (document.visibilityState === "visible") {
+        rig.accumulator = 0;
+        rig.keys.clear();
+      }
     };
 
     const rotate = (movementX: number, movementY: number) => {
@@ -266,6 +287,7 @@ export function MotorControls({
     addEventListener("keydown", down);
     addEventListener("keyup", up);
     addEventListener("blur", blur);
+    document.addEventListener("visibilitychange", visibility);
     el.addEventListener("pointerdown", pdown);
     el.addEventListener("pointerup", pup);
     el.addEventListener("pointermove", pmove);
@@ -276,6 +298,7 @@ export function MotorControls({
       removeEventListener("keydown", down);
       removeEventListener("keyup", up);
       removeEventListener("blur", blur);
+      document.removeEventListener("visibilitychange", visibility);
       el.removeEventListener("pointerdown", pdown);
       el.removeEventListener("pointerup", pup);
       el.removeEventListener("pointermove", pmove);
@@ -285,21 +308,45 @@ export function MotorControls({
   }, [gl, rig, lookSensitivity, pointerLock]);
 
   useFrame((_, delta) => {
-    if (room === null) return;
-    const motor = room.get(LOCAL_ID);
-    if (motor === undefined) return;
+    if (client === null && room === null) return;
+    const motor = room?.get(LOCAL_ID);
+    if (client === null && motor === undefined) return;
+
+    // Networked but not yet welcomed: nothing to simulate or aim the camera
+    // with. Keep the throttled report alive so a stuck join reads as
+    // "connecting" on the HUD rather than being indistinguishable from a hang.
+    if (client !== null && client.localState === null) {
+      rig.report += delta;
+      if (rig.report > 0.15) {
+        rig.report = 0;
+        onState?.({
+          position: camera.position.clone() as THREE.Vector3,
+          agl: 0,
+          speed: 0,
+          grounded: false,
+          net: netPhaseOf(client),
+        });
+      }
+      return;
+    }
 
     rig.accumulator += Math.min(delta, 0.25);
     let budget = MAX_CATCHUP_TICKS;
     while (rig.accumulator >= TICK_SECONDS && budget > 0) {
-      const entry = command.current;
-      entry.tick = rig.tick;
-      entry.buttons = buttonsFrom(rig.keys, rig.stanceIntent, weaponIntent);
-      entry.yawRadians = rig.yaw;
-      entry.pitchRadians = rig.pitch;
-      commands.set(LOCAL_ID, entry);
-      room.step(commands);
-      rig.tick += 1;
+      const buttons = buttonsFrom(rig.keys, rig.stanceIntent, weaponIntent);
+      if (client !== null) {
+        // The client owns tick numbering and quantises before predicting.
+        client.predict(buttons, rig.yaw, rig.pitch);
+      } else {
+        const entry = command.current;
+        entry.tick = rig.tick;
+        entry.buttons = buttons;
+        entry.yawRadians = rig.yaw;
+        entry.pitchRadians = rig.pitch;
+        commands.set(LOCAL_ID, entry);
+        room!.step(commands);
+        rig.tick += 1;
+      }
       rig.accumulator -= TICK_SECONDS;
       budget -= 1;
     }
@@ -307,7 +354,8 @@ export function MotorControls({
     // than compounding it into the next one.
     if (rig.accumulator > TICK_SECONDS) rig.accumulator = 0;
 
-    const state = motor.state;
+    const state = client !== null ? client.localState : motor!.state;
+    if (state === null) return;
     eye.x = state.position.x;
     eye.y = state.position.y + eyeHeightFor(state, tuning);
     eye.z = state.position.z;
@@ -378,7 +426,7 @@ export function MotorControls({
     rig.report += delta;
     if (rig.report > 0.15) {
       rig.report = 0;
-      onState?.({
+      const report: FlyState = {
         position: camera.position.clone() as THREE.Vector3,
         // AGL is the EYE above ground, matching what FlyControls reports and
         // what `position` above already is. Reporting the feet instead makes
@@ -386,7 +434,9 @@ export function MotorControls({
         agl: eye.y - heightfield.sample(state.position.x, state.position.z),
         speed: Math.hypot(state.velocity.x, state.velocity.z),
         grounded: state.grounded,
-      });
+      };
+      if (client !== null) report.net = netPhaseOf(client);
+      onState?.(report);
     }
   });
 
@@ -399,6 +449,17 @@ export function MotorControls({
       frustumCulled={false}
     />
   );
+}
+
+function netPhaseOf(client: GameClient): NonNullable<FlyState["net"]> {
+  return {
+    phase: client.connectionLost
+      ? "dropped"
+      : client.playerId < 0
+        ? "connecting"
+        : "playing",
+    playerId: client.playerId,
+  };
 }
 
 function buttonsFrom(

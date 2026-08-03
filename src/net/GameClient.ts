@@ -76,9 +76,14 @@ export class GameClient {
   lastCorrectionMetres = 0;
   worstCorrectionMetres = 0;
   replayedCommands = 0;
+  /** The transport dropped. Prediction keeps running locally; sends stay gated. */
+  connectionLost = false;
+
+  /** Public so a UI host can adopt the client's tuning instead of its own —
+   * a client tuned differently from the server reconciles every tick. */
+  readonly tuning: MotorTuning;
 
   private readonly transport: ClientTransport;
-  private readonly tuning: MotorTuning;
   private readonly hardSnapMetres: number;
   private readonly commandHistory: number;
   private readonly unacknowledged: PlayerCommand[] = [];
@@ -99,6 +104,9 @@ export class GameClient {
     this.room = new MotorRoom(rapier, world, heightSource, { tuning: this.tuning });
 
     transport.onMessage((bytes) => this.receive(bytes));
+    transport.onClose(() => {
+      this.connectionLost = true;
+    });
   }
 
   get localState(): MotorState | null {

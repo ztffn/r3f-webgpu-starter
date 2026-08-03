@@ -24,6 +24,14 @@ const weaponDemo = requestedScene === "weapon";
 const motorDemo =
   requestedScene === "motor" ||
   new URLSearchParams(window.location.search).get("motor") === "1";
+/**
+ * Networked play: the motor predicts against the authoritative game server and
+ * remote players appear in the world. `?scene=scope&motor=1&net=1`, with an
+ * optional `server=` URL override (default ws://localhost:2567). Requires the
+ * motor — there is nothing to network without it.
+ */
+const netDemo =
+  motorDemo && new URLSearchParams(window.location.search).get("net") === "1";
 
 export default function App() {
   const [wireframe, setWireframe] = useState(false);
@@ -123,6 +131,7 @@ export default function App() {
           scopeDemo={scopeDemo}
           weaponDemo={weaponDemo}
           motorDemo={motorDemo}
+          netDemo={netDemo}
         />
       </GameCanvas>
     </>

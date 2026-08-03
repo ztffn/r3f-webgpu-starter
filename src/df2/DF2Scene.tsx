@@ -32,6 +32,7 @@ import { buildHeightTexture } from "./heightTexture";
 import { loadTerrain, type LoadedTerrain } from "./loadTerrain";
 import { WeaponPrototype } from "../fps/WeaponPrototype";
 import { MotorControls } from "../fps/MotorControls";
+import { useGameClient } from "../fps/useGameClient";
 import { CompositeWorldQuery } from "../fps/core/WorldQuery";
 import type {
   PlayerMotorSnapshotTarget,
@@ -255,6 +256,12 @@ export interface DF2SceneProps {
    * how the terrain and grass work gets judged.
    */
   motorDemo?: boolean;
+  /**
+   * Predict against the authoritative game server and show remote players.
+   * Only meaningful with `motorDemo`; the local motor path is untouched
+   * without it.
+   */
+  netDemo?: boolean;
 }
 
 /**
@@ -303,6 +310,7 @@ export function DF2Scene({
   scopeDemo = false,
   weaponDemo = false,
   motorDemo = false,
+  netDemo = false,
 }: DF2SceneProps) {
   const lookSensitivity = useMemo(() => new LookSensitivityController(), []);
   /** Written by MotorControls each frame, read by WeaponPrototype the same frame. */
@@ -663,6 +671,10 @@ export function DF2Scene({
   useEffect(() => () => waterMaterial.dispose(), [waterMaterial]);
 
   const heightfield = world?.heightfield ?? null;
+  // The networked client's lifetime belongs to this scene, not to
+  // MotorControls: RemotePlayers consumes the same instance, and an effect-owned
+  // client is what guarantees a leaked join cannot outlive its component.
+  const gameClient = useGameClient(motorDemo && netDemo, heightfield);
   // Gameplay collision reads the canonical CPU heightfield, never Terrain's
   // transient LOD meshes or shader-only grass proxies.
   const worldQuery = useMemo(() => new CompositeWorldQuery(heightfield, 0), [heightfield]);
@@ -778,10 +790,13 @@ export function DF2Scene({
 
       {/* Mounted before WeaponPrototype so the pose is published first. Not a
           correctness requirement — a one-frame lag would be imperceptible — but
-          free to get right. */}
-      {heightfield && motorDemo && (
+          free to get right. Networked mode withholds the mount until the client
+          exists, so MotorControls' contract stays binary: client prop present
+          means networked, absent means the unchanged local path. */}
+      {heightfield && motorDemo && (!netDemo || gameClient !== null) && (
         <MotorControls
           heightfield={heightfield}
+          client={netDemo ? gameClient : null}
           pointerLock={scopeDemo}
           lookSensitivity={lookSensitivity}
           onState={onFly}

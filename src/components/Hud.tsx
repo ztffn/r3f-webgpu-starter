@@ -161,6 +161,15 @@ export function Hud({
           <dd>{fly ? fmt(fly.position.y) : "—"} m</dd>
           <dt>AGL</dt>
           <dd>{fly ? fmt(Math.max(0, fly.agl), 1) : "—"} m</dd>
+          {fly?.net && (
+            <>
+              <dt>Net</dt>
+              <dd>
+                {fly.net.phase}
+                {fly.net.playerId >= 0 ? ` · #${fly.net.playerId}` : ""}
+              </dd>
+            </>
+          )}
           <dt>Scope</dt>
           <dd>{combat.range ? fmt(combat.range.metres, 1) : "—"} m</dd>
           <dt>Hit</dt>

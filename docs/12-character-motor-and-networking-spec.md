@@ -202,8 +202,9 @@ combination worth playing. Either way the motor replaces the terrain spike's fly
 the two are mutually exclusive because both write the camera every frame.
 
 **`&net=1`** puts the motor on the authoritative game server: `MotorControls` predicts
-through `GameClient` over the Colyseus transport, remote players render as stance-blended
-capsules (`src/fps/RemotePlayers.tsx`), and the HUD gains a `Net` row (connecting /
+through `GameClient` over the Colyseus transport, remote players render as animated
+soldiers driven by snapshot state (`src/fps/RemotePlayers.tsx`, with a stance-blended
+capsule fallback while the GLB loads), and the HUD gains a `Net` row (connecting /
 playing / dropped). Start the server with `npm run game:server` (port 2567; `&server=`
 overrides the URL). Both sides sample the same prepared terrain — the browser through
 `loadTerrain`, the server through `tools/game-server/terrain.ts` — because any terrain

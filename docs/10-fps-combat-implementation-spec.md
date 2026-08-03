@@ -412,10 +412,10 @@ that the test script fails in a way that does not name the version as the cause.
 - vehicles of any kind;
 - weapon integration BEYOND the handling context. `?scene=scope&motor=1` now carries the
   weapon on a collided body, and stance, planar speed and real grounded state reach
-  `WeaponHandlingContext` from the motor rather than being inferred from the camera. What
-  is still missing: the motor does not own the weapon's shot origin (that is still the
-  camera), recoil does not push the body, and nothing stops or slows movement while
-  reloading or aiming;
+  `WeaponHandlingContext` from the motor rather than being inferred from the camera. Rounds
+  leave the motor's eye rather than the camera, and aim intent slows the player. What is
+  still missing: recoil does not push the body, reloading does not constrain movement, and
+  sprinting does not block firing;
 - animation on the character, a bot harness, and a 32/64-rig browser benchmark. A
   third-person collider proxy exists (`?scene=motor`, then V) but it is a diagnostic
   wireframe capsule, not a character host, and `CharacterAimRig` remains unmounted;

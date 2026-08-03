@@ -106,6 +106,22 @@ test("command and snapshot packets survive a codec round trip", () => {
   assert.ok(Math.abs(back.players[0]!.state.velocity.x - 5.5) < 1e-2);
 });
 
+test("every input bit survives the wire, including the ones past a byte", () => {
+  // Buttons were a u8. Adding aim intent at bit 8 pushed the field past a byte
+  // and it would have silently truncated to zero — a movement input that simply
+  // never reached the server. This asserts the whole bitfield, not a sample.
+  const everyBit = Object.values(MotorInput).reduce((all, bit) => all | bit, 0);
+  assert.ok(everyBit > 0xff, "input bits still fit in a byte; this test is not testing much");
+
+  const decoded = decodeCommands(
+    encodeCommands([{ tick: 7, buttons: everyBit, yawRadians: 0, pitchRadians: 0 }])
+  )[0]!;
+  assert.equal(decoded.buttons, everyBit, "an input bit was lost in transit");
+  for (const [name, bit] of Object.entries(MotorInput)) {
+    assert.ok((decoded.buttons & bit) !== 0, `${name} did not survive the round trip`);
+  }
+});
+
 test("quantising a command is idempotent, so prediction matches the wire", () => {
   const once = quantiseCommand({
     tick: 3,

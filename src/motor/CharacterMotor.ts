@@ -386,9 +386,17 @@ export class CharacterMotor {
     let wantX = -forward * sin + strafe * cos;
     let wantZ = -forward * cos - strafe * sin;
     const magnitude = Math.hypot(wantX, wantZ);
+    // Aiming and running are a trade, so aim intent beats sprint rather than
+    // stacking with it.
+    const aiming = (buttons & MotorInput.Ads) !== 0;
     const sprinting =
-      (buttons & MotorInput.Sprint) !== 0 && state.stance === "stand" && forward > 0;
-    const speed = maxSpeed * (sprinting ? this.tuning.sprintMultiplier : 1);
+      !aiming &&
+      (buttons & MotorInput.Sprint) !== 0 &&
+      state.stance === "stand" &&
+      forward > 0;
+    const speed =
+      maxSpeed *
+      (sprinting ? this.tuning.sprintMultiplier : aiming ? this.tuning.adsMultiplier : 1);
     if (magnitude > 0) {
       wantX = (wantX / magnitude) * speed;
       wantZ = (wantZ / magnitude) * speed;

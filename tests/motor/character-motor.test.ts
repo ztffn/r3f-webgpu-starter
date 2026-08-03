@@ -359,6 +359,30 @@ test("climbing speed falls off smoothly instead of hitting a dead stop", () => {
   }
 });
 
+test("aim intent slows the player and overrides sprint", () => {
+  const speedWith = (buttons: number): number => {
+    const rig = makeMotor();
+    settle(rig);
+    return Math.hypot(
+      run(rig, 150, MotorInput.Forward | buttons).velocity.x,
+      rig.motor.state.velocity.z
+    );
+  };
+
+  const walking = speedWith(0);
+  const sprinting = speedWith(MotorInput.Sprint);
+  const aiming = speedWith(MotorInput.Ads);
+  const both = speedWith(MotorInput.Sprint | MotorInput.Ads);
+
+  assert.ok(sprinting > walking, "sprint did not speed the player up");
+  assert.ok(aiming < walking, `aiming did not slow the player: ${aiming.toFixed(2)}`);
+  // Aiming and running are a trade, so holding both must not sprint.
+  assert.ok(
+    Math.abs(both - aiming) < 0.1,
+    `sprint leaked through while aiming: ${both.toFixed(2)} vs ${aiming.toFixed(2)}`
+  );
+});
+
 test("a wall stops horizontal travel and sets WallContact", () => {
   const rig = makeMotor();
   settle(rig);

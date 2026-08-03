@@ -29,3 +29,15 @@ export interface PlayerMotorSnapshotTarget {
   grounded: boolean;
   planarSpeedMetresPerSecond: number;
 }
+
+/**
+ * Weapon state the MOTOR needs, published by whoever owns the weapon.
+ *
+ * Deliberately one boolean. `WeaponSystem` owns ADS — its progress, whether a
+ * reload refuses it, all of it — and this is only the intent the motor turns
+ * into a speed penalty. Reading the weapon's resolved ADS instead would put
+ * gameplay state the server cannot replay into the movement path.
+ */
+export interface PlayerWeaponIntent {
+  aiming: boolean;
+}

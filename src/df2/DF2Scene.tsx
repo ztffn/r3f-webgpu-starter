@@ -33,7 +33,10 @@ import { loadTerrain, type LoadedTerrain } from "./loadTerrain";
 import { WeaponPrototype } from "../fps/WeaponPrototype";
 import { MotorControls } from "../fps/MotorControls";
 import { CompositeWorldQuery } from "../fps/core/WorldQuery";
-import type { PlayerMotorSnapshotTarget } from "../fps/core/PlayerMotor";
+import type {
+  PlayerMotorSnapshotTarget,
+  PlayerWeaponIntent,
+} from "../fps/core/PlayerMotor";
 import { FPS_DEBUG } from "../fps/debug/debugConfig";
 import { LookSensitivityController } from "../fps/core/LookSensitivityController";
 // Lazily imported so the three multi-megabyte debug models are code-split out of the
@@ -312,6 +315,8 @@ export function DF2Scene({
     }),
     []
   );
+  /** Aim intent the other way: weapon host writes, motor reads. */
+  const weaponIntent = useMemo<PlayerWeaponIntent>(() => ({ aiming: false }), []);
   // undefined = still loading, null = no assets (synthetic), object = real map
   const [loaded, setLoaded] = useState<LoadedTerrain | null | undefined>(undefined);
 
@@ -778,6 +783,7 @@ export function DF2Scene({
           onState={onFly}
           onStance={onStance}
           pose={motorPose}
+          weaponIntent={weaponIntent}
         />
       )}
 
@@ -792,6 +798,7 @@ export function DF2Scene({
           grounded={grounded}
           lookSensitivity={lookSensitivity}
           motorPose={motorDemo ? motorPose : null}
+          weaponIntent={motorDemo ? weaponIntent : null}
         />
       )}
     </>

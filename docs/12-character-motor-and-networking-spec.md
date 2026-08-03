@@ -21,14 +21,14 @@ implementation behind it, and a two-client session harness.
 
 Weapon handling reads the motor: `?scene=scope&motor=1` carries the weapon on a collided
 body, and `WeaponHandlingContext` gets stance, planar speed and real grounded state from
-`MotorState` instead of inferring them from the camera. That last one is the point — camera
+`MotorState` instead of inferring them from the camera. Rounds leave the motor's eye rather
+than the camera, and aim intent slows the player. That last one is the point — camera
 differentiation cannot tell you the player is airborne, so before this `grounded` was
 whatever the app's fly/on-foot toggle said and `airborneDispersionRadians` never applied.
 
 What does **not** exist: matchmaking, reconnection, persistence, anti-cheat, vehicles, and
-animation. On the weapon side the motor still does not own the shot origin (the camera
-does), recoil does not push the body, and movement is not constrained while reloading or
-aiming.
+animation. On the weapon side, recoil does not push the body and reloading does not
+constrain movement.
 
 ## 2. Module map
 
@@ -98,7 +98,11 @@ aim regardless of how many packets were lost.
 6. **Never alias mutable state when measuring a delta across a mutation.** See §6.
 7. **The motor's stance is the truth, not the app's.** It refuses a stand-up with no
    headroom, so `MotorControls` follows the motor's stance rather than driving it.
-8. **Parameter properties are forbidden.** `--experimental-strip-types` runs in strip-only
+8. **Aim intent travels in the command; ADS state does not.** `WeaponSystem` owns ADS.
+   Anything that changes movement must be replayable by a server from the command stream
+   alone, so the motor takes a single intent bit and never reads weapon state. A weapon
+   that refuses to enter ADS still slows the player, and that is the correct trade.
+9. **Parameter properties are forbidden.** `--experimental-strip-types` runs in strip-only
    mode and rejects them outright. Already documented in `10-...md` §9.1; it bit again here.
 
 ## 6. Traps already paid for
@@ -170,8 +174,13 @@ Rifle rounds never become Rapier bodies.
 
 ## 8. Wire format
 
-9 bytes per command up, 24 bytes per player down, no field names. Look angles and velocities
+10 bytes per command up, 24 bytes per player down, no field names. Look angles and velocities
 ride as int16; positions as float32 because quantising them needs an agreed origin.
+
+**Input bits are u16, not u8.** They outgrew a byte the moment aim intent became a movement
+input, and a u8 there does not fail — it silently drops the bit, so the server simply never
+sees that input. `tests/motor/session.test.ts` round-trips the whole bitfield rather than a
+sample, so the next bit added cannot repeat it.
 
 At 64 players and a 20 Hz patch rate with no visibility culling, that is about 31 KB/s per
 client, against roughly 1.28 MB/s for the same content as JSON.

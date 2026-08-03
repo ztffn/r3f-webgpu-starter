@@ -10,7 +10,11 @@ import { float, mix, positionGeometry, smoothstep, texture, uniform, vec2, vec3 
 import { CAMERA_FAR, CAMERA_FOV, CAMERA_NEAR } from "../df2/config";
 import { publishRange, type RangeSample } from "./rangeTelemetry";
 import { LocalPlayerController, type LocalPlayerCommands } from "./core/LocalPlayerController";
-import type { PlayerStance, PlayerMotorSnapshotTarget } from "./core/PlayerMotor";
+import type {
+  PlayerStance,
+  PlayerMotorSnapshotTarget,
+  PlayerWeaponIntent,
+} from "./core/PlayerMotor";
 import type { RegisteredWorldQuery } from "./core/WorldQuery";
 import { BallisticProjectileSystem, type BallisticResult } from "./combat/BallisticProjectileSystem";
 import { readBallisticEnvironment } from "./combat/BallisticEnvironment";
@@ -93,6 +97,11 @@ export interface WeaponPrototypeProps {
    * particular cannot be inferred without it.
    */
   motorPose?: PlayerMotorSnapshotTarget | null;
+  /**
+   * Published each frame so the motor can slow the player while aiming. This
+   * host stays the owner of ADS; only the intent crosses over.
+   */
+  weaponIntent?: PlayerWeaponIntent | null;
 }
 
 function collectTextures(material: THREE.Material, into: Set<THREE.Texture>) {
@@ -243,6 +252,7 @@ export function WeaponPrototype({
   grounded = false,
   lookSensitivity,
   motorPose = null,
+  weaponIntent = null,
 }: WeaponPrototypeProps) {
   const { camera, gl, scene, size } = useThree();
   const player = useMemo(() => new LocalPlayerController(), []);
@@ -364,6 +374,8 @@ export function WeaponPrototype({
   // feeds planar speed, sub-frame interpolation, and the weapon-lag impulse.
   const framePreviousPosition = useMemo(() => new THREE.Vector3(), []);
   const framePreviousQuaternion = useMemo(() => new THREE.Quaternion(), []);
+  /** Where rounds actually leave from this frame. See the frame body. */
+  const shotOrigin = useMemo(() => new THREE.Vector3(), []);
   const framePoseReady = useRef(false);
   const firingTimeline = useMemo(
     () =>
@@ -377,9 +389,16 @@ export function WeaponPrototype({
       }),
     [aimSway, ballistics, scopeAdjustments]
   );
+  // `position` is reassigned each frame to the resolved shot origin, so it must
+  // not alias the camera — see `shotOrigin`.
   const playerPose = useMemo(
-    () => ({ position: camera.position, stance, grounded, planarSpeedMetresPerSecond: 0 }),
-    [camera]
+    () => ({
+      position: new THREE.Vector3(),
+      stance,
+      grounded,
+      planarSpeedMetresPerSecond: 0,
+    }),
+    []
   );
   const handlingContext = useMemo(
     () => ({
@@ -777,6 +796,13 @@ export function WeaponPrototype({
     // frame's end pose is still intact. Planar speed, the timeline's sub-frame
     // interpolation, and the weapon-lag impulse all read this one capture, so
     // no future camera work inside this callback can make them disagree.
+    // Rounds leave the player's EYE, which is not always where the camera is.
+    // A third-person camera sits metres behind the body, so spawning from the
+    // camera puts the muzzle behind the player and every shot starts in the
+    // wrong place. The motor's eye is authoritative whenever it exists; the
+    // camera is only a stand-in for it.
+    shotOrigin.copy(motorPose !== null ? motorPose.position : camera.position);
+
     const hadPreviousFrame = framePoseReady.current;
     let yawDelta = 0;
     let pitchDelta = 0;
@@ -784,8 +810,8 @@ export function WeaponPrototype({
       playerPose.planarSpeedMetresPerSecond = Math.min(
         MAX_TRANSITIONAL_SPEED_METRES_PER_SECOND,
         Math.hypot(
-          camera.position.x - framePreviousPosition.x,
-          camera.position.z - framePreviousPosition.z
+          shotOrigin.x - framePreviousPosition.x,
+          shotOrigin.z - framePreviousPosition.z
         ) / delta
       );
       cameraDeltaQuaternion.copy(framePreviousQuaternion).invert().multiply(camera.quaternion);
@@ -796,11 +822,11 @@ export function WeaponPrototype({
     } else {
       playerPose.planarSpeedMetresPerSecond = 0;
     }
-    timelineFrame.startPosition.copy(hadPreviousFrame ? framePreviousPosition : camera.position);
+    timelineFrame.startPosition.copy(hadPreviousFrame ? framePreviousPosition : shotOrigin);
     timelineFrame.startOrientation.copy(
       hadPreviousFrame ? framePreviousQuaternion : camera.quaternion
     );
-    framePreviousPosition.copy(camera.position);
+    framePreviousPosition.copy(shotOrigin);
     framePreviousQuaternion.copy(camera.quaternion);
     framePoseReady.current = true;
 
@@ -821,7 +847,9 @@ export function WeaponPrototype({
       playerPose.stance = stance;
       playerPose.grounded = grounded;
     }
+    playerPose.position.copy(shotOrigin);
     player.syncMotorPose(playerPose);
+    if (weaponIntent !== null) weaponIntent.aiming = player.wantsAds;
     handlingContext.stance = player.stance;
     handlingContext.grounded = player.grounded;
     handlingContext.planarSpeedMetresPerSecond = player.planarSpeedMetresPerSecond;
@@ -844,7 +872,7 @@ export function WeaponPrototype({
     }
 
     timelineFrame.deltaSeconds = simulationDelta;
-    timelineFrame.endPosition.copy(camera.position);
+    timelineFrame.endPosition.copy(shotOrigin);
     timelineFrame.endOrientation.copy(camera.quaternion);
     timelineFrame.stance = stance;
     timelineFrame.holdingBreath = scopeDemo && commands.holdingBreath;

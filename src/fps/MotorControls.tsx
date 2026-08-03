@@ -17,7 +17,7 @@ import type RAPIER from "@dimforge/rapier3d-compat";
 import type { Heightfield } from "../df2/Heightfield";
 import type { FlyState, Stance } from "../df2/FlyControls";
 import type { LookSensitivityController } from "./core/LookSensitivityController";
-import type { PlayerMotorSnapshotTarget } from "./core/PlayerMotor.ts";
+import type { PlayerMotorSnapshotTarget, PlayerWeaponIntent } from "./core/PlayerMotor.ts";
 import { MotorRoom } from "../motor/MotorRoom.ts";
 import { createMotorWorld, initRapier } from "../motor/MotorWorld.ts";
 import {
@@ -42,6 +42,8 @@ export interface MotorControlsProps {
    * of inferring both from the camera.
    */
   pose?: PlayerMotorSnapshotTarget | null;
+  /** Aim intent from the weapon host, consumed as a movement input. */
+  weaponIntent?: PlayerWeaponIntent | null;
 }
 
 /**
@@ -102,6 +104,7 @@ export function MotorControls({
   onState,
   onStance,
   pose,
+  weaponIntent,
 }: MotorControlsProps) {
   const { camera, gl } = useThree();
   const [rapier, setRapier] = useState<typeof RAPIER | null>(null);
@@ -291,7 +294,7 @@ export function MotorControls({
     while (rig.accumulator >= TICK_SECONDS && budget > 0) {
       const entry = command.current;
       entry.tick = rig.tick;
-      entry.buttons = buttonsFrom(rig.keys, rig.stanceIntent);
+      entry.buttons = buttonsFrom(rig.keys, rig.stanceIntent, weaponIntent?.aiming === true);
       entry.yawRadians = rig.yaw;
       entry.pitchRadians = rig.pitch;
       commands.set(LOCAL_ID, entry);
@@ -397,7 +400,11 @@ export function MotorControls({
   );
 }
 
-function buttonsFrom(keys: ReadonlySet<string>, stance: PlayerStance): number {
+function buttonsFrom(
+  keys: ReadonlySet<string>,
+  stance: PlayerStance,
+  aiming: boolean
+): number {
   let bits = 0;
   if (keys.has("KeyW") || keys.has("ArrowUp")) bits |= MotorInput.Forward;
   if (keys.has("KeyS") || keys.has("ArrowDown")) bits |= MotorInput.Back;
@@ -407,5 +414,6 @@ function buttonsFrom(keys: ReadonlySet<string>, stance: PlayerStance): number {
   if (keys.has("ShiftLeft") || keys.has("ShiftRight")) bits |= MotorInput.Sprint;
   if (stance === "crouch") bits |= MotorInput.Crouch;
   if (stance === "prone") bits |= MotorInput.Prone;
+  if (aiming) bits |= MotorInput.Ads;
   return bits;
 }

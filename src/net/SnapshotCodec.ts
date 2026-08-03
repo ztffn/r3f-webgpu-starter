@@ -1,7 +1,7 @@
 // Hand-packed binary for the simulation hot path.
 //
 // §5 of the multiplayer decision record keeps the hot path off a general state
-// sync tool, so this is a fixed layout with no field names on the wire: 9 bytes
+// sync tool, so this is a fixed layout with no field names on the wire: 10 bytes
 // per command up, 24 bytes per player down.
 //
 // One rule matters more than the packing. Look angles are QUANTISED, and the
@@ -13,7 +13,9 @@ import type { MotorState, PlayerCommand, PlayerStance } from "../motor/MotorType
 
 export const PacketType = { Commands: 1, Snapshot: 2, Welcome: 3 } as const;
 
-export const BYTES_PER_COMMAND = 9;
+/** tick u32 + buttons u16 + yaw i16 + pitch i16. Buttons outgrew a byte when
+ * aim intent became a movement input; a u8 here truncates it to nothing. */
+export const BYTES_PER_COMMAND = 10;
 export const BYTES_PER_PLAYER = 24;
 const COMMAND_HEADER_BYTES = 3;
 const SNAPSHOT_HEADER_BYTES = 10;
@@ -50,7 +52,7 @@ function clampInt16(value: number): number {
 export function quantiseCommand(command: PlayerCommand): PlayerCommand {
   return {
     tick: command.tick,
-    buttons: command.buttons & 0xff,
+    buttons: command.buttons & 0xffff,
     yawRadians: unpackAngle(packAngle(command.yawRadians)),
     pitchRadians: unpackAngle(packAngle(command.pitchRadians)),
   };
@@ -66,9 +68,9 @@ export function encodeCommands(commands: readonly PlayerCommand[]): Uint8Array {
   for (let index = commands.length - count; index < commands.length; index += 1) {
     const command = commands[index]!;
     view.setUint32(at, command.tick >>> 0);
-    view.setUint8(at + 4, command.buttons & 0xff);
-    view.setInt16(at + 5, packAngle(command.yawRadians));
-    view.setInt16(at + 7, packAngle(command.pitchRadians));
+    view.setUint16(at + 4, command.buttons & 0xffff);
+    view.setInt16(at + 6, packAngle(command.yawRadians));
+    view.setInt16(at + 8, packAngle(command.pitchRadians));
     at += BYTES_PER_COMMAND;
   }
   return new Uint8Array(buffer);
@@ -82,9 +84,9 @@ export function decodeCommands(bytes: Uint8Array): PlayerCommand[] {
   for (let index = 0; index < count; index += 1) {
     commands.push({
       tick: view.getUint32(at),
-      buttons: view.getUint8(at + 4),
-      yawRadians: unpackAngle(view.getInt16(at + 5)),
-      pitchRadians: unpackAngle(view.getInt16(at + 7)),
+      buttons: view.getUint16(at + 4),
+      yawRadians: unpackAngle(view.getInt16(at + 6)),
+      pitchRadians: unpackAngle(view.getInt16(at + 8)),
     });
     at += BYTES_PER_COMMAND;
   }

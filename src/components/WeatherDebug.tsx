@@ -6,6 +6,7 @@
 // makes exactly the A/B comparison these dials exist for impossible.
 
 import { memo, useState } from "react";
+import { CollapsiblePanel } from "./CollapsiblePanel";
 import type { SceneHandles } from "../df2/DF2Scene";
 import { WEATHER_PRESETS } from "../df2/weather";
 
@@ -316,8 +317,7 @@ export const WeatherDebug = memo(function WeatherDebug({
   const ids = Object.keys(WEATHER_PRESETS);
 
   return (
-    <section className="panel" id="weatherdebug">
-      <span className="eyebrow">Weather (live)</span>
+    <CollapsiblePanel id="weatherdebug" title="Weather (live)">
       <div className="btns">
         {ids.map((id) => (
           <button
@@ -346,6 +346,6 @@ export const WeatherDebug = memo(function WeatherDebug({
         Baked at load and still needing a reload: <code>?bladecount=</code>, which fixes
         the lattice the field radius divides up.
       </p>
-    </section>
+    </CollapsiblePanel>
   );
 });

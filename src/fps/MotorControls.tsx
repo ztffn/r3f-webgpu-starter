@@ -11,9 +11,15 @@
 // and the resulting state onto the camera.
 
 import { useFrame, useThree } from "@react-three/fiber";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three/webgpu";
 import type { Heightfield } from "../df2/Heightfield";
+import {
+  CharacterView,
+  createCharacterPose,
+  fillCharacterPose,
+} from "./presentation/CharacterView.ts";
+import { loadSoldier } from "./presentation/soldierAssets.ts";
 import type { FlyState, Stance } from "../df2/FlyControls";
 import type { LookSensitivityController } from "./core/LookSensitivityController";
 import type { PlayerMotorSnapshotTarget, PlayerWeaponIntent } from "./core/PlayerMotor.ts";
@@ -168,6 +174,23 @@ export function MotorControls({
     },
     [proxy]
   );
+  // The animated soldier shown in the V third-person view, alongside the
+  // wireframe collider proxy — visual body and collision capsule together is
+  // exactly the comparison that view exists for. The 6.8 MB GLB is fetched on
+  // the FIRST V press, not on mount: in net mode RemotePlayers already warms
+  // the shared cache, and a solo motor scene may never open this view at all.
+  const [character, setCharacter] = useState<CharacterView | null>(null);
+  const characterRequested = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  useEffect(() => () => character?.dispose(), [character]);
+  const characterPose = useRef(createCharacterPose());
+
   // `PlayerCommand` is readonly because it is wire data; this one scratch
   // instance is rewritten every tick so the hot path allocates nothing.
   const command = useRef<{ -readonly [K in keyof PlayerCommand]: PlayerCommand[K] }>({
@@ -399,6 +422,31 @@ export function MotorControls({
         rig.stanceIntent = state.stance;
         onStance?.(state.stance);
       }
+
+      if (rig.thirdPerson && !characterRequested.current) {
+        characterRequested.current = true;
+        loadSoldier()
+          .then((asset) => {
+            if (mounted.current) setCharacter(new CharacterView(asset));
+          })
+          .catch((error: unknown) => {
+            console.error("soldier GLB failed to load:", error);
+            // Unlatch after a beat so a later V frame retries instead of
+            // failing silently for the whole mount.
+            setTimeout(() => {
+              characterRequested.current = false;
+            }, 5000);
+          });
+      }
+      if (character !== null) {
+        character.setVisible(rig.thirdPerson);
+        if (rig.thirdPerson) {
+          fillCharacterPose(characterPose.current, state.position, rig.yaw, rig.pitch, state);
+          // Clamp like the remote path: a hidden tab's first delta back is the
+          // whole hidden duration, and the mixer does not clamp internally.
+          character.update(Math.min(delta, 0.1), characterPose.current);
+        }
+      }
     }
 
     rig.report += delta;
@@ -427,13 +475,16 @@ export function MotorControls({
   });
 
   return (
-    <mesh
-      ref={bodyRef}
-      geometry={proxy.geometry}
-      material={proxy.material}
-      visible={false}
-      frustumCulled={false}
-    />
+    <>
+      <mesh
+        ref={bodyRef}
+        geometry={proxy.geometry}
+        material={proxy.material}
+        visible={false}
+        frustumCulled={false}
+      />
+      {character !== null && <primitive object={character.group} />}
+    </>
   );
 }
 

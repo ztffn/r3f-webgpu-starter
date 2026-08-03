@@ -6,6 +6,7 @@
 // jittering as they update.
 
 import { useSyncExternalStore } from "react";
+import { CollapsiblePanel } from "./CollapsiblePanel";
 import type { LoadedTerrain } from "../df2/loadTerrain";
 import type { PerfSample } from "../df2/PerfMonitor";
 import type { FlyState, Stance } from "../df2/FlyControls";
@@ -78,8 +79,7 @@ export function Hud({
         </div>
       )}
       {combat.recentShots.length > 0 && (
-        <section className="panel" id="combat-log">
-          <span className="eyebrow">Recent shots · {combat.lastShot?.mode}</span>
+        <CollapsiblePanel id="combat-log" title={<>Recent shots · {combat.lastShot?.mode}</>}>
           <ol className="shot-log">
             {combat.recentShots.map((shot) => {
               // The row's subject is the last damaged target, so every value
@@ -111,11 +111,10 @@ export function Hud({
               );
             })}
           </ol>
-        </section>
+        </CollapsiblePanel>
       )}
       {/* Terrain identity */}
-      <section className="panel" id="ident">
-        <span className="eyebrow">Terrain</span>
+      <CollapsiblePanel id="ident" title="Terrain">
         <h1>{terrain ? terrain.name : "Synthetic fBm"}</h1>
         {/* Pack name comes from the manifest, not a literal: this panel claimed
             "TerraNova EXP2b" for whatever terrain happened to load, which is wrong
@@ -147,11 +146,10 @@ export function Hud({
             </>
           )}
         </dl>
-      </section>
+      </CollapsiblePanel>
 
       {/* Telemetry */}
-      <section className="panel" id="telem">
-        <span className="eyebrow">Position</span>
+      <CollapsiblePanel id="telem" title="Position">
         <dl className="rows">
           <dt>East</dt>
           <dd>{fly ? fmt(fly.position.x) : "—"} m</dd>
@@ -312,11 +310,10 @@ export function Hud({
             </span>
           </div>
         )}
-      </section>
+      </CollapsiblePanel>
 
       {/* Controls */}
-      <section className="panel" id="ctl">
-        <span className="eyebrow">View</span>
+      <CollapsiblePanel id="ctl" title="View">
         <div className="btns">
           {/* Stable label + press state, like the toggles beside it. A label
               that swaps between "Fly" and "On foot" reads as either the current
@@ -358,11 +355,11 @@ export function Hud({
             movement scheme yet, and finding that out by poking at a static view
             is a worse first impression than being told. */}
         <p className="note touch-note">Movement needs a keyboard — drag to look around.</p>
-      </section>
+      </CollapsiblePanel>
 
-      {/* Controls legend */}
-      <section className="panel" id="legend">
-        <span className="eyebrow">Controls</span>
+      {/* Controls legend — collapsed by default: expanded, it sat on top of
+          the combat telemetry column the moment the weapon HUD grew rows. */}
+      <CollapsiblePanel id="legend" title="Controls" defaultOpen={false}>
         <dl className="rows">
           <dt>{fpsMode ? "Mouse" : "Drag"}</dt>
           <dd>{fpsMode ? "click once, then look" : "look"}</dd>
@@ -407,7 +404,7 @@ export function Hud({
             </>
           )}
         </dl>
-      </section>
+      </CollapsiblePanel>
     </div>
   );
 }

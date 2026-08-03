@@ -151,5 +151,13 @@ dist
 # tools/vegetation into tracked locations; the raw stash lives on one machine.
 _tempAssets/
 
+# Character source art too large for GitHub's 100 MB file limit (the raw 272 MB
+# GLB) or redundant to it (.blend working files, loose texture exports). The
+# compressed runtime GLB, the clip manifest, the retarget-source FBX pack and
+# the docs ARE committed; the runtime copy lives in public/assets/characters/.
+assets/3d/characters/player1/SpecialForcesSoldier.glb
+assets/3d/characters/player1/*.blend*
+assets/3d/characters/player1/textures/
+
 # macOS Finder metadata
 .DS_Store

@@ -398,6 +398,7 @@ export class CharacterMotor {
     // Penalties compound rather than compete: reloading while aiming is slower
     // than either alone, which is what makes both feel like a commitment.
     state.sprinting = sprinting && magnitude > 0;
+    state.aiming = aiming;
     const speed =
       maxSpeed *
       (sprinting ? this.tuning.sprintMultiplier : aiming ? this.tuning.adsMultiplier : 1) *

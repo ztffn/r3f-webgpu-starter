@@ -102,6 +102,7 @@ test("command and snapshot packets survive a codec round trip", () => {
   state.pitchRadians = -0.6;
   state.previousStance = "crouch";
   state.stanceProgress = 0.4;
+  state.aiming = true;
   const snapshot = encodeSnapshot(99, 42, [{ id: 7, state }]);
   assert.equal(snapshot.length, 10 + BYTES_PER_PLAYER);
 
@@ -116,6 +117,7 @@ test("command and snapshot packets survive a codec round trip", () => {
   assert.ok(Math.abs(back.players[0]!.state.pitchRadians - -0.6) < 1e-3);
   assert.equal(back.players[0]!.state.previousStance, "crouch");
   assert.ok(Math.abs(back.players[0]!.state.stanceProgress - 0.4) < 1 / 255);
+  assert.equal(back.players[0]!.state.aiming, true);
 });
 
 test("every input bit survives the wire, including the ones past a byte", () => {

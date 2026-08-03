@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<!--
+  Standalone animation test harness for assets/3d/characters/player1/SpecialForcesSoldier_compressed.glb.
+  Purpose: eyeball all 49 baked clips and their transitions before the real animation
+  controller is written in src/. Scope: throwaway rig-inspection tool, NOT engine code —
+  it deliberately uses plain three.js WebGLRenderer rather than the project's R3F/WebGPU
+  stack so it stays a single file. Responsibilities: load the Draco/WebP GLB, drive an
+  8-way locomotion + stance state machine from the keyboard, derive movement speed from
+  each clip's own baked root motion, and expose every clip through a browser dropdown.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SpecialForcesSoldier — Animation Harness</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<style>
+  html, body { margin:0; height:100%; overflow:hidden; background:#1a1d22; font-family: system-ui, sans-serif; }
+  .panel {
+    position:absolute; z-index:10; color:#eee; font-size:12px;
+    background:rgba(0,0,0,0.55); padding:10px 13px; border-radius:6px; line-height:1.55;
+    user-select:none;
+  }
+  #help { top:10px; left:10px; pointer-events:none; max-width:330px; }
+  #help b { color:#8ec9ff; }
+  #help .k { color:#ffd479; }
+  #status { top:10px; right:10px; font-family:ui-monospace, monospace; white-space:pre; min-width:250px; }
+  #status .err { color:#ff8080; }
+  #browser { bottom:10px; left:10px; }
+  #browser select, #browser button { font-size:12px; padding:3px 5px; }
+  #browser select { max-width:250px; }
+  #browser label { display:inline-block; margin-right:8px; }
+  #crosshair {
+    position:absolute; top:50%; left:50%; width:6px; height:6px; margin:-3px 0 0 -3px;
+    border-radius:50%; background:#fff; opacity:0.85; z-index:10; pointer-events:none;
+  }
+</style>
+</head>
+<body>
+<div id="help" class="panel">
+  <b>Move</b> <span class="k">W A S D</span> (8-way) &middot; <b>Sprint</b> <span class="k">Shift</span><br>
+  <b>Gait</b> <span class="k">1</span> walk <span class="k">2</span> run <span class="k">3</span> sprint<br>
+  <b>Crouch</b> <span class="k">C</span> &middot; <b>Aim</b> <span class="k">RMB</span> (idle only)<br>
+  <b>Turn 90&deg;</b> <span class="k">Q</span> / <span class="k">E</span> (standing still)<br>
+  <b>Jump</b> <span class="k">Space</span> &middot; <b>Die</b> <span class="k">X</span> &middot; <b>Revive</b> <span class="k">R</span><br>
+  <b>Camera</b> drag <span class="k">LMB</span> to orbit, wheel to zoom
+</div>
+<div id="crosshair"></div>
+<div id="status" class="panel">booting…</div>
+<div id="browser" class="panel">
+  <label>Clip <select id="clipSelect"><option value="">— live controller —</option></select></label>
+  <button id="clipPlay">Play once</button>
+  <button id="clipLoop">Loop</button>
+  <label style="margin-left:8px">Speed <input id="timeScale" type="range" min="0.1" max="2" step="0.05" value="1" style="vertical-align:middle;width:90px"><span id="timeScaleVal">1.00&times;</span></label>
+</div>
+
+<script async src="https://unpkg.com/es-module-shims@1.10.0/dist/es-module-shims.js"></script>
+<script type="importmap">
+{ "imports": { "three": "https://unpkg.com/three@0.185.1/build/three.module.js",
+               "three/addons/": "https://unpkg.com/three@0.185.1/examples/jsm/" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+
+// The GLB is 6.8 MB of Draco-compressed geometry and WebP textures, so unlike the
+// previous version of this harness it is NOT inlined as base64 — it is fetched from
+// its home in the repo. That means this page needs a static server; opening it as a
+// file:// URL will fail the fetch on CORS. `npm run dev` in the repo root then browse
+// to http://localhost:3000/assets/3d/animations/index.html, or from this folder run
+// `python3 -m http.server` and browse to the equivalent path.
+const GLB_URL = '../characters/player1/SpecialForcesSoldier_compressed.glb';
+const DRACO_PATH = 'https://unpkg.com/three@0.185.1/examples/jsm/libs/draco/gltf/';
+
+// ---------- scene ----------
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x8fb3d9);
+scene.fog = new THREE.Fog(0x8fb3d9, 30, 110);
+
+const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 500);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;   // PCFShadowMap is the default; PCFSoft is deprecated in r185
+document.body.appendChild(renderer.domElement);
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.4));
+const sun = new THREE.DirectionalLight(0xffffff, 2.2);
+sun.position.set(6, 10, 4);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = -12; sun.shadow.camera.right = 12;
+sun.shadow.camera.top = 12; sun.shadow.camera.bottom = -12;
+sun.shadow.bias = -0.0008;
+scene.add(sun);
+
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(400, 400),
+  new THREE.MeshStandardMaterial({ color: 0x3d4a3a, roughness: 1 })
+);
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+scene.add(new THREE.GridHelper(400, 200, 0x223322, 0x2a3a2a));
+
+// ============================================================
+// Clip vocabulary — these names come straight out of the GLB
+// (SpecialForcesSoldier_animations.txt lists all 49). Anything the
+// controller references is asserted against the loaded set at startup,
+// so a renamed or missing clip shows up in the HUD instead of silently
+// falling back to a T-pose.
+// ============================================================
+const GAITS = ['Walk', 'Run', 'Sprint'];
+const DEATHS = [
+  'Death_From_The_Front', 'Death_From_The_Back', 'Death_From_Right',
+  'Death_From_Front_Headshot', 'Death_From_Back_Headshot', 'Death_Crouching_Headshot_Front',
+];
+// One-shots: play to completion, then hand control back to locomotion.
+const TURNS = { left: 'Turn_90_Left', right: 'Turn_90_Right' };
+const CROUCH_TURNS = { left: 'Crouching_Turn_90_Left', right: 'Crouching_Turn_90_Right' };
+
+// The Hips carry an exact 90 degrees of baked yaw over a turn clip, so the code must not
+// also rotate the character while the clip plays — the clip already does it. What the
+// code owns is the handover: once the clip ends, the Hips yaw fades back to rest over the
+// crossfade, and unless the model root picks up those same 90 degrees at exactly the same
+// rate the character visibly over-rotates to 180 and swings back. So the root yaw is
+// ramped in over TURN_BLEND, in lockstep with the Hips yaw fading out.
+const TURN_YAW = { left: Math.PI / 2, right: -Math.PI / 2 };
+const TURN_BLEND = 0.18;    // seconds; shared by the crossfade and the root-yaw ramp
+
+// Jump_Up / Jump_Loop / Jump_Down bake no vertical travel at all (the Hips stay at
+// standing height through the whole loop) — they are the pose, not the arc. The arc
+// has to come from here.
+const JUMP_TAKEOFF = 3.6;   // m/s upward at the end of Jump_Up
+const GRAVITY = 9.81;
+
+function dirSuffix(fwd, strafe) {           // strafe: +1 = left, -1 = right
+  if (fwd > 0) return strafe > 0 ? 'Forward_Left'  : strafe < 0 ? 'Forward_Right'  : 'Forward';
+  if (fwd < 0) return strafe > 0 ? 'Backward_Left' : strafe < 0 ? 'Backward_Right' : 'Backward';
+  return strafe > 0 ? 'Left' : 'Right';
+}
+
+// ============================================================
+// PlayerController
+// ============================================================
+class PlayerController {
+  constructor(model, animations) {
+    this.model = model;
+    this.mixer = new THREE.AnimationMixer(model);
+    this.clips = new Map();
+    this.actions = new Map();
+    for (const clip of animations) this.clips.set(clip.name, clip);
+
+    // glTF export strips the ':' from Blender's "mixamorig:Hips" — three's
+    // PropertyBinding.sanitizeNodeName removes it, so the node in the loaded scene
+    // is "mixamorigHips". Resolve it by suffix instead of hardcoding either spelling.
+    this.hips = null;
+    model.traverse((o) => { if (!this.hips && /Hips$/.test(o.name)) this.hips = o; });
+    if (this.hips) this.hipsRest = this.hips.position.clone();
+
+    // Every clip bakes its travel into the Hips bone. Measuring that travel gives the
+    // exact speed the feet were animated for, so driving the model root at the measured
+    // speed means no foot sliding and no hand-tuned WALK_SPEED constants to keep in sync.
+    this.rootMotion = new Map();
+    const hipsTrack = this.hips ? this.hips.name + '.position' : null;
+    for (const [name, clip] of this.clips) {
+      const track = hipsTrack && clip.tracks.find((t) => t.name === hipsTrack);
+      const v = new THREE.Vector3();
+      if (track && clip.duration > 0) {
+        const n = track.values.length;
+        v.set(track.values[n - 3] - track.values[0],
+              0,                                        // vertical drift is bob, not travel
+              track.values[n - 1] - track.values[2]).divideScalar(clip.duration);
+      }
+      this.rootMotion.set(name, v);
+    }
+
+    this.current = null;
+    this.currentName = null;
+    this.locomotionTarget = 'Idle';
+    this.override = null;        // name of the one-shot currently in control
+    this.dead = false;
+    this.jumpPhase = null;       // null | 'up' | 'loop' | 'down'
+    this.jumpVelocity = 0;
+    this.yawRamp = 0;            // radians of turn still to bank into the model root
+    this.yawRampRate = 0;
+    this.airVelocity = new THREE.Vector3();
+    this.velocity = new THREE.Vector3();  // smoothed, model-local
+    this.browserClip = null;     // clip forced from the dropdown, bypasses the state machine
+
+    this.mixer.addEventListener('finished', (e) => this._onFinished(e));
+    this.play('Idle', 0);
+  }
+
+  action(name) {
+    if (this.actions.has(name)) return this.actions.get(name);
+    const clip = this.clips.get(name);
+    if (!clip) return null;
+    const a = this.mixer.clipAction(clip);
+    this.actions.set(name, a);
+    return a;
+  }
+
+  play(name, fade = 0.2) {
+    const next = this.action(name);
+    if (!next || next === this.current) return;
+    next.reset().setLoop(THREE.LoopRepeat, Infinity).setEffectiveWeight(1).fadeIn(fade).play();
+    if (this.current) this.current.fadeOut(fade);
+    this.current = next;
+    this.currentName = name;
+  }
+
+  playOnce(name, fade = 0.12, { clamp = false } = {}) {
+    const next = this.action(name);
+    if (!next) return false;
+    this.override = name;
+    next.reset().setLoop(THREE.LoopOnce, 1).setEffectiveWeight(1).fadeIn(fade).play();
+    next.clampWhenFinished = clamp;
+    if (this.current && this.current !== next) this.current.fadeOut(fade);
+    this.current = next;
+    this.currentName = name;
+    return true;
+  }
+
+  _onFinished(e) {
+    const name = [...this.actions].find(([, a]) => a === e.action)?.[0];
+    if (!name || name !== this.override) return;
+
+    if (name === TURNS.left || name === CROUCH_TURNS.left) this._bankYaw(TURN_YAW.left);
+    if (name === TURNS.right || name === CROUCH_TURNS.right) this._bankYaw(TURN_YAW.right);
+
+    if (name === 'Jump_Up') {
+      // The launch happens at the end of the crouch-and-push, not at the keypress.
+      this.jumpPhase = 'loop';
+      this.jumpVelocity = JUMP_TAKEOFF;
+      this.override = 'Jump_Loop';
+      this.play('Jump_Loop', 0.1);
+      return;
+    }
+    if (name === 'Jump_Down') this.jumpPhase = null;
+    if (DEATHS.includes(name)) return;   // stay down until revived
+
+    this.override = null;
+    this.play(this.locomotionTarget, TURN_BLEND);
+  }
+
+  _bankYaw(radians) {
+    this.yawRamp += radians;
+    this.yawRampRate = this.yawRamp / TURN_BLEND;
+  }
+
+  get busy() { return this.override !== null || this.dead || this.browserClip !== null; }
+
+  // Death clips are the only ones whose Hips translation is the animation rather than
+  // drift, so the pin is keyed on the clip that is actually playing — not on the `dead`
+  // flag, which is false when a death is picked from the clip browser.
+  get pinHips() { return this.hips !== null && !DEATHS.includes(this.currentName); }
+
+  setLocomotion(name) {
+    this.locomotionTarget = name;
+    if (!this.busy) this.play(name, TURN_BLEND);
+  }
+
+  turn(side, crouching) {
+    this.playOnce((crouching ? CROUCH_TURNS : TURNS)[side], 0.15);
+  }
+
+  jump() {
+    if (this.jumpPhase) return;
+    this.jumpPhase = 'up';
+    this.airVelocity.copy(this.velocity);
+    this.playOnce('Jump_Up', 0.08);
+  }
+
+  die(name) {
+    this.dead = true;
+    this.jumpPhase = null;
+    this.model.position.y = 0;
+    this.playOnce(name, 0.1, { clamp: true });
+  }
+
+  revive() {
+    if (!this.dead) return;
+    this.dead = false;
+    this.override = null;
+    if (this.current) this.current.clampWhenFinished = false;
+    this.play(this.locomotionTarget, 0.25);
+  }
+
+  playFromBrowser(name, loop) {
+    this.dead = false;
+    this.override = null;
+    this.jumpPhase = null;
+    this.model.position.set(0, 0, 0);
+    this.velocity.set(0, 0, 0);
+    this.browserClip = name;
+    if (loop) {
+      this.play(name, 0.15);
+    } else {
+      this.playOnce(name, 0.15, { clamp: true });
+      this.override = null;   // browserClip already blocks the state machine
+    }
+  }
+
+  releaseBrowser() {
+    this.browserClip = null;
+    if (this.current) this.current.clampWhenFinished = false;
+    this.play(this.locomotionTarget, 0.2);
+  }
+
+  // Velocity the current clip was animated to travel at, in model-local space
+  // (+Z forward, +X left), zero for anything that is not locomotion.
+  targetVelocity() {
+    if (this.dead || this.browserClip) return ZERO;
+    if (this.jumpPhase) return this.airVelocity;
+    if (this.override) return ZERO;
+    return this.rootMotion.get(this.locomotionTarget) || ZERO;
+  }
+
+  update(dt) {
+    this.mixer.update(dt);
+
+    if (this.yawRamp !== 0) {
+      const step = THREE.MathUtils.clamp(this.yawRampRate * dt,
+        Math.min(0, this.yawRamp), Math.max(0, this.yawRamp));
+      this.model.rotation.y += step;
+      this.yawRamp -= step;
+      if (Math.abs(this.yawRamp) < 1e-6) this.yawRamp = 0;
+    }
+
+    // Ease into the new clip's speed over roughly the crossfade length so a
+    // walk -> sprint change accelerates instead of teleporting.
+    this.velocity.lerp(this.targetVelocity(), Math.min(1, dt / 0.15));
+    if (this.velocity.lengthSq() > 1e-8) {
+      const world = SCRATCH.copy(this.velocity).applyAxisAngle(UP, this.model.rotation.y);
+      this.model.position.addScaledVector(world, dt);
+    }
+
+    if (this.jumpPhase === 'loop') {
+      this.jumpVelocity -= GRAVITY * dt;
+      this.model.position.y += this.jumpVelocity * dt;
+      if (this.model.position.y <= 0) {
+        this.model.position.y = 0;
+        this.jumpVelocity = 0;
+        this.jumpPhase = 'down';
+        this.playOnce('Jump_Down', 0.08);
+      }
+    }
+
+    // Cancel the baked travel so the clips only ever pose the character in place;
+    // all real displacement comes from the velocity integration above. Only X and Z
+    // are pinned: vertical Hips motion is the crouch drop and the walk bob, which are
+    // pose, not drift (measured net dY is ~0 across every locomotion clip). Death
+    // clips are exempt entirely — their whole point is that the body falls over and
+    // travels a metre, and pinning them leaves the soldier dying bolt upright.
+    if (this.pinHips) {
+      this.hips.position.x = this.hipsRest.x;
+      this.hips.position.z = this.hipsRest.z;
+    }
+  }
+}
+
+const UP = new THREE.Vector3(0, 1, 0);
+const ZERO = new THREE.Vector3();
+const SCRATCH = new THREE.Vector3();
+const ANCHOR = new THREE.Vector3();
+
+// ---------- input ----------
+const keys = {};
+addEventListener('keydown', (e) => { keys[e.code] = true; });
+addEventListener('keyup', (e) => { keys[e.code] = false; });
+addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+
+let crouching = false, aiming = false, gait = 0, deathIndex = 0;
+let orbitYaw = 0, orbitPitch = 0.12, orbitDist = 4.6;
+let dragging = false, lastX = 0, lastY = 0;
+
+const canvas = renderer.domElement;
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+canvas.addEventListener('mousedown', (e) => {
+  if (e.button === 0) { dragging = true; lastX = e.clientX; lastY = e.clientY; }
+  if (e.button === 2) aiming = !aiming;
+});
+addEventListener('mouseup', () => { dragging = false; });
+addEventListener('mousemove', (e) => {
+  if (!dragging) return;
+  orbitYaw -= (e.clientX - lastX) * 0.006;
+  orbitPitch = THREE.MathUtils.clamp(orbitPitch + (e.clientY - lastY) * 0.004, -0.4, 1.1);
+  lastX = e.clientX; lastY = e.clientY;
+});
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  orbitDist = THREE.MathUtils.clamp(orbitDist + e.deltaY * 0.004, 1.5, 18);
+}, { passive: false });
+
+// Edge-triggered keys — a held key must not re-fire every frame. Every watched code is
+// sampled once per frame into `tap`, never inline in a condition: reading them through a
+// short-circuiting `else if` chain would skip the bookkeeping for the codes after the
+// branch that matched, and a key held down across that frame would then fire again later.
+const TAP_KEYS = ['Space', 'KeyQ', 'KeyE', 'KeyC', 'KeyR', 'KeyX', 'Digit1', 'Digit2', 'Digit3'];
+const pressed = {};
+const tap = {};
+function sampleTaps() {
+  for (const code of TAP_KEYS) {
+    const down = !!keys[code];
+    tap[code] = down && !pressed[code];
+    pressed[code] = down;
+  }
+}
+
+// ---------- HUD ----------
+const statusEl = document.getElementById('status');
+const clipSelect = document.getElementById('clipSelect');
+const timeScaleEl = document.getElementById('timeScale');
+const timeScaleValEl = document.getElementById('timeScaleVal');
+function setStatus(html) { statusEl.innerHTML = html; }
+
+// ---------- load ----------
+let player = null;
+let standingHeight = 1.8;
+let missingClips = [];
+
+setStatus('loading GLB…');
+
+const draco = new DRACOLoader().setDecoderPath(DRACO_PATH);
+const loader = new GLTFLoader().setDRACOLoader(draco);
+
+loader.load(GLB_URL, (gltf) => {
+  const model = gltf.scene;
+  model.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false; } });
+
+  // The export is already recentred (feet at Y=0, centred on X/Z) — an earlier version of
+  // this harness "corrected" it at runtime with Box3.setFromObject, which reads the
+  // SkinnedMesh's static bind pose rather than the skinned result and produced a bogus
+  // oversize fix. Trust the export: no runtime scale, no recentre.
+  scene.add(model);
+  player = new PlayerController(model, gltf.animations);
+
+  // Real standing height, read off the posed skeleton rather than the bind-pose bbox,
+  // so the camera frames the character it actually renders.
+  model.updateMatrixWorld(true);
+  let headTop = null;
+  model.traverse((o) => { if (!headTop && /HeadTop_End$/.test(o.name)) headTop = o; });
+  if (headTop) standingHeight = headTop.getWorldPosition(new THREE.Vector3()).y;
+
+  // Surface anything the state machine expects but the GLB does not contain.
+  const need = ['Idle', 'Idle_Aiming', 'Idle_Crouching', 'Idle_Crouching_Aiming',
+                'Jump_Up', 'Jump_Loop', 'Jump_Down',
+                ...Object.values(TURNS), ...Object.values(CROUCH_TURNS), ...DEATHS];
+  for (const f of [1, 0, -1]) for (const s of [1, 0, -1]) {
+    if (f === 0 && s === 0) continue;
+    for (const g of GAITS) need.push(`${g}_${dirSuffix(f, s)}`);
+    need.push(`Walk_Crouching_${dirSuffix(f, s)}`);
+  }
+  missingClips = [...new Set(need)].filter((n) => !player.clips.has(n));
+  if (missingClips.length) console.warn('clips referenced but not in GLB:', missingClips);
+
+  for (const name of [...player.clips.keys()].sort()) {
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = `${name}  (${player.clips.get(name).duration.toFixed(2)}s, ` +
+                      `${player.rootMotion.get(name).length().toFixed(2)} m/s)`;
+    clipSelect.appendChild(opt);
+  }
+  console.log(`loaded — ${gltf.animations.length} clips, standing height ${standingHeight.toFixed(3)} m`);
+}, (ev) => {
+  if (ev.total) setStatus(`loading GLB… ${(100 * ev.loaded / ev.total).toFixed(0)}%`);
+}, (err) => {
+  console.error(err);
+  setStatus('<span class="err">failed to load the GLB.' +
+    (location.protocol === 'file:'
+      ? '\n\nThis page is open as a file:// URL, so fetching\nthe .glb next to it is blocked by CORS.\nServe it instead:\n\n  npm run dev\n  → localhost:3000/assets/3d/animations/'
+      : '\n\nSee the console. Check that\n' + GLB_URL + '\nresolves from this page.') +
+    '</span>');
+});
+
+// ---------- clip browser ----------
+clipSelect.addEventListener('change', () => {
+  if (!player) return;
+  if (clipSelect.value) player.playFromBrowser(clipSelect.value, true);
+  else player.releaseBrowser();
+});
+document.getElementById('clipPlay').addEventListener('click', () => {
+  if (player && clipSelect.value) player.playFromBrowser(clipSelect.value, false);
+});
+document.getElementById('clipLoop').addEventListener('click', () => {
+  if (player && clipSelect.value) player.playFromBrowser(clipSelect.value, true);
+});
+timeScaleEl.addEventListener('input', () => {
+  timeScaleValEl.textContent = `${(+timeScaleEl.value).toFixed(2)}×`;
+  if (player) player.mixer.timeScale = +timeScaleEl.value;
+});
+
+// ---------- main loop ----------
+const timer = new THREE.Timer();   // THREE.Clock is deprecated as of r183
+let hudTimer = 0;
+
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(timer.update().getDelta(), 0.05);
+
+  if (player) {
+    sampleTaps();
+    const browsing = player.browserClip !== null;
+
+    if (tap.KeyC) crouching = !crouching;
+    if (tap.Digit1) gait = 0;
+    if (tap.Digit2) gait = 1;
+    if (tap.Digit3) gait = 2;
+    if (tap.KeyR) player.revive();
+    if (tap.KeyX && !player.dead && !browsing) {
+      player.die(DEATHS[deathIndex % DEATHS.length]);
+      deathIndex++;
+    }
+
+    const fwd = (keys['KeyW'] ? 1 : 0) - (keys['KeyS'] ? 1 : 0);
+    const strafe = (keys['KeyA'] ? 1 : 0) - (keys['KeyD'] ? 1 : 0);   // +1 = left, matching +X
+    const moving = fwd !== 0 || strafe !== 0;
+    const sprinting = !!(keys['ShiftLeft'] || keys['ShiftRight']);
+    const tier = crouching ? 0 : (sprinting ? 2 : gait);
+
+    if (!player.dead && !browsing) {
+      if (tap.Space && !crouching && !player.jumpPhase) player.jump();
+      else if (!player.busy && !moving && tap.KeyQ) player.turn('left', crouching);
+      else if (!player.busy && !moving && tap.KeyE) player.turn('right', crouching);
+
+      const suffix = moving ? dirSuffix(fwd, strafe) : null;
+      player.setLocomotion(
+        !moving ? (crouching ? (aiming ? 'Idle_Crouching_Aiming' : 'Idle_Crouching')
+                             : (aiming ? 'Idle_Aiming' : 'Idle'))
+                : (crouching ? `Walk_Crouching_${suffix}` : `${GAITS[tier]}_${suffix}`)
+      );
+    }
+
+    player.update(dt);
+
+    // third-person orbit camera, anchored on the character's chest
+    const anchor = ANCHOR.copy(player.model.position);
+    anchor.y += standingHeight * 0.62;
+    const yaw = player.model.rotation.y + orbitYaw;
+    camera.position.set(
+      anchor.x + Math.sin(yaw) * Math.cos(orbitPitch) * orbitDist,
+      anchor.y + Math.sin(orbitPitch) * orbitDist,
+      anchor.z - Math.cos(yaw) * Math.cos(orbitPitch) * orbitDist,
+    );
+    camera.lookAt(anchor);
+
+    // HUD refresh is on a wall-clock interval, not a frame count: a backgrounded tab
+    // renders only when something forces a frame, and a frame-counted HUD then looks
+    // frozen on a scene that is in fact stepping.
+    hudTimer += dt;
+    if (hudTimer >= 0.1) {
+      hudTimer = 0;
+      const p = player.model.position;
+      setStatus(
+        `clip      ${player.currentName || '—'}\n` +
+        `mode      ${browsing ? 'CLIP BROWSER' : player.dead ? 'DEAD (R to revive)'
+                    : player.jumpPhase ? 'JUMP:' + player.jumpPhase : 'controller'}\n` +
+        `stance    ${crouching ? 'crouch' : 'stand'}${aiming ? ' + aim' : ''}   ` +
+        `gait ${GAITS[tier]}${sprinting && !crouching ? ' (shift)' : ''}\n` +
+        `speed     ${player.velocity.length().toFixed(2)} m/s   (clip-measured)\n` +
+        `pos       ${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)}   ` +
+        `yaw ${THREE.MathUtils.radToDeg(player.model.rotation.y).toFixed(0)}°\n` +
+        `height    ${standingHeight.toFixed(2)} m   clips ${player.clips.size}\n` +
+        `hips pin  ${!player.hips ? 'NO HIPS BONE' : player.pinHips ? 'X/Z' : 'off (death clip)'}` +
+        (missingClips.length ? `\n<span class="err">missing   ${missingClips.length} clip(s), see console</span>` : '')
+      );
+    }
+  }
+
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>

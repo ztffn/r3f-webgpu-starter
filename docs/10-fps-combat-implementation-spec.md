@@ -171,9 +171,11 @@ mixer.update(dt);
 aimRig.update(dt);
 ```
 
-`CharacterAimRig` is implemented and unit tested but is not mounted on a live
-third-person character or bot harness yet. See
-`character-aim-rig-spec-v2.md`.
+`CharacterAimRig` is mounted (2026-08-03) inside
+`presentation/CharacterView.ts`, which owns this lifecycle for the animated
+soldier — the local third-person view and networked remote players both drive
+it through the same `CharacterPose` data. See `character-aim-rig-spec-v2.md`
+for the rig itself.
 
 ## 4. World-query contract
 
@@ -342,6 +344,10 @@ is the evidence of gravity and wind curvature.
 | `presentation/ImpactEffects.tsx` | bounded particles and positional sound |
 | `presentation/ShotTrajectoryDebugView.tsx` | latest-shot world debug |
 | `presentation/CharacterAimRig.ts` | procedural post-mixer bones |
+| `presentation/characterClips.ts` | pure 8-way/stance/gait clip selection (Node-tested) |
+| `presentation/CharacterAnimator.ts` | mixer driver: crossfades, speed matching, hips pin |
+| `presentation/CharacterView.ts` | animated soldier host: model + animator + mounted aim rig |
+| `presentation/soldierAssets.ts` | cached Draco GLB load + per-instance skeleton clones |
 | `ui/CombatTelemetry.ts` | throttled immutable HUD snapshots |
 | `ui/WeaponAimIndicator.ts` / `HipfireCrosshair.tsx` | mutable mean/cone feedback without frame-rate React state |
 | `WeaponPrototype.tsx` | transitional first-person GLB/scope/frame host |
@@ -420,9 +426,14 @@ that the test script fails in a way that does not name the version as the cause.
   and **sprinting refuses the shot outright** — a content constraint, since the authored
   animation set has no sprint-and-fire pose. What is still missing: recoil does not push
   the body;
-- animation on the character, a bot harness, and a 32/64-rig browser benchmark. A
-  third-person collider proxy exists (`?scene=motor`, then V) but it is a diagnostic
-  wireframe capsule, not a character host, and `CharacterAimRig` remains unmounted;
+- character animation landed 2026-08-03: the V third-person view and networked remotes
+  render the animated soldier through `CharacterView` (locomotion, stances, jump,
+  speed-matched playback, mounted aim rig). Still open from that pass: prone clips do not
+  exist in the pack (prone borrows the crouch set until the runbook §4 bake adds them),
+  an aim/ADS flag is not on the snapshot wire (idle aiming variants unused for remotes),
+  deaths and turn-in-place are unwired, the lit GLB bypasses `atmosphere.shade` (docs/08
+  §8 invariant 7's known gap), and the bot harness plus the 32/64-rig browser benchmark
+  remain missing;
 - replication of anything beyond player motor state, and remote tracers. Authority,
   prediction and reconciliation now exist for MOVEMENT only; see doc 12;
 - full piecewise drag/weather model, moving target lead aids, and wind estimation;

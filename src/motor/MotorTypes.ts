@@ -90,6 +90,9 @@ export interface MotorState {
   grounded: boolean;
   /** Resolved, not the raw input bit: aiming or crouching suppresses it. */
   sprinting: boolean;
+  /** ADS intent as the motor consumed it, mirrored into state so a remote can
+   * pose from it (raise the rifle) without weapon state on the wire. */
+  aiming: boolean;
   contactFlags: number;
 }
 
@@ -179,6 +182,7 @@ export function createMotorState(): MotorState {
     stanceProgress: 1,
     grounded: false,
     sprinting: false,
+    aiming: false,
     contactFlags: 0,
   };
 }

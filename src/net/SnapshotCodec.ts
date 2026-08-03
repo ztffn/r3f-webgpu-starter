@@ -17,8 +17,8 @@ export const PacketType = { Commands: 1, Snapshot: 2, Welcome: 3 } as const;
  * aim intent became a movement input; a u8 here truncates it to nothing. */
 export const BYTES_PER_COMMAND = 10;
 /** id u16 + position 3xf32 + velocity 3xi16 + yaw i16 + flags u8 (stance 0-1,
- * grounded 2, sprinting 3, previous stance 4-5) + contact u8 + pitch i16 +
- * stance progress u8. */
+ * grounded 2, sprinting 3, previous stance 4-5, aiming 6) + contact u8 +
+ * pitch i16 + stance progress u8. */
 export const BYTES_PER_PLAYER = 27;
 const COMMAND_HEADER_BYTES = 3;
 const SNAPSHOT_HEADER_BYTES = 10;
@@ -156,7 +156,8 @@ export function encodeSnapshot(
       stanceBits |
         (state.grounded ? 1 << 2 : 0) |
         (state.sprinting ? 1 << 3 : 0) |
-        (previousStanceBits << 4)
+        (previousStanceBits << 4) |
+        (state.aiming ? 1 << 6 : 0)
     );
     view.setUint8(at + 23, state.contactFlags & 0xff);
     view.setInt16(at + 24, packAngle(state.pitchRadians));
@@ -199,6 +200,7 @@ export function decodeSnapshot(bytes: Uint8Array): DecodedSnapshot {
         stanceProgress: view.getUint8(at + 26) / 255,
         grounded: (flags & (1 << 2)) !== 0,
         sprinting: (flags & (1 << 3)) !== 0,
+        aiming: (flags & (1 << 6)) !== 0,
         contactFlags: view.getUint8(at + 23),
       },
     });

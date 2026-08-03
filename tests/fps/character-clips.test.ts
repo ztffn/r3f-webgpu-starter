@@ -28,6 +28,7 @@ function sample(overrides: Partial<LocomotionSample>): LocomotionSample {
     stance: "stand",
     grounded: true,
     sprinting: false,
+    aiming: false,
     ...overrides,
   };
 }
@@ -65,6 +66,12 @@ test("the eight sectors map to the pack's suffixes, including wraparound", () =>
 test("stance, gait, and airborne mapping", () => {
   assert.equal(chooseClip(sample({}), RUN_AT), CLIP_IDLE);
   assert.equal(chooseClip(sample({ stance: "crouch" }), RUN_AT), CLIP_IDLE_CROUCH);
+  // ADS raises the rifle: the aiming idles are what make aim readable at all.
+  assert.equal(chooseClip(sample({ aiming: true }), RUN_AT), "Idle_Aiming");
+  assert.equal(
+    chooseClip(sample({ stance: "crouch", aiming: true }), RUN_AT),
+    "Idle_Crouching_Aiming"
+  );
   // Prone has no clips in the pack; it must fall back to the crouch set.
   assert.equal(chooseClip(sample({ stance: "prone" }), RUN_AT), CLIP_IDLE_CROUCH);
   assert.equal(
@@ -99,7 +106,7 @@ test("every selectable clip is in the shipped manifest's vocabulary", () => {
   for (const name of names) {
     assert.match(
       name,
-      /^(Idle|Idle_Crouching|Jump_Loop|Jump_Down|(Walk|Run|Sprint|Walk_Crouching)_(Forward|Backward|Left|Right|Forward_Left|Forward_Right|Backward_Left|Backward_Right))$/
+      /^(Idle|Idle_Aiming|Idle_Crouching|Idle_Crouching_Aiming|Jump_Loop|Jump_Down|(Walk|Run|Sprint|Walk_Crouching)_(Forward|Backward|Left|Right|Forward_Left|Forward_Right|Backward_Left|Backward_Right))$/
     );
   }
 });

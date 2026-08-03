@@ -84,6 +84,7 @@ export function RemotePlayers({ client, atmosphere }: RemotePlayersProps) {
     stance: "stand",
     grounded: true,
     sprinting: false,
+    aiming: false,
   });
 
   useFrame((_, delta) => {
@@ -123,6 +124,7 @@ export function RemotePlayers({ client, atmosphere }: RemotePlayersProps) {
         state.stance = remote.state.stance;
         state.grounded = remote.state.grounded;
         state.sprinting = remote.state.sprinting;
+        state.aiming = remote.state.aiming;
         visual.view.update(clamped, state);
       } else {
         positionCapsule(visual.mesh, remote, client);

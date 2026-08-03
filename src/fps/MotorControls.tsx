@@ -200,6 +200,7 @@ export function MotorControls({
     stance: "stand",
     grounded: true,
     sprinting: false,
+    aiming: false,
   });
 
   // `PlayerCommand` is readonly because it is wire data; this one scratch
@@ -448,6 +449,7 @@ export function MotorControls({
           characterState.stance = state.stance;
           characterState.grounded = state.grounded;
           characterState.sprinting = state.sprinting;
+          characterState.aiming = state.aiming;
           character.update(delta, characterState);
         }
       }

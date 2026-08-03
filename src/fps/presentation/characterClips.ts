@@ -12,7 +12,9 @@ import type { PlayerStance } from "../../motor/MotorTypes.ts";
 export const IDLE_SPEED = 0.3;
 
 export const CLIP_IDLE = "Idle";
+export const CLIP_IDLE_AIM = "Idle_Aiming";
 export const CLIP_IDLE_CROUCH = "Idle_Crouching";
+export const CLIP_IDLE_CROUCH_AIM = "Idle_Crouching_Aiming";
 export const CLIP_JUMP_LOOP = "Jump_Loop";
 export const CLIP_JUMP_DOWN = "Jump_Down";
 
@@ -45,6 +47,8 @@ export interface LocomotionSample {
   readonly stance: PlayerStance;
   readonly grounded: boolean;
   readonly sprinting: boolean;
+  /** Resolved ADS state — what raises the rifle into the aiming idles. */
+  readonly aiming: boolean;
 }
 
 /**
@@ -88,7 +92,8 @@ export function chooseClip(sample: LocomotionSample, runSpeedThreshold: number):
 
   const crouched = sample.stance === "crouch" || sample.stance === "prone";
   if (sample.speed < IDLE_SPEED) {
-    return crouched ? CLIP_IDLE_CROUCH : CLIP_IDLE;
+    if (crouched) return sample.aiming ? CLIP_IDLE_CROUCH_AIM : CLIP_IDLE_CROUCH;
+    return sample.aiming ? CLIP_IDLE_AIM : CLIP_IDLE;
   }
 
   const suffix = directionSuffix(sample.forward, sample.left);
@@ -99,7 +104,14 @@ export function chooseClip(sample: LocomotionSample, runSpeedThreshold: number):
 
 /** Every clip `chooseClip` can return, for startup validation against the GLB. */
 export function allSelectableClips(): string[] {
-  const names = [CLIP_IDLE, CLIP_IDLE_CROUCH, CLIP_JUMP_LOOP, CLIP_JUMP_DOWN];
+  const names = [
+    CLIP_IDLE,
+    CLIP_IDLE_AIM,
+    CLIP_IDLE_CROUCH,
+    CLIP_IDLE_CROUCH_AIM,
+    CLIP_JUMP_LOOP,
+    CLIP_JUMP_DOWN,
+  ];
   for (const suffix of SUFFIXES) {
     names.push(`Walk_${suffix}`, `Run_${suffix}`, `Sprint_${suffix}`, `Walk_Crouching_${suffix}`);
   }

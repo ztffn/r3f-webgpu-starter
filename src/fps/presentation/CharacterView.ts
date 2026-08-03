@@ -29,6 +29,7 @@ export interface CharacterPose {
   stance: PlayerStance;
   grounded: boolean;
   sprinting: boolean;
+  aiming: boolean;
 }
 
 /** Runtime bone names — the glTF export strips Blender's ':' from
@@ -78,7 +79,16 @@ export class CharacterView {
     stance: PlayerStance;
     grounded: boolean;
     sprinting: boolean;
-  } = { speed: 0, forward: 0, left: 0, stance: "stand", grounded: true, sprinting: false };
+    aiming: boolean;
+  } = {
+    speed: 0,
+    forward: 0,
+    left: 0,
+    stance: "stand",
+    grounded: true,
+    sprinting: false,
+    aiming: false,
+  };
 
   constructor(asset: SoldierAsset) {
     const model = instantiateSoldier(asset);
@@ -122,6 +132,7 @@ export class CharacterView {
     this.sample.stance = pose.stance;
     this.sample.grounded = pose.grounded;
     this.sample.sprinting = pose.sprinting;
+    this.sample.aiming = pose.aiming;
 
     if (this.aimRig === null) {
       this.animator.update(deltaSeconds, this.sample as LocomotionSample);
@@ -150,7 +161,10 @@ export class CharacterView {
       this.rootQuat.w
     );
     this.aimRig.setLook(input.yaw, input.pitch, input.weight);
-    this.aimRig.setAim(input.yaw, input.pitch, input.weight);
+    // The aim channel is what drives spine and chest. Committed on ADS; a
+    // fraction otherwise, so plain look-around still carries some torso pitch
+    // instead of a floating head on a rigid body.
+    this.aimRig.setAim(input.yaw, input.pitch, pose.aiming ? input.weight : input.weight * 0.35);
     this.aimRig.update(deltaSeconds);
   }
 

@@ -10,7 +10,7 @@
 // hairlines into mush, and the touch layout has to move panels out of the thumb
 // zones rather than shrink the desktop one.
 
-import { useSyncExternalStore, type CSSProperties } from "react";
+import { useEffect, useRef, useSyncExternalStore, type CSSProperties } from "react";
 import { combatTelemetry } from "../fps/ui/CombatTelemetry";
 import { HipfireCrosshair } from "../fps/ui/HipfireCrosshair";
 import { impactTelemetryKey } from "../fps/ui/CombatTelemetry";
@@ -21,6 +21,7 @@ import { InvitePanel } from "./InvitePanel";
 import { VitalsPanel, type Vital } from "./VitalsPanel";
 import { WeaponPanel } from "./WeaponPanel";
 import { useRespawnCountdown, type CombatFeed, type LocalDeath } from "../fps/useCombatFeed";
+import { playDamageCue, playHitCue } from "./combatAudio";
 import "./hud.css";
 
 export interface GameHudProps {
@@ -85,6 +86,24 @@ export function GameHud({ fly, health, feed, joinCode, fpsMode, preview }: GameH
   // Aliveness is HEALTH, never whether a death event is still in the log — a
   // stale overlay outliving a respawn is worse than none.
   const dead = health === 0;
+
+  // One cue per event, driven off the sequence rather than the render: the same
+  // feed object is handed to the HUD on every unrelated re-render, and playing on
+  // presence alone would retrigger the sound each time.
+  const lastHitCue = useRef(0);
+  const lastDamageCue = useRef(0);
+  useEffect(() => {
+    if (feed.hit !== null && feed.hit.seq > lastHitCue.current) {
+      lastHitCue.current = feed.hit.seq;
+      playHitCue(feed.hit.fatal);
+    }
+  }, [feed.hit]);
+  useEffect(() => {
+    if (feed.damage !== null && feed.damage.seq > lastDamageCue.current) {
+      lastDamageCue.current = feed.damage.seq;
+      playDamageCue(feed.damage.bearingRadians);
+    }
+  }, [feed.damage]);
 
   const wind = combat.ballistics;
   const windSpeed =

@@ -28,6 +28,7 @@ player instinctively recognise this?* — applies to features, not to whether a 
 | `10-fps-combat-implementation-spec.md` | **As-built FPS ownership, frame order, controls, performance, and deferred work** |
 | `11-weapon-ballistics-and-modifier-system-spec.md` | **Trigger-to-impact contracts, formulas, budgets, and attachment/perk extension rules** |
 | `12-character-motor-and-networking-spec.md` | **As-built shared character motor, room, transport and session test — and the traps that cost this subsystem the most time** |
+| `plans/2026-08-04-web-platform-and-ui-design.md` | **The web product: brand, site/HUD design system, accounts stack, tiers, phasing — and the four traps phases 1–4 already hit.** Read before touching `src/site/`, `src/ui/`, `src/hud/` or `src/devtools/` |
 
 ## Current state (August 2026)
 
@@ -75,6 +76,18 @@ player instinctively recognise this?* — applies to features, not to whether a 
   Draco GLB in `public/assets/characters/`. Prone deliberately renders as the capsule
   (no prone clips baked yet). Combat/damage is still client-local — authority work is
   briefed in `docs/plans/2026-08-03-character-animation-session-handoff.md`.
+- **Web product, brand and UI (Aug 2026):** the project has a public name — **Distant
+  Front** — and a router. `/` is a landing page, `/faq` and `/supporter` are real pages, and
+  **the whole Three.js tree lazy-loads behind `/play`** (entry chunk 98 KB gzipped; a static
+  import anywhere in `src/site/` or `src/ui/` silently undoes that). The nine debug panels
+  that used to fill the game screen are five tabs in **one docked dev console** — backtick or
+  `?debug=1`, every control carrying `data-dev` so browser automation can drive it. The HUD
+  is rebuilt from `design/df2-hud-1to1-html-v3` and is **anchor-based, not the mockup's
+  scaled stage**, with a distinct touch layout that keeps the thumb corners clear.
+  `/hudlab` (dev only) renders the real HUD over a still with the reference overlayable
+  50/50. Design system: `src/ui/tokens.css`, two skins — `.skin-site` parchment,
+  `.skin-hud` phosphor. Read `plans/2026-08-04-...md` before touching any of it; its §5.2
+  lists four traps that each looked like something else.
 - **Test build:** free-fly / on-foot camera with stances, instrument HUD, `netlify.toml`.
   Deploy with `npx netlify deploy --prod --dir=dist` from a machine that has prepared assets —
   or via a Git-connected build — prepared assets are committed, so both render the real map.
@@ -88,6 +101,11 @@ player instinctively recognise this?* — applies to features, not to whether a 
   it renders a stand-in canopy, but egypt / R66 / blizzard / vul001 ship their own strips and
   load as `grassSource: "real"` (`06-...md` §7). Preparing one of those is the cheapest way to
   exercise it.
+- **Next up (web product):** accounts on `@colyseus/auth` (adopted; `@colyseus/database` is
+  **rejected** — broken `types` field, peer-pins core 0.15, incomplete migrations — use Kysely
+  directly), then lobby / server browser / clans, then entitlements. Phases 5–7 of
+  `plans/2026-08-04-...md`. Touch INPUT does not exist yet: mobile and iPad are first-class
+  targets for the UI, and the game still needs a keyboard.
 - **Direction:** custom assets → player-created terrain → map/terrain editor tooling
   (`01-...md` Phase 6). Real assets are the dial-in instrument, not the deliverable.
 

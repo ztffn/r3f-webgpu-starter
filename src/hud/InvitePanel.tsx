@@ -17,8 +17,11 @@ export interface InvitePanelProps {
   joinCode: string | null;
 }
 
+/** What the last copy attempt did, and to which button it belongs. */
+type CopyResult = { what: "code" | "link"; ok: boolean };
+
 export function InvitePanel({ joinCode }: InvitePanelProps) {
-  const [copied, setCopied] = useState<"code" | "link" | null>(null);
+  const [copied, setCopied] = useState<CopyResult | null>(null);
   const [collapsed, setCollapsed] = useState(false);
   const timer = useRef<number | null>(null);
 
@@ -40,14 +43,25 @@ export function InvitePanel({ joinCode }: InvitePanelProps) {
     // button that silently does nothing is worse than one that says it failed. The
     // code is on screen either way, so a failure is recoverable by reading it.
     const done = (ok: boolean) => {
-      setCopied(ok ? what : null);
+      setCopied({ what, ok });
       if (timer.current !== null) window.clearTimeout(timer.current);
       timer.current = window.setTimeout(() => setCopied(null), 1600);
     };
-    navigator.clipboard?.writeText(text).then(
+    // No Clipboard API at all is the insecure-origin case, and optional chaining
+    // short-circuits the whole chain — so this needs its own branch or the button
+    // is inert with no message, which is the thing the comment above rules out.
+    const clipboard = navigator.clipboard;
+    if (clipboard === undefined) return void done(false);
+    clipboard.writeText(text).then(
       () => done(true),
       () => done(false)
     );
+  };
+
+  /** What a button says right now. The code stays on screen either way. */
+  const label = (what: "code" | "link", idle: string): string => {
+    if (copied === null || copied.what !== what) return idle;
+    return copied.ok ? "Copied" : "Copy failed";
   };
 
   if (collapsed) {
@@ -86,10 +100,10 @@ export function InvitePanel({ joinCode }: InvitePanelProps) {
 
       <div className="hud-invite-actions">
         <button type="button" data-dev="invite-copy-code" onClick={() => copy("code", joinCode)}>
-          {copied === "code" ? "Copied" : "Copy code"}
+          {label("code", "Copy code")}
         </button>
         <button type="button" data-dev="invite-copy-link" onClick={() => copy("link", inviteUrl)}>
-          {copied === "link" ? "Copied" : "Copy link"}
+          {label("link", "Copy link")}
         </button>
       </div>
       <p className="hud-invite-note">Anyone with this can join.</p>

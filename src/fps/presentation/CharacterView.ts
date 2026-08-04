@@ -150,8 +150,6 @@ export class CharacterView {
     this.aimRig = rig;
   }
 
-  /** The mandatory order: beginFrame, mixer, aim rig (docs/10 §3). Raw render
-   * delta on purpose — the rig clamps internally. */
   /**
    * Starts, or ends, this character's death.
    *
@@ -159,11 +157,17 @@ export class CharacterView {
    * death event arrived: a dropped packet would otherwise leave a corpse walking.
    * The event only chooses which fall plays.
    */
+  get isDead(): boolean {
+    return this.animator.isDead;
+  }
+
   setDead(dead: boolean, clipName: string): void {
     if (dead) this.animator.die(clipName);
     else this.animator.revive();
   }
 
+  /** The mandatory order: beginFrame, mixer, aim rig (docs/10 §3). Raw render
+   * delta on purpose — the rig clamps internally. */
   update(deltaSeconds: number, pose: CharacterPose): void {
     this.group.position.set(pose.positionX, pose.positionY, pose.positionZ);
     this.group.rotation.y = pose.yawRadians;

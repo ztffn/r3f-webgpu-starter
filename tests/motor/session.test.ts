@@ -865,12 +865,14 @@ test("the roster names every player, and a leaver disappears from it", () => {
     { id: 1, name: "Player 1" },
     { id: 2, name: "Player 2" },
   ]);
-  assert.equal(session.clients[1]!.nameOf(1), "Player 1");
-  assert.equal(session.clients[1]!.nameOf(99), null, "an unknown id has no name, not a guess");
+  const nameOn = (index: number, id: number) =>
+    session.clients[index]!.getRoster().find((entry) => entry.id === id)?.name ?? null;
+  assert.equal(nameOn(1, 1), "Player 1");
+  assert.equal(nameOn(1, 99), null, "an unknown id has no name, not a guess");
 
   session.server.setDisplayName(2, "Ada");
   drive(session, 2, () => ({ buttons: 0, yaw: 0 }));
-  assert.equal(session.clients[0]!.nameOf(2), "Ada", "a rename never reached the other client");
+  assert.equal(nameOn(0, 2), "Ada", "a rename never reached the other client");
 
   // Leaving rewrites the roster, which is what the feed diffs to print "left".
   session.transports[1]!.close();

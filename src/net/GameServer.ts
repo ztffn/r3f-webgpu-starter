@@ -381,14 +381,19 @@ export class GameServer {
   /** One damageable lookup for every query this server builds. */
   private readonly damageableFor = (id: number): Damageable | null =>
     this.peers.get(id)?.damageable ?? this.targets.get(id)?.damageable ?? null;
-  /** Prebuilt drain visitor: counts projectile hits without a per-tick closure. */
-  private readonly countProjectileHit = (result: BallisticResult): void => {
-    if (result.reports.some((report) => report.damageApplied > 0)) this.shotsHit += 1;
+  /** Prebuilt drain visitor: announces and counts a landed projectile, without a
+   *  per-tick closure. */
+  private readonly reportProjectileHit = (result: BallisticResult): void => {
     // The spawn direction, not the direction at impact. Beyond the horizon a
     // round drops, so the two differ in PITCH — but the death clips and the
     // damage bearing are chosen from the horizontal bearing alone, which drift
     // does not touch.
-    this.announceContacts(result.reports, result.shot.direction, this.weaponIndexOf(result.shot));
+    const landed = this.announceContacts(
+      result.reports,
+      result.shot.direction,
+      this.weaponIndexOf(result.shot)
+    );
+    if (landed) this.shotsHit += 1;
   };
   /** Scratch for the damage bearing; the announce path allocates nothing. */
   private readonly bearingScratch = { forward: 0, left: 0 };
@@ -713,15 +718,29 @@ export class GameServer {
     const peer = this.peers.get(playerId);
     if (peer === undefined || peer.health === 0) return null;
     peer.health = Math.max(0, peer.health - Math.max(0, Math.round(amount)));
-    if (peer.health === 0 && this.respawnTicks > 0) {
-      // The DEFAULT schedule. A death that came from a shot is rescheduled a
-      // moment later by `announceContacts`, which knows the direction and
-      // therefore which clip plays and how long it runs. This branch is what
-      // still covers a death with no attribution — a fall, or a grenade when one
-      // exists — so every death has a respawn even if nobody is blamed for it.
-      peer.respawnTick = this.room.tick + this.respawnTicks;
-    }
+    // The DEFAULT schedule, in seconds so one scheduler owns the arithmetic. A
+    // death from a shot is rescheduled a moment later by `announceContacts`,
+    // which knows the direction and therefore which clip plays and how long it
+    // runs. This covers a death with no attribution — a fall, or a grenade when
+    // one exists — so every death has a respawn even if nobody is blamed.
+    //
+    // NOTE: such a death currently produces no feed line, overlay or death clip
+    // either, because only `announceContacts` announces. Nothing but a shot can
+    // damage a player today; the day something can, the announcement belongs
+    // here beside the zero-crossing rather than on the shot path.
+    if (peer.health === 0) this.scheduleRespawn(peer, this.respawnTicks / this.ticksPerSecond);
     return peer.health;
+  }
+
+  /**
+   * The ONE place a respawn tick is written.
+   *
+   * Two writers meant the correct moment depended on which ran last, and the
+   * "is respawn enabled" test had to be repeated at every site.
+   */
+  private scheduleRespawn(peer: Peer, seconds: number): void {
+    if (this.respawnTicks <= 0) return;
+    peer.respawnTick = this.room.tick + this.secondsToTicks(seconds);
   }
 
   /**
@@ -740,9 +759,11 @@ export class GameServer {
     contacts: readonly CombatContact[],
     travel: Vec3Like,
     weaponIndex: number
-  ): void {
+  ): boolean {
+    let landed = false;
     for (const contact of contacts) {
       if (contact.targetId === null || contact.damageApplied <= 0) continue;
+      landed = true;
       const victim = this.peers.get(Number(contact.targetId));
       // World targets are damageables too, and they have no HUD to tell.
       if (victim === undefined) continue;
@@ -781,9 +802,7 @@ export class GameServer {
       const direction = deathDirectionFrom(travel.x, travel.z, victimYaw);
       const clip = chooseDeathClip({ direction, headshot: false, stance });
       const respawnSeconds = clip.seconds + this.respawnPauseSeconds;
-      if (this.respawnTicks > 0) {
-        victim.respawnTick = this.room.tick + this.secondsToTicks(respawnSeconds);
-      }
+      this.scheduleRespawn(victim, respawnSeconds);
       const died = encodePlayerDied({
         victimId: victim.connection.id,
         killerId: attackerId,
@@ -800,6 +819,7 @@ export class GameServer {
       // their own overlay and confirmation off it.
       for (const peer of this.peers.values()) peer.connection.send(died);
     }
+    return landed;
   }
 
   /**
@@ -935,10 +955,9 @@ export class GameServer {
       excludeObjectId: sourceId,
     });
     this.shotsResolved += 1;
-    if (near.interactions.some((i) => i.targetId !== null && i.damageApplied > 0)) {
-      this.shotsHit += 1;
-    }
-    this.announceContacts(near.interactions, aim, peer.weaponIndex);
+    // Announce and count in one pass: the predicate that decides "did anything
+    // land" is the same one the announcement already applies per contact.
+    if (this.announceContacts(near.interactions, aim, peer.weaponIndex)) this.shotsHit += 1;
 
     // FAR: still flying at the horizon — the rest of the arc belongs to the
     // shared integrator: drop, drift, energy decay, further penetrations.
@@ -1169,8 +1188,11 @@ export class GameServer {
       }
     }
 
-    let best = this.spawn(peer.connection.id);
-    if (living.length === 0) return best;
+    // Their own seat only when nobody else is alive — once the loop runs it
+    // overwrites this unconditionally, so computing it up front was a wasted call
+    // and the tie-break it claimed never happened.
+    if (living.length === 0) return this.spawn(peer.connection.id);
+    let best = this.spawn(this.spawnSeats[0]!);
     let bestClearance = -1;
     // The same seats every player could have spawned on, scored for elbow room.
     for (const seat of this.spawnSeats) {
@@ -1250,7 +1272,7 @@ export class GameServer {
     // moves health. The 1/120 s inner step runs twice per 60 Hz room tick.
     this.refillLiveCapsules();
     this.ballistics.update(this.room.tuning.fixedTimestepSeconds);
-    this.ballistics.drainResults(this.countProjectileHit);
+    this.ballistics.drainResults(this.reportProjectileHit);
     this.respawnDue();
     // Refilled AFTER respawn placement, so the ring holds exactly what this
     // tick's snapshot will show — viewTick rewinds must land on rendered truth.

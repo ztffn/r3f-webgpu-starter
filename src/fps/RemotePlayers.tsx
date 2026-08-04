@@ -123,8 +123,14 @@ export function RemotePlayers({ client, atmosphere }: RemotePlayersProps) {
 
     // Read the event log forward for the clip each death should play. Only the
     // CHOICE comes from here; whether a body is down comes from its health.
-    for (const event of client.getCombatEvents()) {
-      if (event.seq <= lastEventSeq.current) continue;
+    // Walked from the TAIL and stopped at the first already-seen event: `seq` is
+    // monotonic, so everything before it has been handled, and a full 64-event
+    // rescan every frame is work that is almost always wasted.
+    const log = client.getCombatEvents();
+    let from = log.length;
+    while (from > 0 && log[from - 1]!.seq > lastEventSeq.current) from -= 1;
+    for (let index = from; index < log.length; index += 1) {
+      const event = log[index]!;
       lastEventSeq.current = event.seq;
       if (event.kind !== "died") continue;
       // The facing, not the resolved clip: the stance belongs to the remote and
@@ -162,15 +168,21 @@ export function RemotePlayers({ client, atmosphere }: RemotePlayersProps) {
       // never a corpse that keeps walking.
       const dead = remote.health === 0;
       if (visual.view !== null) {
-        const facing = deathFacing.current.get(remote.id);
-        // Reused scratch: `die` is idempotent per clip name, so this resolves the
-        // same name every frame a body is down and must not allocate to do it.
-        deathSample.direction = facing?.direction ?? DEFAULT_DEATH_DIRECTION;
-        deathSample.headshot = facing?.headshot ?? false;
-        deathSample.stance = remote.state.stance;
-        visual.view.setDead(dead, chooseDeathClip(deathSample).name);
+        if (dead) {
+          const facing = deathFacing.current.get(remote.id);
+          // Reused scratch: `die` is idempotent per clip name, so this resolves
+          // the same name every frame a body is down and must not allocate.
+          deathSample.direction = facing?.direction ?? DEFAULT_DEATH_DIRECTION;
+          deathSample.headshot = facing?.headshot ?? false;
+          deathSample.stance = remote.state.stance;
+          visual.view.setDead(true, chooseDeathClip(deathSample).name);
+        } else if (visual.view.isDead) {
+          // Only on the frame they actually come back. Calling this for every
+          // living remote every frame resolved a clip name that was thrown away.
+          visual.view.setDead(false, "");
+          deathFacing.current.delete(remote.id);
+        }
       }
-      if (!dead) deathFacing.current.delete(remote.id);
 
       // Prone has no clips in the pack: the character would render a
       // kneel-height crouch over a prone-height collider, betraying exactly

@@ -11,6 +11,7 @@
 
 import type { MotorState, PlayerCommand, PlayerStance } from "../motor/MotorTypes.ts";
 import { clamp } from "../combat/math.ts";
+import type { DeathDirection } from "../character/characterClips.ts";
 
 export const PacketType = {
   Commands: 1,
@@ -773,16 +774,21 @@ export function decodeRoster(bytes: Uint8Array): RosterEntry[] {
   return entries;
 }
 
-/** Which side the killing round came from. Matches the character clip vocabulary. */
-const DEATH_DIRECTIONS = ["front", "back", "side"] as const;
-export type DeathDirectionWire = (typeof DEATH_DIRECTIONS)[number];
+/**
+ * The wire's ordinal order for a death direction.
+ *
+ * Typed against the SHARED union rather than restating it: the clip table owns
+ * the vocabulary, and a second copy here would let a fourth direction be added
+ * there and silently decode as "front" instead of failing to compile.
+ */
+const DEATH_DIRECTIONS: readonly DeathDirection[] = ["front", "back", "side"];
 
 export interface PlayerDiedEvent {
   readonly victimId: number;
   /** 0 when nobody killed them — a fall, or an attacker who already left. */
   readonly killerId: number;
   readonly weaponIndex: number;
-  readonly direction: DeathDirectionWire;
+  readonly direction: DeathDirection;
   readonly headshot: boolean;
   /** Seconds until the victim is back, as the SERVER scheduled it. */
   readonly respawnSeconds: number;

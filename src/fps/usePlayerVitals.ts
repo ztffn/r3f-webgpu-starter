@@ -10,6 +10,7 @@
 
 import { useCallback, useSyncExternalStore } from "react";
 import type { GameClient } from "../net/GameClient.ts";
+import { clamp } from "../combat/math.ts";
 
 /** Shared so a null client subscribes to something stable rather than a new closure. */
 const NO_SUBSCRIPTION = (): (() => void) => () => {};
@@ -32,6 +33,9 @@ export function usePlayerVitals(client: GameClient | null): number | null {
   // trip useSyncExternalStore's identity check the way a fresh object would.
   const getSnapshot = useCallback(() => client?.getHealth() ?? null, [client]);
   const health = useSyncExternalStore(subscribe, getSnapshot);
+  // Null until the first snapshot as well as offline. Between joining and that
+  // packet nobody has said what the hit points are, and reporting the field's
+  // old zero-default would have read as "dead" for the whole window.
   if (client === null || health === null) return null;
-  return Math.max(0, Math.min(1, health / client.maxHealth));
+  return clamp(health / client.maxHealth, 0, 1);
 }

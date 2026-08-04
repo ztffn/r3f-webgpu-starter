@@ -33,10 +33,10 @@ import { loadTerrain, type LoadedTerrain } from "./loadTerrain";
 import { WeaponPrototype } from "../fps/WeaponPrototype";
 import { MotorControls } from "../fps/MotorControls";
 import { useGameClient } from "../fps/useGameClient";
+import type { GameClient } from "../net/GameClient.ts";
 import type { RoomInfo } from "../net/ColyseusProtocol.ts";
 import { useRoomVisuals, type RoomVisuals } from "../fps/useRoomVisuals";
 import { usePlayerVitals } from "../fps/usePlayerVitals";
-import { useCombatFeed, type CombatFeed } from "../fps/useCombatFeed";
 import { applyVisualDials, type VisualDialTargets } from "./visualDials";
 import { RemotePlayers } from "../fps/RemotePlayers";
 import { CompositeWorldQuery } from "../fps/core/WorldQuery";
@@ -272,8 +272,16 @@ export interface DF2SceneProps {
    * handle each time somebody took a bullet.
    */
   onHealth?: (health: number | null) => void;
-  /** Kill feed, death overlay and damage direction. Same route as health. */
-  onCombatFeed?: (feed: CombatFeed) => void;
+  /**
+   * The networked client itself, or null offline.
+   *
+   * The CLIENT, not anything derived from it. Deriving the combat feed in here
+   * meant every death in the room re-rendered the whole scene subtree — terrain,
+   * grass, water, precipitation, remotes — twice, once for the hook and once for
+   * the state it fed back down. Handing the instance up lets the HUD subscribe
+   * outside the canvas, where a re-render costs a few DOM nodes.
+   */
+  onClient?: (client: GameClient | null) => void;
   onToggleGround?: () => void;
   onStance?: (s: Stance) => void;
   onStatus?: (status: { loading: boolean; terrain: LoadedTerrain | null }) => void;
@@ -340,7 +348,7 @@ export function DF2Scene({
   onFly,
   onRoomInfo,
   onHealth,
-  onCombatFeed,
+  onClient,
   onToggleGround,
   onStance,
   onGrassReady,
@@ -444,10 +452,9 @@ export function DF2Scene({
   useEffect(() => {
     onHealth?.(health);
   }, [onHealth, health]);
-  const combatFeed = useCombatFeed(gameClient);
   useEffect(() => {
-    onCombatFeed?.(combatFeed);
-  }, [onCombatFeed, combatFeed]);
+    onClient?.(gameClient);
+  }, [onClient, gameClient]);
   /**
    * The room's visuals, or null when playing alone.
    *

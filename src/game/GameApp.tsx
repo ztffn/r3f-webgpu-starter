@@ -15,7 +15,8 @@ import { DF2Scene, type SceneHandles } from "../df2/DF2Scene";
 import type { GrassUniforms } from "../df2/GrassMaterial";
 import type { FlyState, Stance } from "../df2/FlyControls";
 import type { RoomInfo } from "../net/ColyseusProtocol";
-import { EMPTY_COMBAT_FEED, type CombatFeed } from "../fps/useCombatFeed";
+import { useCombatFeed } from "../fps/useCombatFeed";
+import type { GameClient } from "../net/GameClient";
 import type { LoadedTerrain } from "../df2/loadTerrain";
 import type { PerfSample } from "../df2/PerfMonitor";
 import { BENCH, publish } from "../df2/bench";
@@ -86,7 +87,11 @@ export default function GameApp() {
   const [roomInfo, setRoomInfo] = useState<RoomInfo | null>(null);
   /** Null offline and until the first snapshot; see VitalsPanel for why not 1. */
   const [health, setHealth] = useState<number | null>(null);
-  const [combat, setCombat] = useState<CombatFeed>(EMPTY_COMBAT_FEED);
+  // Held so the feed can be derived HERE, outside the canvas: a kill must not
+  // reconcile the scene tree, and this component renders only the HUD.
+  const [client, setClient] = useState<GameClient | null>(null);
+  const feed = useCombatFeed(client);
+
   const [status, setStatus] = useState<{ loading: boolean; terrain: LoadedTerrain | null }>({
     loading: true,
     terrain: null,
@@ -98,7 +103,7 @@ export default function GameApp() {
   const onFly = useCallback((s: FlyState) => setFly(s), []);
   const onRoomInfo = useCallback((info: RoomInfo | null) => setRoomInfo(info), []);
   const onHealth = useCallback((value: number | null) => setHealth(value), []);
-  const onCombatFeed = useCallback((value: CombatFeed) => setCombat(value), []);
+  const onClient = useCallback((value: GameClient | null) => setClient(value), []);
 
   // Held so the debug panel can write uniform values directly. Not state the scene
   // reads back, so changing a slider never re-renders the canvas tree.
@@ -156,7 +161,7 @@ export default function GameApp() {
           // DF2Scene, so the HUD still does not know how health is sourced —
           // and it is null offline, where no authority reports hit points.
           health={health}
-          feed={combat}
+          feed={feed}
           joinCode={roomInfo?.joinCode ?? null}
           fpsMode={scopeDemo}
           preview={hudPreview}
@@ -198,7 +203,7 @@ export default function GameApp() {
           onFly={onFly}
           onRoomInfo={onRoomInfo}
           onHealth={onHealth}
-          onCombatFeed={onCombatFeed}
+          onClient={onClient}
           onToggleGround={toggleGround}
           onStance={chooseStance}
           onGrassReady={onGrassReady}

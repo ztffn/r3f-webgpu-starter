@@ -160,7 +160,7 @@ export class GameClient {
    * them, and a mispredicted death is the worst correction in a shooter. This lags
    * by up to one patch and is always the truth.
    */
-  health = 0;
+  health: number | null = null;
   /**
    * Full health for this room, from the welcome packet.
    *
@@ -283,7 +283,7 @@ export class GameClient {
     return () => this.healthListeners.delete(listener);
   };
 
-  readonly getHealth = (): number => this.health;
+  readonly getHealth = (): number | null => this.health;
 
   readonly getWorldTargets = (): readonly WorldTargetState[] | null =>
     this.worldTargetsValue;
@@ -294,11 +294,6 @@ export class GameClient {
   };
 
   readonly getRoster = (): readonly RosterEntry[] => this.rosterValue;
-
-  /** The display name for a player id, or null when the roster has not said. */
-  nameOf(playerId: number): string | null {
-    return this.rosterValue.find((entry) => entry.id === playerId)?.name ?? null;
-  }
 
   readonly subscribeCombatEvents = (listener: () => void): (() => void) => {
     this.combatEventListeners.add(listener);
@@ -320,11 +315,20 @@ export class GameClient {
    * reader is expected to keep up with: a hidden tab still receives every death
    * in the room and must not accumulate a match's worth of them.
    */
-  private pushCombatEvent(event: Omit<CombatEvent, "seq">): void {
-    const stamped = { ...event, seq: this.nextCombatEventSeq } as CombatEvent;
+  private pushCombatEvent<K extends CombatEvent["kind"]>(
+    kind: K,
+    payload: Omit<Extract<CombatEvent, { kind: K }>, "kind" | "seq">
+  ): void {
+    // Keyed off the union rather than `Omit<CombatEvent, "seq">`: `keyof` a union
+    // is the INTERSECTION of its members' keys, so that spelling collapsed to
+    // `{ kind }` and let a mismatched decoder and variant compile clean.
+    const stamped = { ...payload, kind, seq: this.nextCombatEventSeq } as unknown as CombatEvent;
     this.nextCombatEventSeq += 1;
-    const next = [...this.combatEventsValue, stamped];
-    this.combatEventsValue = next.length > MAX_COMBAT_EVENTS ? next.slice(-MAX_COMBAT_EVENTS) : next;
+    const next =
+      this.combatEventsValue.length >= MAX_COMBAT_EVENTS
+        ? [...this.combatEventsValue.slice(1 - MAX_COMBAT_EVENTS), stamped]
+        : [...this.combatEventsValue, stamped];
+    this.combatEventsValue = next;
     for (const listener of this.combatEventListeners) listener();
   }
 
@@ -485,17 +489,17 @@ export class GameClient {
     }
     if (type === PacketType.PlayerDied) {
       const died = decodePlayerDied(bytes);
-      if (died !== null) this.pushCombatEvent({ kind: "died", ...died });
+      if (died !== null) this.pushCombatEvent("died", died);
       return;
     }
     if (type === PacketType.HitConfirmed) {
       const hit = decodeHitConfirmed(bytes);
-      if (hit !== null) this.pushCombatEvent({ kind: "hit", ...hit });
+      if (hit !== null) this.pushCombatEvent("hit", hit);
       return;
     }
     if (type === PacketType.DamageTaken) {
       const damage = decodeDamageTaken(bytes);
-      if (damage !== null) this.pushCombatEvent({ kind: "damage", ...damage });
+      if (damage !== null) this.pushCombatEvent("damage", damage);
       return;
     }
     if (type === PacketType.ShotFired) {

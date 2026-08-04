@@ -12,11 +12,15 @@ import { accountClient, AccountError } from "../../account/accountClient";
 import { useAuth } from "../../account/AuthProvider";
 import { validateCallsign } from "../../account/accountTypes";
 import { tierById } from "../../account/tiers";
+import { useAsyncAction } from "../useAsyncAction";
 import { useDocumentTitle } from "../useDocumentTitle";
 import "./page.css";
 import "./auth.css";
 
 const fmt = (n: number) => n.toLocaleString("en-US");
+
+const describeRename = (failure: unknown) =>
+  failure instanceof AccountError ? failure.message : "Could not rename.";
 
 function duration(seconds: number): string {
   if (seconds < 60) return `${seconds}s`;
@@ -30,9 +34,7 @@ export function Profile() {
   const { me, loading, refresh, signOut } = useAuth();
 
   const [callsign, setCallsign] = useState("");
-  const [renaming, setRenaming] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
+  const { busy, error, done: saved, run } = useAsyncAction<"rename">(describeRename);
 
   if (loading) {
     return (
@@ -67,21 +69,11 @@ export function Profile() {
   const onRename = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (problem !== null) return;
-    setRenaming(true);
-    setError(null);
-    setSaved(false);
-    void (async () => {
-      try {
-        await accountClient.setCallsign(callsign);
-        await refresh();
-        setCallsign("");
-        setSaved(true);
-      } catch (failure) {
-        setError(failure instanceof AccountError ? failure.message : "Could not rename.");
-      } finally {
-        setRenaming(false);
-      }
-    })();
+    void run("rename", async () => {
+      await accountClient.setCallsign(callsign);
+      await refresh();
+      setCallsign("");
+    });
   };
 
   return (
@@ -188,9 +180,9 @@ export function Profile() {
               type="submit"
               className="btn"
               data-dev="profile-rename"
-              disabled={renaming || callsign === "" || problem !== null}
+              disabled={busy !== null || callsign === "" || problem !== null}
             >
-              {renaming ? "Saving…" : "Rename"}
+              {busy !== null ? "Saving…" : "Rename"}
             </button>
           </form>
         </section>

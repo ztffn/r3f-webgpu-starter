@@ -18,6 +18,7 @@ import {
   validateCharacter,
   type Character,
 } from "../../account/characters";
+import { useAsyncAction } from "../useAsyncAction";
 import { useDocumentTitle } from "../useDocumentTitle";
 import "./page.css";
 import "./auth.css";
@@ -30,14 +31,22 @@ const WEAPON_LABELS: Record<string, string> = {
 
 const label = (id: string) => WEAPON_LABELS[id] ?? id;
 
+/**
+ * A refusal from the API lists every field it objected to, and all of them are
+ * worth showing — the validator returns problems rather than throwing precisely
+ * so a form can show them at once.
+ */
+const describeSave = (failure: unknown) =>
+  failure instanceof AccountError
+    ? failure.problems.map((problem) => problem.message).join(" ") || failure.message
+    : "Could not save.";
+
 export function CharacterPage() {
   useDocumentTitle("Character");
   const { me, loading, refresh, can } = useAuth();
 
   const [draft, setDraft] = useState<Character | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
+  const { busy, error, done: saved, run } = useAsyncAction<"save">(describeSave);
 
   // Seeded from the account once it arrives. Not derived on every render, or
   // typing in the insignia field would be overwritten by the stored value.
@@ -83,24 +92,10 @@ export function CharacterPage() {
     );
 
   const onSave = () => {
-    setBusy(true);
-    setError(null);
-    setSaved(false);
-    void (async () => {
-      try {
-        await accountClient.saveCharacter(draft);
-        await refresh();
-        setSaved(true);
-      } catch (failure) {
-        setError(
-          failure instanceof AccountError
-            ? failure.problems.map((p) => p.message).join(" ") || failure.message
-            : "Could not save."
-        );
-      } finally {
-        setBusy(false);
-      }
-    })();
+    void run("save", async () => {
+      await accountClient.saveCharacter(draft);
+      await refresh();
+    });
   };
 
   return (
@@ -263,10 +258,10 @@ export function CharacterPage() {
               type="button"
               className="btn btn-primary"
               data-dev="character-save"
-              disabled={busy || problems.length > 0}
+              disabled={busy !== null || problems.length > 0}
               onClick={onSave}
             >
-              {busy ? "Saving…" : "Save character"}
+              {busy !== null ? "Saving…" : "Save character"}
             </button>
             <Link className="btn btn-ghost" to="/profile">
               Back to profile

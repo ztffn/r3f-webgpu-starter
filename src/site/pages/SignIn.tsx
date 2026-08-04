@@ -8,8 +8,9 @@
 
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
-import { accountClient, AccountError, providerSignInUrl } from "../../account/accountClient";
+import { accountClient, providerSignInUrl } from "../../account/accountClient";
 import { useAuth } from "../../account/AuthProvider";
+import { useAsyncAction } from "../useAsyncAction";
 import { useDocumentTitle } from "../useDocumentTitle";
 import "./page.css";
 import "./auth.css";
@@ -19,24 +20,11 @@ export function SignIn() {
   const { config } = useAuth();
   const navigate = useNavigate();
 
-  const [busy, setBusy] = useState<"guest" | "email" | "reset" | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { busy, error, run } = useAsyncAction<"guest" | "email" | "reset">();
   const [resetSent, setResetSent] = useState(false);
 
-  const run = async (kind: "guest" | "email" | "reset", action: () => Promise<void>) => {
-    setBusy(kind);
-    setError(null);
-    try {
-      await action();
-    } catch (problem) {
-      setError(problem instanceof AccountError ? problem.message : "Something went wrong.");
-    } finally {
-      setBusy(null);
-    }
-  };
-
   const onGuest = () =>
-    run("guest", async () => {
+    void run("guest", async () => {
       await accountClient.signInAnonymously();
       navigate("/play");
     });

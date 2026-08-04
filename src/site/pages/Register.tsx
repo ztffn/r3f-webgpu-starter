@@ -8,9 +8,10 @@
 
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
-import { accountClient, AccountError } from "../../account/accountClient";
+import { accountClient } from "../../account/accountClient";
 import { useAuth } from "../../account/AuthProvider";
 import { validateCallsign } from "../../account/accountTypes";
+import { useAsyncAction } from "../useAsyncAction";
 import { useDocumentTitle } from "../useDocumentTitle";
 import "./page.css";
 import "./auth.css";
@@ -26,8 +27,7 @@ export function Register() {
   const upgrading = me !== null && me.account.anonymous;
 
   const [callsign, setCallsign] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { busy, error, run } = useAsyncAction<"register">();
 
   const callsignProblem = callsign === "" ? null : validateCallsign(callsign);
 
@@ -37,23 +37,15 @@ export function Register() {
     const email = (form.elements.namedItem("email") as HTMLInputElement).value;
     const password = (form.elements.namedItem("password") as HTMLInputElement).value;
     if (callsignProblem !== null) return;
-    setBusy(true);
-    setError(null);
-    void (async () => {
-      try {
-        // The client sends whatever token it holds. If that is a guest token the
-        // server upgrades that row in place; the caller does not have to ask for it.
-        // No explicit refresh: setToken notifies AuthProvider's subscription,
-        // which fetches /api/me. Awaiting one here made the same request twice,
-        // with both racing to set the same state.
-        await accountClient.register(email, password, callsign);
-        navigate("/profile");
-      } catch (problem) {
-        setError(problem instanceof AccountError ? problem.message : "Something went wrong.");
-      } finally {
-        setBusy(false);
-      }
-    })();
+    void run("register", async () => {
+      // The client sends whatever token it holds. If that is a guest token the
+      // server upgrades that row in place; the caller does not have to ask for it.
+      // No explicit refresh: setToken notifies AuthProvider's subscription,
+      // which fetches /api/me. Awaiting one here made the same request twice,
+      // with both racing to set the same state.
+      await accountClient.register(email, password, callsign);
+      navigate("/profile");
+    });
   };
 
   return (
@@ -128,9 +120,9 @@ export function Register() {
               type="submit"
               className="btn btn-primary"
               data-dev="register-submit"
-              disabled={busy || callsignProblem !== null}
+              disabled={busy !== null || callsignProblem !== null}
             >
-              {busy ? "Enlisting…" : upgrading ? "Keep my progress" : "Create account"}
+              {busy !== null ? "Enlisting…" : upgrading ? "Keep my progress" : "Create account"}
             </button>
           </form>
 

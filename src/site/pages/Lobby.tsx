@@ -12,6 +12,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { accountClient, AccountError, type ServerListing } from "../../account/accountClient";
 import { useAuth } from "../../account/AuthProvider";
+import { useAsyncAction } from "../useAsyncAction";
 import { useDocumentTitle } from "../useDocumentTitle";
 import "./page.css";
 import "./auth.css";
@@ -19,6 +20,17 @@ import "./lobby.css";
 
 /** How often the browser refreshes itself, milliseconds. */
 const POLL_MS = 5000;
+
+/**
+ * The status is the message here, not the server's wording: "no such game" and
+ * "that game is full" are different situations for the person typing a code, and
+ * only one of them is worth retyping the code over.
+ */
+const describeJoin = (failure: unknown) => {
+  if (failure instanceof AccountError && failure.status === 404) return "No game with that code.";
+  if (failure instanceof AccountError && failure.status === 409) return "That game is full.";
+  return "Could not join.";
+};
 
 export function Lobby() {
   useDocumentTitle("Play");
@@ -32,8 +44,7 @@ export function Lobby() {
   // to notice they had opened the wrong one.
   const [params] = useSearchParams();
   const [code, setCode] = useState(() => (params.get("code") ?? "").toUpperCase());
-  const [codeError, setCodeError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const { busy, error: codeError, run } = useAsyncAction<"join">(describeJoin);
 
   const refresh = useCallback(async () => {
     try {
@@ -71,26 +82,12 @@ export function Lobby() {
 
   const onJoinCode = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setBusy(true);
-    setCodeError(null);
-    void (async () => {
-      try {
-        // Resolved here, then navigated with the room id — so the code itself never
-        // lands in browser history or in a URL someone might share later.
-        const roomId = await accountClient.resolveJoinCode(code);
-        navigate(`/play?scene=scope&motor=1&net=1&room=${encodeURIComponent(roomId)}`);
-      } catch (problem) {
-        setCodeError(
-          problem instanceof AccountError && problem.status === 404
-            ? "No game with that code."
-            : problem instanceof AccountError && problem.status === 409
-              ? "That game is full."
-              : "Could not join."
-        );
-      } finally {
-        setBusy(false);
-      }
-    })();
+    void run("join", async () => {
+      // Resolved here, then navigated with the room id — so the code itself never
+      // lands in browser history or in a URL someone might share later.
+      const roomId = await accountClient.resolveJoinCode(code);
+      navigate(`/play?scene=scope&motor=1&net=1&room=${encodeURIComponent(roomId)}`);
+    });
   };
 
   return (
@@ -205,9 +202,9 @@ export function Lobby() {
                 type="submit"
                 className="btn"
                 data-dev="join-code-submit"
-                disabled={busy || code.trim().length < 4}
+                disabled={busy !== null || code.trim().length < 4}
               >
-                {busy ? "Joining…" : "Join private game"}
+                {busy !== null ? "Joining…" : "Join private game"}
               </button>
             </form>
           )}

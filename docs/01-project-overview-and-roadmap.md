@@ -250,13 +250,19 @@ and immediately answers "does this feel like DF2?".
   distances from measured deviation against a stated bound instead. LOD 0 everywhere is
   exact and measured 17.5 ms against 9 ms, so it is not the answer.
 
-### Phase 4 — Integration (🟡 combat slice local-only; multiplayer movement and animated characters in as of 2026-08-03 — see docs/12 and the character-animation handoff brief)
+### Phase 4 — Integration (🟡 multiplayer movement, animated characters, and server-authoritative PvP damage in as of 2026-08-04 — see docs/12 §8.3; world-object authority and remote shot presentation still open)
 - ✅ Local-first controller/weapon/loadout contracts, resettable test targets, structured
   hit reports, and opt-in latest-shot diagnostics are built. The legacy hitscan resolver
   remains tested as a generic adapter, but the mounted sniper no longer fires hitscan.
 - ✅ **Authoritative fixed-step rifle ballistics**: a pooled 120 Hz projectile system owns
   muzzle velocity, gravity, wind, drag, time of flight, swept collision, delayed damage,
   hit reports, HUD telemetry, and debug paths through 1,300 m.
+- ✅ **Server-authoritative PvP damage on that same model** (2026-08-04): the ballistic
+  core moved to Three-free `src/combat/` and the server resolves every shot itself —
+  closed-form hitscan against lag-compensated (rewound) capsules inside a per-ammunition
+  drop-budget horizon, continuation projectiles against live state beyond it, with a
+  server-owned loadout record gating weapon, magazine, cadence, reload, and switch. The
+  flat per-hit damage constant is gone. docs/11 §12.4/§15.3 and docs/12 §8.3.
 - ✅ **Scalable gameplay collision seam**: terrain segments traverse the canonical CPU
   heightfield analytically, simplified object colliders use a spatial index, and both are
   composed by `WorldQuery`. Render terrain/grass/LOD objects are excluded.

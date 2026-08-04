@@ -1,6 +1,6 @@
 import * as THREE from "three/webgpu";
-import { HealthDamageable } from "../combat/Damageable.ts";
-import type { SurfaceId } from "../combat/SurfaceProfile";
+import { HealthDamageable } from "../../combat/Damageable.ts";
+import type { SurfaceId } from "../../combat/SurfaceProfile.ts";
 import type { RegisteredWorldQuery, WorldHitKind } from "../core/WorldQuery";
 
 export interface WorldObjectDefinition {

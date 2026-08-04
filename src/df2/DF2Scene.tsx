@@ -25,7 +25,7 @@ import { WEATHER_PRESETS, readWeather, type WeatherPreset } from "./weather";
 import { createAtmosphere } from "./atmosphere";
 import { createPrecipitation } from "./Precipitation";
 import { buildBladeGeometry } from "./bladeGeometry";
-import { readBallisticEnvironment } from "../fps/combat/BallisticEnvironment";
+import { readBallisticEnvironment } from "../combat/BallisticEnvironment.ts";
 import { bakeSyntheticMaps } from "./syntheticMaps";
 import { bakeGrassJitter } from "./grassJitter";
 import { buildHeightTexture } from "./heightTexture";
@@ -48,6 +48,12 @@ import { LookSensitivityController } from "../fps/core/LookSensitivityController
 // main bundle and only fetched when ?targets=1 actually asks for them.
 const TestTargets = lazy(() =>
   import("../fps/TestTargets").then((m) => ({ default: m.TestTargets }))
+);
+const NetworkTargets = lazy(() =>
+  import("../fps/NetworkTargets").then((m) => ({ default: m.NetworkTargets }))
+);
+const RemoteFireEffects = lazy(() =>
+  import("../fps/RemoteFireEffects").then((m) => ({ default: m.RemoteFireEffects }))
 );
 const BallisticTestRange = lazy(() =>
   import("../fps/BallisticTestRange").then((m) => ({ default: m.BallisticTestRange }))
@@ -428,6 +434,29 @@ export function DF2Scene({
    */
   const room = useRoomVisuals(gameClient);
   const netWeather = room?.preset ?? null;
+  /**
+   * Claims an accepted shot to the server, or nothing when playing alone.
+   *
+   * Damage on another player is SERVER-ONLY. Offline there is no authority to ask,
+   * so nothing is claimed and combat stays what it was — a local ballistic
+   * simulation against local targets.
+   */
+  // Weapon switches and reloads are claims for the same reason shots are: the
+  // server owns the loadout record that scores damage, so it has to hear about
+  // what the player is holding and when the magazine cycles. One memo, three
+  // callbacks — they share a lifetime because they share the client.
+  const claims = useMemo(
+    () =>
+      gameClient === null
+        ? null
+        : {
+            shot: (yawRadians: number, pitchRadians: number) =>
+              gameClient.fire(yawRadians, pitchRadians),
+            selectWeapon: (weaponIndex: number) => gameClient.selectWeapon(weaponIndex),
+            reload: () => gameClient.reload(),
+          },
+    [gameClient]
+  );
 
   // --- weather ---------------------------------------------------------------
   // ONE grade object for the three materials that sample the colormap, so a preset
@@ -846,7 +875,7 @@ export function DF2Scene({
         </Suspense>
       )}
 
-      {scopeDemo && (
+      {(scopeDemo || (netDemo && gameClient !== null)) && (
         <Suspense fallback={null}>
           <ImpactEffects />
         </Suspense>
@@ -886,7 +915,19 @@ export function DF2Scene({
       )}
 
       {netDemo && gameClient !== null && (
-        <RemotePlayers client={gameClient} atmosphere={atmosphere} />
+        <>
+          <RemotePlayers client={gameClient} atmosphere={atmosphere} />
+          <Suspense fallback={null}>
+            {/* Other players' shots as theatre, and the room's shared targets.
+                Both are replicated presentation over the server's truth. */}
+            <RemoteFireEffects client={gameClient} worldQuery={worldQuery} />
+            <NetworkTargets
+              client={gameClient}
+              worldQuery={worldQuery}
+              atmosphere={atmosphere}
+            />
+          </Suspense>
+        </>
       )}
 
       {/* Kept opt-in while the existing terrain visual work remains the default.
@@ -901,6 +942,9 @@ export function DF2Scene({
           lookSensitivity={lookSensitivity}
           motorPose={motorDemo ? motorPose : null}
           weaponIntent={motorDemo ? weaponIntent : null}
+          onShotFired={claims?.shot ?? null}
+          onWeaponSelected={claims?.selectWeapon ?? null}
+          onReloadStarted={claims?.reload ?? null}
         />
       )}
     </>

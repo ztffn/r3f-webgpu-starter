@@ -133,7 +133,9 @@ class GameRoom extends Room {
     string,
     { accountId: number | null; joinedAtMs: number }
   >();
-  private nextId = 1;
+  // Starts at 0 because the allocator in onJoin pre-increments; the wrap-around
+  // it performs is what keeps connection ids out of the world-target id band.
+  private nextId = 0;
   private game!: GameServer;
 
   /**
@@ -170,6 +172,16 @@ class GameRoom extends Room {
       weatherIndex,
       clampVisualDial,
       allowClientVisualDials: ADMIN,
+      // A shared target ladder out from the spawn ring, SERVER-authored so
+      // every player shoots the same figures and sees the same husks. Ranges
+      // echo the offline contrast ladder; feet land on the real terrain.
+      worldTargets: [
+        { x: 4, z: -15 },
+        { x: -6, z: -35 },
+        { x: 8, z: -70 },
+        { x: -10, z: -140 },
+        { x: 3, z: -300 },
+      ],
     });
     // A private room is excluded from matchmaking and from the browser by
     // Colyseus itself; the code is how it is reachable at all. Generated here so
@@ -215,14 +227,22 @@ class GameRoom extends Room {
           `${usedMs.toFixed(2)} ms/tick (${((usedMs / tickMs) * 100).toFixed(1)}% budget), ` +
           `${this.game.snapshotsSent} snapshots, ` +
           `${this.game.commandsDiscarded} discarded, ` +
-          `${this.game.malformedPacketsDropped} malformed`
+          `${this.game.malformedPacketsDropped} malformed, ` +
+          `${this.game.shotsHit}/${this.game.shotsResolved} shots hit, ` +
+          `${this.game.fireClaimsRejected} claims rejected`
       );
     }, 5000);
   }
 
   onJoin(client: Client): void {
+    // Ids live on the wire as u16 and world targets own 40,000+, so a room
+    // that outlives tens of thousands of joins wraps back to 1 rather than
+    // marching into the target band — skipping any id still connected.
+    const inUse = new Set([...this.connections.values()].map((c) => c.id));
+    do {
+      this.nextId = this.nextId >= 39_999 ? 1 : this.nextId + 1;
+    } while (inUse.has(this.nextId));
     const id = this.nextId;
-    this.nextId += 1;
     const connection: ServerConnection = {
       id,
       send: (bytes) => client.sendBytes(PACKET_DOWN, bytes),

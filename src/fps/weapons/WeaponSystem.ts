@@ -1,9 +1,9 @@
-import type { AmmunitionDefinition } from "./AmmunitionDefinition";
+import type { AmmunitionDefinition } from "../../combat/AmmunitionDefinition.ts";
 import type {
   FireMode,
   WeaponCommand,
   WeaponDefinition,
-} from "./WeaponDefinition";
+} from "../../combat/WeaponDefinition.ts";
 import {
   calculateDispersionConeRadians,
   DEFAULT_WEAPON_HANDLING_CONTEXT,

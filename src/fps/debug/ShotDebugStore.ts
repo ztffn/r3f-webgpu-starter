@@ -1,4 +1,4 @@
-import type { ShotTrace } from "../combat/ShotTrace";
+import type { ShotTrace } from "../../combat/ShotTrace.ts";
 
 export interface ShotDebugSnapshot {
   readonly trace: ShotTrace | null;

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Vector3 } from "three/webgpu";
-import type { BallisticEnvironment } from "../../src/fps/combat/BallisticEnvironment.ts";
+import type { BallisticEnvironment } from "../../src/combat/BallisticEnvironment.ts";
 import {
   ScopeAdjustmentController,
   SCOPE_ZERO_DISTANCES_METRES,
@@ -10,7 +10,7 @@ import {
   scopeAdjustmentActionForKey,
   solveElevationZeroRadians,
 } from "../../src/fps/core/ScopeAdjustmentController.ts";
-import { AMMUNITION_DEFINITIONS } from "../../src/fps/weapons/AmmunitionDefinition.ts";
+import { AMMUNITION_DEFINITIONS } from "../../src/combat/AmmunitionDefinition.ts";
 
 const PROFILE = {
   muzzleVelocityMetresPerSecond: 792.48,

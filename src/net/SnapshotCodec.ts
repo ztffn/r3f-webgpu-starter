@@ -10,6 +10,7 @@
 // `quantiseCommand` exists so a client cannot forget.
 
 import type { MotorState, PlayerCommand, PlayerStance } from "../motor/MotorTypes.ts";
+import { clamp } from "../combat/math.ts";
 
 export const PacketType = {
   Commands: 1,
@@ -19,6 +20,16 @@ export const PacketType = {
   RoomState: 4,
   /** Up: an admin asking for one dial change. Refused unless the server allows it. */
   SetVisualDial: 5,
+  /** Up: the client claiming it fired. Carries intent, never a result. */
+  Fire: 6,
+  /** Up: the client changed weapons. The server holds the loadout truth. */
+  SelectWeapon: 7,
+  /** Up: the client started a reload. Rounds move when the server's timer says. */
+  Reload: 8,
+  /** Down: someone else's accepted shot, for tracer/flash/report presentation. */
+  ShotFired: 9,
+  /** Down: every server-owned world target — position, size, health. */
+  WorldTargets: 10,
 } as const;
 
 /** tick u32 + buttons u16 + yaw i16 + pitch i16. Buttons outgrew a byte when
@@ -26,8 +37,14 @@ export const PacketType = {
 export const BYTES_PER_COMMAND = 10;
 /** id u16 + position 3xf32 + velocity 3xi16 + yaw i16 + flags u8 (stance 0-1,
  * grounded 2, sprinting 3, previous stance 4-5, aiming 6) + contact u8 +
- * pitch i16 + stance progress u8. */
-export const BYTES_PER_PLAYER = 27;
+ * pitch i16 + stance progress u8 + health u8.
+ *
+ * HEALTH IS NOT MotorState. The motor simulates movement and knows nothing about
+ * damage, so health rides beside its state rather than inside it — that is what
+ * keeps a shot out of the replay path, since a client replaying unacknowledged
+ * commands must not re-derive how much health it had. Dead is `health === 0`
+ * rather than its own flag bit, because two encodings of one fact drift. */
+export const BYTES_PER_PLAYER = 28;
 const COMMAND_HEADER_BYTES = 3;
 const SNAPSHOT_HEADER_BYTES = 10;
 
@@ -124,6 +141,8 @@ export function decodeCommands(bytes: Uint8Array): PlayerCommand[] {
 export interface SnapshotPlayer {
   readonly id: number;
   readonly state: MotorState;
+  /** Server-owned hit points, 0-255. 0 is dead. */
+  readonly health: number;
 }
 
 export interface DecodedSnapshot {
@@ -170,6 +189,7 @@ export function encodeSnapshot(
     view.setUint8(at + 23, state.contactFlags & 0xff);
     view.setInt16(at + 24, packAngle(state.pitchRadians));
     view.setUint8(at + 26, packProgress(state.stanceProgress));
+    view.setUint8(at + 27, Math.max(0, Math.min(255, Math.round(players[index]!.health))));
     at += BYTES_PER_PLAYER;
   }
   return new Uint8Array(buffer);
@@ -187,15 +207,21 @@ export function decodeSnapshot(bytes: Uint8Array): DecodedSnapshot {
   let at = SNAPSHOT_HEADER_BYTES;
   for (let index = 0; index < count; index += 1) {
     const flags = view.getUint8(at + 22);
+    const x = view.getFloat32(at + 2);
+    const y = view.getFloat32(at + 6);
+    const z = view.getFloat32(at + 10);
+    // A hostile server is a peer too: one NaN position teleports the local
+    // Rapier body to NaN and poisons every step after. Drop the player entry.
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+      at += BYTES_PER_PLAYER;
+      continue;
+    }
     players.push({
       id: view.getUint16(at),
+      health: view.getUint8(at + 27),
       state: {
         tick: view.getUint32(1),
-        position: {
-          x: view.getFloat32(at + 2),
-          y: view.getFloat32(at + 6),
-          z: view.getFloat32(at + 10),
-        },
+        position: { x, y, z },
         velocity: {
           x: view.getInt16(at + 14) / VELOCITY_SCALE,
           y: view.getInt16(at + 16) / VELOCITY_SCALE,
@@ -255,10 +281,14 @@ export function decodeWelcome(bytes: Uint8Array): {
 } | null {
   if (bytes.byteLength < WELCOME_BYTES) return null;
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const spawn = { x: view.getFloat32(7), y: view.getFloat32(11), z: view.getFloat32(15) };
+  // Same hostile-peer rule as every other decoder: a NaN spawn poisons the
+  // client's physics world on the very first packet.
+  if (![spawn.x, spawn.y, spawn.z].every(Number.isFinite)) return null;
   return {
     playerId: view.getUint16(1),
     tick: view.getUint32(3),
-    spawn: { x: view.getFloat32(7), y: view.getFloat32(11), z: view.getFloat32(15) },
+    spawn,
   };
 }
 
@@ -405,6 +435,238 @@ export function decodeSetVisualDial(bytes: Uint8Array): { id: number; value: num
   const value = view.getFloat32(2);
   if (!Number.isFinite(value)) return null;
   return { id: view.getUint8(1), value };
+}
+
+/**
+ * The client claiming it fired: `type u8 + tick u32 + sequence u16 + yaw i16 +
+ * pitch i16 + viewTick u32`.
+ *
+ * NO ORIGIN, and that is the point. The server takes the shooter's eye from its own
+ * authoritative motor state, so an origin cannot be spoofed at all — there is
+ * nowhere to put one. The look angles ARE sent, because the shot leaves along the
+ * weapon's aimed direction after sway and recoil, which the server does not
+ * simulate; it clamps them against the look angles it already has for that tick
+ * (see `GameServer.receiveFire`), which bounds the lie without needing full
+ * server-side weapon simulation.
+ *
+ * NO WEAPON either: the server already holds each peer's equipped weapon
+ * (`SelectWeapon`), so a claim cannot name a bigger gun than the one in hand.
+ *
+ * `viewTick` is the server tick of the snapshot the shooter was LOOKING AT when
+ * the trigger broke — the lag-compensation rewind target. It is a claim like the
+ * direction, so the server clamps how far back it will honor it; lying forward
+ * gains nothing and lying backward is bounded to the rewind window.
+ *
+ * The sequence is the shooter's own shot counter, echoed back on the resulting hit
+ * so a client can match an authoritative outcome to the round it fired.
+ */
+const FIRE_BYTES = 15;
+
+export interface FireClaim {
+  readonly tick: number;
+  readonly sequence: number;
+  readonly yawRadians: number;
+  readonly pitchRadians: number;
+  /** Server tick of the snapshot the shooter was rendering. */
+  readonly viewTick: number;
+}
+
+export function encodeFire(claim: FireClaim): Uint8Array {
+  const buffer = new ArrayBuffer(FIRE_BYTES);
+  const view = new DataView(buffer);
+  view.setUint8(0, PacketType.Fire);
+  view.setUint32(1, claim.tick >>> 0);
+  view.setUint16(5, claim.sequence & 0xffff);
+  view.setInt16(7, packAngle(claim.yawRadians));
+  view.setInt16(9, packAngle(claim.pitchRadians));
+  view.setUint32(11, claim.viewTick >>> 0);
+  return new Uint8Array(buffer);
+}
+
+/** Null on a short buffer — this arrives from a client, so it is hostile input. */
+export function decodeFire(bytes: Uint8Array): FireClaim | null {
+  if (bytes.byteLength < FIRE_BYTES) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return {
+    tick: view.getUint32(1),
+    sequence: view.getUint16(5),
+    yawRadians: unpackAngle(view.getInt16(7)),
+    pitchRadians: unpackAngle(view.getInt16(9)),
+    viewTick: view.getUint32(11),
+  };
+}
+
+/**
+ * A weapon selection or reload claim: intent with a sequence, like fire. One
+ * shared sequence counter covers both — they are ordered on one reliable stream,
+ * and the dedupe only needs "have I consumed this claim already".
+ */
+const SELECT_WEAPON_BYTES = 4;
+const RELOAD_BYTES = 3;
+
+export interface WeaponClaim {
+  readonly sequence: number;
+  /** Index into the canonical WEAPON_DEFINITIONS wire order. */
+  readonly weaponIndex: number;
+}
+
+export function encodeSelectWeapon(claim: WeaponClaim): Uint8Array {
+  const buffer = new ArrayBuffer(SELECT_WEAPON_BYTES);
+  const view = new DataView(buffer);
+  view.setUint8(0, PacketType.SelectWeapon);
+  view.setUint16(1, claim.sequence & 0xffff);
+  view.setUint8(3, claim.weaponIndex & 0xff);
+  return new Uint8Array(buffer);
+}
+
+export function decodeSelectWeapon(bytes: Uint8Array): WeaponClaim | null {
+  if (bytes.byteLength < SELECT_WEAPON_BYTES) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return { sequence: view.getUint16(1), weaponIndex: view.getUint8(3) };
+}
+
+export function encodeReload(sequence: number): Uint8Array {
+  const buffer = new ArrayBuffer(RELOAD_BYTES);
+  const view = new DataView(buffer);
+  view.setUint8(0, PacketType.Reload);
+  view.setUint16(1, sequence & 0xffff);
+  return new Uint8Array(buffer);
+}
+
+export function decodeReload(bytes: Uint8Array): { sequence: number } | null {
+  if (bytes.byteLength < RELOAD_BYTES) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return { sequence: view.getUint16(1) };
+}
+
+/**
+ * Someone else's accepted shot, going DOWN: `type u8 + shooter u16 + weapon u8 +
+ * sequence u16 + origin 3xf32 + yaw i16 + pitch i16`.
+ *
+ * PRESENTATION ONLY — tracer, muzzle flash, report, impact dust. The origin and
+ * direction are the SERVER'S resolved values (its eye, its clamped aim), so the
+ * theatre a bystander sees is the shot the authority actually fired, not the
+ * claim. A client must never apply damage from this; damage arrives as health
+ * in the snapshot, or not at all. The shooter is excluded from the broadcast —
+ * their own client already played the shot locally.
+ */
+const SHOT_FIRED_BYTES = 22;
+
+export interface ShotFiredEvent {
+  readonly shooterId: number;
+  readonly weaponIndex: number;
+  readonly sequence: number;
+  readonly origin: { readonly x: number; readonly y: number; readonly z: number };
+  readonly yawRadians: number;
+  readonly pitchRadians: number;
+}
+
+export function encodeShotFired(event: ShotFiredEvent): Uint8Array {
+  const buffer = new ArrayBuffer(SHOT_FIRED_BYTES);
+  const view = new DataView(buffer);
+  view.setUint8(0, PacketType.ShotFired);
+  view.setUint16(1, event.shooterId & 0xffff);
+  view.setUint8(3, event.weaponIndex & 0xff);
+  view.setUint16(4, event.sequence & 0xffff);
+  view.setFloat32(6, event.origin.x);
+  view.setFloat32(10, event.origin.y);
+  view.setFloat32(14, event.origin.z);
+  view.setInt16(18, packAngle(event.yawRadians));
+  view.setInt16(20, packAngle(event.pitchRadians));
+  return new Uint8Array(buffer);
+}
+
+/** Null on a short buffer; a hostile server is a peer too. */
+export function decodeShotFired(bytes: Uint8Array): ShotFiredEvent | null {
+  if (bytes.byteLength < SHOT_FIRED_BYTES) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const origin = {
+    x: view.getFloat32(6),
+    y: view.getFloat32(10),
+    z: view.getFloat32(14),
+  };
+  if (![origin.x, origin.y, origin.z].every(Number.isFinite)) return null;
+  return {
+    shooterId: view.getUint16(1),
+    weaponIndex: view.getUint8(3),
+    sequence: view.getUint16(4),
+    origin,
+    yawRadians: unpackAngle(view.getInt16(18)),
+    pitchRadians: unpackAngle(view.getInt16(20)),
+  };
+}
+
+/**
+ * Every server-owned world target, going DOWN, always complete — the same
+ * "no deltas" rule as RoomState, and for the same reason: an absent id in a
+ * delta cannot be told from an unchanged one. `type u8 + count u8 + per target:
+ * id u16 + x f32 + y f32 + z f32 + radius u8 (cm) + height u8 (2 cm units) +
+ * health u8 + maxHealth u8`. Y is the FEET, like players.
+ */
+const WORLD_TARGETS_HEADER_BYTES = 2;
+const BYTES_PER_WORLD_TARGET = 18;
+
+export interface WorldTargetState {
+  readonly id: number;
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly radiusMetres: number;
+  readonly heightMetres: number;
+  readonly health: number;
+  readonly maxHealth: number;
+}
+
+export function encodeWorldTargets(targets: readonly WorldTargetState[]): Uint8Array {
+  const count = Math.min(targets.length, 0xff);
+  const buffer = new ArrayBuffer(WORLD_TARGETS_HEADER_BYTES + count * BYTES_PER_WORLD_TARGET);
+  const view = new DataView(buffer);
+  view.setUint8(0, PacketType.WorldTargets);
+  view.setUint8(1, count);
+  let at = WORLD_TARGETS_HEADER_BYTES;
+  for (let index = 0; index < count; index += 1) {
+    const target = targets[index]!;
+    view.setUint16(at, target.id & 0xffff);
+    view.setFloat32(at + 2, target.x);
+    view.setFloat32(at + 6, target.y);
+    view.setFloat32(at + 10, target.z);
+    view.setUint8(at + 14, clamp(Math.round(target.radiusMetres * 100), 1, 255));
+    view.setUint8(at + 15, clamp(Math.round(target.heightMetres * 50), 1, 255));
+    view.setUint8(at + 16, clamp(Math.round(target.health), 0, 255));
+    view.setUint8(at + 17, clamp(Math.round(target.maxHealth), 1, 255));
+    at += BYTES_PER_WORLD_TARGET;
+  }
+  return new Uint8Array(buffer);
+}
+
+export function decodeWorldTargets(bytes: Uint8Array): WorldTargetState[] {
+  if (bytes.byteLength < WORLD_TARGETS_HEADER_BYTES) return [];
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const available = Math.floor(
+    (bytes.byteLength - WORLD_TARGETS_HEADER_BYTES) / BYTES_PER_WORLD_TARGET
+  );
+  const count = Math.min(view.getUint8(1), available);
+  const targets: WorldTargetState[] = [];
+  let at = WORLD_TARGETS_HEADER_BYTES;
+  for (let index = 0; index < count; index += 1) {
+    const x = view.getFloat32(at + 2);
+    const y = view.getFloat32(at + 6);
+    const z = view.getFloat32(at + 10);
+    if ([x, y, z].every(Number.isFinite)) {
+      targets.push({
+        id: view.getUint16(at),
+        x,
+        y,
+        z,
+        radiusMetres: view.getUint8(at + 14) / 100,
+        heightMetres: view.getUint8(at + 15) / 50,
+        health: view.getUint8(at + 16),
+        maxHealth: view.getUint8(at + 17),
+      });
+    }
+    at += BYTES_PER_WORLD_TARGET;
+  }
+  return targets;
 }
 
 export function packetTypeOf(bytes: Uint8Array): number {

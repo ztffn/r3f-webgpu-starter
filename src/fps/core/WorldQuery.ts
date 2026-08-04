@@ -1,31 +1,32 @@
 import * as THREE from "three/webgpu";
-import type { Damageable } from "../combat/Damageable";
+import type { Damageable } from "../../combat/Damageable.ts";
 import {
   DEFAULT_SURFACE_BY_KIND,
   DEFAULT_THICKNESS_BY_KIND,
   type SurfaceId,
-} from "../combat/SurfaceProfile.ts";
+} from "../../combat/SurfaceProfile.ts";
+import type {
+  HeightfieldQuerySource,
+  WorldHit as SharedWorldHit,
+  WorldHitKind,
+  WorldQuery,
+  WorldQueryMetrics,
+} from "../../combat/WorldQuery.ts";
 
-export type WorldHitKind = "terrain" | "target" | "world";
+// The CONTRACT lives in src/combat/WorldQuery.ts, Three-free, because the
+// server implements it too. This module is the browser side: implementations
+// over registered Three colliders and the analytic heightfield. Re-exported so
+// fps consumers keep one import site.
+export type {
+  HeightfieldQuerySource,
+  WorldHitKind,
+  WorldQuery,
+  WorldQueryMetrics,
+} from "../../combat/WorldQuery.ts";
 
-export interface WorldHit {
-  readonly distance: number;
-  readonly point: THREE.Vector3;
-  readonly normal: THREE.Vector3 | null;
-  readonly kind: WorldHitKind;
-  readonly objectId: string;
-  readonly surfaceId: SurfaceId;
-  readonly penetrationThicknessMetres: number;
-  readonly damageable: Damageable | null;
+/** Browser hit: the shared shape plus the intersected Three object. */
+export interface WorldHit extends SharedWorldHit {
   readonly object: THREE.Object3D;
-}
-
-export interface WorldQuery {
-  raycast(
-    origin: THREE.Vector3Like,
-    direction: THREE.Vector3Like,
-    maxDistance: number
-  ): WorldHit | null;
 }
 
 export interface WorldQueryRegistration {
@@ -45,26 +46,14 @@ export interface WorldQueryRegistrationHandle {
 }
 
 export interface RegisteredWorldQuery extends WorldQuery {
+  raycast(
+    origin: THREE.Vector3Like,
+    direction: THREE.Vector3Like,
+    maxDistance: number,
+    excludeObjectId?: string
+  ): WorldHit | null;
   register(registration: WorldQueryRegistration): WorldQueryRegistrationHandle;
   getMetrics(): WorldQueryMetrics;
-}
-
-export interface HeightfieldQuerySource {
-  readonly cellSize: number;
-  readonly halfWorld: number;
-  readonly minHeight: number;
-  readonly maxHeight: number;
-  sample(x: number, z: number): number;
-  normal(x: number, z: number, out?: [number, number, number]): [number, number, number];
-}
-
-export interface WorldQueryMetrics {
-  readonly raycasts: number;
-  readonly terrainQueries: number;
-  readonly terrainCellTests: number;
-  readonly terrainSamples: number;
-  readonly colliderQueries: number;
-  readonly colliderCandidates: number;
 }
 
 interface IndexedRegistration {
@@ -134,7 +123,8 @@ export class ThreeWorldQuery implements RegisteredWorldQuery {
   raycast(
     origin: THREE.Vector3Like,
     direction: THREE.Vector3Like,
-    maxDistance: number
+    maxDistance: number,
+    excludeObjectId?: string
   ): WorldHit | null {
     if (!Number.isFinite(maxDistance) || !(maxDistance > 0)) return null;
     this.direction.set(direction.x, direction.y, direction.z);
@@ -158,8 +148,15 @@ export class ThreeWorldQuery implements RegisteredWorldQuery {
 
     this.candidateRoots.length = 0;
     for (const candidate of this.candidates) {
-      this.candidateRoots.push(candidate.registration.root);
+      const registration = candidate.registration;
+      // Exclusion matches the registration's stable identity; a collider
+      // registered without one cannot be excluded, deliberately.
+      if (excludeObjectId !== undefined && registrationIdOf(registration) === excludeObjectId) {
+        continue;
+      }
+      this.candidateRoots.push(registration.root);
     }
+    if (this.candidateRoots.length === 0) return null;
     this.raycaster.near = 0;
     this.raycaster.far = maxDistance;
     this.raycaster.set(this.origin, this.direction);
@@ -182,7 +179,8 @@ export class ThreeWorldQuery implements RegisteredWorldQuery {
       point: nearest.point.clone(),
       normal: nearest.face?.normal.clone().transformDirection(nearest.object.matrixWorld) ?? null,
       kind: owner.kind,
-      objectId: owner.objectId || owner.root.name || nearest.object.uuid,
+      objectId: registrationIdOf(owner) || nearest.object.uuid,
+      objectName: nearest.object.name,
       surfaceId: owner.surfaceId ?? DEFAULT_SURFACE_BY_KIND[owner.kind],
       penetrationThicknessMetres:
         Number.isFinite(thickness) && thickness >= 0
@@ -297,6 +295,15 @@ export class ThreeWorldQuery implements RegisteredWorldQuery {
       }
     }
   }
+}
+
+/**
+ * A registration's stable identity, computed ONE way for both the hit result
+ * and exclusion — two fallback chains here would let a collider answer to one
+ * id when hit and a different id when excluded.
+ */
+function registrationIdOf(registration: WorldQueryRegistration): string {
+  return registration.objectId || registration.root.name;
 }
 
 const TERRAIN_ROOT_EPSILON = 1e-7;
@@ -472,6 +479,7 @@ export class HeightfieldWorldQuery implements WorldQuery {
       normal: new THREE.Vector3(tuple[0], tuple[1], tuple[2]),
       kind: "terrain",
       objectId: "terrain-heightfield",
+      objectName: this.terrainObject.name,
       surfaceId: "dirt",
       penetrationThicknessMetres: DEFAULT_THICKNESS_BY_KIND.terrain,
       damageable: null,
@@ -501,14 +509,16 @@ export class CompositeWorldQuery implements RegisteredWorldQuery {
   raycast(
     origin: THREE.Vector3Like,
     direction: THREE.Vector3Like,
-    maxDistance: number
+    maxDistance: number,
+    excludeObjectId?: string
   ): WorldHit | null {
     this.raycasts += 1;
     const terrainHit = this.terrain?.raycast(origin, direction, maxDistance) ?? null;
     const colliderHit = this.colliders.raycast(
       origin,
       direction,
-      terrainHit ? Math.min(maxDistance, terrainHit.distance + TERRAIN_ROOT_EPSILON) : maxDistance
+      terrainHit ? Math.min(maxDistance, terrainHit.distance + TERRAIN_ROOT_EPSILON) : maxDistance,
+      excludeObjectId
     );
     if (colliderHit && (!terrainHit || colliderHit.distance <= terrainHit.distance)) {
       return colliderHit;

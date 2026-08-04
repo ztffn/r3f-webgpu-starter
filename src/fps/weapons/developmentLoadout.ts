@@ -1,4 +1,4 @@
-import type { WeaponDefinition, WeaponSlotId } from "./WeaponDefinition.ts";
+import type { WeaponDefinition, WeaponSlotId } from "../../combat/WeaponDefinition.ts";
 import { LoadoutSystem, type LoadoutSlot } from "./LoadoutSystem.ts";
 import { deriveWeaponInstanceSeed, WeaponSystem } from "./WeaponSystem.ts";
 import {
@@ -6,7 +6,7 @@ import {
   M4_DEFINITION,
   SAW_DEFINITION,
   SNIPER_DEFINITION,
-} from "./weaponDefinitions.ts";
+} from "../../combat/weaponDefinitions.ts";
 
 /** One stable identity for the single local player of the prototype scene. */
 export const LOCAL_PLAYER_SEED = 1;

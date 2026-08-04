@@ -15,18 +15,26 @@ import type {
   PlayerMotorSnapshotTarget,
   PlayerWeaponIntent,
 } from "./core/PlayerMotor";
+import { lookAngles } from "../motor/MotorTypes";
 import type { RegisteredWorldQuery } from "./core/WorldQuery";
-import { BallisticProjectileSystem, type BallisticResult } from "./combat/BallisticProjectileSystem";
-import { readBallisticEnvironment } from "./combat/BallisticEnvironment";
+import { BallisticProjectileSystem, type BallisticResult } from "../combat/BallisticProjectileSystem.ts";
+import {
+  DEFAULT_BALLISTIC_ENVIRONMENT,
+  readBallisticEnvironment,
+} from "../combat/BallisticEnvironment.ts";
 import { type LoadoutEvent } from "./weapons/LoadoutSystem";
 import {
   GLOCK_DEFINITION,
   M4_DEFINITION,
   SAW_DEFINITION,
   SNIPER_DEFINITION,
-} from "./weapons/weaponDefinitions";
+  weaponWireIndex,
+} from "../combat/weaponDefinitions.ts";
 import { createDevelopmentLoadout, LOCAL_PLAYER_SEED } from "./weapons/developmentLoadout";
-import { ammunitionFromSearch } from "./weapons/AmmunitionDefinition";
+import {
+  ammunitionFromSearch,
+  DEFAULT_AMMUNITION,
+} from "../combat/AmmunitionDefinition.ts";
 import { combatTelemetry } from "./ui/CombatTelemetry";
 import { shotDebugStore } from "./debug/ShotDebugStore";
 import { impactEffectBus } from "./presentation/ImpactEffectBus";
@@ -102,6 +110,25 @@ export interface WeaponPrototypeProps {
    * host stays the owner of ADS; only the intent crosses over.
    */
   weaponIntent?: PlayerWeaponIntent | null;
+  /**
+   * Called for every accepted shot with the direction the round actually left
+   * along, so a networked host can claim the shot to the server.
+   *
+   * INTENT ONLY, and it changes nothing locally: impact effects, tracers and the
+   * client's own ballistic simulation are unchanged presentation. This is the one
+   * thing that makes another player's health fall, and the server decides whether
+   * it did (docs/12 §8.3).
+   */
+  onShotFired?: ((yawRadians: number, pitchRadians: number) => void) | null;
+  /**
+   * Called when a weapon switch completes, with the weapon's wire index, and
+   * when a reload starts. Same contract as `onShotFired`: claims to the
+   * authority, changing nothing locally. The server re-times both with its own
+   * switch and reload clocks — these exist so its loadout record tracks what
+   * the player is actually holding.
+   */
+  onWeaponSelected?: ((weaponIndex: number) => void) | null;
+  onReloadStarted?: (() => void) | null;
 }
 
 function collectTextures(material: THREE.Material, into: Set<THREE.Texture>) {
@@ -253,12 +280,23 @@ export function WeaponPrototype({
   lookSensitivity,
   motorPose = null,
   weaponIntent = null,
+  onShotFired = null,
+  onWeaponSelected = null,
+  onReloadStarted = null,
 }: WeaponPrototypeProps) {
   const { camera, gl, scene, size } = useThree();
   const player = useMemo(() => new LocalPlayerController(), []);
+  // NETWORKED MEANS AUTHORED. The server scores damage with the canonical
+  // definitions, so the `?ammo=` sniper experiment is an offline toy — honoring
+  // it online would show the shooter one arc while the room scores another.
+  // Same rule as `?weather=` (docs/12 §8.1).
+  const networked = onShotFired !== null;
   const ammunition = useMemo(
-    () => ammunitionFromSearch(typeof window === "undefined" ? "" : window.location.search),
-    []
+    () =>
+      networked
+        ? DEFAULT_AMMUNITION
+        : ammunitionFromSearch(typeof window === "undefined" ? "" : window.location.search),
+    [networked]
   );
   const sniperDefinition = useMemo(
     () => ({
@@ -281,9 +319,15 @@ export function WeaponPrototype({
   );
   const [presentationWeaponId, setPresentationWeaponId] = useState(sniperDefinition.id);
   const presentation = weaponPresentationFor(presentationWeaponId);
+  // URL wind overrides are offline toys for the same reason as `?ammo=`: the
+  // server integrates far shots with the default environment, and wind that
+  // differs between shooter and authority is drift the shooter cannot hold for.
   const ballisticEnvironment = useMemo(
-    () => readBallisticEnvironment(typeof window === "undefined" ? "" : window.location.search),
-    []
+    () =>
+      networked
+        ? DEFAULT_BALLISTIC_ENVIRONMENT
+        : readBallisticEnvironment(typeof window === "undefined" ? "" : window.location.search),
+    [networked]
   );
   const captureShotTrace = FPS_DEBUG.shotTrajectory;
   const ballistics = useMemo(
@@ -468,8 +512,19 @@ export function WeaponPrototype({
       recoilYaw.current += event.recoilImpulseYawRadians;
       const segment = weaponPresentationFor(event.weaponId).animationSegments.fire;
       if (segment !== undefined) playSegment(segment);
+      // The PROJECTILE direction, not the sight direction: the round is what can
+      // hit somebody, and the two differ by the dispersion the server does not
+      // simulate — which is exactly the deviation its clamp is sized for.
+      if (onShotFired) {
+        const angles = lookAngles(
+          shot.projectileDirection.x,
+          shot.projectileDirection.y,
+          shot.projectileDirection.z
+        );
+        onShotFired(angles.yawRadians, angles.pitchRadians);
+      }
     },
-    [playSegment]
+    [onShotFired, playSegment]
   );
 
   const handleWeaponEvent = useCallback(
@@ -483,6 +538,7 @@ export function WeaponPrototype({
       if (event.type === "reload-started") {
         const segment = weaponPresentationFor(event.weaponId).animationSegments.reload;
         if (segment !== undefined) playSegment(segment);
+        onReloadStarted?.();
         return;
       }
       if (event.type === "weapon-switch-started") {
@@ -492,9 +548,13 @@ export function WeaponPrototype({
       }
       if (event.type === "weapon-equipped") {
         setPresentationWeaponId(event.weaponId);
+        if (onWeaponSelected) {
+          const wireIndex = weaponWireIndex(event.weaponId);
+          if (wireIndex !== null) onWeaponSelected(wireIndex);
+        }
       }
     },
-    [loadout, playSegment]
+    [loadout, onReloadStarted, onWeaponSelected, playSegment]
   );
 
   // `runFrame` takes its handlers per call, so this needs no stable identity.

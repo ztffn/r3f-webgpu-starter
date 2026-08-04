@@ -11,13 +11,13 @@ import {
 import {
   BallisticProjectileSystem,
   type BallisticResult,
-} from "../../src/fps/combat/BallisticProjectileSystem.ts";
-import type { BallisticEnvironment } from "../../src/fps/combat/BallisticEnvironment.ts";
+} from "../../src/combat/BallisticProjectileSystem.ts";
+import type { BallisticEnvironment } from "../../src/combat/BallisticEnvironment.ts";
 import type { WorldQuery } from "../../src/fps/core/WorldQuery.ts";
 import { LoadoutSystem } from "../../src/fps/weapons/LoadoutSystem.ts";
 import { WeaponSystem } from "../../src/fps/weapons/WeaponSystem.ts";
-import type { WeaponDefinition } from "../../src/fps/weapons/WeaponDefinition.ts";
-import { SAW_DEFINITION } from "../../src/fps/weapons/weaponDefinitions.ts";
+import type { WeaponDefinition } from "../../src/combat/WeaponDefinition.ts";
+import { SAW_DEFINITION } from "../../src/combat/weaponDefinitions.ts";
 
 const MISS_QUERY: WorldQuery = { raycast: () => null };
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
@@ -216,7 +216,10 @@ function runCadence(renderHz: number, track: PoseTrack, totalSeconds = 2): Caden
         pathLengthMetres: result.trace.pathLengthMetres,
         verticalDropMetres: result.trace.verticalDropMetres,
         lateralDriftMetres: result.trace.lateralDriftMetres,
-        finalPoint: result.trace.points.at(-1)!.toArray(),
+        finalPoint: (() => {
+          const end = result.trace.points.at(-1)!;
+          return [end.x, end.y, end.z];
+        })(),
       });
     });
 
@@ -404,14 +407,29 @@ test("the resolved trace keeps sight, mean bore, and projectile directions disti
   }
   assert.ok(trace);
 
-  assert.ok(trace.sightDirection.distanceTo(spawned.sight) < 1e-12);
-  assert.ok(trace.boreDirection.distanceTo(spawned.bore) < 1e-12);
-  assert.ok(trace.initialDirection.distanceTo(spawned.projectile) < 1e-12);
+  const traceSight = new THREE.Vector3(
+    trace.sightDirection.x,
+    trace.sightDirection.y,
+    trace.sightDirection.z
+  );
+  const traceBore = new THREE.Vector3(
+    trace.boreDirection.x,
+    trace.boreDirection.y,
+    trace.boreDirection.z
+  );
+  const traceProjectile = new THREE.Vector3(
+    trace.initialDirection.x,
+    trace.initialDirection.y,
+    trace.initialDirection.z
+  );
+  assert.ok(traceSight.distanceTo(spawned.sight) < 1e-12);
+  assert.ok(traceBore.distanceTo(spawned.bore) < 1e-12);
+  assert.ok(traceProjectile.distanceTo(spawned.projectile) < 1e-12);
   // The debug view draws all three. Collapsing bore onto the dispersed
   // direction would report random spread as scope elevation and windage.
-  assert.ok(trace.sightDirection.angleTo(trace.boreDirection) > 1e-4);
-  assert.ok(trace.boreDirection.angleTo(trace.initialDirection) > 1e-6);
-  assert.ok(trace.sightDirection.angleTo(trace.initialDirection) > 1e-4);
+  assert.ok(traceSight.angleTo(traceBore) > 1e-4);
+  assert.ok(traceBore.angleTo(traceProjectile) > 1e-6);
+  assert.ok(traceSight.angleTo(traceProjectile) > 1e-4);
 });
 
 test("a stationary shooter's accepted rounds are identical at 30, 60, and 144 Hz", () => {

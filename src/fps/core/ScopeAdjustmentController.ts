@@ -1,6 +1,6 @@
 import * as THREE from "three/webgpu";
-import type { BallisticEnvironment } from "../combat/BallisticEnvironment";
-import { integrateBallisticVelocity, type MutableVelocity } from "../combat/BallisticModel.ts";
+import type { BallisticEnvironment } from "../../combat/BallisticEnvironment.ts";
+import { integrateBallisticVelocity, type MutableVelocity } from "../../combat/BallisticModel.ts";
 
 export const SCOPE_ZERO_DISTANCES_METRES = [
   100, 200, 300, 400, 500, 600, 700, 800, 900, 1_000, 1_100, 1_200, 1_300,

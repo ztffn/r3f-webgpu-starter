@@ -2,10 +2,13 @@
 
 **Status:** canonical as-built specification with forward extension contracts
 
-**Last verified:** 2026-08-02
+**Last verified:** 2026-08-04
 
-**Implementation:** `src/fps/weapons/**`, `src/fps/combat/**`, and the adapter in
-`src/fps/WeaponPrototype.tsx`
+**Implementation:** `src/combat/**` (the shared, Three-free ballistic core both
+the browser and the authoritative server run — §19), `src/fps/weapons/**` and
+`src/fps/core/**` (the browser-side weapon runtime and query implementations),
+the adapter in `src/fps/WeaponPrototype.tsx`, and the server's resolution path
+in `src/net/GameServer.ts` + `src/net/ServerWorldQuery.ts`
 
 ## 1. Purpose and precedence
 
@@ -555,7 +558,29 @@ appliedRequest = nominalWeaponDamage * damageScale
 `Damageable` clamps applied damage to remaining health. Penetration therefore
 reduces damage at later contacts through retained speed; ordinary flight keeps
 full nominal damage until energy falls below 70% of muzzle energy. The 10%
-floor and nominal values are game tuning, not physical claims.
+floor and nominal values are game tuning, not physical claims. The scale is ONE
+function — `terminalDamageScale` in `PenetrationResolver.ts` — shared by the
+projectile integrator and the near-field hitscan walk, so the two resolution
+paths cannot drift apart.
+
+### 12.4 Near-field closed form (2026-08-04)
+
+`HitscanBallistics.ts` is the same drag model solved exactly instead of stepped:
+for flat fire, `dv/ds = −k·v` gives `v(d) = v₀·e^(−k·d)` and
+`t(d) = (e^(k·d) − 1)/(k·v₀)`. It is valid precisely as far as drop stays under a
+budget, and that IS the definition of the **hitscan horizon**:
+
+```text
+horizon = muzzleVelocity * sqrt(2 * dropBudget / g),   dropBudget = 0.05 m
+```
+
+About 80 m for .308, 93 m for 5.56, 35 m for 9mm — and any future subsonic or
+suppressed load earns its shorter horizon from its own velocity, with no special
+case. Inside the horizon the authority resolves a shot instantly (which is what
+makes lag-compensated rewind tractable); a round still moving at the horizon
+hands off to the projectile integrator as a continuation spawn carrying speed,
+distance, elapsed time and interaction count. A parity test holds the closed
+form and the integrator to within 1% of each other at the horizon.
 
 ## 13. Events, reports, traces, and presentation
 
@@ -663,15 +688,36 @@ ammunition identity and resolved launch values for replay and diagnostics.
 
 ### 15.3 Authority contract
 
-A future server-authoritative path should replicate or reconstruct:
+**As built (2026-08-04): PvP damage is server-authoritative on this model.** The
+server owns each peer's loadout record (equipped weapon, magazines, cadence,
+switch and reload clocks), takes a fire claim carrying only tick, sequence,
+direction and viewTick, and resolves the shot itself with the shared `src/combat/`
+code — near-field hitscan against rewound capsules inside the horizon (§12.4),
+the projectile integrator against live state beyond it. Health moves only in
+`GameServer.damagePlayer` and reaches clients only in snapshots. docs/12 §8.3 is
+the wire-level description.
 
-- shooter and weapon-instance identity;
-- command sequence and simulation tick;
-- resolved weapon/ammunition revision;
-- deterministic instance seed and shot sequence;
-- accepted origin, sight/bore/projectile direction as required by the chosen
-  prediction protocol;
-- authoritative impact, damage, and destruction outcomes.
+Replicated presentation is in (2026-08-04): every accepted shot is relayed to
+bystanders as a `ShotFired` packet and re-flown client-side at damage zero for
+tracer, flash, report, and impact effects — docs/12 §8.3. Server-owned world
+targets replicate the same way.
+
+Still to replicate or reconstruct, in this contract's terms:
+
+- **Server-side dispersion replay — deliberately NOT built, and here is the
+  honest blocker.** Recomputing the deterministic sample needs more than the
+  seed and sequence (§15.1): the claimed direction is `sightline + sway +
+  recoil + scope turret + dispersion`, and sway, recoil recovery, and turret
+  zero are CONTINUOUS client-side state the wire does not carry. Replaying the
+  sample without them reconstructs the wrong cone centre. What would unlock it:
+  per-player instance seeds derived from the server-assigned player id (today
+  every client uses `LOCAL_PLAYER_SEED`), plus replicating turret state and
+  recomputing sway/recoil server-side from the command stream — a weapon-state
+  replication project of its own. Until then the 0.2 rad clamp remains the
+  bound on the lie, sized to the legitimate envelope (max recoil + sway +
+  long-zero holdover + spread ≈ 0.15 rad).
+- resolved weapon/ammunition revision, once attachments/perks exist;
+- server-owned inventory: which weapons a peer may select at all.
 
 The local player may predict their own projectiles. Remote clients should
 normally consume replicated shot/impact presentation rather than independently
@@ -785,27 +831,36 @@ specifier resolution are load-bearing for the current test runner.
 
 ## 19. Module map
 
+**The ballistic core lives in `src/combat/` since 2026-08-04** — Three-free at
+runtime under the same rule as `src/motor/` and `src/net/` (docs/12 §3), because
+the authoritative server runs the SAME model. `src/fps/` keeps only what is
+genuinely browser presentation and input.
+
 | Module | Responsibility |
 | --- | --- |
-| `weapons/WeaponDefinition.ts` | weapon/fire-mode/command schema |
-| `weapons/AmmunitionDefinition.ts` | ammunition data and kinetic energy helper |
-| `weapons/WeaponHandling.ts` | handling context, flat modifier seam, cone formula |
-| `weapons/WeaponSystem.ts` | weapon runtime, deterministic shot acceptance and events |
-| `weapons/LoadoutSystem.ts` | equipment routing and switching |
-| `weapons/weaponDefinitions.ts` | sniper/M4/Glock/SAW tuning |
-| `core/WeaponAimComposer.ts` | local angular direction composition |
-| `core/ScopeAdjustmentController.ts` | shared-model zeroing and windage |
-| `combat/BallisticEnvironment.ts` | gravity, wind, fixed-step configuration |
-| `combat/BallisticModel.ts` | shared velocity integration |
-| `combat/BallisticProjectileSystem.ts` | pooled projectile simulation and results |
-| `core/WorldQuery.ts` | analytic terrain and indexed collider seam |
-| `combat/SurfaceProfile.ts` | material gameplay/effect definitions |
-| `combat/PenetrationResolver.ts` | pure energy/thickness terminal model |
-| `combat/Damageable.ts` | target health contract |
-| `combat/ImpactEvent.ts` | immediate contact event |
-| `combat/TargetHitReport.ts` | applied target damage report |
-| `combat/ShotResult.ts` / `ShotTrace.ts` | completed outcome and reporting path |
-| `WeaponPrototype.tsx` | transitional input/aim/projectile/presentation adapter |
+| `src/combat/WeaponDefinition.ts` | weapon/fire-mode/command schema |
+| `src/combat/AmmunitionDefinition.ts` | ammunition data and kinetic energy helper |
+| `src/combat/weaponDefinitions.ts` | sniper/M4/Glock/SAW tuning + the wire index order |
+| `src/combat/BallisticEnvironment.ts` | gravity, wind, fixed-step configuration |
+| `src/combat/BallisticModel.ts` | shared velocity integration |
+| `src/combat/BallisticProjectileSystem.ts` | pooled projectile simulation and results |
+| `src/combat/HitscanBallistics.ts` | near-field closed form: horizon, decay, hitscan walk |
+| `src/combat/WorldQuery.ts` | the Three-free ray-query contract both runtimes implement |
+| `src/combat/SurfaceProfile.ts` | material gameplay/effect definitions |
+| `src/combat/PenetrationResolver.ts` | pure energy/thickness terminal model + §12.3 scale |
+| `src/combat/Damageable.ts` | target health contract |
+| `src/combat/ImpactEvent.ts` | immediate contact event |
+| `src/combat/TargetHitReport.ts` | applied target damage report |
+| `src/combat/ShotResult.ts` / `ShotTrace.ts` | completed outcome and reporting path |
+| `src/combat/math.ts` | plain `{x,y,z}` shape, clamp, lerp |
+| `src/fps/weapons/WeaponHandling.ts` | handling context, flat modifier seam, cone formula |
+| `src/fps/weapons/WeaponSystem.ts` | weapon runtime, deterministic shot acceptance and events |
+| `src/fps/weapons/LoadoutSystem.ts` | equipment routing and switching |
+| `src/fps/core/WeaponAimComposer.ts` | local angular direction composition |
+| `src/fps/core/ScopeAdjustmentController.ts` | shared-model zeroing and windage |
+| `src/fps/core/WorldQuery.ts` | the browser implementations: analytic terrain + indexed colliders |
+| `src/net/ServerWorldQuery.ts` | the authority implementation: motor capsules + terrain |
+| `src/fps/WeaponPrototype.tsx` | transitional input/aim/projectile/presentation adapter |
 
 ## 20. Known limitations and deliberate next seams
 

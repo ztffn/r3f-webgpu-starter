@@ -1,8 +1,8 @@
-import type * as THREE from "three/webgpu";
+import type { Vec3Like } from "./math.ts";
 
 export interface BallisticEnvironment {
-  readonly gravity: THREE.Vector3Like;
-  readonly windVelocity: THREE.Vector3Like;
+  readonly gravity: Vec3Like;
+  readonly windVelocity: Vec3Like;
   readonly fixedStepSeconds: number;
   readonly maxCatchUpSeconds: number;
 }

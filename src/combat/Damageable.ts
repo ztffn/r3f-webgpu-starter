@@ -1,9 +1,9 @@
-import type * as THREE from "three/webgpu";
+import type { Vec3Like } from "./math.ts";
 
 export interface DamageInfo {
   readonly amount: number;
-  readonly point: THREE.Vector3Like;
-  readonly direction: THREE.Vector3Like;
+  readonly point: Vec3Like;
+  readonly direction: Vec3Like;
   readonly sourceId: string;
   readonly shotSequence: number;
 }

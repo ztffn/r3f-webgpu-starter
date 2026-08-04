@@ -1,4 +1,4 @@
-import type { AmmunitionDefinition } from "./AmmunitionDefinition";
+import type { AmmunitionDefinition } from "./AmmunitionDefinition.ts";
 
 export type WeaponId = string;
 export type WeaponSlotId = "primary" | "secondary" | "sidearm" | string;

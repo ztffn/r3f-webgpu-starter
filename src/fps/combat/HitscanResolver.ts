@@ -1,7 +1,7 @@
 import * as THREE from "three/webgpu";
 import type { WorldQuery } from "../core/WorldQuery";
-import type { ShotTrace } from "./ShotTrace";
-import type { ShotResult } from "./ShotResult";
+import type { ShotTrace } from "../../combat/ShotTrace.ts";
+import type { ShotResult } from "../../combat/ShotResult.ts";
 
 export interface HitscanShot {
   readonly sourceId: string;
@@ -26,7 +26,9 @@ export class HitscanResolver {
     const origin = new THREE.Vector3(shot.origin.x, shot.origin.y, shot.origin.z);
     const direction = new THREE.Vector3(shot.direction.x, shot.direction.y, shot.direction.z);
     if (direction.lengthSq() > Number.EPSILON) direction.normalize();
-    const end = hit?.point.clone() ?? origin.clone().addScaledVector(direction, shot.maxDistance);
+    const end = hit
+      ? new THREE.Vector3(hit.point.x, hit.point.y, hit.point.z)
+      : origin.clone().addScaledVector(direction, shot.maxDistance);
     const trace: ShotTrace = {
       shotSequence: shot.sequence,
       sourceId: shot.sourceId,
@@ -40,11 +42,11 @@ export class HitscanResolver {
       interactions: [],
       impact: hit
         ? {
-            point: hit.point.clone(),
-            normal: hit.normal?.clone() ?? null,
+            point: { x: hit.point.x, y: hit.point.y, z: hit.point.z },
+            normal: hit.normal ? { x: hit.normal.x, y: hit.normal.y, z: hit.normal.z } : null,
             kind: hit.kind,
             targetId: hit.damageable?.id ?? null,
-            objectName: hit.object.name,
+            objectName: hit.objectName,
           }
         : null,
       flightTimeSeconds: 0,
@@ -67,11 +69,11 @@ export class HitscanResolver {
     });
     const report = {
       targetId: hit.damageable.id,
-      objectName: hit.object.name,
+      objectName: hit.objectName,
       sourceId: shot.sourceId,
       shotSequence: shot.sequence,
-      point: hit.point.clone(),
-      normal: hit.normal?.clone() ?? null,
+      point: { x: hit.point.x, y: hit.point.y, z: hit.point.z },
+      normal: hit.normal ? { x: hit.normal.x, y: hit.normal.y, z: hit.normal.z } : null,
       rangeMetres: hit.distance,
       damageApplied: damage.applied,
       healthBefore,

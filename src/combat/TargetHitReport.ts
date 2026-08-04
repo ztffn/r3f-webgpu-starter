@@ -1,4 +1,4 @@
-import type * as THREE from "three/webgpu";
+import type { Vec3Like } from "./math.ts";
 
 /** Damageable-target truth emitted after damage has been applied. */
 export interface TargetHitReport {
@@ -6,8 +6,8 @@ export interface TargetHitReport {
   readonly objectName: string;
   readonly sourceId: string;
   readonly shotSequence: number;
-  readonly point: THREE.Vector3;
-  readonly normal: THREE.Vector3 | null;
+  readonly point: Vec3Like;
+  readonly normal: Vec3Like | null;
   readonly rangeMetres: number;
   readonly damageApplied: number;
   readonly healthBefore: number;

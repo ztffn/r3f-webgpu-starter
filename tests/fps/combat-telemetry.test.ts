@@ -4,10 +4,10 @@ import { Object3D, Vector3 } from "three/webgpu";
 import {
   BallisticProjectileSystem,
   type BallisticResult,
-} from "../../src/fps/combat/BallisticProjectileSystem.ts";
-import type { BallisticEnvironment } from "../../src/fps/combat/BallisticEnvironment.ts";
-import { HealthDamageable } from "../../src/fps/combat/Damageable.ts";
-import type { SurfaceId } from "../../src/fps/combat/SurfaceProfile.ts";
+} from "../../src/combat/BallisticProjectileSystem.ts";
+import type { BallisticEnvironment } from "../../src/combat/BallisticEnvironment.ts";
+import { HealthDamageable } from "../../src/combat/Damageable.ts";
+import type { SurfaceId } from "../../src/combat/SurfaceProfile.ts";
 import type { WorldHitKind, WorldQuery } from "../../src/fps/core/WorldQuery.ts";
 import {
   CombatTelemetry,
@@ -15,7 +15,7 @@ import {
   shotTelemetryKey,
   type ShotTelemetry,
 } from "../../src/fps/ui/CombatTelemetry.ts";
-import { AMMUNITION_DEFINITIONS } from "../../src/fps/weapons/AmmunitionDefinition.ts";
+import { AMMUNITION_DEFINITIONS } from "../../src/combat/AmmunitionDefinition.ts";
 
 const STILL: BallisticEnvironment = {
   gravity: { x: 0, y: 0, z: 0 },
@@ -66,7 +66,7 @@ function layeredQuery(layers: readonly Layer[]): WorldQuery {
         surfaceId: layer.surfaceId,
         penetrationThicknessMetres: layer.thicknessMetres,
         damageable: layer.damageable ?? null,
-        object: objects.get(layer.objectId)!,
+        objectName: objects.get(layer.objectId)!.name,
       };
     },
   };

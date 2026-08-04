@@ -1,4 +1,4 @@
-import type { WeaponDefinition } from "./WeaponDefinition";
+import type { WeaponDefinition } from "./WeaponDefinition.ts";
 import { AMMUNITION_DEFINITIONS, DEFAULT_AMMUNITION } from "./AmmunitionDefinition.ts";
 
 const AMMO_556 = AMMUNITION_DEFINITIONS["556"];
@@ -154,9 +154,33 @@ export const SAW_DEFINITION: WeaponDefinition = {
   },
 };
 
+/**
+ * Canonical order IS the wire encoding: a weapon's index here is the u8 the
+ * client sends in a SelectWeapon message and the identity the server resolves
+ * damage with. Append only — reordering silently re-arms every player.
+ */
 export const WEAPON_DEFINITIONS = [
   SNIPER_DEFINITION,
   M4_DEFINITION,
   GLOCK_DEFINITION,
   SAW_DEFINITION,
 ] as const;
+
+/**
+ * Seconds a weapon switch takes. ONE number for both sides of the wire: the
+ * client's LoadoutSystem animates it and the server's loadout record gates
+ * fire acceptance on it — copied literals here would drift into the server
+ * refusing legal shots after every switch.
+ */
+export const WEAPON_SWITCH_SECONDS = 0.35;
+
+/** Wire index for a weapon id, or null for a weapon the wire cannot name. */
+export function weaponWireIndex(weaponId: string): number | null {
+  const index = WEAPON_DEFINITIONS.findIndex((definition) => definition.id === weaponId);
+  return index >= 0 ? index : null;
+}
+
+/** Definition for a wire index, or null for an index out of range (hostile input). */
+export function weaponByWireIndex(index: number): WeaponDefinition | null {
+  return Number.isInteger(index) ? (WEAPON_DEFINITIONS[index] ?? null) : null;
+}

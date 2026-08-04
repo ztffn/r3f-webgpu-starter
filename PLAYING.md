@@ -138,15 +138,55 @@ inside its wireframe collision capsule. A prone player deliberately shows as the
 capsule instead of the soldier — the animation set has no prone clips yet, and an honest
 low silhouette beats a kneeling one that betrays your concealment.
 
+### Shoot each other
+
+Same setup as above — and yes, the rounds are real now. What hits, how hard, and who
+falls is decided **on the server**, with the same ballistics you see locally: bullets
+take time to fly, drop with distance, drift in the wind, lose energy, and will go
+through one body into the one behind it if the round is heavy enough. Your health is
+the number the server says; when it reaches zero you stop being shootable and respawn
+a few seconds later with full kit.
+
+**Worth doing:** go prone in deep grass, let your friend hunt you, and put one .308
+round through them when they walk past — that ambush is the whole thesis of this
+project in one moment. Then swap and try to spot the muzzle of someone you cannot see.
+
+Up close, aim right at them — inside roughly a hundred metres the server honours what
+was on your screen when you pulled the trigger, so a fast peek fight feels fair even
+with some latency. At range you are flying a real projectile: **lead a moving target
+and hold over for drop**, exactly as offline. The numbers — per-weapon damage, drop,
+full-damage ranges, what penetrates what — are in the
+[combat handbook](./docs/guides/combat-handbook.md).
+
+You can also *see and hear* each other shoot: every accepted round is relayed and
+re-flown on your screen as a tracer with a muzzle flash and a report, kicking real
+dust where it lands. And the room shares a ladder of shootable targets placed by the
+server — knock one down and it falls in both windows, then stands back up for
+everyone on the server's clock.
+
+One honest caveat. Ammunition, reload timing and fire rate are enforced by the server
+(an empty magazine online is genuinely empty), and the `?ammo=` / wind URL experiments
+are ignored online so both players fight under the same physics.
+
 ## FAQ
 
-- **Can we shoot each other?** Not yet. Shooting and damage still run entirely inside your
-  own browser; nothing about a shot reaches the server. Server-authoritative combat is the
-  next major work item (`docs/plans/2026-08-03-character-animation-session-handoff.md`).
-- **I killed a target and the other window didn't notice.** Same reason: target health is
-  local to each browser until world state gets a server owner.
-- **We see different weather.** Weather is currently chosen per client (URL and debug
-  panel), not by the server — also queued in the same handoff.
+- **Can we shoot each other?** Yes. PvP damage is server-authoritative: the claim your
+  browser sends is only "I fired, this way" — the server runs the ballistics and moves
+  the health. See the [combat handbook](./docs/guides/combat-handbook.md) for how hit
+  registration, damage falloff, and penetration behave in play.
+- **I shot them and nothing happened.** In order of likelihood: they were further away
+  than they looked and the round dropped under them (hold over); they were moving and
+  you did not lead; the round was still in the air when you looked away — at 600 m a
+  .308 takes the best part of a second; or your magazine was empty and the server
+  refused the shot. Dead players are also not shootable while they wait to respawn.
+- **I killed a *practice target* and the other window didn't notice.** The room's own
+  target ladder IS shared — those husks replicate. What stays local is the offline
+  contrast ladder (`&targets=1`), which each client places relative to its own camera
+  and therefore cannot be shared truth.
+- **We see different weather.** You should not anymore: networked, the room owns the
+  weather and every visual dial, precisely because fog is concealment and two players
+  under different fog is a fairness bug. If two windows genuinely disagree, that is a
+  bug worth reporting.
 - **The other soldier looks flat or too dark in fog.** The soldier is a lit model in a
   world of pre-shaded terrain, and the atmosphere term for lit materials does not exist
   yet (docs/08 knows). He pops through haze more than he should.
@@ -157,15 +197,17 @@ low silhouette beats a kneeling one that betrays your concealment.
 
 Being clear about this is more useful than a feature list.
 
-- **No player-versus-player damage.** You can see each other; you cannot hurt each other.
-- **There are no opponents.** No AI, no bots, nothing that shoots back.
+- **Nobody dies on screen.** Health falls, the kill is real, the victim respawns — but
+  there is no death animation, no kill feed, no score. The death clips exist and wait
+  on presentation work.
+- **There are no opponents.** No AI, no bots, nothing that shoots back on its own.
 - **Grass concealment is not a mechanic yet.** Grass genuinely hides you from a human
   looking at a screen — a prone player measures zero visible pixels even through a scope at
-  300 m — but nothing in the game *knows* that, so nothing can act on it.
+  300 m — but nothing in the game *knows* that, so nothing can act on it. (Against another
+  human online, it already works the honest way: they simply cannot see you.)
 - **Every weapon uses the same placeholder model,** clearly labelled as a proxy.
-- **Prone has no animation** (capsule stand-in), and nobody dies on screen — the death
-  clips exist but wait on damage being real.
-- **No objectives, score, match, menu or settings screen.**
+- **Prone has no animation** (capsule stand-in).
+- **No objectives, match flow, menu or settings screen.**
 
 ## If something looks wrong
 

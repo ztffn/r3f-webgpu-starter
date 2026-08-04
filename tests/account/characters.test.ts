@@ -15,7 +15,7 @@ import {
   validateCharacter,
   type Character,
 } from "../../src/account/characters.ts";
-import { WEAPON_DEFINITIONS } from "../../src/fps/weapons/weaponDefinitions.ts";
+import { WEAPON_DEFINITIONS } from "../../src/combat/weaponDefinitions.ts";
 
 /** A valid character, which each test then breaks in exactly one way. */
 function sample(overrides: Partial<Character> = {}): Character {

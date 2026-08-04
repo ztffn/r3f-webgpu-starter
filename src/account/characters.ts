@@ -10,7 +10,7 @@
 // weapons the game already defines rather than tuning them.
 
 import { can, type TierId } from "./tiers.ts";
-import { WEAPON_DEFINITIONS } from "../fps/weapons/weaponDefinitions.ts";
+import { WEAPON_DEFINITIONS } from "../combat/weaponDefinitions.ts";
 
 /**
  * Every weapon id the engine defines.

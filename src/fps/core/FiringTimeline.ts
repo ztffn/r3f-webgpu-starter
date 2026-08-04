@@ -8,7 +8,7 @@ import * as THREE from "three/webgpu";
 import type { PlayerStance } from "./PlayerMotor.ts";
 import { WeaponAimComposer } from "./WeaponAimComposer.ts";
 import type { AimSwayController } from "./AimSwayController.ts";
-import type { BallisticShot } from "../combat/BallisticProjectileSystem.ts";
+import type { BallisticShot } from "../../combat/BallisticProjectileSystem.ts";
 import type { LoadoutEvent } from "../weapons/LoadoutSystem.ts";
 import { WEAPON_UPDATE_MAX_SECONDS } from "../weapons/WeaponSystem.ts";
 

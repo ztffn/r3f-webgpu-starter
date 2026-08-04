@@ -1,8 +1,8 @@
-import type * as THREE from "three/webgpu";
-import type { WorldHitKind } from "../core/WorldQuery";
-import type { AmmunitionId } from "../weapons/AmmunitionDefinition";
-import type { PenetrationOutcome } from "./PenetrationResolver";
-import type { SurfaceId } from "./SurfaceProfile";
+import type { WorldHitKind } from "./WorldQuery.ts";
+import type { AmmunitionId } from "./AmmunitionDefinition.ts";
+import type { PenetrationOutcome } from "./PenetrationResolver.ts";
+import type { SurfaceId } from "./SurfaceProfile.ts";
+import type { Vec3Like } from "./math.ts";
 
 export interface ImpactEvent {
   readonly sourceId: string;
@@ -19,9 +19,9 @@ export interface ImpactEvent {
   readonly destroyed: boolean;
   readonly surfaceId: SurfaceId;
   readonly outcome: PenetrationOutcome;
-  readonly point: THREE.Vector3;
-  readonly exitPoint: THREE.Vector3 | null;
-  readonly normal: THREE.Vector3 | null;
+  readonly point: Vec3Like;
+  readonly exitPoint: Vec3Like | null;
+  readonly normal: Vec3Like | null;
   readonly effectiveThicknessMetres: number;
   readonly speedBeforeMetresPerSecond: number;
   readonly speedAfterMetresPerSecond: number;

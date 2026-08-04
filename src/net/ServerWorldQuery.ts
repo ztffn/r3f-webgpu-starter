@@ -9,6 +9,7 @@ import type { MotorHeightSource } from "../motor/MotorTypes.ts";
 import {
   capsuleNormalAt,
   capsuleRayDistance,
+  capsuleRayExitDistance,
   terrainNormalAt,
   terrainRayDistance,
 } from "../motor/HitQuery.ts";
@@ -133,6 +134,22 @@ export class ServerWorldQuery implements WorldQuery {
         // The whole body along the ray, as the simulation sizes it: a round
         // that keeps enough energy through a diameter of flesh keeps flying.
         penetrationThicknessMetres: nearest.radius * 2,
+        // Where the ray leaves the body, so a penetrating round can never be
+        // advanced to a point still inside it and wound it twice.
+        exitDistanceMetres:
+          capsuleRayExitDistance(
+            origin.x,
+            origin.y,
+            origin.z,
+            dirX,
+            dirY,
+            dirZ,
+            nearest.feetX,
+            nearest.feetY,
+            nearest.feetZ,
+            nearest.radius,
+            nearest.height
+          ) ?? undefined,
         damageable: this.damageableFor(nearest.id),
       };
     }

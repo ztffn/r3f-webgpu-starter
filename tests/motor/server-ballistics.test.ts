@@ -142,6 +142,28 @@ test("a .50 BMG penetrates the first body and wounds the one behind; a 9mm stops
   assert.equal(second.health, 100, "a stopped 9mm reached the second body anyway");
 });
 
+test("a steep penetrating shot wounds a body once, never twice", () => {
+  // Entering through the capsule's TOP CAP, the entry normal is nearly parallel
+  // to the ray, so the authored-thickness advance alone is one body diameter —
+  // far short of the ~1.8 m chord. Without the geometric exit the round
+  // re-enters the same body and one .308 trigger pull deals ~145 damage.
+  const body = new HealthDamageable("7", 100);
+  const query = queryOver([capsule(7, 0)], null, new Map([[7, body]]));
+  const result = resolveHitscanShot({
+    query,
+    sourceId: "tower",
+    sequence: 1,
+    origin: { x: 0, y: 30, z: 0 },
+    direction: { x: 0, y: -1, z: 0 },
+    maxDistanceMetres: 50,
+    damage: AMMUNITION_DEFINITIONS["308"].baseDamage,
+    ammunition: AMMUNITION_DEFINITIONS["308"],
+  });
+  const bodyHits = result.interactions.filter((i) => i.targetId === "7");
+  assert.equal(bodyHits.length, 1, "one round wounded the same body twice");
+  assert.equal(100 - body.health, 100, "a .308 through the crown should apply nominal damage once");
+});
+
 test("a shot that crosses the horizon still flying hands off its continuation state", () => {
   const empty = queryOver([], null);
   const ammunition = AMMUNITION_DEFINITIONS["308"];

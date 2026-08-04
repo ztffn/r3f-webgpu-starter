@@ -59,7 +59,13 @@ export function resolveSurfaceContact(input: SurfaceContactInput): SurfaceContac
   const hitNormal: Vec3Like | null = hit.normal
     ? { x: hit.normal.x, y: hit.normal.y, z: hit.normal.z }
     : null;
-  const traversalDistance = response.effectiveThicknessMetres + EXIT_EPSILON_METRES;
+  // Advance by the authored energy path OR the geometric far side, whichever
+  // is further: energy cost stays game tuning, but the exit must clear the
+  // object it just penetrated.
+  const geometricTraversal =
+    hit.exitDistanceMetres !== undefined ? hit.exitDistanceMetres - hit.distance : 0;
+  const traversalDistance =
+    Math.max(response.effectiveThicknessMetres, geometricTraversal) + EXIT_EPSILON_METRES;
   const exitPoint: Vec3Like | null = canContinue
     ? {
         x: hitPoint.x + direction.x * traversalDistance,

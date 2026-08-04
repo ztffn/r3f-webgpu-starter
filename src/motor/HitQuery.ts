@@ -73,6 +73,72 @@ export function capsuleRayDistance(
   return best;
 }
 
+/**
+ * Distance along the ray where it LEAVES the capsule — the FARTHEST valid
+ * intersection, under the same validity rules as the entry test. Only worth
+ * calling for a capsule the ray is known to hit.
+ */
+export function capsuleRayExitDistance(
+  originX: number,
+  originY: number,
+  originZ: number,
+  dirX: number,
+  dirY: number,
+  dirZ: number,
+  feetX: number,
+  feetY: number,
+  feetZ: number,
+  radius: number,
+  height: number
+): number | null {
+  const spine = Math.max(0, height - radius * 2);
+  const baseY = feetY + radius;
+  const topY = baseY + spine;
+  const ox = originX - feetX;
+  const oz = originZ - feetZ;
+  const a = dirX * dirX + dirZ * dirZ;
+  let farthest: number | null = null;
+
+  if (a > 1e-12) {
+    const b = ox * dirX + oz * dirZ;
+    const c = ox * ox + oz * oz - radius * radius;
+    const discriminant = b * b - a * c;
+    if (discriminant >= 0) {
+      const root = Math.sqrt(discriminant);
+      const farT = (-b + root) / a;
+      if (farT >= 0) {
+        const y = originY + dirY * farT;
+        if (y >= baseY && y <= topY && (farthest === null || farT > farthest)) farthest = farT;
+      }
+    }
+  }
+  farthest = capRayFarthest(ox, originY - baseY, oz, dirX, dirY, dirZ, radius, farthest);
+  if (spine > 0) {
+    farthest = capRayFarthest(ox, originY - topY, oz, dirX, dirY, dirZ, radius, farthest);
+  }
+  return farthest;
+}
+
+/** Farthest non-negative ray-sphere root for one cap, folded into `farthest`. */
+function capRayFarthest(
+  ox: number,
+  oy: number,
+  oz: number,
+  dirX: number,
+  dirY: number,
+  dirZ: number,
+  radius: number,
+  farthest: number | null
+): number | null {
+  const b = ox * dirX + oy * dirY + oz * dirZ;
+  const c = ox * ox + oy * oy + oz * oz - radius * radius;
+  const discriminant = b * b - c;
+  if (discriminant < 0) return farthest;
+  const farT = -b + Math.sqrt(discriminant);
+  if (farT >= 0 && (farthest === null || farT > farthest)) farthest = farT;
+  return farthest;
+}
+
 /** Nearest non-negative ray-sphere root for one cap, folded into `best`. */
 function capRayBest(
   ox: number,

@@ -117,7 +117,7 @@ class GameRoom extends Room {
 
   private readonly bridge = new RoomBridge();
   private readonly connections = new Map<string, ServerConnection>();
-  private nextId = 1;
+  private nextId = 0;
   private game!: GameServer;
 
   onCreate(): void {
@@ -173,8 +173,14 @@ class GameRoom extends Room {
   }
 
   onJoin(client: Client): void {
+    // Ids live on the wire as u16 and world targets own 40,000+, so a room
+    // that outlives tens of thousands of joins wraps back to 1 rather than
+    // marching into the target band — skipping any id still connected.
+    const inUse = new Set([...this.connections.values()].map((c) => c.id));
+    do {
+      this.nextId = this.nextId >= 39_999 ? 1 : this.nextId + 1;
+    } while (inUse.has(this.nextId));
     const id = this.nextId;
-    this.nextId += 1;
     const connection: ServerConnection = {
       id,
       send: (bytes) => client.sendBytes(PACKET_DOWN, bytes),

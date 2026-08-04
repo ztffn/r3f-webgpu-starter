@@ -621,12 +621,15 @@ export class GameServer {
       return;
     }
     // A resend or a replayed packet must not fire twice. The sequence is the
-    // shooter's own counter, so this is the same dedupe idea as the command queue.
-    if (claim.sequence <= peer.highestFireSequence) {
+    // shooter's own counter, so this is the same dedupe idea as the command
+    // queue — but WRAP-AWARE, because the wire truncates it to u16 and a
+    // long-lived peer's 65,536th shot must not brick its trigger forever.
+    const fireAdvance = sequenceAdvance(peer.highestFireSequence, claim.sequence);
+    if (fireAdvance === null) {
       this.fireClaimsRejected += 1;
       return;
     }
-    peer.highestFireSequence = claim.sequence;
+    peer.highestFireSequence += fireAdvance;
 
     const motor = this.room.get(peer.roomId);
     if (motor === undefined) {
@@ -755,11 +758,15 @@ export class GameServer {
   private receiveSelectWeapon(connection: ServerConnection, bytes: Uint8Array): void {
     const peer = this.peers.get(connection.id);
     const claim = decodeSelectWeapon(bytes);
-    if (peer === undefined || claim === null || claim.sequence <= peer.highestWeaponSequence) {
+    const selectAdvance =
+      peer === undefined || claim === null
+        ? null
+        : sequenceAdvance(peer.highestWeaponSequence, claim.sequence);
+    if (peer === undefined || claim === null || selectAdvance === null) {
       this.weaponClaimsRejected += 1;
       return;
     }
-    peer.highestWeaponSequence = claim.sequence;
+    peer.highestWeaponSequence += selectAdvance;
     const definition = weaponByWireIndex(claim.weaponIndex);
     if (definition === null || claim.weaponIndex === peer.weaponIndex) {
       this.weaponClaimsRejected += 1;
@@ -776,11 +783,15 @@ export class GameServer {
   private receiveReload(connection: ServerConnection, bytes: Uint8Array): void {
     const peer = this.peers.get(connection.id);
     const claim = decodeReload(bytes);
-    if (peer === undefined || claim === null || claim.sequence <= peer.highestWeaponSequence) {
+    const reloadAdvance =
+      peer === undefined || claim === null
+        ? null
+        : sequenceAdvance(peer.highestWeaponSequence, claim.sequence);
+    if (peer === undefined || claim === null || reloadAdvance === null) {
       this.weaponClaimsRejected += 1;
       return;
     }
-    peer.highestWeaponSequence = claim.sequence;
+    peer.highestWeaponSequence += reloadAdvance;
     this.settleWeapon(peer);
     const definition = this.equippedDefinition(peer);
     if (
@@ -946,7 +957,9 @@ export class GameServer {
       peer.reloadCompleteTick = -1;
       if (motor === undefined) continue;
       const at = this.spawn(peer.connection.id);
-      motor.teleport({ x: at.x, y: at.y ?? motor.state.position.y, z: at.z });
+      // The spawn point's OWN elevation, not the corpse's: dying in a hollow
+      // must not respawn a player buried inside the spawn ring's hill.
+      motor.teleport({ x: at.x, y: at.y ?? this.heights.sample(at.x, at.z), z: at.z });
     }
   }
 
@@ -1104,6 +1117,18 @@ function damageableAdapter(
     },
     reset() {},
   };
+}
+
+/**
+ * How far a u16 wire sequence advances past the highest consumed one, or null
+ * for a replay/stale claim. Forward window of half the u16 space: a counter
+ * that wrapped keeps advancing, a resend lands at delta 0, an old claim in the
+ * backward half is stale. `highest` itself is an unbounded number.
+ */
+function sequenceAdvance(highest: number, wireSequence: number): number | null {
+  const delta = (wireSequence - (highest & 0xffff)) & 0xffff;
+  if (delta === 0 || delta > 0x7fff) return null;
+  return delta;
 }
 
 function defaultSpawn(seat: number): { x: number; z: number } {

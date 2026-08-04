@@ -207,16 +207,21 @@ export function decodeSnapshot(bytes: Uint8Array): DecodedSnapshot {
   let at = SNAPSHOT_HEADER_BYTES;
   for (let index = 0; index < count; index += 1) {
     const flags = view.getUint8(at + 22);
+    const x = view.getFloat32(at + 2);
+    const y = view.getFloat32(at + 6);
+    const z = view.getFloat32(at + 10);
+    // A hostile server is a peer too: one NaN position teleports the local
+    // Rapier body to NaN and poisons every step after. Drop the player entry.
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+      at += BYTES_PER_PLAYER;
+      continue;
+    }
     players.push({
       id: view.getUint16(at),
       health: view.getUint8(at + 27),
       state: {
         tick: view.getUint32(1),
-        position: {
-          x: view.getFloat32(at + 2),
-          y: view.getFloat32(at + 6),
-          z: view.getFloat32(at + 10),
-        },
+        position: { x, y, z },
         velocity: {
           x: view.getInt16(at + 14) / VELOCITY_SCALE,
           y: view.getInt16(at + 16) / VELOCITY_SCALE,
@@ -276,10 +281,14 @@ export function decodeWelcome(bytes: Uint8Array): {
 } | null {
   if (bytes.byteLength < WELCOME_BYTES) return null;
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const spawn = { x: view.getFloat32(7), y: view.getFloat32(11), z: view.getFloat32(15) };
+  // Same hostile-peer rule as every other decoder: a NaN spawn poisons the
+  // client's physics world on the very first packet.
+  if (![spawn.x, spawn.y, spawn.z].every(Number.isFinite)) return null;
   return {
     playerId: view.getUint16(1),
     tick: view.getUint32(3),
-    spawn: { x: view.getFloat32(7), y: view.getFloat32(11), z: view.getFloat32(15) },
+    spawn,
   };
 }
 

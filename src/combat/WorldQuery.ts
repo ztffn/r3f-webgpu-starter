@@ -21,6 +21,14 @@ export interface WorldHit {
   readonly objectName: string;
   readonly surfaceId: SurfaceId;
   readonly penetrationThicknessMetres: number;
+  /**
+   * Distance along the ray where it LEAVES the object, when the implementation
+   * knows the far side (the server's analytic capsules do). A penetrating round
+   * must advance past this, or a steep entry through a capsule's cap — where
+   * the entry normal hides the true chord — exits inside the same body and
+   * wounds it twice.
+   */
+  readonly exitDistanceMetres?: number;
   readonly damageable: Damageable | null;
 }
 

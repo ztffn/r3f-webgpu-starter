@@ -30,6 +30,14 @@ export const PacketType = {
   ShotFired: 9,
   /** Down: every server-owned world target — position, size, health. */
   WorldTargets: 10,
+  /** Down: who is in the room and what they are called. Sent on every change. */
+  Roster: 11,
+  /** Down, broadcast: somebody died. Drives the death clip and the kill feed. */
+  PlayerDied: 12,
+  /** Down, SHOOTER ONLY: your round landed. Drives the hitmarker. */
+  HitConfirmed: 13,
+  /** Down, VICTIM ONLY: you were hit, and roughly from where. */
+  DamageTaken: 14,
 } as const;
 
 /** tick u32 + buttons u16 + yaw i16 + pitch i16. Buttons outgrew a byte when
@@ -688,4 +696,222 @@ export function decodeWorldTargets(bytes: Uint8Array): WorldTargetState[] {
 
 export function packetTypeOf(bytes: Uint8Array): number {
   return bytes.length > 0 ? bytes[0]! : 0;
+}
+
+// --- feedback packets (2026-08-04) ------------------------------------------
+//
+// Four down packets that carry no gameplay outcome whatsoever. Damage still
+// arrives as health in a snapshot and nowhere else; these say what happened so a
+// screen can show it, and a client that dropped every one of them would still
+// take exactly the same damage. That is the same rule the accepted-shot relay
+// already states, and it is what keeps presentation off the authority path.
+//
+// Player ids are u16 and start at 1, so ZERO IS THE ABSENT ID — no killer, or an
+// attacker who has since left. Every decoder is hardened against a short buffer
+// on the same principle as the rest of this file: a hostile server is a peer too.
+
+/** Longest callsign on the wire. `validateCallsign` already caps it at 16. */
+const CALLSIGN_MAX_BYTES = 16;
+
+export interface RosterEntry {
+  readonly id: number;
+  /** Display name. A callsign for an account, a fallback for an anonymous join. */
+  readonly name: string;
+}
+
+/**
+ * WHO IS HERE, in full, on every change.
+ *
+ * A complete roster rather than join and leave deltas, for two reasons. A client
+ * that misses one delta is wrong about a name until it reconnects, whereas a
+ * missed full roster is corrected by the next one. And the feed's joined and left
+ * lines fall out of diffing two rosters, so one packet does the work of three.
+ *
+ * `type u8 + count u8 + (id u16 + length u8 + UTF-8 bytes) * n`.
+ */
+export function encodeRoster(entries: readonly RosterEntry[]): Uint8Array {
+  const encoder = new TextEncoder();
+  const names = entries.map((entry) => encoder.encode(entry.name).slice(0, CALLSIGN_MAX_BYTES));
+  const total = names.reduce((sum, name) => sum + 3 + name.byteLength, 2);
+  const buffer = new ArrayBuffer(total);
+  const view = new DataView(buffer);
+  const out = new Uint8Array(buffer);
+  view.setUint8(0, PacketType.Roster);
+  view.setUint8(1, Math.min(entries.length, 255));
+  let at = 2;
+  for (let index = 0; index < entries.length && index < 255; index += 1) {
+    const name = names[index]!;
+    view.setUint16(at, entries[index]!.id & 0xffff);
+    view.setUint8(at + 2, name.byteLength);
+    out.set(name, at + 3);
+    at += 3 + name.byteLength;
+  }
+  return out;
+}
+
+/** Empty on anything malformed; a roster is never worth throwing over. */
+export function decodeRoster(bytes: Uint8Array): RosterEntry[] {
+  if (bytes.byteLength < 2) return [];
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const decoder = new TextDecoder();
+  const claimed = view.getUint8(1);
+  const entries: RosterEntry[] = [];
+  let at = 2;
+  // Bounded by what ARRIVED, not by what the header claimed — the same rule the
+  // command and snapshot decoders follow.
+  for (let index = 0; index < claimed; index += 1) {
+    if (at + 3 > bytes.byteLength) break;
+    const id = view.getUint16(at);
+    const length = view.getUint8(at + 2);
+    if (at + 3 + length > bytes.byteLength) break;
+    entries.push({
+      id,
+      name: decoder.decode(bytes.subarray(at + 3, at + 3 + length)),
+    });
+    at += 3 + length;
+  }
+  return entries;
+}
+
+/** Which side the killing round came from. Matches the character clip vocabulary. */
+const DEATH_DIRECTIONS = ["front", "back", "side"] as const;
+export type DeathDirectionWire = (typeof DEATH_DIRECTIONS)[number];
+
+export interface PlayerDiedEvent {
+  readonly victimId: number;
+  /** 0 when nobody killed them — a fall, or an attacker who already left. */
+  readonly killerId: number;
+  readonly weaponIndex: number;
+  readonly direction: DeathDirectionWire;
+  readonly headshot: boolean;
+  /** Seconds until the victim is back, as the SERVER scheduled it. */
+  readonly respawnSeconds: number;
+}
+
+/**
+ * SOMEBODY DIED, to everyone.
+ *
+ * Broadcast rather than targeted because three different surfaces need it from
+ * three points of view: every client plays the death clip on that body, the feed
+ * prints a line, and the victim's own overlay reads the killer and the countdown
+ * off the same packet the server scheduled from. One event, one set of facts, no
+ * chance of the countdown and the respawn disagreeing.
+ *
+ * `type u8 + victim u16 + killer u16 + weapon u8 + flags u8 + respawn tenths u8`.
+ * Tenths of a second because a death clip runs 1.9 to 3.7 seconds and the pause
+ * after it is authored in tenths; 25.5 s of range is far more than any respawn.
+ */
+const PLAYER_DIED_BYTES = 8;
+
+export function encodePlayerDied(event: PlayerDiedEvent): Uint8Array {
+  const buffer = new ArrayBuffer(PLAYER_DIED_BYTES);
+  const view = new DataView(buffer);
+  const direction = Math.max(0, DEATH_DIRECTIONS.indexOf(event.direction));
+  view.setUint8(0, PacketType.PlayerDied);
+  view.setUint16(1, event.victimId & 0xffff);
+  view.setUint16(3, event.killerId & 0xffff);
+  view.setUint8(5, event.weaponIndex & 0xff);
+  view.setUint8(6, (direction & 0b11) | (event.headshot ? 0b100 : 0));
+  view.setUint8(7, clamp(Math.round(event.respawnSeconds * 10), 0, 255));
+  return new Uint8Array(buffer);
+}
+
+export function decodePlayerDied(bytes: Uint8Array): PlayerDiedEvent | null {
+  if (bytes.byteLength < PLAYER_DIED_BYTES) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const flags = view.getUint8(6);
+  return {
+    victimId: view.getUint16(1),
+    killerId: view.getUint16(3),
+    weaponIndex: view.getUint8(5),
+    // An index this build does not know falls back to the front death rather
+    // than to undefined: a wrong-facing fall beats no animation at all.
+    direction: DEATH_DIRECTIONS[flags & 0b11] ?? "front",
+    headshot: (flags & 0b100) !== 0,
+    respawnSeconds: view.getUint8(7) / 10,
+  };
+}
+
+export interface HitConfirmedEvent {
+  /** The shooter's own claim sequence, so a client can match its own round. */
+  readonly sequence: number;
+  readonly victimId: number;
+  readonly fatal: boolean;
+}
+
+/**
+ * YOUR ROUND LANDED, to the shooter alone.
+ *
+ * Separate from the damage packet below rather than one shape with an audience
+ * flag: the two carry different facts to different people, and a single packet is
+ * how a shooter ends up holding something only the victim should know. This one
+ * says a hit happened, never how much health is left.
+ *
+ * `type u8 + sequence u16 + victim u16 + flags u8`.
+ */
+const HIT_CONFIRMED_BYTES = 6;
+
+export function encodeHitConfirmed(event: HitConfirmedEvent): Uint8Array {
+  const buffer = new ArrayBuffer(HIT_CONFIRMED_BYTES);
+  const view = new DataView(buffer);
+  view.setUint8(0, PacketType.HitConfirmed);
+  view.setUint16(1, event.sequence & 0xffff);
+  view.setUint16(3, event.victimId & 0xffff);
+  view.setUint8(5, event.fatal ? 1 : 0);
+  return new Uint8Array(buffer);
+}
+
+export function decodeHitConfirmed(bytes: Uint8Array): HitConfirmedEvent | null {
+  if (bytes.byteLength < HIT_CONFIRMED_BYTES) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return {
+    sequence: view.getUint16(1),
+    victimId: view.getUint16(3),
+    fatal: view.getUint8(5) !== 0,
+  };
+}
+
+export interface DamageTakenEvent {
+  /** 0 when the attacker is unknown or already gone. */
+  readonly attackerId: number;
+  /**
+   * Where the round came FROM, in radians relative to the victim's own facing:
+   * 0 dead ahead, positive to the left, matching the motor's basis.
+   */
+  readonly bearingRadians: number;
+  /** Hit points removed by this round. */
+  readonly amount: number;
+}
+
+/**
+ * YOU WERE HIT, to the victim alone.
+ *
+ * The bearing is what makes a directional indicator possible, and it is
+ * deliberately the only spatial fact here — no position, no range, no name of a
+ * place. In a game whose premise is concealment, telling a victim exactly where a
+ * shooter is hands back what the grass and the fog just earned, so the wire
+ * carries a direction and the HUD decides how coarsely to draw it.
+ *
+ * `type u8 + attacker u16 + bearing i16 + amount u8`.
+ */
+const DAMAGE_TAKEN_BYTES = 6;
+
+export function encodeDamageTaken(event: DamageTakenEvent): Uint8Array {
+  const buffer = new ArrayBuffer(DAMAGE_TAKEN_BYTES);
+  const view = new DataView(buffer);
+  view.setUint8(0, PacketType.DamageTaken);
+  view.setUint16(1, event.attackerId & 0xffff);
+  view.setInt16(3, packAngle(event.bearingRadians));
+  view.setUint8(5, clamp(Math.round(event.amount), 0, 255));
+  return new Uint8Array(buffer);
+}
+
+export function decodeDamageTaken(bytes: Uint8Array): DamageTakenEvent | null {
+  if (bytes.byteLength < DAMAGE_TAKEN_BYTES) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return {
+    attackerId: view.getUint16(1),
+    bearingRadians: unpackAngle(view.getInt16(3)),
+    amount: view.getUint8(5),
+  };
 }

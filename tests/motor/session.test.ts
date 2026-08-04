@@ -14,10 +14,18 @@ import {
   BYTES_PER_COMMAND,
   PacketType,
   decodeCommands,
+  decodeDamageTaken,
+  decodeHitConfirmed,
+  decodePlayerDied,
   decodeRoomState,
+  decodeRoster,
   decodeSetVisualDial,
   decodeSnapshot,
   decodeWelcome,
+  encodeDamageTaken,
+  encodeHitConfirmed,
+  encodePlayerDied,
+  encodeRoster,
   encodeCommands,
   encodeFire,
   encodeSnapshot,
@@ -176,6 +184,68 @@ test("the welcome carries the room's full health, so a client can read a fractio
   assert.equal(decodeWelcome(encodeWelcome(1, 0, { x: 0, y: 0, z: 0 }, 9999))!.maxHealth, 255);
 });
 
+test("the feedback packets survive a codec round trip", () => {
+  const died = decodePlayerDied(
+    encodePlayerDied({
+      victimId: 4,
+      killerId: 9,
+      weaponIndex: 2,
+      direction: "back",
+      headshot: true,
+      respawnSeconds: 5.4,
+    })
+  )!;
+  assert.equal(died.victimId, 4);
+  assert.equal(died.killerId, 9);
+  assert.equal(died.weaponIndex, 2);
+  assert.equal(died.direction, "back");
+  assert.equal(died.headshot, true);
+  // Tenths of a second: the death clips run 1.9 to 3.7 s and the pause after
+  // them is authored in tenths, so this must not round to whole seconds.
+  assert.ok(Math.abs(died.respawnSeconds - 5.4) < 0.05);
+
+  // Zero is the absent id - nobody killed them, or the killer already left.
+  assert.equal(decodePlayerDied(encodePlayerDied({ ...died, killerId: 0 }))!.killerId, 0);
+
+  const hit = decodeHitConfirmed(
+    encodeHitConfirmed({ sequence: 61234, victimId: 3, fatal: true })
+  )!;
+  assert.equal(hit.sequence, 61234, "the sequence must survive past a signed 16-bit range");
+  assert.equal(hit.victimId, 3);
+  assert.equal(hit.fatal, true);
+
+  const damage = decodeDamageTaken(
+    encodeDamageTaken({ attackerId: 8, bearingRadians: -2.2, amount: 34 })
+  )!;
+  assert.equal(damage.attackerId, 8);
+  assert.equal(damage.amount, 34);
+  assert.ok(Math.abs(damage.bearingRadians - -2.2) < 1e-3);
+  // Clamped into the byte rather than wrapping: a wrapped amount would report a
+  // scratch as a kill.
+  assert.equal(decodeDamageTaken(encodeDamageTaken({ ...damage, amount: 9999 }))!.amount, 255);
+});
+
+test("the roster carries names, and survives a hostile length byte", () => {
+  const entries = [
+    { id: 1, name: "Ada" },
+    { id: 2, name: "Recruit-0042" },
+  ];
+  assert.deepEqual(decodeRoster(encodeRoster(entries)), entries);
+  assert.deepEqual(decodeRoster(encodeRoster([])), []);
+
+  // Callsigns are capped at 16 characters by validateCallsign, and the wire caps
+  // them again rather than trusting that.
+  const long = decodeRoster(encodeRoster([{ id: 3, name: "x".repeat(64) }]));
+  assert.equal(long[0]!.name.length, 16);
+
+  // A count claiming more entries than arrived yields what arrived, never a throw
+  // and never an undefined entry - the same rule the command decoder follows.
+  const truncated = new Uint8Array([PacketType.Roster, 9, 0, 1, 3, 65, 66, 67]);
+  assert.deepEqual(decodeRoster(truncated), [{ id: 1, name: "ABC" }]);
+  assert.deepEqual(decodeRoster(new Uint8Array([PacketType.Roster, 200])), []);
+  assert.deepEqual(decodeRoster(new Uint8Array([PacketType.Roster])), []);
+});
+
 test("every input bit survives the wire, including the ones past a byte", () => {
   // Buttons were a u8. Adding aim intent at bit 8 pushed the field past a byte
   // and it would have silently truncated to zero — a movement input that simply
@@ -220,6 +290,10 @@ test("a malformed packet is survived, not thrown on", () => {
     // Every decoder here is hardened against a short buffer, and a new packet
     // type must not be the exception — it is reached from the same handler.
     assert.doesNotThrow(() => decodeRoomState(bytes), `decodeRoomState threw on ${label}`);
+    assert.doesNotThrow(() => decodeRoster(bytes), `decodeRoster threw on ${label}`);
+    assert.doesNotThrow(() => decodePlayerDied(bytes), `decodePlayerDied threw on ${label}`);
+    assert.doesNotThrow(() => decodeHitConfirmed(bytes), `decodeHitConfirmed threw on ${label}`);
+    assert.doesNotThrow(() => decodeDamageTaken(bytes), `decodeDamageTaken threw on ${label}`);
   }
 
   // Clamped to what arrived, not to what was claimed.

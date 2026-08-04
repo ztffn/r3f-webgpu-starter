@@ -17,6 +17,12 @@ import { TIERS, type TierId } from "../../src/account/tiers.ts";
 import { accountOf, requireAccount } from "./authMiddleware.ts";
 import type { AccountRepository } from "./repository.ts";
 
+/**
+ * Longest a dev tier grant may run, in days. Ten years — far beyond any test and
+ * well inside the range a Date can represent.
+ */
+const MAX_GRANT_DAYS = 3650;
+
 export interface ApiDeps {
   repository: AccountRepository;
   providers: string[];
@@ -59,7 +65,9 @@ export function createApiRouter({
       // So the supporter page can offer the dev grant instead of guessing from a
       // build-time flag. Off in production, where the button must not exist.
       grantEnabled: adminEnabled,
-      tiers: TIERS.map((tier) => ({ id: tier.id, priceMinor: tier.priceMinor })),
+      // No `tiers` here. The table is shared code (src/account/tiers.ts) and the
+      // supporter page imports it directly, so sending it was a second copy of
+      // the same facts that `ServerConfig` never even declared a field for.
     });
   });
 
@@ -159,7 +167,14 @@ export function createApiRouter({
       return void res.status(400).json({ error: "unknown_tier" });
     }
     const paid = TIERS.find((entry) => entry.id === tier)?.priceMinor ?? 0;
-    const days = typeof body.days === "number" && Number.isFinite(body.days) ? body.days : 30;
+    // CLAMPED, not merely checked for finiteness. `days: 1e21` makes the sum
+    // infinite and `new Date(Infinity).toISOString()` throws a RangeError, which
+    // Express turns into a 500 from a route whose whole job is to be predictable.
+    // A negative value is allowed through the floor deliberately — granting an
+    // already-lapsed tier is a case worth being able to test.
+    const requested =
+      typeof body.days === "number" && Number.isFinite(body.days) ? Math.trunc(body.days) : 30;
+    const days = Math.max(-MAX_GRANT_DAYS, Math.min(MAX_GRANT_DAYS, requested));
     const expiresAt =
       paid > 0 ? new Date(Date.now() + days * 86_400_000).toISOString() : null;
     await repository.setTier(account.id, tier satisfies TierId, expiresAt);

@@ -201,9 +201,8 @@ export function CharacterPage() {
             ))}
             {!canSaveLoadout && (
               <p className="kit-note">
-                Guests deploy with the standard kit.{" "}
-                <Link to="/register">Register</Link> to save your own — it is free
-                and keeps the progress you already have.
+                <Link to="/register">Register</Link> to keep your own kit. Free,
+                and you keep what you have earned.
               </p>
             )}
           </section>
@@ -236,12 +235,12 @@ export function CharacterPage() {
               </Suspense>
             </div>
           </div>
-          <p className="stage-caption">
-            Appearance is cosmetic and always will be — camouflage does not change
-            how well the grass hides you.{" "}
-            <strong>The model does not wear your choices yet:</strong> they are
-            saved and enforced, but nothing renders them on the soldier so far.
-          </p>
+          {/* No caption. The paragraph that was here explained an unrendered
+              appearance system and a fair-play position — a developer's caveat
+              and a policy note, neither of which a player wants between them and
+              their soldier. The gap is recorded in the design record §5.6, which
+              is where a known gap belongs; the fair-play line is argued once, on
+              the supporter page, where someone is actually deciding to pay. */}
         </div>
 
         <div className="loadout-col">
@@ -331,7 +330,7 @@ export function CharacterPage() {
             </div>
             {canInsignia ? (
               <p className="kit-note">
-                Up to {INSIGNIA_MAX} capitals or digits, worn on the shoulder.
+                {INSIGNIA_MAX} characters, worn on the shoulder.
               </p>
             ) : (
               <p className="kit-locked">Supporter perk</p>

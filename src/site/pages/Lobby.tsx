@@ -129,8 +129,7 @@ export function Lobby() {
         <section className="auth-card notched notched-sm">
           <h2 className="display display-sm">Quick match</h2>
           <p className="auth-note">
-            Straight into a public game — the server picks the map and the weather,
-            because fog is concealment and a match cannot let players choose it.
+            Straight into a live game. The server picks the map and the weather.
           </p>
           <Link className="btn btn-primary" to="/play?scene=scope&motor=1&net=1">
             Deploy now
@@ -195,9 +194,8 @@ export function Lobby() {
               diverge silently. */}
           {!can("joinPrivateGame") ? (
             <p className="auth-note">
-              Joining a private game needs an account.{" "}
-              <Link to="/register">Register</Link> — it is free and keeps the
-              progress you already have.
+              Private games need an account. <Link to="/register">Register</Link> —
+              free, and you keep what you have earned.
             </p>
           ) : (
             <form className="stack" onSubmit={onJoinCode}>
@@ -215,8 +213,7 @@ export function Lobby() {
                   onChange={(event) => setCode(normaliseJoinCode(event.target.value))}
                 />
                 <p className="field-hint">
-                  Six characters. Ambiguous letters and digits are never used, so
-                  there is no O/0 or I/1 to guess at.
+                  Six characters. No O/0 or I/1 — they are never used.
                 </p>
                 {codeError !== null && (
                   <p className="field-error" role="alert">
@@ -239,9 +236,8 @@ export function Lobby() {
           {can("hostPrivateGame") ? (
             <>
               <p className="auth-note">
-                Starts an unlisted game that only people with its code can join.
-                The code appears in the HUD once you are in, with a button to copy
-                it or a link to send.
+                An unlisted game only your code can reach. The code is in your HUD,
+                ready to copy.
               </p>
               {host.error !== null && (
                 <p className="field-error" role="alert" data-dev="host-private-error">
@@ -260,9 +256,8 @@ export function Lobby() {
             </>
           ) : (
             <p className="auth-note">
-              Hosting a private game is a{" "}
-              <Link to="/supporter">supporter perk</Link>. Anyone with the code can
-              join one.
+              Hosting is a <Link to="/supporter">supporter perk</Link>. Joining one
+              is not.
             </p>
           )}
         </section>

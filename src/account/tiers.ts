@@ -77,8 +77,7 @@ export const TIERS: readonly Tier[] = [
     name: "Supporter",
     priceMinor: 500,
     currency: "USD",
-    summary:
-      "Fund the project and run part of it — clans, servers and your own insignia.",
+    summary: "Run part of this community — clans, servers, your own insignia.",
     capabilities: [
       ...ENLISTED_CAPABILITIES,
       "hostPrivateGame",
@@ -105,7 +104,7 @@ export const CAPABILITY_LABELS: Record<Capability, string> = {
   hostCommunityServer: "Run a community server listed in the public browser",
   reservedSlot: "A reserved slot on your own server",
   customInsignia: "Custom clan insignia and unit patch",
-  earlyAccessMaps: "Early access to new maps and terrain",
+  earlyAccessMaps: "New maps and terrain a week before everyone else",
   supporterMarker: "Supporter marker on your profile",
 };
 

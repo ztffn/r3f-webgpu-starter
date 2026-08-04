@@ -51,9 +51,9 @@ export function Supporter() {
           <p className="eyebrow">Membership</p>
           <h1 className="display display-lg">Play free. Back it if you want to run it.</h1>
           <p className="prose" style={{ marginTop: "var(--s4)" }}>
-            The game is free and stays free. Supporting it pays for servers and
-            buys you the tools to build something on top of it — a clan, a server,
-            a squad with your own patch on it.
+            The game is free and stays free. Supporting it buys you the tools to
+            build something on top of it — a clan, a server, a squad with your own
+            patch on it.
           </p>
         </div>
       </header>
@@ -73,7 +73,7 @@ export function Supporter() {
                       taller than the one that does not, so "Free", "Free" and
                       "$5" landed on three different baselines. */}
                   <div className="tier-tag">
-                    {featured && <span className="badge badge-accent">Funds the project</span>}
+                    {featured && <span className="badge badge-accent">Run things</span>}
                     {tier.id === "guest" && <span className="badge">No account</span>}
                   </div>
                   <h2 className="display display-sm">{tier.name}</h2>

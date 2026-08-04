@@ -97,8 +97,8 @@ export function Leaderboard() {
           ) : board.rows.length === 0 ? (
             <p className="auth-note" data-dev="board-empty">
               {board.populated
-                ? "Nobody has anything on this board yet. Play a match and you will be the first."
-                : "Nothing records this statistic yet — it needs the server-authoritative combat work. The board is real; the numbers are not being written."}
+                ? "Nobody on this board yet. Be the first."
+                : "Not tracked yet."}
             </p>
           ) : (
             <ol className="board" data-dev="board-rows">
@@ -125,8 +125,7 @@ export function Leaderboard() {
           <section className="auth-card notched notched-sm">
             <h2 className="display display-sm">Get on the board</h2>
             <p className="auth-note">
-              A free account is all it takes, and registering keeps the progress you
-              already have.
+              A free account is all it takes, and you keep what you have earned.
             </p>
             <Link className="btn btn-primary" to="/register">
               Register

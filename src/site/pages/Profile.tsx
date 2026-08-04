@@ -128,20 +128,13 @@ export function Profile() {
             <dd>{career.timePlayedSeconds > 0 ? duration(career.timePlayedSeconds) : "—"}</dd>
           </dl>
           {career.matches === 0 && (
-            <p className="auth-note">
-              Nothing recorded yet. Career statistics are written by the match
-              server, which does not report them at this stage of development —
-              so these will stay at zero for now rather than being invented.
-            </p>
+            <p className="auth-note">Nothing on the board yet. Go and deploy.</p>
           )}
         </section>
 
         <section className="auth-card notched notched-sm">
           <h2 className="display display-sm">Medals</h2>
-          <p className="auth-note">
-            Medals come only from play and cannot be bought — see the{" "}
-            <Link to="/supporter">supporter page</Link> for where that line sits.
-          </p>
+          <p className="auth-note">Earned in the field. Never for sale.</p>
           {/* The whole catalogue, not just what is held: a locked medal with its
               requirement beside it is something to go and do, whereas an empty
               list is indistinguishable from a feature that does not exist. */}
@@ -163,9 +156,10 @@ export function Profile() {
                       ? medal.description
                       : medal.earnable
                         ? medal.requirement
-                        : // Not "you have not done this" — nothing records it yet,
-                          // and the two are different claims.
-                          `${medal.requirement} Nothing records this yet.`}
+                        : // Still honest — it says the medal is not being tracked
+                          // rather than implying nobody has managed it — but in
+                          // four words instead of a sentence about the roadmap.
+                          "Not tracked yet."}
                   </span>
                   <em>{held !== undefined ? held.slice(0, 10) : "—"}</em>
                 </li>

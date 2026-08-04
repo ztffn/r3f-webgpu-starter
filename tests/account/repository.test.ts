@@ -11,6 +11,7 @@ import { after, before, describe, it } from "node:test";
 import { migrate, openDatabase, type AccountDb } from "../../tools/account/database.ts";
 import { AccountRepository } from "../../tools/account/repository.ts";
 import { DEFAULT_CHARACTER } from "../../src/account/characters.ts";
+import { validateCallsign } from "../../src/account/accountTypes.ts";
 
 let db: AccountDb;
 let repo: AccountRepository;
@@ -176,6 +177,25 @@ describe("registering", () => {
         }),
       /reserved/
     );
+  });
+
+  it("still registers an address whose local part is a reserved word", async () => {
+    // A callsign the user never typed must not be able to refuse them an account.
+    // Deriving one from `admin@` produced `admin`, then `admin-1` … `admin-19`,
+    // every one of which is reserved by its prefix — twenty-one refusals and a
+    // thrown error, so nobody at `admin`, `administrator`, `moderator`,
+    // `official` or `distantfront` could register at all.
+    for (const local of ["admin", "administrator", "moderator", "official", "distantfront"]) {
+      const account = await repo.registerWithEmailAndPassword({
+        email: `${local}@example.com`,
+        passwordHash: "hash",
+      });
+      assert.equal(
+        validateCallsign(account.callsign),
+        null,
+        `${local} produced an invalid callsign: ${account.callsign}`
+      );
+    }
   });
 });
 

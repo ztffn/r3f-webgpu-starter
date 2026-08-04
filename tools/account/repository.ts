@@ -9,6 +9,7 @@
 import { sql } from "kysely";
 import {
   EMPTY_CAREER,
+  GUEST_DIGITS,
   guestCallsign,
   validateCallsign,
   type Account,
@@ -23,7 +24,7 @@ import {
 import type { LeaderboardUnit } from "../../src/account/lobby.ts";
 import { earnedMedals } from "../../src/account/medals.ts";
 import type { TierId } from "../../src/account/tiers.ts";
-import type { AccountDb, UserRow } from "./database.ts";
+import { isUniqueViolation, type AccountDb, type UserRow } from "./database.ts";
 
 /** A row as selected, with `id` resolved to a number. */
 type SelectedUser = {
@@ -92,6 +93,20 @@ export interface LeaderboardDefinition {
   unit: LeaderboardUnit;
   /** False while nothing writes the column. The page says which kind of empty. */
   populated: boolean;
+}
+
+/**
+ * Look a board up by the id in the URL.
+ *
+ * `Object.hasOwn` and not a bare index, because the key comes from a request and
+ * the table is a plain object literal: `LEADERBOARD_COLUMNS["__proto__"]` returns
+ * `Object.prototype`, and `["constructor"]` and `["toString"]` return functions.
+ * All three are non-undefined, so a bare index passed the "no such board" check
+ * and reached the query with `column === undefined`, producing
+ * `career.undefined` — a 500 where a 404 was meant.
+ */
+export function leaderboardDefinition(board: string): LeaderboardDefinition | undefined {
+  return Object.hasOwn(LEADERBOARD_COLUMNS, board) ? LEADERBOARD_COLUMNS[board] : undefined;
 }
 
 /** Board id (what the URL says) to its definition. */
@@ -204,10 +219,13 @@ export class AccountRepository {
   async createGuest(anonymousId: string): Promise<Account> {
     const created = nowIso();
     for (let attempt = 0; attempt < 8; attempt += 1) {
-      // Widen the space on later attempts instead of looping forever on a
-      // saturated 4-digit range.
-      const seed = attempt < 6 ? Math.floor(Math.random() * 10000) : Math.floor(Math.random() * 1e9);
-      const callsign = guestCallsign(seed);
+      // Widen the NAME, not just the seed. Drawing a bigger random number did
+      // nothing while `guestCallsign` folded it back with `% 10000` — every
+      // attempt drew from the same 10,000 names, so a saturated range failed all
+      // eight times. Asking for more digits is what actually escapes it.
+      const digits = attempt < 6 ? GUEST_DIGITS : GUEST_DIGITS + 3;
+      const seed = Math.floor(Math.random() * 10 ** digits);
+      const callsign = guestCallsign(seed, digits);
       if ((await this.findByCallsign(callsign)) !== undefined) continue;
       try {
         const row = await this.db
@@ -603,15 +621,30 @@ export class AccountRepository {
    * Sanitises first, because an email local part or a Discord username can
    * contain dots and Unicode that `validateCallsign` rejects — and a registration
    * that fails on a name the user never typed is baffling.
+   *
+   * The two-stage fallback matters, and it is what this function got wrong: every
+   * candidate used to keep `base`'s prefix, so a reserved one could never be
+   * escaped. `admin@company.com` produced `admin`, then `admin-1` … `admin-19`,
+   * all of which `validateCallsign` rejects as reserved — twenty-one refusals and
+   * a thrown error, so nobody whose address began `admin`, `administrator`,
+   * `moderator`, `official` or `distantfront` could register at all. When the
+   * derived stem is unusable the name has to stop being derived from it.
    */
   private async uniqueCallsign(base: string): Promise<string> {
     const cleaned = base.replace(/[^A-Za-z0-9_]/g, "").slice(0, 12) || "Operator";
     const padded = cleaned.length >= 3 ? cleaned : `${cleaned}Ops`;
-    if ((await this.findByCallsign(padded)) === undefined && validateCallsign(padded) === null) {
-      return padded;
-    }
+    // Only worth suffixing a stem that is legal on its own; a reserved stem stays
+    // reserved however many digits follow it.
+    const stem = validateCallsign(padded) === null ? padded : null;
+    if (stem !== null && (await this.findByCallsign(stem)) === undefined) return stem;
+
     for (let attempt = 0; attempt < 20; attempt += 1) {
-      const candidate = `${padded.slice(0, 12)}-${Math.floor(Math.random() * 1000)}`;
+      const candidate =
+        stem !== null
+          ? `${stem.slice(0, 12)}-${Math.floor(Math.random() * 1000)}`
+          : // Not derived from `base` at all. `Operator` is the neutral stem the
+            // sanitiser already falls back to for an unusable local part.
+            `Operator-${Math.floor(Math.random() * 100000)}`;
       if (validateCallsign(candidate) !== null) continue;
       if ((await this.findByCallsign(candidate)) === undefined) return candidate;
     }
@@ -635,9 +668,4 @@ function safeParse(json: string): unknown {
   } catch {
     return {};
   }
-}
-
-/** SQLite reports a unique constraint failure by message; there is no code. */
-function isUniqueViolation(error: unknown): boolean {
-  return error instanceof Error && /UNIQUE constraint failed/i.test(error.message);
 }

@@ -18,7 +18,11 @@ import { normaliseJoinCode, type ServerListing } from "../../src/account/lobby.t
 import { can } from "../../src/account/tiers.ts";
 import { GAME_ROOM } from "../../src/net/ColyseusProtocol.ts";
 import { accountOf, requireAccount } from "./authMiddleware.ts";
-import { LEADERBOARD_COLUMNS, type AccountRepository } from "./repository.ts";
+import {
+  LEADERBOARD_COLUMNS,
+  leaderboardDefinition,
+  type AccountRepository,
+} from "./repository.ts";
 import { readRoomOptions, type RoomMetadata } from "./roomMetadata.ts";
 
 export interface LobbyApiDeps {
@@ -156,7 +160,7 @@ export function createLobbyRouter({ repository }: LobbyApiDeps): Router {
    */
   router.get("/leaderboard/:board", async (req: Request, res: Response) => {
     const board = typeof req.params.board === "string" ? req.params.board : "";
-    const entry = LEADERBOARD_COLUMNS[board];
+    const entry = leaderboardDefinition(board);
     if (entry === undefined) {
       return void res.status(404).json({
         error: "no_such_board",

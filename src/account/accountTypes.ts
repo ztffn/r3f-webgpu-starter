@@ -127,11 +127,21 @@ export function validateCallsign(raw: string): CallsignProblem | null {
   return null;
 }
 
+/** Digits in a guest's number. The default; `createGuest` widens on collision. */
+export const GUEST_DIGITS = 4;
+
 /**
  * The guest name. Not random-looking on purpose — a guest should read as a
  * placeholder so that "make an account" is an obvious next step rather than a
  * setting to hunt for.
+ *
+ * `digits` is what makes a retry able to escape a saturated range. It used to be
+ * fixed at four while the caller varied the seed up to 1e9, which did nothing at
+ * all: the modulo folded every seed back into the same 10,000 names, so
+ * `guestCallsign(987654321)` and `guestCallsign(4321)` were both `Recruit-4321`.
  */
-export function guestCallsign(seed: number): string {
-  return `Recruit-${String(Math.abs(Math.trunc(seed)) % 10000).padStart(4, "0")}`;
+export function guestCallsign(seed: number, digits: number = GUEST_DIGITS): string {
+  const width = Math.max(GUEST_DIGITS, Math.trunc(digits));
+  const modulus = 10 ** width;
+  return `Recruit-${String(Math.abs(Math.trunc(seed)) % modulus).padStart(width, "0")}`;
 }

@@ -103,4 +103,20 @@ describe("guestCallsign", () => {
       assert.equal(validateCallsign(name)?.reason, "reserved", name);
     }
   });
+
+  it("widens the name when asked, so a saturated range can be escaped", () => {
+    // `createGuest` retries on a collision and asks for more digits once the
+    // 4-digit range starts colliding. It used to just draw a bigger random NUMBER,
+    // which did nothing whatsoever: the modulo folded every seed back into the
+    // same ten thousand names, so `guestCallsign(987654321)` and
+    // `guestCallsign(4321)` were both `Recruit-4321` and all eight attempts drew
+    // from one exhausted pool.
+    assert.equal(guestCallsign(987654321), guestCallsign(4321), "the old fold, still true at 4 digits");
+    assert.match(guestCallsign(987654321, 7), /^Recruit-\d{7}$/);
+    assert.notEqual(guestCallsign(987654321, 7), guestCallsign(4321, 7));
+    // A wider name is still reserved, which is what keeps it un-registerable.
+    assert.equal(validateCallsign(guestCallsign(987654321, 7))?.reason, "reserved");
+    // Never narrower than the default, however small the argument.
+    assert.match(guestCallsign(5, 1), /^Recruit-\d{4}$/);
+  });
 });

@@ -89,7 +89,12 @@ function makeSession(clientCount: number, options: SessionOptions = {}) {
   return { network, server, clients, transports };
 }
 
-/** Runs the session for `ticks`, letting each client supply its own input. */
+/**
+ * Runs the session for `ticks`, letting each client supply its own input.
+ * Pumps each client's remote interpolation once per tick like a real frame
+ * loop, so `remote.state`/`remote.position` are the RENDERED (fixed-delay,
+ * interpolated) view — which is also what a fire claim's viewTick names.
+ */
 function drive(
   session: ReturnType<typeof makeSession>,
   ticks: number,
@@ -103,6 +108,7 @@ function drive(
     session.network.advance(TICK_MS / 2);
     session.server.tick();
     session.network.advance(TICK_MS / 2);
+    for (const client of session.clients) client.interpolateRemotes(TICK_MS / 1000);
   }
 }
 
@@ -774,15 +780,121 @@ test("two clients join one room and each sees the other move", () => {
     remoteWalker.z - walker.position.z
   );
   assert.ok(gap < 1.5, `remote view lagged the walker by ${gap.toFixed(2)} m`);
-  // A snapshot is a PAST authoritative state: at 20 Hz patch over a 60 Hz tick
-  // it is up to three ticks stale, which at walking pace is about 0.28 m. The
-  // test bounds that staleness rather than demanding equality.
+  // The rendered view is DELIBERATELY in the past: two patch intervals of
+  // interpolation delay (6 ticks = 0.1 s), which at the 5.5 m/s walk is about
+  // 0.55 m, plus up to a patch of snapshot staleness. Bound it on both sides —
+  // too small means interpolation is not rendering the past at all, too large
+  // means the render clock is drifting.
   const behindAuthority = Math.abs(
     remoteWalker.z - session.server.room.get("1")!.state.position.z
   );
   assert.ok(
-    behindAuthority < 0.5,
-    `remote view is ${behindAuthority.toFixed(3)} m from authority, beyond patch staleness`
+    behindAuthority > 0.25 && behindAuthority < 1.2,
+    `remote view is ${behindAuthority.toFixed(3)} m behind authority; expected ~0.55 m of designed delay`
+  );
+});
+
+test("remotes render a fixed interval in the past, at their true speed", () => {
+  const session = makeSession(2);
+  session.network.advance(TICK_MS);
+  session.server.tick();
+  session.network.advance(TICK_MS);
+
+  // The walker moves at constant velocity; the stander records what its screen
+  // shows and what the server truly held at every tick.
+  const serverHistory = new Map<number, { x: number; z: number }>();
+  const renderedSteps: number[] = [];
+  let previousRendered: { x: number; z: number } | null = null;
+  for (let tick = 0; tick < 300; tick += 1) {
+    session.clients[0]!.predict(MotorInput.Forward, 0, 0);
+    session.clients[1]!.predict(0, 0, 0);
+    session.network.advance(TICK_MS / 2);
+    session.server.tick();
+    const authoritative = session.server.room.get("1")!.state.position;
+    serverHistory.set(session.server.room.tick, { x: authoritative.x, z: authoritative.z });
+    session.network.advance(TICK_MS / 2);
+    for (const client of session.clients) client.interpolateRemotes(TICK_MS / 1000);
+    // Sample the rendered walker over the settled tail of the run.
+    if (tick > 240) {
+      const rendered = [...session.clients[1]!.remotePlayers][0]!.position;
+      if (previousRendered !== null) {
+        renderedSteps.push(
+          Math.hypot(rendered.x - previousRendered.x, rendered.z - previousRendered.z)
+        );
+      }
+      previousRendered = { x: rendered.x, z: rendered.z };
+    }
+  }
+
+  // ACCURACY: what the stander renders is the walker where the server had it
+  // at the render tick — the interpolation is exact on linear motion, so the
+  // tolerance is only slew and snapshot quantisation.
+  const stander = session.clients[1]!;
+  const rendered = [...stander.remotePlayers][0]!.position;
+  const reference = serverHistory.get(stander.renderTick);
+  assert.ok(reference, "the render tick names a tick the server never had");
+  const error = Math.hypot(rendered.x - reference.x, rendered.z - reference.z);
+  assert.ok(
+    error < 0.15,
+    `rendered walker is ${error.toFixed(3)} m from the server's state at the render tick`
+  );
+
+  // SMOOTHNESS: at constant velocity every rendered frame step is the same
+  // size. The old exponential chase surged after each packet and settled
+  // between them; interpolation must not.
+  const meanStep = renderedSteps.reduce((sum, step) => sum + step, 0) / renderedSteps.length;
+  const worstStep = Math.max(...renderedSteps);
+  assert.ok(meanStep > 0.05, "the walker's rendered view never moved");
+  assert.ok(
+    worstStep < meanStep * 1.6,
+    `rendered motion surges: worst step ${worstStep.toFixed(4)} vs mean ${meanStep.toFixed(4)}`
+  );
+});
+
+test("a shot aimed at the rendered soldier hits, because the claim names the rendered tick", () => {
+  // The end-to-end contract of parts III and IV together: the victim sprints
+  // across the shooter's view, so the rendered soldier trails the live one by
+  // more than a capsule radius. Aiming at the PIXELS — the interpolated remote
+  // — must still land, because fire() claims the render tick and the server
+  // rewinds to exactly that.
+  const session = makeSession(2, {
+    spawn: (seat) => ({ x: seat === 1 ? 0 : 8, z: 0 }),
+    respawnSeconds: 0,
+  });
+  const aim = { yaw: -Math.PI / 2 };
+  const input = (index: number) => ({
+    buttons: index === 1 ? MotorInput.Forward | MotorInput.Sprint : 0,
+    yaw: index === 0 ? aim.yaw : 0,
+  });
+  // Warm up: the victim reaches sprint speed and the render clock settles.
+  // The shooter's look chases the rendered victim every tick, the way a human
+  // tracks the soldier they can actually see.
+  for (let tick = 0; tick < 90; tick += 1) {
+    drive(session, 1, input);
+    const rendered = [...session.clients[0]!.remotePlayers][0];
+    if (rendered !== undefined) {
+      aim.yaw = lookAngles(rendered.position.x, 0, rendered.position.z).yawRadians;
+    }
+  }
+
+  const shooter = session.clients[0]!;
+  const renderedVictim = [...shooter.remotePlayers][0]!.position;
+  const liveVictim = session.server.room.get("2")!.state.position;
+  const offset = Math.hypot(
+    renderedVictim.x - liveVictim.x,
+    renderedVictim.z - liveVictim.z
+  );
+  assert.ok(
+    offset > 0.45,
+    `the rendered victim only trails the live one by ${offset.toFixed(2)} m; ` +
+      "a hit would not prove the rewind (capsule radius is 0.35 m)"
+  );
+
+  shooter.fire(aim.yaw, 0);
+  drive(session, 4, input);
+  assert.ok(
+    session.server.healthOf(2)! < 100,
+    "a shot aimed exactly at the rendered soldier missed"
   );
 });
 

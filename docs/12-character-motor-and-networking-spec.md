@@ -344,7 +344,8 @@ silently and counted:
 - **Fire** (15 bytes): `type u8 + tick u32 + sequence u16 + yaw i16 + pitch i16 +
   viewTick u32`. No origin (the server uses its own eye for the shooter's blended
   stance) and **no weapon** — the server already knows what is in hand. `viewTick`
-  is the server tick of the snapshot the shooter was rendering: the rewind target.
+  is the shooter's RENDER TICK — the moment in the room's past their screen was
+  showing (§8.4) — and is the rewind target.
 - **SelectWeapon** (4 bytes): `type u8 + sequence u16 + index u8` into the
   canonical `WEAPON_DEFINITIONS` order (`src/combat/weaponDefinitions.ts`), which
   is therefore append-only.
@@ -385,6 +386,37 @@ server's look, since sway/recoil/dispersion are client-side until dispersion is
 recomputed server-side from the deterministic seed) and the claimed weapon
 selection itself (no server-owned inventory yet — a client may select any of the
 four dev weapons, but only a weapon it then actually fights with).
+
+### 8.4 Entity interpolation — remotes render the exact past (2026-08-04)
+
+Remote players are drawn a FIXED interval in the past: two patch intervals
+(100 ms at the default 20 Hz), interpolated between the two snapshots that
+bracket a free-running render clock (`GameClient.interpolateRemotes`). Position,
+yaw (shortest-arc), pitch, velocity and the stance blend all interpolate;
+`remote.state` IS the interpolated presentation state, so the animator and aim
+rig get smooth values without knowing any of this. The clock advances on wall
+time and slews gently toward `latest snapshot − delay`, snapping only after a
+real stall; past the newest snapshot a remote HOLDS rather than extrapolates —
+dead reckoning guesses wrong exactly when a player jinks, which in a shooter is
+the moment that matters.
+
+This replaced an exponential chase toward the latest snapshot (rate 12), and the
+reason is §8.3 as much as smoothness: the chase trailed a moving target by
+roughly `v × 80 ms` — half a metre at a sprint, more than a capsule radius — and
+that trailing position was NEVER a state the server could name, so the lag
+compensation rewound to a world the shooter had not actually seen. With the
+render clock, "what the shooter saw" is a server tick by construction:
+`fire()` claims `renderTick` and the rewind restores the shooter's pixels to
+within one tick. The end-to-end test aims at the interpolated soldier of a
+sprinting victim — deliberately more than a radius from the live position — and
+must hit. The delay rides inside the 250 ms rewind cap with room for network
+latency; a headless client that never pumps interpolation falls back to
+claiming the raw latest snapshot tick.
+
+The known costs, accepted: everyone else is 100 ms in the past (imperceptible
+next to the flight-time and leading skills this game already demands), and the
+"shot around the corner" window for the victim grows by the same 100 ms — the
+standard trade, bounded by the rewind cap.
 
 The motor is selected independently of the scene. `?scene=motor` is movement alone;
 **`?scene=scope&motor=1`** is the weapon carried on a collided body, which is the

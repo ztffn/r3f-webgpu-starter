@@ -6,6 +6,7 @@
 // yet" instead of pretending, and a dead payment button costs more trust than that.
 
 import { Link } from "react-router";
+import { accountClient } from "../../account/accountClient";
 import {
   CAPABILITY_LABELS,
   TIERS,
@@ -14,8 +15,10 @@ import {
   type Capability,
 } from "../../account/tiers";
 import { useAuth } from "../../account/AuthProvider";
+import { useAsyncAction } from "../useAsyncAction";
 import { useDocumentTitle } from "../useDocumentTitle";
 import "./page.css";
+import "./auth.css";
 
 /**
  * Capabilities listed on every card, so the columns line up and a reader can see
@@ -30,8 +33,12 @@ const SHOWN: readonly Capability[] = tierById("supporter").capabilities;
 export function Supporter() {
   // The SERVER decides whether checkout is live, not the build. Two flags meant
   // the page could offer a checkout the server would refuse to honour.
-  const { config } = useAuth();
+  const { config, me, refresh } = useAuth();
   const checkoutEnabled = config?.checkoutEnabled === true;
+  // The dev grant, and ONLY when the server says its route is open. A build-time
+  // flag would put this button on a production page whose server answers 404.
+  const grantEnabled = config?.grantEnabled === true && me !== null;
+  const grant = useAsyncAction<"grant" | "revoke">();
   useDocumentTitle(
     "Supporter",
     "Back Distant Front: found a clan, host a community server, and get your own insignia. Nothing purchasable affects a fight."
@@ -130,6 +137,66 @@ export function Supporter() {
                 Everything on the free tiers works as described, and none of it is
                 waiting on payment.
               </p>
+            </div>
+          </section>
+        )}
+
+        {grantEnabled && (
+          <section className="callout notched notched-sm" data-dev="tier-grant">
+            <h2 className="display display-sm">Development: grant a tier</h2>
+            <div className="prose">
+              <p>
+                This server was started with <code>DF2_ADMIN=1</code>, so it will
+                put your own account on any tier without a payment. It exists to
+                exercise the gates — hosting a private game, custom insignia —
+                before there is a checkout to do it properly. On any other server
+                the route does not exist.
+              </p>
+              <p>
+                It cannot award a medal, and no version of it ever will. Medals
+                come from play, which is what the rest of this page is promising.
+              </p>
+            </div>
+            <p className="auth-note" data-dev="tier-grant-state">
+              You are <strong>{me.effectiveTier}</strong>
+              {me.account.tierExpiresAt !== null &&
+                ` until ${me.account.tierExpiresAt.slice(0, 10)}`}
+              .
+            </p>
+            {grant.error !== null && (
+              <p className="field-error" role="alert">
+                {grant.error}
+              </p>
+            )}
+            <div className="row">
+              <button
+                type="button"
+                className="btn"
+                data-dev="grant-supporter"
+                disabled={grant.busy !== null}
+                onClick={() =>
+                  void grant.run("grant", async () => {
+                    await accountClient.grantTier("supporter", 30);
+                    await refresh();
+                  })
+                }
+              >
+                {grant.busy === "grant" ? "Granting…" : "Grant supporter, 30 days"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                data-dev="grant-enlisted"
+                disabled={grant.busy !== null}
+                onClick={() =>
+                  void grant.run("revoke", async () => {
+                    await accountClient.grantTier("enlisted");
+                    await refresh();
+                  })
+                }
+              >
+                {grant.busy === "revoke" ? "Dropping…" : "Back to enlisted"}
+              </button>
             </div>
           </section>
         )}

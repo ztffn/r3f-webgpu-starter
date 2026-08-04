@@ -11,6 +11,7 @@ import { Link } from "react-router";
 import { accountClient, AccountError } from "../../account/accountClient";
 import { useAuth } from "../../account/AuthProvider";
 import { validateCallsign } from "../../account/accountTypes";
+import { MEDALS } from "../../account/medals";
 import { tierById } from "../../account/tiers";
 import { useAsyncAction } from "../useAsyncAction";
 import { useDocumentTitle } from "../useDocumentTitle";
@@ -63,6 +64,9 @@ export function Profile() {
 
   const { account, career, medals, effectiveTier } = me;
   const tier = tierById(effectiveTier);
+  // Id to award date, so the catalogue below can be rendered in ITS order rather
+  // than in the order the awards happen to come back in.
+  const awarded = new Map(medals.map((medal) => [medal.medalId, medal.awardedAt]));
   const lapsed = account.tier === "supporter" && effectiveTier !== "supporter";
   const problem = callsign === "" ? null : validateCallsign(callsign);
 
@@ -134,21 +138,40 @@ export function Profile() {
 
         <section className="auth-card notched notched-sm">
           <h2 className="display display-sm">Medals</h2>
-          {medals.length === 0 ? (
-            <p className="auth-note">
-              None yet. Medals come only from play and cannot be bought — see the{" "}
-              <Link to="/supporter">supporter page</Link> for where that line sits.
-            </p>
-          ) : (
-            <ul className="medal-list" data-dev="profile-medals">
-              {medals.map((medal) => (
-                <li key={medal.medalId}>
-                  <strong>{medal.medalId}</strong>
-                  <em>{medal.awardedAt.slice(0, 10)}</em>
+          <p className="auth-note">
+            Medals come only from play and cannot be bought — see the{" "}
+            <Link to="/supporter">supporter page</Link> for where that line sits.
+          </p>
+          {/* The whole catalogue, not just what is held: a locked medal with its
+              requirement beside it is something to go and do, whereas an empty
+              list is indistinguishable from a feature that does not exist. */}
+          <ul className="medal-list" data-dev="profile-medals">
+            {MEDALS.map((medal) => {
+              const held = awarded.get(medal.id);
+              return (
+                <li
+                  key={medal.id}
+                  className={held === undefined ? "medal-locked" : undefined}
+                  data-dev={`medal-${medal.id}`}
+                  data-dev-state={
+                    held !== undefined ? "earned" : medal.earnable ? "locked" : "unearnable"
+                  }
+                >
+                  <strong>{medal.name}</strong>
+                  <span className="medal-note">
+                    {held !== undefined
+                      ? medal.description
+                      : medal.earnable
+                        ? medal.requirement
+                        : // Not "you have not done this" — nothing records it yet,
+                          // and the two are different claims.
+                          `${medal.requirement} Nothing records this yet.`}
+                  </span>
+                  <em>{held !== undefined ? held.slice(0, 10) : "—"}</em>
                 </li>
-              ))}
-            </ul>
-          )}
+              );
+            })}
+          </ul>
         </section>
 
         <section className="auth-card notched notched-sm">

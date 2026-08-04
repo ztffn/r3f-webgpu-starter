@@ -70,10 +70,13 @@ ul.field-error {
   flex-direction: column;
   gap: var(--s2);
 }
+/* Name and date on one line with the requirement under them, rather than three
+   columns: the requirement is a sentence, and squeezed into a middle column it
+   wrapped to three lines on a phone while the date sat alone in open space. */
 .medal-list li {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--s3);
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0 var(--s3);
   padding-bottom: var(--s2);
   border-bottom: var(--hair) solid var(--line);
 }
@@ -83,10 +86,21 @@ ul.field-error {
   letter-spacing: 0.02em;
   text-transform: uppercase;
 }
+.medal-list .medal-note {
+  grid-column: 1 / -1;
+  color: var(--ink-dim);
+  font-size: 0.86rem;
+}
 .medal-list em {
   font-style: normal;
   color: var(--ink-faint);
   font-variant-numeric: tabular-nums;
+}
+/* Dimmed, not hidden. A medal you have not earned is the reason to go and play,
+   so it has to be legible — this is the same call the locked character options
+   make, and for the same reason. */
+.medal-list .medal-locked strong {
+  color: var(--ink-dim);
 }
 
 /* --- account state in the site nav -------------------------------------

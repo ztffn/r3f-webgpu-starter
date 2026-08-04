@@ -40,6 +40,13 @@
   [headers.values]
     Cache-Control = "public, max-age=0, must-revalidate"
 
+# Self-hosted webfonts (src/ui/tokens.css). Their filenames carry the upstream
+# face version, so a changed face is a changed name and caching hard is safe.
+[[headers]]
+  for = "/fonts/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
 [[redirects]]
   from = "/*"
   to = "/index.html"

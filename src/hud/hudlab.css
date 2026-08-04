@@ -1,0 +1,113 @@
+/* HUD lab: still frame, the real HUD on top, reference overlay for comparison.
+ *
+ * The stage fills the viewport rather than reproducing the mockup's fixed
+ * 1448x1086 box, because the thing being checked is an anchored layout — pinning
+ * the stage to the mockup's dimensions would only ever verify one window size,
+ * which is the limitation the anchored layout exists to fix.
+ */
+
+.hudlab {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: #030503;
+}
+
+/* The lab is where panel compositing cost is at its worst: a full-screen still
+   behind every blurred panel, with a second full-screen image stacked on top. A
+   software renderer cannot composite that, so the lab opts out of the blur and
+   keeps the geometry — which is what it exists to check. Judge the blur in-game
+   on real hardware, not here. */
+.hudlab .hud-panel {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background:
+    linear-gradient(180deg, rgba(230, 238, 210, 0.05), transparent 18%),
+    linear-gradient(135deg, rgba(16, 21, 18, 0.97), rgba(7, 10, 9, 0.93));
+}
+
+.hudlab-stage {
+  position: absolute;
+  inset: 0;
+}
+
+.hudlab-scene,
+.hudlab-reference {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* The still is a 4:3 capture; letting it cover keeps the horizon roughly where
+     the HUD expects it at any window shape. */
+}
+
+.hudlab-reference {
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease);
+}
+.mode-reference .hudlab-reference {
+  opacity: 1;
+}
+/* Half-and-half, with a hairline so the seam is locatable. */
+.mode-split .hudlab-reference {
+  opacity: 1;
+  clip-path: inset(0 0 0 50%);
+}
+.mode-split::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.72);
+  z-index: 30;
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.8);
+}
+/* Reference mode hides the live HUD, so the two are never superimposed and
+   mistaken for a match. */
+.mode-reference .hud-root {
+  display: none;
+}
+
+.hudlab-controls {
+  position: fixed;
+  left: 12px;
+  top: 12px;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s2);
+  background: rgba(5, 8, 7, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: #dfe4da;
+}
+.hudlab-controls button {
+  padding: 7px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: transparent;
+  color: #dfe4da;
+  font: inherit;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.hudlab-controls button[aria-pressed="true"] {
+  border-color: #a9bd61;
+  color: #c1d979;
+}
+.hudlab-controls label {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  white-space: nowrap;
+}
+.hudlab-controls input[type="range"] {
+  width: 160px;
+}

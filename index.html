@@ -4,30 +4,51 @@
     <meta charset="utf-8" />
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1, shrink-to-fit=no"
+      content="width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover"
     />
-    <title>Delta Force 2 — Web Port (Terrain Scaffold)</title>
+    <title>Distant Front — A spiritual successor to Delta Force</title>
     <meta
       name="description"
-      content="A browser reconstruction of Delta Force 2 (NovaLogic, 1999). Phase 1 chunked LOD heightfield terrain on Three.js WebGPU + TSL."
+      content="A long-range tactical shooter in the browser. Vast terrain, grass that actually conceals you, and engagements measured in hundreds of metres."
     />
     <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Distant Front" />
     <meta
       property="og:title"
-      content="Delta Force 2 — Web Port (Terrain Scaffold)"
+      content="Distant Front — A spiritual successor to Delta Force"
     />
     <meta
       property="og:description"
-      content="A browser reconstruction of Delta Force 2's Voxel Space 32 terrain on Three.js WebGPU + TSL."
+      content="A long-range tactical shooter in the browser. Vast terrain, grass that actually conceals you, and engagements measured in hundreds of metres."
     />
-    <meta name="theme-color" content="#000000" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="theme-color" content="#0d0e0d" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon/favicon-32x32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon/favicon-16x16.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/favicon/apple-touch-icon.png" />
     <link rel="manifest" href="/favicon/site.webmanifest" />
+    <!-- The two identity faces are used above the fold on every route, so they are
+         fetched in parallel with the CSS rather than after it. Body prose uses a
+         system stack, which is why there is no third preload here. -->
+    <link
+      rel="preload"
+      href="/fonts/oxanium-latin.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link
+      rel="preload"
+      href="/fonts/quantico-700.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
   </head>
   <body>
-    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <noscript>
+      Distant Front needs JavaScript and a WebGPU- or WebGL2-capable browser.
+    </noscript>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

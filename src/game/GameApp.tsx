@@ -1,14 +1,22 @@
+// The playable scene — everything below this module pulls in Three.js.
+//
+// Reached only through a dynamic import from the /play route (src/site/routes.tsx),
+// which is what keeps ~1.5 MB of renderer off the landing page. Nothing in
+// src/site/ or src/ui/ may import this file or anything it imports; the boundary
+// is invisible until something crosses it and then it costs megabytes.
+
 import { useCallback, useEffect, useState } from "react";
-import { GameCanvas } from "./components/GameCanvas";
-import { Hud } from "./components/Hud";
-import { GrassDebug } from "./components/GrassDebug";
-import { WeatherDebug } from "./components/WeatherDebug";
-import { DF2Scene, type SceneHandles } from "./df2/DF2Scene";
-import type { GrassUniforms } from "./df2/GrassMaterial";
-import type { FlyState, Stance } from "./df2/FlyControls";
-import type { LoadedTerrain } from "./df2/loadTerrain";
-import type { PerfSample } from "./df2/PerfMonitor";
-import { BENCH, publish } from "./df2/bench";
+import "../styles.css";
+import { GameCanvas } from "../components/GameCanvas";
+import { GameHud } from "../hud/GameHud";
+import { DevConsole } from "../devtools/DevConsole";
+import { useDevConsole } from "../devtools/useDevConsole";
+import { DF2Scene, type SceneHandles } from "../df2/DF2Scene";
+import type { GrassUniforms } from "../df2/GrassMaterial";
+import type { FlyState, Stance } from "../df2/FlyControls";
+import type { LoadedTerrain } from "../df2/loadTerrain";
+import type { PerfSample } from "../df2/PerfMonitor";
+import { BENCH, publish } from "../df2/bench";
 
 const urlParams = new URLSearchParams(window.location.search);
 const requestedScene = urlParams.get("scene");
@@ -30,8 +38,28 @@ const motorDemo = requestedScene === "motor" || urlParams.get("motor") === "1";
  * motor — there is nothing to network without it.
  */
 const netDemo = motorDemo && urlParams.get("net") === "1";
+/**
+ * Render the HUD panels that have no data source yet — objective and squad chat.
+ *
+ * They exist so the redesign can be compared 1:1 against
+ * `design/df2-hud-1to1-html-v3`, and they are OFF by default because a scripted
+ * objective that nothing will ever update is a lie a player would believe.
+ */
+const hudPreview = urlParams.get("hudpreview") === "1";
 
-export default function App() {
+export default function GameApp() {
+  // The game owns the viewport and must never scroll; the site must. Set as a
+  // body class rather than a global stylesheet rule because this module's CSS is
+  // injected on first visit and never removed — a global `overflow: hidden` left
+  // every site page unscrollable for the rest of the session.
+  useEffect(() => {
+    document.body.classList.add("mode-game");
+    return () => document.body.classList.remove("mode-game");
+  }, []);
+
+  // `?debug=1` starts it open; backtick toggles it either way.
+  const devConsole = useDevConsole(BENCH.debug === true);
+
   const [wireframe, setWireframe] = useState(false);
   const [grass, setGrass] = useState(BENCH.grass ?? true);
   // ?bench=1 always starts on foot: the ground-level frame is the one being tuned.
@@ -94,24 +122,40 @@ export default function App() {
 
   return (
     <>
-      <Hud
-        loading={status.loading}
-        terrain={status.terrain}
-        perf={perf}
-        fly={fly}
-        grounded={grounded}
-        setGrounded={setGrounded}
-        stance={stance}
-        setStance={chooseStance}
-        grass={grass}
-        setGrass={setGrass}
-        wireframe={wireframe}
-        setWireframe={setWireframe}
-        fpsMode={scopeDemo}
-      />
+      {status.loading ? (
+        <div className="boot">
+          <div>Decoding terrain</div>
+          <div className="bar">
+            <i />
+          </div>
+        </div>
+      ) : (
+        <GameHud fly={fly} fpsMode={scopeDemo} preview={hudPreview} />
+      )}
 
-      {BENCH.debug && !status.loading && <GrassDebug uniforms={grassUniforms} />}
-      {BENCH.debug && !status.loading && <WeatherDebug scene={sceneHandles} />}
+      {/* The console is always mountable now, not gated on ?debug=1 — that
+          parameter only decides whether it starts OPEN. Gating the mount meant a
+          session that had not thought to add the parameter could not reach the
+          dials at all without a reload. */}
+      {!status.loading && (
+        <DevConsole
+          state={devConsole}
+          terrain={status.terrain}
+          perf={perf}
+          fly={fly}
+          grounded={grounded}
+          setGrounded={setGrounded}
+          stance={stance}
+          setStance={chooseStance}
+          grass={grass}
+          setGrass={setGrass}
+          wireframe={wireframe}
+          setWireframe={setWireframe}
+          grassUniforms={grassUniforms}
+          scene={sceneHandles}
+          fpsMode={scopeDemo}
+        />
+      )}
 
       <GameCanvas>
         <DF2Scene

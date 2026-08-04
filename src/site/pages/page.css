@@ -1,0 +1,190 @@
+/* Shared layout for the interior pages: page head, body rhythm, FAQ accordion,
+ * supporter tier cards.
+ *
+ * Mobile-first, and every interactive row clears the 44px touch target from
+ * tokens.css. The FAQ uses native <details>, so the only styling needed is the
+ * marker (removed and replaced with a rotating chevron) and the open state.
+ */
+
+.page-head {
+  padding-block: var(--s7) var(--s5);
+  border-bottom: var(--hair) solid var(--line);
+}
+
+.page-body {
+  padding-block: var(--s6) var(--s8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s7);
+}
+
+/* --- FAQ ----------------------------------------------------------------- */
+.faq-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+.faq-group-title {
+  margin: 0 0 var(--s2);
+}
+
+.faq-item {
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.faq-item > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s4);
+  min-height: var(--tap);
+  padding: var(--s4) var(--s5);
+  cursor: pointer;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.02rem;
+  color: var(--ink);
+  list-style: none;
+}
+/* Both spellings needed: WebKit uses the pseudo-element, others the property. */
+.faq-item > summary::-webkit-details-marker {
+  display: none;
+}
+.faq-item > summary::marker {
+  content: "";
+}
+
+/* Chevron drawn from borders so it inherits colour and needs no glyph. */
+.faq-item > summary > i {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--accent);
+  border-bottom: 2px solid var(--accent);
+  transform: rotate(45deg);
+  transform-origin: center;
+  transition: transform var(--base) var(--ease);
+}
+.faq-item[open] > summary > i {
+  transform: rotate(225deg);
+}
+
+.faq-answer {
+  padding: 0 var(--s5) var(--s5);
+  font-size: 0.98rem;
+}
+
+/* --- supporter tiers ---------------------------------------------------- */
+.tiers {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--s4);
+}
+@media (min-width: 900px) {
+  .tiers {
+    grid-template-columns: repeat(3, 1fr);
+    align-items: start;
+  }
+}
+
+.tier {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+  padding: var(--s5);
+  background: rgba(255, 255, 255, 0.018);
+}
+
+/* The recommended tier is lifted by contrast, not by scale: a transform would
+   make its hairline border render at a fractional pixel and go fuzzy. */
+.tier-featured {
+  background: rgba(184, 163, 115, 0.06);
+  --line-strong: rgba(184, 163, 115, 0.7);
+}
+
+.tier-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+
+/* Reserved whether or not this tier has a tag, so the three price figures share
+   a baseline across the row. Height is the badge's own, not a guess. */
+.tier-tag {
+  display: flex;
+  min-height: 22px;
+}
+.tier-price {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 2rem;
+  line-height: 1;
+  color: var(--ink);
+}
+.tier-price small {
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--ink-faint);
+  letter-spacing: 0.06em;
+}
+.tier-summary {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 0.92rem;
+  line-height: 1.6;
+}
+
+.tier-perks {
+  flex: 1;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  font-size: 0.92rem;
+  line-height: 1.55;
+  color: var(--ink-dim);
+}
+.tier-perks li {
+  display: grid;
+  grid-template-columns: 16px 1fr;
+  gap: var(--s2);
+}
+.tier-perks li::before {
+  content: "▸";
+  color: var(--accent);
+}
+.tier-perks li.tier-perk-off {
+  color: var(--ink-faint);
+}
+.tier-perks li.tier-perk-off::before {
+  content: "·";
+  color: var(--ink-faint);
+}
+
+.tier .btn {
+  width: 100%;
+}
+
+/* --- callout: the fair-play promise, and the checkout-disabled notice ---- */
+.callout {
+  padding: var(--s5);
+  background: rgba(255, 255, 255, 0.02);
+}
+.callout h2,
+.callout h3 {
+  margin: 0 0 var(--s3);
+}
+.callout p:last-child {
+  margin-bottom: 0;
+}
+
+/* --- not found ---------------------------------------------------------- */
+.notfound {
+  display: grid;
+  place-items: center;
+  gap: var(--s4);
+  padding-block: var(--s9);
+  text-align: center;
+}

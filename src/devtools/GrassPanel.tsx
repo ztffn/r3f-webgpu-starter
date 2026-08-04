@@ -1,4 +1,4 @@
-// Live slider panel for the grass shader, shown with ?debug=1.
+// Live grass-shader dials — the "Grass" tab of the dev console.
 //
 // Writes straight to uniform .value, so nothing re-renders and no material is
 // rebuilt — rebuilding would throw away the terrain geometry cache and stall for
@@ -7,9 +7,12 @@
 // The coarse step COUNT is live (the loop compiles at a ceiling and runs to a uniform),
 // but the ceiling itself and the bisection count are baked into the graph at construction
 // and are listed at the bottom as URL parameters needing a reload.
+//
+// Every control carries `data-dev` and its current value, so browser automation can
+// address a dial by name and assert what it set rather than screenshot and guess
+// (docs/plans/2026-08-04-web-platform-and-ui-design.md §4).
 
 import { useEffect, useRef, useState } from "react";
-import { CollapsiblePanel } from "./CollapsiblePanel";
 import type { GrassUniforms } from "../df2/GrassMaterial";
 import { GRASS_STEPS } from "../df2/config";
 import { BENCH } from "../df2/bench";
@@ -120,7 +123,7 @@ const DEBUG_MODES = [
   "Fog colour",
 ];
 
-export function GrassDebug({ uniforms }: GrassDebugProps) {
+export function GrassPanel({ uniforms }: GrassDebugProps) {
   // Mirror of uniform values, so the sliders have positions to show. Seeded once
   // from the material rather than from config, so it always reflects what is live.
   const [vals, setVals] = useState<Record<string, number>>({});
@@ -148,17 +151,50 @@ export function GrassDebug({ uniforms }: GrassDebugProps) {
     setVals((p) => ({ ...p, [key]: v }));
   };
 
-  return (
-    <CollapsiblePanel id="grassdebug" title="Grass (live)">
+  /** One mode row. Three of these differ only by label, list and uniform. */
+  const modeRow = (
+    title: string,
+    key: "toneMode" | "canopyForce" | "debugMode",
+    modes: string[]
+  ) => (
+    <>
+      <span className="eyebrow dev-group">{title}</span>
+      <div className="btns" data-dev={`modes-${key}`} data-dev-value={vals[key] ?? 0}>
+        {modes.map((m, i) => (
+          <button
+            key={m}
+            type="button"
+            data-dev={`${key}-${i}`}
+            aria-pressed={(vals[key] ?? 0) === i}
+            onClick={() => {
+              uniforms[key].value = i;
+              setVals((p) => ({ ...p, [key]: i }));
+            }}
+          >
+            {m}
+          </button>
+        ))}
+      </div>
+    </>
+  );
 
+  return (
+    <>
       {DIALS.map((d) => (
         <label key={d.key} className="dial">
           <span className="dial-row">
             <span>{d.label}</span>
-            <b>{(vals[d.key] ?? 0).toFixed(d.step < 0.01 ? 3 : 2)}</b>
+            <b data-dev={`readout-${d.key}`}>
+              {(vals[d.key] ?? 0).toFixed(d.step < 0.01 ? 3 : 2)}
+            </b>
           </span>
           <input
             type="range"
+            // Both the machine name and the current value: a driver finds the
+            // control by `data-dev` and asserts the result without reading pixels.
+            data-dev={`dial-${d.key}`}
+            data-dev-value={vals[d.key] ?? d.min}
+            aria-label={d.label}
             min={d.min}
             max={d.max}
             step={d.step}
@@ -169,59 +205,9 @@ export function GrassDebug({ uniforms }: GrassDebugProps) {
         </label>
       ))}
 
-      <span className="eyebrow" style={{ marginTop: 10 }}>
-        Tone keyed on
-      </span>
-      <div className="btns">
-        {TONE_MODES.map((m, i) => (
-          <button
-            key={m}
-            aria-pressed={(vals.toneMode ?? 0) === i}
-            onClick={() => {
-              uniforms.toneMode.value = i;
-              setVals((p) => ({ ...p, toneMode: i }));
-            }}
-          >
-            {m}
-          </button>
-        ))}
-      </div>
-
-      <span className="eyebrow" style={{ marginTop: 10 }}>
-        Canopy from
-      </span>
-      <div className="btns">
-        {CANOPY_MODES.map((m, i) => (
-          <button
-            key={m}
-            aria-pressed={(vals.canopyForce ?? 0) === i}
-            onClick={() => {
-              uniforms.canopyForce.value = i;
-              setVals((p) => ({ ...p, canopyForce: i }));
-            }}
-          >
-            {m}
-          </button>
-        ))}
-      </div>
-
-      <span className="eyebrow" style={{ marginTop: 10 }}>
-        View
-      </span>
-      <div className="btns">
-        {DEBUG_MODES.map((m, i) => (
-          <button
-            key={m}
-            aria-pressed={(vals.debugMode ?? 0) === i}
-            onClick={() => {
-              uniforms.debugMode.value = i;
-              setVals((p) => ({ ...p, debugMode: i }));
-            }}
-          >
-            {m}
-          </button>
-        ))}
-      </div>
+      {modeRow("Tone keyed on", "toneMode", TONE_MODES)}
+      {modeRow("Canopy from", "canopyForce", CANOPY_MODES)}
+      {modeRow("View", "debugMode", DEBUG_MODES)}
 
       <p className="note">
         <code>March steps</code> is live, but its CEILING is compiled — the slider stops at
@@ -236,6 +222,6 @@ export function GrassDebug({ uniforms }: GrassDebugProps) {
         <code>?dpr=2</code> to push the frame off the cap when you need to see the
         difference a dial actually makes.
       </p>
-    </CollapsiblePanel>
+    </>
   );
 }

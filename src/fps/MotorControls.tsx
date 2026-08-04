@@ -21,6 +21,7 @@ import {
 } from "./presentation/CharacterView.ts";
 import { loadSoldier } from "./presentation/soldierAssets.ts";
 import type { FlyState, Stance } from "../df2/FlyControls";
+import { headingFromYaw, hudSignals } from "../hud/hudSignals";
 import type { LookSensitivityController } from "./core/LookSensitivityController";
 import type { PlayerMotorSnapshotTarget, PlayerWeaponIntent } from "./core/PlayerMotor.ts";
 import type { GameClient } from "../net/GameClient.ts";
@@ -366,6 +367,10 @@ export function MotorControls({
       const forwardY = Math.sin(rig.pitch);
       const forwardZ = -Math.cos(rig.yaw) * cosPitch;
 
+      // Every frame, not at the HUD report rate — see src/hud/hudSignals.ts.
+      hudSignals.headingRadians = headingFromYaw(rig.yaw);
+      hudSignals.pitchRadians = rig.pitch;
+
       const body = bodyRef.current;
       if (body !== null) {
         body.visible = rig.thirdPerson;
@@ -469,7 +474,13 @@ export function MotorControls({
               speed: 0,
               grounded: false,
             };
-      if (client !== null) report.net = { phase: client.phase, playerId: client.playerId };
+      if (client !== null) {
+        report.net = {
+          phase: client.phase,
+          playerId: client.playerId,
+          health: client.health,
+        };
+      }
       onState?.(report);
     }
   });

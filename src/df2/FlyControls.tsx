@@ -12,6 +12,7 @@ import * as THREE from "three/webgpu";
 import type { Heightfield } from "./Heightfield";
 import { BENCH } from "./bench";
 import type { LookSensitivityController } from "../fps/core/LookSensitivityController";
+import { headingFromYaw, hudSignals } from "../hud/hudSignals";
 
 /** Eye height above ground, metres. Matches docs/04 §4.2. */
 export const STANCE_EYE = { stand: 1.7, crouch: 0.95, prone: 0.35 } as const;
@@ -24,7 +25,12 @@ export interface FlyState {
   speed: number;
   grounded: boolean;
   /** Present only when the motor is networked; FlyControls never sets it. */
-  net?: { phase: "connecting" | "playing" | "dropped"; playerId: number };
+  net?: {
+    phase: "connecting" | "playing" | "dropped";
+    playerId: number;
+    /** Server-owned hit points. Never predicted — see GameClient.health. */
+    health: number;
+  };
 }
 
 export interface FlyControlsProps {
@@ -261,6 +267,11 @@ export function FlyControls({
 
     camera.position.copy(rig.pos);
     camera.lookAt(rig.pos.x + v.dir.x, rig.pos.y + v.dir.y, rig.pos.z + v.dir.z);
+
+    // EVERY frame, not on the 0.15 s report below: the HUD compass steps visibly
+    // at the report rate, so heading rides a mutable signal instead of state.
+    hudSignals.headingRadians = headingFromYaw(rig.yaw);
+    hudSignals.pitchRadians = rig.pitch;
 
     rig.report += dt;
     if (rig.report > 0.15) {

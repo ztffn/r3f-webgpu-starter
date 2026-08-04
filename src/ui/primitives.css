@@ -1,0 +1,341 @@
+/* Distant Front — shared UI primitives: notched panels, buttons, fields, badges.
+ *
+ * Everything here is skin-agnostic: it reads the palette variables that
+ * .skin-site and .skin-hud set in tokens.css, so one button definition serves a
+ * supporter page and a HUD control. The notched octagon is the shape that ties
+ * the site back to the game and is therefore defined once, here, rather than
+ * copied out of the HUD mockup into each surface that wants it.
+ */
+
+/* --- notched panel ---------------------------------------------------------
+   The cut-corner octagon from design/df2-hud-1to1-html-v3. Three layers:
+   the clip-path cuts the shape, ::before paints a 1px gradient border inside
+   that same shape via mask-composite (a plain `border` cannot follow a
+   clip-path), and ::after inlays the faint interior rule.
+
+   `isolation: isolate` is load-bearing. Both pseudo-elements sit at z-index -1
+   so they paint behind the content; without a new stacking context they fall
+   behind the panel's own background instead and vanish. */
+.notched {
+  position: relative;
+  isolation: isolate;
+  clip-path: polygon(
+    var(--notch) 0,
+    calc(100% - var(--notch)) 0,
+    100% var(--notch),
+    100% calc(100% - var(--notch)),
+    calc(100% - var(--notch)) 100%,
+    var(--notch) 100%,
+    0 calc(100% - var(--notch)),
+    0 var(--notch)
+  );
+}
+
+.notched-sm {
+  --notch: var(--notch-sm);
+}
+
+.notched::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  clip-path: inherit;
+  padding: var(--hair);
+  background: linear-gradient(
+    135deg,
+    var(--line-strong) 0,
+    var(--line) 30%,
+    rgba(0, 0, 0, 0.08) 60%,
+    var(--line-strong) 100%
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* Corner rivets. Four radial gradients rather than four elements, because the
+   panel's children are content and these are chrome. */
+.notched-riveted {
+  background-image:
+    radial-gradient(circle at 10px 10px, rgba(202, 218, 150, 0.24) 0 1px, transparent 2px),
+    radial-gradient(
+      circle at calc(100% - 10px) 10px,
+      rgba(202, 218, 150, 0.2) 0 1px,
+      transparent 2px
+    ),
+    radial-gradient(
+      circle at 10px calc(100% - 10px),
+      rgba(202, 218, 150, 0.16) 0 1px,
+      transparent 2px
+    ),
+    radial-gradient(
+      circle at calc(100% - 10px) calc(100% - 10px),
+      rgba(202, 218, 150, 0.2) 0 1px,
+      transparent 2px
+    );
+}
+
+/* --- eyebrow: the small tracked-out label above a heading ----------------- */
+.eyebrow {
+  font-family: var(--font-label);
+  font-weight: 700;
+  font-size: 0.72rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--accent, var(--olive-bright));
+}
+
+/* --- headings ------------------------------------------------------------- */
+.display {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 800;
+  line-height: 0.94;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  text-wrap: balance;
+  font-variant-numeric: tabular-nums;
+  text-rendering: geometricPrecision;
+}
+
+.display-xl {
+  font-size: clamp(2.75rem, 8.5vw, 7.5rem);
+  line-height: 0.88;
+}
+.display-lg {
+  font-size: clamp(2rem, 5.4vw, 4rem);
+}
+.display-md {
+  font-size: clamp(1.4rem, 3vw, 2rem);
+}
+.display-sm {
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.prose {
+  color: var(--ink-dim);
+  font-size: 1.02rem;
+  line-height: 1.75;
+  max-width: var(--measure);
+}
+.prose strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+.prose p {
+  margin: 0 0 1em;
+}
+.prose p:last-child {
+  margin-bottom: 0;
+}
+.prose a:not(.btn) {
+  color: var(--accent, var(--olive-bright));
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+
+/* --- buttons -------------------------------------------------------------
+   One definition, three variants. min-height is the touch target from tokens,
+   applied unconditionally rather than under a media query: an iPad in landscape
+   is a wide viewport with no cursor, so sizing on width would miss it. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
+  min-height: var(--tap);
+  padding: 0 var(--s5);
+  border: var(--hair) solid var(--line-strong);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--font-label);
+  font-weight: 700;
+  font-size: 0.76rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    color var(--fast) var(--ease),
+    border-color var(--fast) var(--ease),
+    background var(--fast) var(--ease),
+    transform var(--fast) var(--ease);
+}
+
+.btn-primary {
+  background: var(--accent, var(--olive-bright));
+  border-color: var(--accent, var(--olive-bright));
+  color: var(--accent-ink, #11120f);
+}
+
+.btn-ghost {
+  border-color: var(--line);
+  color: var(--ink-muted);
+}
+
+.btn-sm {
+  min-height: 34px;
+  padding: 0 var(--s3);
+  font-size: 0.68rem;
+}
+
+/* Hover lift only where there is a cursor to hover with. On touch, :hover
+   sticks after a tap and leaves the button looking permanently pressed. */
+@media (hover: hover) and (pointer: fine) {
+  .btn:hover:not(:disabled) {
+    color: var(--ink);
+    border-color: var(--accent, var(--olive-bright));
+  }
+  .btn-primary:hover:not(:disabled) {
+    color: var(--accent-ink, #11120f);
+    transform: translateY(-1px);
+  }
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.btn:disabled,
+.btn[aria-disabled="true"] {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn[aria-pressed="true"] {
+  background: var(--accent, var(--olive-bright));
+  border-color: var(--accent, var(--olive-bright));
+  color: var(--accent-ink, #11120f);
+}
+
+/* --- form fields --------------------------------------------------------- */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+
+.field > label {
+  font-family: var(--font-label);
+  font-weight: 700;
+  font-size: 0.7rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+.field input,
+.field select,
+.field textarea {
+  min-height: var(--tap);
+  padding: 0 var(--s3);
+  border: var(--hair) solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--bg-sunken, rgba(0, 0, 0, 0.3));
+  color: var(--ink);
+  font-family: var(--font-body);
+  /* 16px minimum: iOS Safari zooms the whole page when focusing any input with
+     a smaller computed size, which throws the layout off centre mid-form. */
+  font-size: 1rem;
+}
+
+.field textarea {
+  min-height: 96px;
+  padding: var(--s3);
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.field input::placeholder {
+  color: var(--ink-faint);
+}
+
+.field-hint {
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--ink-faint);
+}
+
+.field-error {
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--bad);
+}
+
+/* --- badges: supporter markers, medals, input-class tags ------------------ */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+  padding: 3px var(--s2);
+  border: var(--hair) solid var(--line);
+  border-radius: var(--radius);
+  font-family: var(--font-label);
+  font-weight: 700;
+  font-size: 0.62rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+
+.badge-accent {
+  border-color: var(--accent, var(--olive-bright));
+  color: var(--accent, var(--olive-bright));
+}
+.badge-good {
+  border-color: var(--good, var(--olive));
+  color: var(--good, var(--olive));
+}
+.badge-bad {
+  border-color: var(--bad);
+  color: var(--bad);
+}
+
+/* --- definition rows: the readout pattern, site and HUD alike ------------- */
+.rows {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--s1) var(--s4);
+  margin: 0;
+}
+.rows dt {
+  font-family: var(--font-label);
+  font-size: 0.66rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.rows dd {
+  margin: 0;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- layout helpers ------------------------------------------------------ */
+.shell {
+  width: min(100% - (var(--s4) * 2), var(--shell));
+  margin-inline: auto;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s3);
+}

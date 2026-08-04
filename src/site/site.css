@@ -1,0 +1,256 @@
+/* Public site layout: nav, footer, hero, section rhythm, boot screen.
+ *
+ * Mobile-first — every rule here is the phone layout, and min-width queries add
+ * the wider ones. Visual direction follows design/distant-front-landing-modern-army:
+ * a 5px grid wash over near-black, khaki hairlines, Oxanium display type. Page-
+ * specific styles live beside their page component; only shared chrome is here.
+ */
+
+.site {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  background:
+    radial-gradient(circle at 50% 12%, rgba(122, 118, 83, 0.16), transparent 34rem),
+    linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px), var(--bg);
+  background-size: auto, 5px 5px, 5px 5px, auto;
+}
+
+.site > main {
+  flex: 1;
+}
+
+.skip-link {
+  position: absolute;
+  left: var(--s3);
+  top: -100px;
+  z-index: calc(var(--z-site-nav) + 1);
+  padding: var(--s2) var(--s4);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-family: var(--font-label);
+  font-weight: 700;
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  transition: top var(--fast) var(--ease);
+}
+.skip-link:focus {
+  top: var(--s3);
+}
+
+/* --- navigation ---------------------------------------------------------- */
+.site-nav {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-site-nav);
+  background: linear-gradient(to bottom, rgba(8, 9, 8, 0.96), rgba(8, 9, 8, 0.86));
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-bottom: var(--hair) solid var(--line);
+  /* Notched devices put the nav under the status bar in landscape. */
+  padding-inline: env(safe-area-inset-left) env(safe-area-inset-right);
+}
+
+.site-nav-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s4);
+  min-height: 62px;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  color: var(--accent);
+  font-family: var(--font-label);
+  font-weight: 700;
+  font-size: 0.86rem;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.brand span {
+  color: var(--ink);
+}
+
+/* Inline links are desktop-only; the phone gets the disclosure menu below. */
+.site-nav-links {
+  display: none;
+  gap: var(--s5);
+  font-family: var(--font-label);
+  font-weight: 700;
+  font-size: 0.74rem;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+.site-nav-links a {
+  color: var(--ink-muted);
+  padding-block: var(--s2);
+  border-bottom: 2px solid transparent;
+  transition: color var(--fast) var(--ease);
+}
+.site-nav-links a[aria-current="page"] {
+  color: var(--ink);
+  border-bottom-color: var(--accent);
+}
+
+.site-nav-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.site-nav-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--tap);
+  height: var(--tap);
+  border: var(--hair) solid var(--line);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--ink);
+  font-size: 1.05rem;
+  cursor: pointer;
+}
+
+.site-menu {
+  display: flex;
+  flex-direction: column;
+  border-top: var(--hair) solid var(--line);
+  font-family: var(--font-label);
+  font-weight: 700;
+  font-size: 0.8rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.site-menu a {
+  padding: var(--s4);
+  min-height: var(--tap);
+  color: var(--ink-muted);
+  border-bottom: var(--hair) solid var(--line);
+}
+.site-menu a[aria-current="page"] {
+  color: var(--accent);
+}
+
+/* Matches the hero's own 768px breakpoint (landing.css). Kept in step
+   deliberately: a tablet showing the two-column hero but still a hamburger reads
+   as two different layouts arguing. */
+@media (min-width: 768px) {
+  .site-nav-inner {
+    min-height: 74px;
+  }
+  .site-nav-links {
+    display: flex;
+  }
+  .site-nav-toggle {
+    display: none;
+  }
+}
+
+/* --- section rhythm ------------------------------------------------------ */
+.site-section {
+  padding-block: var(--s8);
+  border-top: var(--hair) solid var(--line);
+}
+.site-section:first-of-type {
+  border-top: 0;
+}
+
+/* Heading column beside a content column on wide screens, stacked below. */
+.site-split {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--s6);
+}
+@media (min-width: 900px) {
+  .site-section {
+    padding-block: var(--s9);
+  }
+  .site-split {
+    grid-template-columns: 0.8fr 1.2fr;
+    gap: var(--s8);
+  }
+}
+
+/* --- footer -------------------------------------------------------------- */
+.site-footer {
+  padding-block: var(--s6);
+  padding-bottom: max(var(--s6), env(safe-area-inset-bottom));
+  border-top: var(--hair) solid var(--line);
+  color: var(--ink-faint);
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+.site-footer-legal {
+  margin: 0 0 var(--s3);
+  max-width: 62ch;
+}
+.site-footer-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s4);
+  justify-content: space-between;
+}
+.site-footer-meta a:hover {
+  color: var(--ink-muted);
+}
+
+/* --- boot screen (Suspense fallback for the game chunk) ------------------- */
+.booting {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-boot);
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: var(--s3);
+  background: #0d0e0d;
+  color: #aaa487;
+}
+.booting-brand {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1.4rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #b8a373;
+}
+.booting-label {
+  font-family: var(--font-label);
+  font-size: 0.7rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+.booting-bar {
+  width: 190px;
+  height: 1px;
+  background: rgba(232, 223, 195, 0.22);
+  overflow: hidden;
+}
+.booting-bar i {
+  display: block;
+  width: 40%;
+  height: 100%;
+  background: #b8a373;
+  animation: booting-sweep 1.2s ease-in-out infinite;
+}
+@keyframes booting-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(350%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .booting-bar i {
+    width: 100%;
+    animation: none;
+  }
+}

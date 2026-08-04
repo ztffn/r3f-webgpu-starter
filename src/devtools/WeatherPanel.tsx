@@ -1,6 +1,6 @@
-// Live panel for weather, atmosphere, rain and the near-field blades, with ?debug=1.
+// Weather, atmosphere, rain and near-field blade dials — the "Weather" tab.
 //
-// Sibling of GrassDebug and the same contract: offline, every control writes straight
+// Sibling of GrassPanel and the same contract: offline, every control writes straight
 // to a uniform, so nothing re-renders and no material is rebuilt. That is not a nicety
 // here — rebuilding discards the terrain geometry cache and stalls for about a second,
 // which makes exactly the A/B comparison these dials exist for impossible.
@@ -10,7 +10,6 @@
 // lives in src/df2/visualDials.ts, shared with that server.
 
 import { memo, useEffect, useRef, useState } from "react";
-import { CollapsiblePanel } from "./CollapsiblePanel";
 import type { SceneHandles } from "../df2/DF2Scene";
 import { WEATHER_PRESET_IDS } from "../df2/weather";
 import { VISUAL_DIALS, type VisualDialGroup } from "../df2/visualDials";
@@ -93,19 +92,25 @@ function Group({
 
   return (
     <>
-      <span className="eyebrow" style={{ marginTop: 10 }}>
-        {title}
-      </span>
+      <span className="eyebrow dev-group">{title}</span>
       {ids.map((id, i) => {
         const d = VISUAL_DIALS[id]!;
         return (
           <label key={d.label} className="dial">
             <span className="dial-row">
               <span>{d.label}</span>
-              <b>{vals[i]?.toFixed(d.step < 0.01 ? 3 : 2)}</b>
+              <b data-dev={`readout-${id}`}>{vals[i]?.toFixed(d.step < 0.01 ? 3 : 2)}</b>
             </span>
             <input
               type="range"
+              // Keyed on the dial's index in VISUAL_DIALS, which is also its wire
+              // identity — so a driver, this panel and the server all name it the
+              // same way. `data-dev-locked` says WHY a dial is inert, which the
+              // `disabled` attribute on its own cannot.
+              data-dev={`dial-${id}`}
+              data-dev-value={vals[i] ?? d.min}
+              data-dev-locked={room !== null && !room.dialsAllowed ? "not-admin" : undefined}
+              aria-label={d.label}
               min={d.min}
               max={d.max}
               step={d.step}
@@ -139,7 +144,7 @@ function Group({
  * it does not read. `scene` only changes identity on a preset switch, on a room dial
  * packet, or when the admin gate changes.
  */
-export const WeatherDebug = memo(function WeatherDebug({
+export const WeatherPanel = memo(function WeatherPanel({
   scene,
 }: WeatherDebugProps): React.ReactElement | null {
   if (!scene) return null;
@@ -149,11 +154,14 @@ export const WeatherDebug = memo(function WeatherDebug({
   const room = scene.roomDials;
 
   return (
-    <CollapsiblePanel id="weatherdebug" title="Weather (live)">
-      <div className="btns">
+    <>
+      <span className="eyebrow dev-group">Preset</span>
+      <div className="btns" data-dev="weather-presets" data-dev-value={scene.preset.id}>
         {WEATHER_PRESET_IDS.map((id) => (
           <button
             key={id}
+            type="button"
+            data-dev={`preset-${id}`}
             aria-pressed={scene.preset.id === id}
             disabled={room !== null}
             onClick={() => scene.setPreset(id)}
@@ -204,6 +212,6 @@ export const WeatherDebug = memo(function WeatherDebug({
         Baked at load and still needing a reload: <code>?bladecount=</code>, which fixes
         the lattice the field radius divides up.
       </p>
-    </CollapsiblePanel>
+    </>
   );
 });

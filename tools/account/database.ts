@@ -118,6 +118,21 @@ export interface ClanMemberRow {
   joined_at: string;
 }
 
+/**
+ * One finished session. The EVENT behind the career counters.
+ *
+ * `career` holds totals, which cannot answer "when". A profile that shows a
+ * month of activity needs the events, and inventing them from a counter is the
+ * one thing this project never does — so the room writes a row here when a
+ * player leaves, alongside the increment it already performs.
+ */
+export interface SessionRow {
+  id: Generated<number>;
+  user_id: number;
+  ended_at: string;
+  seconds: number;
+}
+
 export interface SchemaVersionRow {
   version: number;
 }
@@ -132,6 +147,7 @@ export interface AccountDatabase {
   profile_posts: ProfilePostRow;
   clans: ClanRow;
   clan_members: ClanMemberRow;
+  sessions: SessionRow;
   schema_version: SchemaVersionRow;
 }
 
@@ -372,6 +388,27 @@ const MIGRATIONS: ((db: AccountDb) => Promise<void>)[] = [
       .on("clan_members")
       .column("user_id")
       .unique()
+      .execute();
+  },
+
+  // Session events, so a profile can show a month rather than a total. The
+  // career counters stay: they are the authoritative totals and re-deriving them
+  // from this table on every read would be slower and could disagree after a
+  // pruning. This table is the history, not the source of truth.
+  async (db) => {
+    await db.schema
+      .createTable("sessions")
+      .addColumn("id", "integer", (c) => c.primaryKey().autoIncrement())
+      .addColumn("user_id", "integer", (c) =>
+        c.notNull().references("users.id").onDelete("cascade")
+      )
+      .addColumn("ended_at", "text", (c) => c.notNull())
+      .addColumn("seconds", "integer", (c) => c.notNull())
+      .execute();
+    await db.schema
+      .createIndex("sessions_user_time")
+      .on("sessions")
+      .columns(["user_id", "ended_at"])
       .execute();
   },
 ];

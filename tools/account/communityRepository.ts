@@ -502,6 +502,34 @@ export class CommunityRepository {
     }));
   }
 
+  /**
+   * Sessions per day for the last `days` days, oldest first.
+   *
+   * Returned as a dense array including zero days, because a sparkline of only
+   * the days someone played is a lie about their rhythm — the gaps ARE the
+   * shape. Bucketed by UTC date, which is what the stored ISO strings are in.
+   */
+  async sessionsByDay(userId: number, days = 30): Promise<number[]> {
+    const since = new Date(Date.now() - (days - 1) * 86_400_000);
+    since.setUTCHours(0, 0, 0, 0);
+    const rows = await this.db
+      .selectFrom("sessions")
+      .select(["ended_at"])
+      .where("user_id", "=", userId)
+      .where("ended_at", ">=", since.toISOString())
+      .execute();
+
+    const counts = new Map<string, number>();
+    for (const row of rows) {
+      const day = row.ended_at.slice(0, 10);
+      counts.set(day, (counts.get(day) ?? 0) + 1);
+    }
+    return Array.from({ length: days }, (_unused, index) => {
+      const day = new Date(since.getTime() + index * 86_400_000).toISOString().slice(0, 10);
+      return counts.get(day) ?? 0;
+    });
+  }
+
   // --- activity ------------------------------------------------------------
 
   /**

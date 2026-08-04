@@ -222,7 +222,7 @@ export function Faq() {
         </div>
       </header>
 
-      <div className="shell page-body">
+      <div className="shell page-body prose-page">
         {GROUPS.map((group) => (
           <section className="faq-group" key={group.group}>
             <h2 className="eyebrow faq-group-title">{group.group}</h2>

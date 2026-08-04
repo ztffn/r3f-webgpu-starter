@@ -17,9 +17,11 @@ import { MEDALS } from "../../account/medals";
 import { useAuth } from "../../account/AuthProvider";
 import { useAsyncAction } from "../useAsyncAction";
 import { useDocumentTitle } from "../useDocumentTitle";
+import { ribbonStyle } from "../ribbons";
 import "./page.css";
 import "./auth.css";
 import "./community.css";
+import "./dashboard.css";
 
 const fmt = (n: number) => n.toLocaleString("en-US");
 
@@ -99,7 +101,10 @@ export function PlayerProfile() {
     );
   }
 
-  const { profile, clan, wall, activity, viewer } = page;
+  const { profile, clan, wall, activity, sessionsByDay, viewer } = page;
+  // One scale for the whole plot. Per-bar normalisation would make a quiet week
+  // look identical to a busy one.
+  const peak = Math.max(...sessionsByDay, 0);
   const earned = new Map(profile.medals.map((medal) => [medal.medalId, medal.awardedAt]));
   const problem = draft === "" ? null : validatePost(draft);
 
@@ -111,101 +116,117 @@ export function PlayerProfile() {
 
   return (
     <>
-      <header className="page-head">
-        <div className="shell profile-head">
+      <header className="dash-head">
+        <div className="shell dash-head-inner">
           <div>
-            <p className="eyebrow">
+            <p className="dash-eyebrow">
               {clan !== null ? (
                 <Link to={`/clans/${clan.tag}`} className="clan-tag">
-                  [{clan.tag}]
+                  [{clan.tag}] {clan.name}
                 </Link>
               ) : (
-                "Operator"
+                "Unattached"
               )}
             </p>
-            <h1 className="display display-lg" data-dev="player-callsign">
+            <h1 className="dash-name" data-dev="player-callsign">
               {profile.callsign}
             </h1>
-            {profile.tier === "supporter" && (
-              <span className="badge badge-accent">Supporter</span>
-            )}
-          </div>
-
-          {/* Only what this reader may actually do. A signed-out visitor sees a
-              profile with no buttons rather than buttons that 401. */}
-          {!viewer.isSelf && viewer.canFriend && (
-            <div className="row profile-actions">
-              {viewer.friendState === "none" && (
-                <button
-                  type="button"
-                  className="btn btn-primary btn-sm"
-                  data-dev="friend-add"
-                  disabled={action.busy !== null}
-                  onClick={() =>
-                    act("friend", async () => {
-                      await accountClient.requestFriend(playerId);
-                    })
-                  }
-                >
-                  Add friend
-                </button>
+            <div className="dash-badges">
+              {profile.tier === "supporter" && (
+                <span className="badge badge-accent">Supporter</span>
               )}
-              {viewer.friendState === "pending_out" && (
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  data-dev="friend-withdraw"
-                  disabled={action.busy !== null}
-                  onClick={() => act("friend", () => accountClient.removeFriend(playerId))}
-                >
-                  Requested — withdraw
-                </button>
-              )}
-              {viewer.friendState === "pending_in" && (
-                <button
-                  type="button"
-                  className="btn btn-primary btn-sm"
-                  data-dev="friend-accept"
-                  disabled={action.busy !== null}
-                  onClick={() => act("friend", () => accountClient.acceptFriend(playerId))}
-                >
-                  Accept friend request
-                </button>
-              )}
-              {viewer.friendState === "friends" && (
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  data-dev="friend-remove"
-                  disabled={action.busy !== null}
-                  onClick={() => act("friend", () => accountClient.removeFriend(playerId))}
-                >
-                  Friends — remove
-                </button>
-              )}
-              {viewer.friendState === "blocked" ? (
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  data-dev="unblock"
-                  disabled={action.busy !== null}
-                  onClick={() => act("block", () => accountClient.unblock(playerId))}
-                >
-                  Unblock
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  data-dev="block"
-                  disabled={action.busy !== null}
-                  onClick={() => act("block", () => accountClient.block(playerId))}
-                >
-                  Block
-                </button>
+              {/* Only what this reader may actually do. A signed-out visitor sees
+                  a profile with no buttons rather than buttons that 401. */}
+              {!viewer.isSelf && viewer.canFriend && (
+                <>
+                  {viewer.friendState === "none" && (
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      data-dev="friend-add"
+                      disabled={action.busy !== null}
+                      onClick={() =>
+                        act("friend", async () => {
+                          await accountClient.requestFriend(playerId);
+                        })
+                      }
+                    >
+                      Add friend
+                    </button>
+                  )}
+                  {viewer.friendState === "pending_out" && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      data-dev="friend-withdraw"
+                      disabled={action.busy !== null}
+                      onClick={() => act("friend", () => accountClient.removeFriend(playerId))}
+                    >
+                      Requested
+                    </button>
+                  )}
+                  {viewer.friendState === "pending_in" && (
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      data-dev="friend-accept"
+                      disabled={action.busy !== null}
+                      onClick={() => act("friend", () => accountClient.acceptFriend(playerId))}
+                    >
+                      Accept request
+                    </button>
+                  )}
+                  {viewer.friendState === "friends" && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      data-dev="friend-remove"
+                      disabled={action.busy !== null}
+                      onClick={() => act("friend", () => accountClient.removeFriend(playerId))}
+                    >
+                      Friends
+                    </button>
+                  )}
+                  {viewer.friendState === "blocked" ? (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      data-dev="unblock"
+                      disabled={action.busy !== null}
+                      onClick={() => act("block", () => accountClient.unblock(playerId))}
+                    >
+                      Unblock
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      data-dev="block"
+                      disabled={action.busy !== null}
+                      onClick={() => act("block", () => accountClient.block(playerId))}
+                    >
+                      Block
+                    </button>
+                  )}
+                </>
               )}
             </div>
-          )}
+          </div>
+
+          <dl className="dash-service" data-dev="player-service">
+            <dt>Matches</dt>
+            <dd>{fmt(profile.career.matches)}</dd>
+            <dt>In the field</dt>
+            <dd>
+              {profile.career.timePlayedSeconds > 0
+                ? duration(profile.career.timePlayedSeconds)
+                : "—"}
+            </dd>
+            <dt>Ribbons</dt>
+            <dd>{profile.medals.length}</dd>
+            <dt>Clan</dt>
+            <dd>{clan?.tag ?? "—"}</dd>
+          </dl>
         </div>
       </header>
 
@@ -217,24 +238,24 @@ export function PlayerProfile() {
         </div>
       )}
 
-      <div className="shell page-body profile-grid">
-        <div className="stack">
-          <section className="auth-card notched notched-sm">
-            <h2 className="display display-sm">Record</h2>
-            <dl className="rows" data-dev="player-career">
+      <div className="shell dash-body">
+        <div className="dash-col">
+          <section className="panel">
+            <h2>Data on previous engagements</h2>
+            <dl className="dope" data-dev="player-career">
+              <dt>Longest shot</dt>
+              <dd className="dope-hero">
+                {profile.career.longestShotMetres > 0
+                  ? `${fmt(Math.round(profile.career.longestShotMetres))} m`
+                  : "—"}
+              </dd>
               <dt>Matches</dt>
               <dd>{fmt(profile.career.matches)}</dd>
               <dt>Kills</dt>
               <dd>{fmt(profile.career.kills)}</dd>
               <dt>Deaths</dt>
               <dd>{fmt(profile.career.deaths)}</dd>
-              <dt>Longest shot</dt>
-              <dd>
-                {profile.career.longestShotMetres > 0
-                  ? `${fmt(Math.round(profile.career.longestShotMetres))} m`
-                  : "—"}
-              </dd>
-              <dt>Time played</dt>
+              <dt>Time in the field</dt>
               <dd>
                 {profile.career.timePlayedSeconds > 0
                   ? duration(profile.career.timePlayedSeconds)
@@ -243,20 +264,43 @@ export function PlayerProfile() {
             </dl>
           </section>
 
-          <section className="auth-card notched notched-sm">
-            <h2 className="display display-sm">Medals</h2>
-            {/* Someone ELSE's shelf shows what they hold, not what they have yet
-                to earn — a stranger's locked list is a to-do list for a person
-                who did not ask for one. */}
+          <section className="panel">
+            <h2>Last 30 days</h2>
+            {/* Real events, not a total: `sessions` records each finished match,
+                and a day with none still draws a floor tick because the gaps are
+                the shape of somebody's week. */}
+            <div className="plot" data-dev="player-plot">
+              {sessionsByDay.map((count, index) => (
+                <span
+                  key={index}
+                  className="plot-bar"
+                  data-value={count}
+                  style={{ height: `${peak === 0 ? 0 : Math.round((count / peak) * 100)}%` }}
+                  title={`${count} ${count === 1 ? "match" : "matches"}`}
+                />
+              ))}
+            </div>
+            <div className="plot-axis">
+              <span>30 days ago</span>
+              <span>Today</span>
+            </div>
+          </section>
+
+          <section className="panel">
+            <h2>Ribbons</h2>
             {profile.medals.length === 0 ? (
-              <p className="auth-note">None yet.</p>
+              <p className="rack-empty">None yet.</p>
             ) : (
-              <ul className="medal-list" data-dev="player-medals">
-                {MEDALS.filter((medal) => earned.has(medal.id)).map((medal) => (
-                  <li key={medal.id}>
-                    <strong>{medal.name}</strong>
-                    <span className="medal-note">{medal.description}</span>
-                    <em>{earned.get(medal.id)?.slice(0, 10)}</em>
+              <ul className="rack" data-dev="player-medals">
+                {MEDALS.filter((medal) => earned.has(medal.id)).map((medal, index) => (
+                  <li
+                    key={medal.id}
+                    className="ribbon"
+                    style={{ ...ribbonStyle(medal.id), animationDelay: `${index * 40}ms` }}
+                    title={`${medal.name} — ${medal.description}`}
+                    data-dev={`ribbon-${medal.id}`}
+                  >
+                    <span className="sr-only">{medal.name}</span>
                   </li>
                 ))}
               </ul>
@@ -264,8 +308,8 @@ export function PlayerProfile() {
           </section>
 
           {activity.length > 0 && (
-            <section className="auth-card notched notched-sm">
-              <h2 className="display display-sm">Activity</h2>
+            <section className="panel">
+              <h2>Activity</h2>
               <ul className="activity" data-dev="player-activity">
                 {activity.map((entry) => (
                   <li key={`${entry.kind}-${entry.at}-${entry.text}`}>
@@ -278,8 +322,8 @@ export function PlayerProfile() {
           )}
         </div>
 
-        <section className="auth-card notched notched-sm">
-          <h2 className="display display-sm">Wall</h2>
+        <section className="panel">
+          <h2>Wall</h2>
 
           {viewer.canPost && viewer.friendState !== "blocked" ? (
             <form
@@ -340,8 +384,6 @@ export function PlayerProfile() {
                   <div className="wall-meta">
                     <Link to={`/players/${post.authorId}`}>{post.authorCallsign}</Link>
                     <em>{ago(post.createdAt)}</em>
-                    {/* The wall's owner may remove anything on it, and an author
-                        may remove their own note anywhere. */}
                     {(viewer.isSelf || viewer.id === post.authorId) && (
                       <button
                         type="button"

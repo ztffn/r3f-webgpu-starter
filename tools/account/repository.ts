@@ -513,6 +513,13 @@ export class AccountRepository {
    */
   async recordSession(userId: number, secondsPlayed: number): Promise<void> {
     const seconds = Math.max(0, Math.round(secondsPlayed));
+    // The event, so a profile can show a month rather than a running total.
+    // Written beside the increment rather than instead of it: the counters stay
+    // authoritative, and this table is the history.
+    await this.db
+      .insertInto("sessions")
+      .values({ user_id: userId, ended_at: nowIso(), seconds })
+      .execute();
     await this.db
       .updateTable("career")
       .set((eb) => ({

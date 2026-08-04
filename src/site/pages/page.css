@@ -18,6 +18,13 @@
   gap: var(--s7);
 }
 
+/* A page of prose reads at a MEASURE, not at the shell's full width. The FAQ was
+   the one page set to 1180px and is the one page that wanted 72 characters —
+   exactly inverted from the dashboards, which were capped at a form's width. */
+.prose-page {
+  width: min(100%, 78ch);
+}
+
 /* --- FAQ ----------------------------------------------------------------- */
 .faq-group {
   display: flex;

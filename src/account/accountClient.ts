@@ -58,6 +58,8 @@ export interface PlayerPage {
   clan: ClanSummary | null;
   wall: ProfilePost[];
   activity: ActivityEntry[];
+  /** Sessions per day, oldest first, zero days included. 30 entries. */
+  sessionsByDay: number[];
   viewer: {
     id: number | null;
     friendState: FriendState;

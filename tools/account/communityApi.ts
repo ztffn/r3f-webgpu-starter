@@ -80,10 +80,11 @@ export function createCommunityRouter({
     if (profile === null) return void res.status(404).json({ error: "not_found" });
 
     const viewer = viewerOf(req);
-    const [clan, wall, activity, friendState] = await Promise.all([
+    const [clan, wall, activity, sessionsByDay, friendState] = await Promise.all([
       community.clanOf(id),
       community.wall(id),
       community.activity(id),
+      community.sessionsByDay(id),
       viewer === null
         ? Promise.resolve("none" as const)
         : community.friendState(viewer.id, id),
@@ -93,6 +94,7 @@ export function createCommunityRouter({
       clan,
       wall,
       activity,
+      sessionsByDay,
       viewer: {
         id: viewer?.id ?? null,
         friendState,

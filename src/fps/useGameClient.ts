@@ -15,6 +15,7 @@ import {
   type ColyseusJoinOptions,
 } from "../net/ColyseusTransport.ts";
 import { getToken } from "../account/accountClient.ts";
+import type { RoomInfo } from "../net/ColyseusProtocol.ts";
 import { createMotorWorld } from "../motor/MotorWorld.ts";
 import { useRapier } from "./useRapier.ts";
 
@@ -46,22 +47,39 @@ function readJoinOptions(): ColyseusJoinOptions {
   };
 }
 
+export interface NetworkedGame {
+  client: GameClient | null;
+  /**
+   * What the room told us about itself — currently the private join code.
+   *
+   * Returned alongside the client rather than hung off it, because GameClient is
+   * transport-agnostic and knows nothing about Colyseus rooms. The concrete
+   * transport carries it and this hook is the one place that has both.
+   */
+  roomInfo: RoomInfo | null;
+}
+
 export function useGameClient(
   enabled: boolean,
   heightfield: Heightfield | null
-): GameClient | null {
+): NetworkedGame {
   const rapier = useRapier(enabled);
   const [client, setClient] = useState<GameClient | null>(null);
+  const [roomInfo, setRoomInfo] = useState<RoomInfo | null>(null);
   useEffect(() => {
     if (!enabled || rapier === null || heightfield === null) return;
     const transport = new ColyseusClientTransport(readServerUrl(), readJoinOptions());
+    // Subscribed before the join can resolve; the transport replays a message that
+    // arrived first, so the ordering cannot lose it either way.
+    transport.onRoomInfo(setRoomInfo);
     const created = new GameClient(rapier, createMotorWorld(rapier), heightfield, transport);
     setClient(created);
     return () => {
       setClient(null);
+      setRoomInfo(null);
       created.dispose();
     };
   }, [enabled, rapier, heightfield]);
 
-  return client;
+  return { client, roomInfo };
 }

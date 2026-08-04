@@ -6,7 +6,13 @@
 // ColyseusProtocol.ts, shared with the server room so the two cannot drift.
 
 import { Client, type Room } from "@colyseus/sdk";
-import { COMMANDS_UP, GAME_ROOM, PACKET_DOWN } from "./ColyseusProtocol.ts";
+import {
+  COMMANDS_UP,
+  GAME_ROOM,
+  PACKET_DOWN,
+  ROOM_INFO,
+  type RoomInfo,
+} from "./ColyseusProtocol.ts";
 import type { ClientTransport, TransportMessageHandler } from "./Transport.ts";
 
 export interface ColyseusJoinOptions {
@@ -34,6 +40,16 @@ export class ColyseusClientTransport implements ClientTransport {
   private closed = false;
   private messageHandler: TransportMessageHandler | null = null;
   private closeHandler: (() => void) | null = null;
+  /**
+   * The room's own facts, once it has told us.
+   *
+   * Held here rather than pushed through `ClientTransport`: that interface is
+   * shared with the loopback and ws implementations used by the Node tests, and
+   * neither has a concept of a Colyseus room. A caller that wants this reaches for
+   * the concrete class, which `useGameClient` already constructs.
+   */
+  private info: RoomInfo | null = null;
+  private infoHandler: ((info: RoomInfo) => void) | null = null;
 
   constructor(url: string, options: ColyseusJoinOptions = {}) {
     const client = new Client(url);
@@ -67,6 +83,10 @@ export class ColyseusClientTransport implements ClientTransport {
         }
         this.room = room;
         room.onMessage(PACKET_DOWN, (bytes: Uint8Array) => this.messageHandler?.(bytes));
+        room.onMessage(ROOM_INFO, (info: RoomInfo) => {
+          this.info = info;
+          this.infoHandler?.(info);
+        });
         room.onLeave(() => {
           this.room = null;
           this.closeHandler?.();
@@ -101,5 +121,23 @@ export class ColyseusClientTransport implements ClientTransport {
 
   get connected(): boolean {
     return this.room !== null;
+  }
+
+  /** The room's join code and label, or null until the room says. */
+  get roomInfo(): RoomInfo | null {
+    return this.info;
+  }
+
+  /**
+   * Subscribe to the room's facts.
+   *
+   * Replays immediately if the message already arrived — the room sends it during
+   * join, which can easily beat a React effect subscribing after mount, and a
+   * subscription that silently misses the only send it will ever get is the kind
+   * of bug that looks like the server never sent anything.
+   */
+  onRoomInfo(handler: (info: RoomInfo) => void): void {
+    this.infoHandler = handler;
+    if (this.info !== null) handler(this.info);
   }
 }

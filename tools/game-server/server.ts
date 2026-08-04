@@ -22,6 +22,8 @@ import {
   COMMANDS_UP,
   GAME_ROOM,
   PACKET_DOWN,
+  ROOM_INFO,
+  type RoomInfo,
 } from "../../src/net/ColyseusProtocol.ts";
 import { createMotorWorld, initRapier } from "../../src/motor/MotorWorld.ts";
 import { DEFAULT_MOTOR_TUNING } from "../../src/motor/MotorTypes.ts";
@@ -232,6 +234,19 @@ class GameRoom extends Room {
     const accountId = (client.auth as { accountId?: number | null } | undefined)?.accountId ?? null;
     this.sessions.set(client.sessionId, { accountId, joinedAtMs: Date.now() });
     this.bridge.connectionHandler?.(connection);
+
+    // Tell this client what it needs to invite others. Sent to EVERY member of a
+    // private room, not only its creator: anyone already inside got there with the
+    // code, so they know it — the only person who does not is the host, and
+    // singling them out would mean tracking who created the room for no gain.
+    // Public rooms get a label and no code, because there is nothing to gate.
+    const meta = this.metadata as RoomMetadata | undefined;
+    const info: RoomInfo = {
+      label: meta?.label,
+      ...(meta?.joinCode !== undefined ? { joinCode: meta.joinCode } : {}),
+    };
+    client.send(ROOM_INFO, info);
+
     console.log(
       `[${this.roomId}] player ${id} joined (${this.connections.size} online)` +
         (accountId === null ? " [anonymous]" : ` [account ${accountId}]`)

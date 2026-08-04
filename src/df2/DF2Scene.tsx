@@ -33,6 +33,7 @@ import { loadTerrain, type LoadedTerrain } from "./loadTerrain";
 import { WeaponPrototype } from "../fps/WeaponPrototype";
 import { MotorControls } from "../fps/MotorControls";
 import { useGameClient } from "../fps/useGameClient";
+import type { RoomInfo } from "../net/ColyseusProtocol.ts";
 import { useRoomVisuals, type RoomVisuals } from "../fps/useRoomVisuals";
 import { applyVisualDials, type VisualDialTargets } from "./visualDials";
 import { RemotePlayers } from "../fps/RemotePlayers";
@@ -253,6 +254,8 @@ export interface DF2SceneProps {
   stance?: Stance;
   onPerf?: (s: PerfSample) => void;
   onFly?: (s: FlyState) => void;
+  /** The room's join code, once a private room has sent it. */
+  onRoomInfo?: (info: RoomInfo | null) => void;
   onToggleGround?: () => void;
   onStance?: (s: Stance) => void;
   onStatus?: (status: { loading: boolean; terrain: LoadedTerrain | null }) => void;
@@ -317,6 +320,7 @@ export function DF2Scene({
   onStatus,
   onPerf,
   onFly,
+  onRoomInfo,
   onToggleGround,
   onStance,
   onGrassReady,
@@ -406,7 +410,14 @@ export function DF2Scene({
   // client is what guarantees a leaked join cannot outlive its component.
   // DECLARED BEFORE THE WEATHER BLOCK, because weather is now downstream of it:
   // when networked, the room's preset is authoritative and the URL's is not.
-  const gameClient = useGameClient(motorDemo && netDemo, heightfield);
+  const { client: gameClient, roomInfo } = useGameClient(motorDemo && netDemo, heightfield);
+  // Reported upward like fly state and perf samples rather than folded into
+  // SceneHandles: the room sends it once, well after the handles object is first
+  // published, and widening that memo to re-run on it would republish every scene
+  // handle for a fact no scene material reads.
+  useEffect(() => {
+    onRoomInfo?.(roomInfo);
+  }, [onRoomInfo, roomInfo]);
   /**
    * The room's visuals, or null when playing alone.
    *

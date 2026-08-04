@@ -17,6 +17,7 @@ import { impactTelemetryKey } from "../fps/ui/CombatTelemetry";
 import type { FlyState } from "../df2/FlyControls";
 import { Compass } from "./Compass";
 import { RadarRose } from "./RadarRose";
+import { InvitePanel } from "./InvitePanel";
 import { VitalsPanel, type Vital } from "./VitalsPanel";
 import { WeaponPanel } from "./WeaponPanel";
 import "./hud.css";
@@ -33,6 +34,13 @@ export interface GameHudProps {
    * is the honest reading when there is no damage model.
    */
   health: number | null;
+  /**
+   * The private room's invite code, or null.
+   *
+   * Passed in rather than read from a store because the HUD has no network
+   * concept — GameApp is where the room and the HUD meet.
+   */
+  joinCode: string | null;
   /** True in the scope demo — the crosshair and weapon block only apply there. */
   fpsMode: boolean;
   /** `?hudpreview=1`: also render the panels that have no data source yet. */
@@ -48,7 +56,7 @@ function windBearing(x: number, z: number): string {
   return points[Math.round(degrees / 45) % 8]!;
 }
 
-export function GameHud({ fly, health, fpsMode, preview }: GameHudProps) {
+export function GameHud({ fly, health, joinCode, fpsMode, preview }: GameHudProps) {
   const combat = useSyncExternalStore(
     combatTelemetry.subscribe,
     combatTelemetry.getSnapshot,
@@ -83,6 +91,8 @@ export function GameHud({ fly, health, fpsMode, preview }: GameHudProps) {
       )}
 
       <Compass />
+
+      <InvitePanel joinCode={joinCode} />
 
       {/* Wind — real, from the ballistic environment the solver actually uses.
           The mockup pairs it with a "HOLD" row; nothing computes a hold yet, so

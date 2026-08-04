@@ -123,8 +123,7 @@ player instinctively recognise this?* — applies to features, not to whether a 
   room metadata and is stripped before any response, which is why the listing is built
   server-side. Design record §5.4 has the verification and what is still open.
 - **Next up (web product):** clans and community-hosted servers (§6b), then entitlements
-  and medals (phase 7). Two known gaps: **the host cannot see their own join code** (the
-  room logs it; nothing delivers it), and kills/deaths are still unwritten pending
+  and medals (phase 7). One known gap: kills/deaths are still unwritten pending
   feat/server-ballistics — `recordLongestShot` exists and is tested but has no caller.
   Touch INPUT does not exist either: mobile and iPad are first-class targets for the UI,
   and the game still needs a keyboard.

@@ -9,7 +9,7 @@
 // lobby exists and every dev URL keeps working unchanged.
 
 import { useCallback, useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 import { accountClient, AccountError, type ServerListing } from "../../account/accountClient";
 import { useAuth } from "../../account/AuthProvider";
 import { useDocumentTitle } from "../useDocumentTitle";
@@ -27,7 +27,11 @@ export function Lobby() {
 
   const [servers, setServers] = useState<ServerListing[] | null>(null);
   const [listError, setListError] = useState<string | null>(null);
-  const [code, setCode] = useState("");
+  // Prefilled from `?code=`, which is what a copied invite link carries. The field
+  // stays editable — a link that silently auto-joined would give someone no chance
+  // to notice they had opened the wrong one.
+  const [params] = useSearchParams();
+  const [code, setCode] = useState(() => (params.get("code") ?? "").toUpperCase());
   const [codeError, setCodeError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -196,17 +200,10 @@ export function Lobby() {
           <span className="eyebrow">Host one</span>
           {can("hostPrivateGame") ? (
             <>
-              {/* Deliberately does NOT promise to show the code. The room mints one
-                  and prints it to the server log, but nothing sends it to the host
-                  yet — that needs a message on the game connection, which is not
-                  built. Claiming otherwise would be the worst kind of copy: a
-                  promise the UI cannot keep. Design record 5.4. */}
               <p className="auth-note">
                 Starts an unlisted game that only people with its code can join.
-              </p>
-              <p className="field-hint">
-                The code is not shown to you yet — it is printed in the server log.
-                Surfacing it in-game is the next piece of this.
+                The code appears in the HUD once you are in, with a button to copy
+                it or a link to send.
               </p>
               <Link
                 className="btn btn-ghost"

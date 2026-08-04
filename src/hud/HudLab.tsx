@@ -111,7 +111,8 @@ export default function HudLab() {
             decoding="async"
           />
         )}
-        <GameHud fly={SAMPLE_FLY} health={1} fpsMode preview />
+        {/* A sample code so the invite panel can be judged in the lab too. */}
+        <GameHud fly={SAMPLE_FLY} health={1} joinCode="QGHRD9" fpsMode preview />
         {live && <HeadingSweep />}
       </div>
     </div>

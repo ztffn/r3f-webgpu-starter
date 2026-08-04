@@ -463,9 +463,24 @@ claim that nobody has ever killed anyone.
 
 ### Still open after phase 6
 
-- **The host cannot see their own join code.** The room mints one and logs it; there
-  is no message that delivers it to the host, so the Lobby says so plainly instead
-  of promising a code it cannot show. Needs a packet on the game connection.
+- ~~The host cannot see their own join code.~~ **Done.** A `ROOM_INFO` Colyseus
+  message carries the code to every member on join, and `src/hud/InvitePanel.tsx`
+  shows it with copy-code and copy-link buttons. It is a Colyseus MESSAGE rather
+  than a packet inside `PACKET_DOWN` — the opposite of the choice made for weather
+  in `12-...md` §8.1, and the difference is the point: weather is gameplay (fog is
+  concealment, the authority layer owns it, the Node loopback suite must cover it),
+  whereas a join code is read by no simulation code, changes never, and is
+  per-client. Putting it in the codec would mean widening `SnapshotCodec`,
+  `GameServer` and the packet enum to carry a string nothing will consult — and
+  those are exactly the files feat/server-ballistics is working in.
+  Sent to every member, not only the creator: anyone already inside used the code to
+  get there, so the only person who lacks it is the host. Verified against a live
+  server — a private room delivers `{label, joinCode}`, a public room delivers
+  `{label}` and no code, a second member joining by id gets the same code, and the
+  code shown in the HUD resolves through `/api/join-code` while the room stays
+  absent from the public listing. `InvitePanel` is the ONLY HUD element with
+  `pointer-events: auto`; `.hud-root` is click-through so a look-drag never catches
+  on a panel.
 - **Clans and community-hosted servers are not built.** The metadata carries
   `community` and `hostCallsign` and the browser renders them, but nothing sets
   them — `foundClan`, `hostCommunityServer` and `reservedSlot` remain ungranted

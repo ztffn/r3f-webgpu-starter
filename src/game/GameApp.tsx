@@ -14,6 +14,7 @@ import { useDevConsole } from "../devtools/useDevConsole";
 import { DF2Scene, type SceneHandles } from "../df2/DF2Scene";
 import type { GrassUniforms } from "../df2/GrassMaterial";
 import type { FlyState, Stance } from "../df2/FlyControls";
+import type { RoomInfo } from "../net/ColyseusProtocol";
 import type { LoadedTerrain } from "../df2/loadTerrain";
 import type { PerfSample } from "../df2/PerfMonitor";
 import { BENCH, publish } from "../df2/bench";
@@ -79,6 +80,9 @@ export default function GameApp() {
 
   const [perf, setPerf] = useState<PerfSample | null>(null);
   const [fly, setFly] = useState<FlyState | null>(null);
+  // The room's join code, once a private room has sent it. Null for a public room
+  // and when playing offline.
+  const [roomInfo, setRoomInfo] = useState<RoomInfo | null>(null);
   const [status, setStatus] = useState<{ loading: boolean; terrain: LoadedTerrain | null }>({
     loading: true,
     terrain: null,
@@ -88,6 +92,7 @@ export default function GameApp() {
   // HUD can re-render on telemetry without ever re-rendering the canvas tree.
   const onPerf = useCallback((s: PerfSample) => setPerf(s), []);
   const onFly = useCallback((s: FlyState) => setFly(s), []);
+  const onRoomInfo = useCallback((info: RoomInfo | null) => setRoomInfo(info), []);
 
   // Held so the debug panel can write uniform values directly. Not state the scene
   // reads back, so changing a slider never re-renders the canvas tree.
@@ -144,6 +149,7 @@ export default function GameApp() {
           // local player's hit points; VitalsPanel shows that as an empty
           // dashed track rather than a full bar.
           health={null}
+          joinCode={roomInfo?.joinCode ?? null}
           fpsMode={scopeDemo}
           preview={hudPreview}
         />
@@ -182,6 +188,7 @@ export default function GameApp() {
           onStatus={onStatus}
           onPerf={onPerf}
           onFly={onFly}
+          onRoomInfo={onRoomInfo}
           onToggleGround={toggleGround}
           onStance={chooseStance}
           onGrassReady={onGrassReady}

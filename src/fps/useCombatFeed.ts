@@ -9,7 +9,7 @@
 // latest damage are all read out of the event log the client already holds, so
 // there is no second copy to fall out of step with it.
 
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { GameClient } from "../net/GameClient.ts";
 import { weaponByWireIndex } from "../combat/weaponDefinitions.ts";
 
@@ -18,6 +18,14 @@ const NO_SUBSCRIPTION = (): (() => void) => () => {};
 
 /** How many feed lines the panel shows. The mockup's chat block fits four. */
 const FEED_LINES = 4;
+/**
+ * How long a line stays up.
+ *
+ * The feed is a notification, not a log: a kill from ten minutes ago sitting on
+ * screen in a quiet match reads as a frozen HUD. Long enough to catch a line you
+ * glanced away from, short enough that the panel is usually empty.
+ */
+const FEED_LINE_SECONDS = 8;
 
 export interface FeedLine {
   /** The event's own sequence — stable, so React keys never collide. */
@@ -106,9 +114,16 @@ export function useCombatFeed(client: GameClient | null): CombatFeed {
     });
   }, [roster]);
 
+  // Events carry no timestamp — the wire has no reason to spend bytes on one — so
+  // a line is aged from when this client first SAW it. Ids are stable, so a line
+  // cannot be re-stamped by a later render and live forever.
+  const firstSeen = useRef(new Map<number, number>());
+  const [expiryTick, setExpiryTick] = useState(0);
+  const onExpiryTick = useCallback(() => setExpiryTick((n) => n + 1), []);
+
   const localId = client?.playerId ?? 0;
 
-  return useMemo(() => {
+  const shaped = useMemo(() => {
     if (client === null || events === null) return EMPTY_COMBAT_FEED;
 
     const kills: FeedLine[] = [];
@@ -144,15 +159,29 @@ export function useCombatFeed(client: GameClient | null): CombatFeed {
       }
     }
 
+    const now = Date.now();
+    const fresh: FeedLine[] = [];
+    for (const line of [...membership.lines, ...kills]) {
+      let seen = firstSeen.current.get(line.id);
+      if (seen === undefined) {
+        seen = now;
+        firstSeen.current.set(line.id, seen);
+      }
+      if (now - seen < FEED_LINE_SECONDS * 1000) fresh.push(line);
+    }
+
     return {
-      lines: [...membership.lines, ...kills].slice(-FEED_LINES),
+      lines: fresh.slice(-FEED_LINES),
       // Cleared the moment health returns, which the caller decides — a stale
       // overlay outliving a respawn is worse than none.
       death,
       damage,
       hit,
     };
-  }, [client, events, localId, membership.lines, nameOf]);
+  }, [client, events, localId, membership.lines, nameOf, expiryTick]);
+
+  useFeedExpiry(shaped.lines.length > 0, onExpiryTick);
+  return shaped;
 }
 
 /**
@@ -162,6 +191,21 @@ export function useCombatFeed(client: GameClient | null): CombatFeed {
  * else re-renders when a packet arrives, and a countdown has to move between
  * them. Runs only while dead.
  */
+/**
+ * Re-renders while any feed line is still within its lifetime.
+ *
+ * Its own effect because expiry is the only thing here that happens without a
+ * packet arriving. It stops as soon as the feed is empty, so a quiet match pays
+ * nothing.
+ */
+function useFeedExpiry(hasLines: boolean, tick: () => void): void {
+  useEffect(() => {
+    if (!hasLines) return;
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [hasLines, tick]);
+}
+
 export function useRespawnCountdown(death: LocalDeath | null): number | null {
   const [, setNow] = useState(0);
   useEffect(() => {

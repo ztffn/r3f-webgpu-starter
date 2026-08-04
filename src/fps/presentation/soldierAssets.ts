@@ -12,7 +12,10 @@ import * as THREE from "three/webgpu";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
 import { clone as cloneWithSkeleton } from "three/addons/utils/SkeletonUtils.js";
-import { allSelectableClips } from "../../character/characterClips.ts";
+import {
+  allSelectableClips,
+  deathClipDurationDrift,
+} from "../../character/characterClips.ts";
 import { measureClipSpeeds, type ClipSpeeds } from "./CharacterAnimator.ts";
 
 const SOLDIER_URL = "/assets/characters/player1/soldier.glb";
@@ -42,6 +45,22 @@ export function loadSoldier(): Promise<SoldierAsset> {
           `soldier GLB is missing ${missing.length} expected clip(s): ${missing.join(", ")}`
         );
       }
+      // The death-clip table is the SERVER's only copy of these durations and it
+      // cannot open a GLB to check them. This is the one place that has both, so
+      // a re-export that changed a clip's length is caught here — where it reads
+      // as stale data — rather than in the field, where it reads as a body
+      // vanishing mid-fall. A warning, not a throw: the wrong respawn moment is
+      // survivable and refusing to load the character is not.
+      const drift = deathClipDurationDrift((name) =>
+        gltf.animations.find((clip) => clip.name === name)?.duration
+      );
+      if (drift.length > 0) {
+        console.warn(
+          `[soldier] death clip durations disagree with the shared table; the server will ` +
+            `respawn at the wrong moment: ${drift.join("; ")}`
+        );
+      }
+
       gltf.scene.traverse((object) => {
         if ((object as THREE.Mesh).isMesh) object.frustumCulled = false;
       });

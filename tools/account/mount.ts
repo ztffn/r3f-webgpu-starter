@@ -14,6 +14,7 @@ import { migrate, openDatabase, type AccountDb } from "./database.ts";
 import { AccountRepository } from "./repository.ts";
 import { configureAuth, configuredProviders } from "./authSettings.ts";
 import { createApiRouter } from "./api.ts";
+import { createLobbyRouter } from "./lobbyApi.ts";
 
 export interface MountedAccounts {
   db: AccountDb;
@@ -56,6 +57,9 @@ export async function mountAccounts(app: Application): Promise<MountedAccounts> 
   // /forgot-password, /reset-password, /confirm-email, plus provider callbacks.
   app.use(auth.prefix, auth.routes());
   app.use("/api", createApiRouter({ repository, providers, checkoutEnabled: CHECKOUT_ENABLED }));
+  // Server browser, join codes and leaderboards. A separate router because these
+  // read the matchmaker rather than the database.
+  app.use("/api", createLobbyRouter({ repository }));
 
   console.log(
     `[accounts] ${DB_FILE} — auth at ${auth.prefix}, api at /api` +

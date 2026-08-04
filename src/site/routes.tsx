@@ -12,6 +12,8 @@ import { SiteLayout } from "./SiteLayout";
 import { Landing } from "./pages/Landing";
 import { Faq } from "./pages/Faq";
 import { Supporter } from "./pages/Supporter";
+import { Lobby } from "./pages/Lobby";
+import { Leaderboard } from "./pages/Leaderboard";
 import { SignIn } from "./pages/SignIn";
 import { Register } from "./pages/Register";
 import { Profile } from "./pages/Profile";
@@ -89,6 +91,8 @@ export const router = createBrowserRouter([
       { index: true, element: <LandingOrGame /> },
       { path: "faq", element: <Faq /> },
       { path: "supporter", element: <Supporter /> },
+      { path: "lobby", element: <Lobby /> },
+      { path: "leaderboard", element: <Leaderboard /> },
       { path: "sign-in", element: <SignIn /> },
       { path: "register", element: <Register /> },
       // No route guard: both pages render their own signed-out state with a way

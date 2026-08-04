@@ -20,6 +20,7 @@ import {
   coerceCharacter,
   type Character,
 } from "../../src/account/characters.ts";
+import type { TierId } from "../../src/account/tiers.ts";
 import type { AccountDb, UserRow } from "./database.ts";
 
 /** A row as selected, with `id` resolved to a number. */
@@ -60,6 +61,27 @@ type LoginCandidate = Omit<
  * password login against a Discord-only account correctly fails.
  */
 const NO_PASSWORD = "";
+
+/**
+ * Career columns a leaderboard may rank by.
+ *
+ * A closed union rather than a string, because the value is interpolated into an
+ * ORDER BY and a column reference. Nothing from a request reaches this type
+ * without passing through `LEADERBOARD_COLUMNS` first.
+ */
+export type LeaderboardColumn =
+  | "matches"
+  | "kills"
+  | "longest_shot_metres"
+  | "time_played_seconds";
+
+/** Board id (what the URL says) to column, and the label the client shows. */
+export const LEADERBOARD_COLUMNS: Record<string, { column: LeaderboardColumn; label: string }> = {
+  matches: { column: "matches", label: "Matches played" },
+  kills: { column: "kills", label: "Kills" },
+  distance: { column: "longest_shot_metres", label: "Longest shot" },
+  time: { column: "time_played_seconds", label: "Time played" },
+};
 
 const nowIso = (): string => new Date().toISOString();
 
@@ -396,6 +418,83 @@ export class AccountRepository {
         })
       )
       .execute();
+  }
+
+  /**
+   * Record the end of a session: one more match, and the seconds played.
+   *
+   * Called by the game room when a player leaves, which is what makes the
+   * leaderboard real rather than a table of zeros. Kills and deaths are NOT
+   * touched here — they need the server-authoritative damage work on
+   * feat/server-ballistics, and inventing them from client reports would be worse
+   * than leaving them at zero.
+   *
+   * An incrementing UPDATE rather than read-modify-write: the same account can end
+   * two sessions at once (one on a phone, one on a desktop), and a read-then-write
+   * would lose one of them.
+   */
+  async recordSession(userId: number, secondsPlayed: number): Promise<void> {
+    const seconds = Math.max(0, Math.round(secondsPlayed));
+    await this.db
+      .updateTable("career")
+      .set((eb) => ({
+        matches: eb("matches", "+", 1),
+        time_played_seconds: eb("time_played_seconds", "+", seconds),
+      }))
+      .where("user_id", "=", userId)
+      .execute();
+  }
+
+  /**
+   * Raise the longest-shot record, never lower it.
+   *
+   * Separate from `recordSession` because it is a MAXIMUM rather than a sum, and
+   * because the shot that sets it happens mid-match. The `where` does the
+   * comparison, so a slower report arriving late cannot overwrite a better one.
+   */
+  async recordLongestShot(userId: number, metres: number): Promise<void> {
+    if (!Number.isFinite(metres) || metres <= 0) return;
+    await this.db
+      .updateTable("career")
+      .set({ longest_shot_metres: metres })
+      .where("user_id", "=", userId)
+      .where("longest_shot_metres", "<", metres)
+      .execute();
+  }
+
+  /**
+   * Leaderboard rows for one stat.
+   *
+   * Guests are EXCLUDED. A guest account is per-browser and disposable, so
+   * ranking them would fill the board with names nobody can be held to and would
+   * reward clearing your storage. Being ranked is a reason to register.
+   *
+   * Ties break on callsign so the order is stable between requests — without a
+   * second key, two accounts on the same score swap places at random and the board
+   * looks like it is churning.
+   */
+  async leaderboard(
+    column: LeaderboardColumn,
+    limit: number
+  ): Promise<{ rank: number; id: number; callsign: string; tier: TierId; value: number }[]> {
+    const rows = await this.db
+      .selectFrom("career")
+      .innerJoin("users", "users.id", "career.user_id")
+      .select(["users.id", "users.callsign", "users.tier"])
+      .select((eb) => eb.ref(`career.${column}`).as("value"))
+      .where("users.anonymous", "=", 0)
+      .where((eb) => eb(eb.ref(`career.${column}`), ">", 0))
+      .orderBy(`career.${column}`, "desc")
+      .orderBy("users.callsign", "asc")
+      .limit(Math.max(1, Math.min(100, limit)))
+      .execute();
+    return rows.map((row, index) => ({
+      rank: index + 1,
+      id: row.id,
+      callsign: row.callsign,
+      tier: row.tier,
+      value: Number(row.value),
+    }));
   }
 
   /** Career and character rows every account is expected to have. */

@@ -35,6 +35,46 @@ export interface ServerConfig {
   checkoutEnabled: boolean;
 }
 
+/** One row of the server browser. Mirrors ServerListing in tools/account/lobbyApi.ts. */
+export interface ServerListing {
+  roomId: string;
+  label: string;
+  map: string;
+  weather: string;
+  inputClass: string;
+  players: number;
+  maxPlayers: number;
+  community: boolean;
+  hostCallsign: string | null;
+  locked: boolean;
+}
+
+export interface BoardSummary {
+  id: string;
+  label: string;
+  /**
+   * Whether anything currently writes this stat.
+   *
+   * The server reports it so the page can distinguish "nobody has done this yet"
+   * from "nothing records this yet" — an empty kills board would otherwise read as
+   * nobody having ever killed anyone, which is not what is true.
+   */
+  populated: boolean;
+}
+
+export interface LeaderboardRow {
+  rank: number;
+  id: number;
+  callsign: string;
+  tier: TierId;
+  value: number;
+}
+
+export interface Leaderboard extends BoardSummary {
+  board: string;
+  rows: LeaderboardRow[];
+}
+
 /** Thrown by every call in this module so callers have one thing to catch. */
 export class AccountError extends Error {
   readonly status: number;
@@ -200,6 +240,37 @@ export const accountClient = {
       body: JSON.stringify(character),
     });
     return result.character;
+  },
+
+  /** Public rooms, optionally filtered to one input class. */
+  async servers(inputClass?: string): Promise<ServerListing[]> {
+    const query = inputClass === undefined ? "" : `?input=${encodeURIComponent(inputClass)}`;
+    const result = await request<{ servers: ServerListing[] }>(`/api/servers${query}`);
+    return result.servers;
+  },
+
+  /**
+   * Turn a join code into a room id.
+   *
+   * The code never reaches the game — the lobby resolves it here and navigates to
+   * /play with `&room=<id>`, so a code cannot end up in browser history or in a
+   * shared URL where it would outlive the match.
+   */
+  async resolveJoinCode(code: string): Promise<string> {
+    const result = await request<{ roomId: string }>("/api/join-code", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    });
+    return result.roomId;
+  },
+
+  async leaderboards(): Promise<BoardSummary[]> {
+    const result = await request<{ boards: BoardSummary[] }>("/api/leaderboards");
+    return result.boards;
+  },
+
+  async leaderboard(board: string): Promise<Leaderboard> {
+    return await request<Leaderboard>(`/api/leaderboard/${encodeURIComponent(board)}`);
   },
 
   signOut(): void {

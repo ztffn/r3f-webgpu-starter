@@ -14,6 +14,8 @@ import "./site.css";
 import "./pages/auth.css";
 
 const NAV = [
+  { to: "/lobby", label: "Play" },
+  { to: "/leaderboard", label: "Standings" },
   { to: "/faq", label: "FAQ" },
   { to: "/supporter", label: "Supporter" },
 ];

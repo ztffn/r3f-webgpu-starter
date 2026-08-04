@@ -281,21 +281,43 @@ Four things that were each invisible until something was measured — the same s
    frame, and the tape arithmetic moved into `src/hud/compassTape.ts`, which is pure and
    pinned by tests. A claim that cannot be verified in the environment where verification
    happens is not a claim worth making.
-3. **`backdrop-filter` per panel is the most expensive thing in the HUD.** Seven panels each
-   blurring the scene behind them, plus `filter: drop-shadow` on a clip-path'd element
-   forcing a second offscreen pass, was enough to saturate the main thread of a software
-   renderer completely — the HUD lab page stopped responding to CDP entirely. Now: one
-   drop-shadow rather than two, `contain: layout paint`, and the blur dropped in favour of a
-   more opaque background under `(pointer: coarse)` and `prefers-reduced-transparency`.
-   Mobile GPUs are a first-class target, so this is a real fix and not a workaround —
-   but it is still **unmeasured on real mobile hardware** (§2.5).
-   A related instance: two full-screen images stacked in the lab, one at `opacity: 0`, still
-   cost a full composite each frame. The hidden one is now unmounted rather than transparent.
+3. **Compositing cost in the HUD lab, and a correction.** The lab page — two full-screen
+   1448×1086 JPEGs stacked, under seven panels each running `backdrop-filter` plus
+   `filter: drop-shadow` on a clip-path'd element — stopped responding to CDP entirely.
+   What actually fixed it was **unmounting the hidden reference image** rather than leaving
+   it at `opacity: 0`, where the compositor still pays for it every frame.
+   The panel changes made alongside it (one drop-shadow instead of two, `contain: layout
+   paint`, and the blur dropped under `(pointer: coarse)` and
+   `prefers-reduced-transparency`) are worth keeping on their own merits, because mobile
+   GPUs are a first-class target — but note they were **not** what unblocked the page.
+   **Correction:** this was written up at the time as "a software renderer" being saturated.
+   That was an inference, and it was wrong — the same machine runs the game at 88 fps on
+   WebGPU. The backdrop-filter cost is still unmeasured on real mobile hardware (§2.5), and
+   the "3 fps" reading that prompted the software-GPU guess was really trap 5 below.
 4. **`import.meta.env.DEV` does not drop a top-level dynamic import.** Guarding the *route*
    in a dead branch left `lazy(() => import("../hud/HudLab"))` at module scope, and Rollup
    emitted the HudLab chunk into `dist/` regardless. The `lazy()` call has to sit inside the
    branch. Confirmed by grepping `dist/assets/`, which is the only way this is visible —
    nothing errors, the chunk is simply shipped and never fetched.
+5. **A percentage height chain needs EVERY link to be definite, including `html`.**
+   `body.mode-game { height: 100% }` was added without `html`, whose height came only from
+   `min-height: 100%` — and `min-height` does not make a height definite, so the percentage
+   resolved to `auto`. `#root` collapsed to its content and the R3F canvas fell back to a
+   `<canvas>` element's intrinsic **150px**. `/play` rendered a 150px sliver of terrain in a
+   664px viewport.
+   **It was invisible for three reasons, all worth knowing:** the HUD is `position: fixed`,
+   so it filled the screen and looked completely correct; the sliver still showed real
+   terrain, so the page did not look broken so much as oddly framed; and it was mistaken for
+   a slow-GPU artifact and explained away instead of measured. The measurement that would
+   have caught it immediately is one line — compare the canvas's client height to
+   `innerHeight` — and it now belongs in any check of `/play`:
+   ```js
+   const c = document.querySelector('canvas');
+   Math.abs(c.getBoundingClientRect().height - innerHeight) < 2;   // must be true
+   ```
+   The class is set on `documentElement` as well as `body` so `html` can carry the height,
+   and removed from both on unmount — verified via browser Back, which is a client-side
+   unmount and the path that would otherwise leave the site locked.
 
 ## 5.3 What phase 5 landed
 

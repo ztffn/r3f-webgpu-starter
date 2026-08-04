@@ -176,7 +176,17 @@ body {
 
 /* The game owns the viewport and must never scroll; the site must. Applied by
    the /play route rather than globally, because a single `overflow: hidden` on
-   body was what made every site page unscrollable. */
+   body was what made every site page unscrollable.
+ *
+ * `html` IS IN THIS LIST, and leaving it out broke /play completely. A percentage
+ * height resolves against the containing block's `height`, and `min-height: 100%`
+ * above does NOT make html's height definite — so `body { height: 100% }` computed
+ * to auto, #root collapsed to its content, and the R3F canvas fell back to a
+ * `<canvas>` element's intrinsic 150px. The result was a 150px sliver of terrain
+ * under a full-screen HUD, because the HUD is position:fixed and so looked correct
+ * throughout. Every link in the chain needs a definite height; the class is set on
+ * documentElement as well as body (src/game/GameApp.tsx) so `html` can be one. */
+html.mode-game,
 body.mode-game,
 body.mode-game #root {
   height: 100%;

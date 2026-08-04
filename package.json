@@ -23,7 +23,7 @@
     "session:server": "node --experimental-strip-types --experimental-specifier-resolution=node tools/session-test/server.ts",
     "session:client": "vite --config tools/session-test/vite.config.ts",
     "motor:bench": "node --experimental-strip-types --experimental-specifier-resolution=node tools/motor-bench/dense-room.ts",
-    "game:server": "node --experimental-strip-types --experimental-specifier-resolution=node tools/game-server/server.ts"
+    "game:server": "node --env-file-if-exists=.env --experimental-strip-types --experimental-specifier-resolution=node tools/game-server/server.ts"
   },
   "dependencies": {
     "@colyseus/auth": "^0.17.9",

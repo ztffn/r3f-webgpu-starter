@@ -49,12 +49,20 @@ const hudPreview = urlParams.get("hudpreview") === "1";
 
 export default function GameApp() {
   // The game owns the viewport and must never scroll; the site must. Set as a
-  // body class rather than a global stylesheet rule because this module's CSS is
+  // class rather than a global stylesheet rule because this module's CSS is
   // injected on first visit and never removed — a global `overflow: hidden` left
   // every site page unscrollable for the rest of the session.
+  //
+  // On documentElement AS WELL AS body, and both are load-bearing: the canvas
+  // sizes to a chain of percentage heights, and html needs a definite height or
+  // the whole chain collapses to a 150px sliver (see tokens.css).
   useEffect(() => {
+    document.documentElement.classList.add("mode-game");
     document.body.classList.add("mode-game");
-    return () => document.body.classList.remove("mode-game");
+    return () => {
+      document.documentElement.classList.remove("mode-game");
+      document.body.classList.remove("mode-game");
+    };
   }, []);
 
   // `?debug=1` starts it open; backtick toggles it either way.

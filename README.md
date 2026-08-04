@@ -23,11 +23,14 @@ fallback path). The legacy Create React App / react-scripts setup has been remov
 columnar grass. With prepared assets present it renders a real DF-era map; without them it
 falls back to synthetic fBm and needs no game data at all.
 
-**Multiplayer movement and characters are in** (August 2026): a shared fixed-tick
+**Multiplayer movement, characters, and combat are in** (August 2026): a shared fixed-tick
 character motor with client prediction against an authoritative Colyseus server running
-the real terrain, and an animated soldier for remote players and the third-person view.
-Combat is still local-only; the authority work is queued in
-[`docs/plans/2026-08-03-character-animation-session-handoff.md`](./docs/plans/2026-08-03-character-animation-session-handoff.md).
+the real terrain, an animated soldier for remote players and the third-person view, and
+**server-authoritative PvP damage on the full ballistic model** — lag-compensated up
+close, real integrated projectiles at range, with the server owning each player's
+weapon, magazine, and cadence. Playtester-level detail is in
+[`docs/guides/combat-handbook.md`](./docs/guides/combat-handbook.md); the wire and
+authority contracts are docs/12 §8.3 and docs/11 §15.3.
 
 A local-first FPS combat slice is also available at `?scene=scope`: pointer-lock
 long-range aiming, authoritative stance/breath sway, scope zero and windage,
@@ -187,8 +190,9 @@ that distinction, not "assets" as a blanket category, is what the policy turns o
 
 ## Roadmap (next)
 
-- **▶ Now:** gameplay and multiplayer. The character motor and an authoritative two-client
-  session are in; next are remote players rendered in the world and concealment.
+- **▶ Now:** gameplay and multiplayer. Movement, remote characters, and authoritative
+  PvP combat are in; next are combat presentation for remote shots (tracers, sound,
+  deaths), server-owned world targets, and concealment.
 - **Open:** the skirt artifact above. `HEIGHT_SCALE` / `METERS_PER_TEXEL` are still
   nominally placeholders but judged close enough to build gameplay on.
 - **Phase 2** — grass: measure the current columnar march against the reference screenshots

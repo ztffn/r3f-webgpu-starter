@@ -37,10 +37,13 @@ existing animated sniper presentation. It currently provides:
 - deterministic unit/load coverage for the gameplay systems.
 
 This is not yet a complete player, weapon library, or multiplayer match. There
-is one proxy FPS rig shared by the selectable sniper, M4, Glock, and SAW, no physical
-character controller, no network authority, no remote-character presentation,
-and no in-game loadout or settings screen. Authored per-weapon models and
-animations have not been added.
+is one proxy FPS rig shared by the selectable sniper, M4, Glock, and SAW, and no
+in-game loadout or settings screen. Authored per-weapon models and animations
+have not been added. What HAS landed since this document's first draft: the
+character motor and remote-soldier presentation (docs/12), and **server-
+authoritative PvP damage on the shared ballistic model** — the shared core now
+lives in `src/combat/` and the authority contract is docs/11 §15.3 with the wire
+in docs/12 §8.3. Damage to local world targets remains client-local.
 
 ## 2. Ownership and data flow
 
@@ -334,12 +337,9 @@ is the evidence of gravity and wind curvature.
 | `core/FiringTimeline.ts` | one-frame trigger-to-projectile timeline and shared simulation clamp |
 | `core/LookSensitivityController.ts` | FOV-scaled pointer response |
 | `core/ScopeAdjustmentController.ts` | reachable zeros, elevation, and windage |
-| `core/WorldQuery.ts` | analytic terrain, collider index, composite query |
-| `weapons/*` | definitions, ammunition, handling math, weapon state, generic loadout slots |
-| `combat/BallisticProjectileSystem.ts` | pooled active rounds and authoritative contacts |
-| `combat/BallisticModel.ts` | allocation-free gravity/drag/wind velocity step |
-| `combat/SurfaceProfile.ts` / `PenetrationResolver.ts` | material tuning and terminal response |
-| `combat/Damageable.ts` | health/hit/reset contract |
+| `core/WorldQuery.ts` | the BROWSER implementations of the shared query contract: analytic terrain, collider index, composite query |
+| `weapons/*` | weapon state machine, handling math, loadout slots (definitions and ammunition moved to `src/combat/`) |
+| `../combat/*` (i.e. `src/combat/`) | THE SHARED BALLISTIC CORE — definitions, ammunition, projectile system, terminal model, near-field closed form. Three-free; the server runs it. Map in docs/11 §19 |
 | `world/WorldObjectPrefab.ts` | simplified collider + optional destructible composition |
 | `presentation/ImpactEffects.tsx` | bounded particles and positional sound |
 | `presentation/ShotTrajectoryDebugView.tsx` | latest-shot world debug |
@@ -356,7 +356,10 @@ is the evidence of gravity and wind curvature.
 
 `HitscanResolver.ts` remains as a tested generic/legacy resolver, but the mounted
 sniper uses `BallisticProjectileSystem`. Do not accidentally route rifle fire
-back through hitscan.
+back through hitscan. It is also NOT the server's near-field hitscan — that is
+`src/combat/HitscanBallistics.ts`, which is the same drag model solved in closed
+form and bounded by the drop-budget horizon (docs/11 §12.4), not a flat ray with
+flat damage.
 
 ## 9. Verification and human acceptance
 
@@ -400,7 +403,8 @@ The consequence is that **`src/fps` carries a mix of extensionless and `.ts`-suf
 imports, and normalising them toward extensionless makes the problem worse.** The future-proof
 migration is the other direction — add `.ts` everywhere and drop the flag, which `tsconfig`
 already permits via `allowImportingTsExtensions` — but it touches every module and has not been
-done. Do not tidy this halfway.
+done. Do not tidy this halfway. `src/combat/` was born fully `.ts`-suffixed because the game
+server loads it outside the test runner, where the flag does not apply.
 
 **`engines` now declares Node >= 22.6**, which is what `--experimental-strip-types` needs. Below
 that the test script fails in a way that does not name the version as the cause.

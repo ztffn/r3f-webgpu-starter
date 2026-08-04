@@ -67,6 +67,13 @@ and `tests/motor/session.test.ts` loading both in bare Node is what enforces it 
 that check already caught `weather.ts` importing `./config` without a file extension,
 which Vite resolves and Node does not.
 
+**`src/combat/` carries the rule wholesale (2026-08-04).** The entire ballistic
+core — definitions, terminal model, hitscan closed form, and the projectile
+integrator — moved out of `src/fps/` precisely so the authority could run it, and
+`tests/motor/server-ballistics.test.ts` loads it in bare Node. Vectors there are
+plain `{x, y, z}` (`combat/math.ts`); `THREE.Vector3` satisfies the shape
+structurally, which is why the browser implementations did not have to change.
+
 ## 4. Tick and frame contract
 
 ```text
@@ -193,7 +200,8 @@ Rifle rounds never become Rapier bodies.
 
 ## 8. Wire format
 
-10 bytes per command up, 27 bytes per player down, no field names. Look angles and velocities
+10 bytes per command up, 28 bytes per player down (health rode in as the 28th on
+2026-08-03), no field names. Look angles and velocities
 ride as int16; positions as float32 because quantising them needs an agreed origin. Pitch and
 the stance blend (`previousStance`, `stanceProgress`) ride in the snapshot since 2026-08-03 —
 they were decode-side fakes before that, which was harmless for capsules and wrong the moment
@@ -328,7 +336,55 @@ reload. Of what is replicated, only rain intensity and blade field radius move a
 *drawn* count, and both are bounded by a pool allocated per client at load — an admin
 can push a client to its own ceiling and no further.
 
-## 9. Controls and URLs
+### 8.3 Combat claims and the hybrid ballistic authority (2026-08-04)
+
+Three uplink claims, all sequence-deduped like the command queue, all refused
+silently and counted:
+
+- **Fire** (15 bytes): `type u8 + tick u32 + sequence u16 + yaw i16 + pitch i16 +
+  viewTick u32`. No origin (the server uses its own eye for the shooter's blended
+  stance) and **no weapon** — the server already knows what is in hand. `viewTick`
+  is the server tick of the snapshot the shooter was rendering: the rewind target.
+- **SelectWeapon** (4 bytes): `type u8 + sequence u16 + index u8` into the
+  canonical `WEAPON_DEFINITIONS` order (`src/combat/weaponDefinitions.ts`), which
+  is therefore append-only.
+- **Reload** (3 bytes): `type u8 + sequence u16`. Select and reload share one
+  sequence counter; the stream is ordered, so "consumed already" is one number.
+
+**The server owns the loadout record**: equipped index, per-weapon magazines and
+reserves, per-weapon cadence clocks (per weapon, or a sniper shot would lend its
+75-tick cooldown to the sidearm you switch to), a 0.35 s switch clock mirroring
+`LoadoutSystem`, and the reload timer, settled lazily. The client's `WeaponSystem`
+runs the same rules for prediction, so an honest client never trips a gate; the
+gates exist for the client that stops being honest. Death refills on respawn.
+
+**Damage is the shared ballistic model** (`src/combat/`, docs/11 §12), resolved as
+a hybrid:
+
+- **Inside the ammunition's hitscan horizon** — `v₀·√(2ε/g)`, ε = 5 cm of hidden
+  drop; ~80 m for .308, ~35 m for 9mm — the shot is instant, resolved by the exact
+  flat-fire decay against capsules **rewound to viewTick** (a 32-tick ring,
+  claims clamped to 250 ms): lag compensation where twitch fights happen.
+- **Beyond it**, the round leaves the horizon as a continuation spawn into the
+  same `BallisticProjectileSystem` the client runs — drop, drag, wind and further
+  penetrations against LIVE state. At range, flight time dwarfs latency and
+  holding lead is the game. A parity test pins the two solutions to within 1% at
+  the horizon.
+
+Overpenetration works through players — a capsule is one blended-stance diameter
+of flesh — and through the same 8-interaction budget as everything else. Health
+still moves in exactly one place (`damagePlayer`, via each peer's `Damageable`)
+and still rides only the snapshot; nothing about the health flow changed.
+
+Because the server integrates far shots with `DEFAULT_BALLISTIC_ENVIRONMENT`, a
+networked client ignores `?ammo=` and `?windx/z=` — same rule as `?weather=`.
+Replicating wind through RoomState belongs to the weather-authority work.
+
+Still trusted within bounds: the claimed direction (clamped to 0.2 rad around the
+server's look, since sway/recoil/dispersion are client-side until dispersion is
+recomputed server-side from the deterministic seed) and the claimed weapon
+selection itself (no server-owned inventory yet — a client may select any of the
+four dev weapons, but only a weapon it then actually fights with).
 
 The motor is selected independently of the scene. `?scene=motor` is movement alone;
 **`?scene=scope&motor=1`** is the weapon carried on a collided body, which is the

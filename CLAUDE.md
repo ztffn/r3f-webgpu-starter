@@ -28,7 +28,9 @@ player instinctively recognise this?* — applies to features, not to whether a 
 | `10-fps-combat-implementation-spec.md` | **As-built FPS ownership, frame order, controls, performance, and deferred work** |
 | `11-weapon-ballistics-and-modifier-system-spec.md` | **Trigger-to-impact contracts, formulas, budgets, and attachment/perk extension rules** |
 | `12-character-motor-and-networking-spec.md` | **As-built shared character motor, room, transport and session test — and the traps that cost this subsystem the most time** |
-| `plans/2026-08-04-web-platform-and-ui-design.md` | **The web product: brand, site/HUD design system, accounts stack, tiers, phasing — and the four traps phases 1–4 already hit.** Read before touching `src/site/`, `src/ui/`, `src/hud/` or `src/devtools/` |
+| `plans/2026-08-04-web-platform-and-ui-design.md` | **The web product: brand, site/HUD design system, accounts stack, tiers, phasing, hosting — the four traps phases 1–4 hit (§5.2) and the 21 findings the pre-merge review found (§5.7).** Read before touching `src/site/`, `src/ui/`, `src/hud/` or `src/devtools/` |
+| `plans/2026-08-04-community-layer-design.md` | **Profiles, tagwall, friends, presence, clans: the privacy model, the rate limits, and why `pair_key` is the only thing that can enforce one friendship per pair.** Read before touching `tools/account/community*` |
+| `plans/2026-08-04-player-statistics-design.md` | **The dfhub metric vocabulary, the three telemetry tables, and which of them nothing writes yet.** Read before adding any figure to a stats page |
 
 ## Current state (August 2026)
 
@@ -78,7 +80,8 @@ player instinctively recognise this?* — applies to features, not to whether a 
   briefed in `docs/plans/2026-08-03-character-animation-session-handoff.md`.
 - **Web product, brand and UI (Aug 2026):** the project has a public name — **Distant
   Front** — and a router. `/` is a landing page, `/faq` and `/supporter` are real pages, and
-  **the whole Three.js tree lazy-loads behind `/play`** (entry chunk 98 KB gzipped; a static
+  **the whole Three.js tree lazy-loads behind `/play`** (entry chunk 115.67 KB gzipped, and its
+  only static import is the module runtime — re-measure, do not quote; a static
   import anywhere in `src/site/` or `src/ui/` silently undoes that). The nine debug panels
   that used to fill the game screen are five tabs in **one docked dev console** — backtick or
   `?debug=1`, every control carrying `data-dev` so browser automation can drive it. The HUD
@@ -133,13 +136,46 @@ player instinctively recognise this?* — applies to features, not to whether a 
   used to let anyone host one. `/character` can load a lazy 3D soldier turntable that
   deliberately does **not** reflect camo/headgear/insignia, because nothing renders
   them yet and the page says so. Read `plans/2026-08-04-...md` §5.6 first.
+- **Player statistics (Aug 2026):** the metric vocabulary is dfhub.net's. Three telemetry
+  tables, a pure derived-metrics module (`src/account/playerStats.ts` — nothing stores a
+  ratio), and five pages. **`match_participation` has three readers and NO writer**, and
+  unlike `engagements` it is not blocked on ballistics, it is unbuilt — so wins, losses,
+  stance times and shot counts are absent, not zero. Do **not** write a partial row to light
+  a section up: a row with zeroed counters makes `available.objectives` true and every figure
+  above it a false claim. The population aggregates in `tools/account/statsRepository.ts`
+  count in SQL and read only `fatal = 1` rows for medians — they are public endpoints, so
+  anything O(players × rows) there is a denial of service waiting for a population
+  (`plans/...-player-statistics-design.md` §6).
+- **Reviewed before merge (Aug 2026):** 21 findings across phases 5–7, all fixed, suite 271 →
+  287. The four categories worth carrying forward, because they will recur:
+  **(1)** unknown rendered as a plausible number — `patienceScore` answered a confident
+  *40/100* for every player because absent stance telemetry reads as "never moved";
+  **(2)** a comment asserting an invariant the code lacked — `friendships`' unique index
+  claimed pair normalisation it never did, and `(A,B)`/`(B,A)` are different keys to it
+  (now a `pair_key` column; community record §4);
+  **(3)** costs invisible while the tables are empty — every population query was unbounded
+  or quadratic on a public route;
+  **(4)** a join that changed the answer, not just the cost — `/stats/maps` weighted each
+  match's kill ranges by its player count, reporting a median of 200 where 550 was correct.
+  Design record §5.7 has all of it. **Verify claims like these by measuring, not reasoning:**
+  the 40, the 200-vs-550 and Colyseus's 15-second auto-dispose were each confirmed by running
+  the old code, and one of them contradicted what the review first wrote down.
+- **Deploying is a VPS** (decided Aug 2026): one box, the Colyseus server serving the built
+  client plus `/auth` and `/api` from the same origin — which is what `vite.config.ts`'s dev
+  proxy has always mimicked. **The proxy must not let the SPA fallback swallow `/api` and
+  `/auth`**: a catch-all returning `index.html` with status 200 for an API call is a live
+  crash, not a soft failure. `accountClient.request` now rejects a 200 that is not JSON so it
+  surfaces as an error message rather than a blank page, but that is a net, not the fix.
+  `netlify.toml` is for static previews only.
 - **Next up (web product):** clans and community-hosted servers (§6b), then a real
   checkout. Known gaps: kills/deaths are still unwritten pending
-  feat/server-ballistics — `recordLongestShot` exists and is tested but has no caller —
-  and most supporter capabilities (`foundClan`, `hostCommunityServer`, `reservedSlot`,
-  `earlyAccessMaps`, `supporterMarker`) are advertised by the tier table but enforced
-  nowhere. Touch INPUT does not exist either: mobile and iPad are first-class targets
-  for the UI, and the game still needs a keyboard.
+  feat/server-ballistics — `recordLongestShot` exists and is tested but has no caller, and
+  `consistency()` is the same shape (the board sends `null` explicitly rather than computing
+  it from an empty array) — and most supporter capabilities (`foundClan`,
+  `hostCommunityServer`, `reservedSlot`, `earlyAccessMaps`, `supporterMarker`) are advertised
+  by the tier table but enforced nowhere. `match_participation` needs a writer before any
+  objective, stance or win-rate figure means anything. Touch INPUT does not exist either:
+  mobile and iPad are first-class targets for the UI, and the game still needs a keyboard.
 - **Direction:** custom assets → player-created terrain → map/terrain editor tooling
   (`01-...md` Phase 6). Real assets are the dial-in instrument, not the deliverable.
 

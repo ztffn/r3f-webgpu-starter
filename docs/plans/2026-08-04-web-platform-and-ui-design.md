@@ -252,9 +252,12 @@ Deleted: `src/components/Hud.tsx` and `src/components/CollapsiblePanel.tsx`. The
 panels that used to occupy every corner of the game screen are now five tabs in one docked
 console, which is what freed those corners for the HUD.
 
-**Route split verified**, not assumed: the entry chunk is 307 KB (98 KB gzipped) and mentions
-`three-*.js` only inside Vite's `__vite__mapDeps` preload table for the lazy chunk. Three.js
-and the game are separate chunks that a visitor reading the FAQ never fetches.
+**Route split verified**, not assumed: at this phase the entry chunk was 307 KB (98 KB
+gzipped) and mentioned `three-*.js` only inside Vite's `__vite__mapDeps` preload table for the
+lazy chunk. Three.js and the game are separate chunks that a visitor reading the FAQ never
+fetches. (Re-measured after phase 7 and the review: 382 KB / **115.67 KB gzipped**, still with
+the module runtime as its only static import. Growth is site code — the figure moves every
+phase, so check it rather than quoting this line.)
 
 **Honesty carried through to the HUD.** Health is real (`fly.net.health`, and
 `GameServer.applyDamage` is the only thing that lowers it). Stamina, hydration and armour have
@@ -332,7 +335,7 @@ tools/account/   database.ts   (Kysely schema + versioned migrations)
                  repository.ts (every account query; row -> Account mapping)
                  authSettings.ts (the seven @colyseus/auth callbacks)
                  api.ts, mount.ts
-tests/account/   account-types, characters, repository (47 assertions)
+tests/account/   account-types, characters, repository (49 test cases today)
 tsconfig.server.json  — `npm run typecheck` now covers tools/ as well
 ```
 
@@ -421,7 +424,7 @@ tools/game-server/server.ts     static onAuth, room metadata, private rooms,
 src/net/ColyseusTransport.ts    token + join options (by id / create private)
 src/site/pages/Lobby.tsx        quick match, browser, join by code, host private
 src/site/pages/Leaderboard.tsx  four boards with an honest empty state
-tests/account/lobby.test.ts     12 assertions
+tests/account/lobby.test.ts     13 test cases today
 ```
 
 **The career pipeline is now real, and that is what makes a leaderboard possible.**
@@ -544,7 +547,7 @@ tools/account/lobbyApi.ts       + POST /api/private-game (capability gated)
 src/site/pages/Profile.tsx      the whole catalogue, earned / locked / unearnable
 src/site/pages/Supporter.tsx    the dev grant, shown only when the server allows it
 src/game/CharacterPreview.tsx   turntable soldier, lazy island off /character
-tests/account/medals.test.ts    17 assertions
+tests/account/medals.test.ts    8 test cases today
 ```
 
 **A supporter perk was enforced by nothing.** `hostPrivateGame` was checked only by
@@ -619,6 +622,138 @@ offset the model by its own bounds centre in X and Z before rotating the pivot.
   supporter page advertises them, which is the drift `tiers.ts` exists to prevent,
   so they are named here rather than left to be discovered.
 
+## 5.7 The review pass over phases 5–7
+
+A full read of the branch before merge. Twenty-one findings, all fixed; the suite went from
+271 to 287 tests. Grouped by what the mistake actually was, because the categories repeat and
+the categories are the useful part.
+
+```
+src/account/accountClient.ts    + a non-JSON 200 is rejected, not parsed to {}
+src/account/accountTypes.ts     guestCallsign(seed, digits) — the widening is real now
+src/account/playerStats.ts      patienceScore returns null with no stance telemetry
+src/site/pages/PlayerProfile.tsx  missing / unreachable / loaded, and state resets on :id
+src/hud/InvitePanel.tsx         a failed copy says so, including with no Clipboard API
+tools/account/database.ts       + migration 7: friendships.pair_key unique; pairKey(),
+                                isUniqueViolation() shared rather than duplicated
+tools/account/repository.ts      + leaderboardDefinition() (Object.hasOwn), a reserved
+                                stem stops being derived from
+tools/account/statsRepository.ts  all three aggregates count in SQL; + players()
+tools/account/communityRepository.ts  + requireAccount(), pair_key race handled
+tools/account/api.ts            days clamped; /api/config no longer sends `tiers`
+tools/game-server/server.ts     seatReservationTimeout=45, session cap, presence by
+                                session, const accounts
+tests/account/stats-repository.test.ts  NEW — the aggregates had no coverage at all
+```
+
+**Unknown rendered as a plausible number.** The one worth leading with, because it is the rule
+this project states most often and it still got broken three times.
+
+1. **`patienceScore` answered a confident 40/100 for every player alive.** `match_participation`
+   has no writer, so all three stance counters are zero — which the formula read as "never
+   moved", giving `stillness` 0 and `restraint` a perfect 1, and `0 x 0.6 + 1 x 0.4` is 40.
+   Not a placeholder, not an obvious zero: a mid-range score that looks measured. It now
+   returns null when no stance telemetry exists at all, which the profile page already had a
+   branch for. Measured before and after rather than reasoned about.
+2. **`match_participation` has three readers and no writer**, and unlike `engagements` it is
+   *not* blocked on ballistics — it is simply unbuilt, which made it easy to read as done.
+   Now stated in the schema and in `player-statistics-design.md` §6, with the warning that
+   attaches to it: do not write a partial row to light the section up, because a row with
+   zeroed counters makes `available.objectives` true and every figure above it a false claim.
+3. **`consistency()` was being called with a permanently empty array.** It has no per-match
+   kill source yet, so the board now sends `null` explicitly instead of computing a number
+   from nothing.
+
+**A comment that documented an invariant the code did not have.** `friendships`' unique index
+was annotated "the repository normalises before inserting so a reversed duplicate cannot be
+created either". It did not normalise, and the index could not have enforced it anyway —
+`(A,B)` and `(B,A)` are different keys. Fixed with a `pair_key` column; the full argument,
+including why normalising the direction columns would have been the *wrong* fix, is in
+`community-layer-design.md` §4.
+
+**Costs that were invisible because the tables are empty.** Every one of these is a public,
+unauthenticated endpoint whose cost grows superlinearly in population, so none of them would
+have shown up in testing and all of them would have shown up at once.
+
+- `/stats/weapons` selected **every shot ever fired** and grouped it with
+  `map.set(k, [...previous, row])` — quadratic in rows per weapon on top of an unbounded read.
+- `/stats/leaderboard` ran `participation.filter(e => e.user_id === row.id)` inside
+  `players.map(...)`: O(players x rows), a hundred million comparisons for a thousand accounts
+  against a hundred thousand rows. It also passed every account id as a bound parameter, which
+  has a hard ceiling in SQLite.
+- `/stats/players` ran the entire scored board to return two columns.
+
+All three now count in SQL, and the reads that genuinely need individual values are restricted
+to `fatal = 1` rows — a kill-range median cannot be computed from counts, but it does not need
+the shots that hit nobody either. Population medians still want a nightly aggregate eventually
+(`player-statistics-design.md` §6).
+
+**A join that changed the answer, not just the cost.** `/stats/maps` attributed engagement
+ranges to a map by joining on `match_id`, which duplicated every engagement once per
+participant — so each match's ranges were weighted by how many people were in it. Measured
+against a fixture: the join read 9 engagement rows where 5 exist and reported a median of 200
+where the correct answer is 550. Attribution is now a `match_id -> map` lookup built once. Both
+numbers are pinned in `tests/account/stats-repository.test.ts`, which is new — these aggregates
+had no coverage at all.
+
+**Two states where there were three.** `PlayerProfile` mapped every failure to "No such
+player", and never reset the flag. Because React Router reuses the component across
+`/player/:id`, one bad id wedged the route: every later profile fetched fine, set its state,
+and still rendered "No such player" until a full reload. `Lobby` had already got this
+distinction right for the matchmaker ("a matchmaker that is down must not render as *no
+servers*") — the same reasoning simply had not been applied here.
+
+**A guard that could not fire, and a retry that could not escape.**
+
+- `LEADERBOARD_COLUMNS[board]` with a URL segment as the key: `__proto__` returns
+  `Object.prototype`, `constructor` and `toString` return functions. All three are
+  non-undefined, so they passed the "no such board" check and reached the query as
+  `career.undefined` — a 500 where a 404 was meant. Now `Object.hasOwn`.
+- `createGuest` retried a collision by drawing a bigger random number, which did nothing
+  whatsoever: `guestCallsign` folded it back with `% 10000`, so `guestCallsign(987654321)` and
+  `guestCallsign(4321)` were both `Recruit-4321` and all eight attempts drew from one
+  exhausted pool. It now widens the *name*.
+- `uniqueCallsign` derived a callsign from the email local part and kept the prefix on every
+  retry, so `admin@`, `administrator@`, `moderator@`, `official@` and `distantfront@` produced
+  twenty-one reserved candidates and a thrown error. **Nobody at those addresses could
+  register at all.** A reserved stem now stops being suffixed and stops being derived from.
+
+**A room that disposed before its host could reach it.** `POST /api/private-game` creates the
+room and hands back an id, and only then does the browser navigate to `/play` and lazy-load a
+~930 kB `GameApp` chunk, ~390 kB of `three`, Rapier and the terrain before it can call
+`joinById`. Colyseus arms an auto-dispose timer at creation from `seatReservationTimeout`,
+default **15 seconds** — comfortably less than a cold load, so the host arrived at a room that
+had already stopped existing.
+
+`GameRoom` now sets `seatReservationTimeout = 45` as a **subclass field**, which is the only
+place that works: `__init()` arms the first timer, it runs after the constructor and before
+`onCreate`, and `resetAutoDisposeTimeout` is private to the base class — so `onCreate` is too
+late. Verified by instrumenting a bare subclass rather than assumed: base default 15, subclass
+field 45, `__init()` arms with 45. The cost is that an empty room lingers 45 s and an abandoned
+seat reservation holds its slot that long, which with `maxClients = 64` and no rate limit on
+matchmaking is a slightly cheaper slot-holding nuisance than before. Reserving the host's seat
+server-side would be the tighter fix and needs a client change.
+
+**Smaller, all fixed:** blocking a nonexistent id returned 500 rather than 404 (foreign key,
+no existence check, while `post` and `requestFriend` both had one); `POST /api/me/tier` took
+`days` unclamped, so `1e21` made `new Date(...).toISOString()` throw; session time was
+uncapped wall-clock with no idle detection, on one of only two populated boards, so a parked
+socket outranked a player — capped at six hours, with the honest fix named; `/api/config` sent
+a `tiers` array that `ServerConfig` never declared and nothing read; the HUD's copy buttons
+promised to report a failure and reported nothing, including the insecure-origin case where
+optional chaining short-circuited the whole call; `let accounts` was assigned exactly once.
+
+**Two test files were binary to git.** `community.test.ts` and `lobby.test.ts` each embedded a
+literal NUL byte in a control-character fixture, so git classified both as binary: no
+reviewable diff, no line blame, no textual merge. The tests were correct; the bytes are now
+`\u0000`-style escapes. Worth remembering the next time a test needs a control
+character: the escape and the raw byte are identical to the runtime and very much not
+to the tooling. (Written the wrong way once more while writing this very paragraph.)
+
+**Not a finding, recorded because it was checked:** the lazy boundary holds. The entry chunk is
+115.67 kB gzipped and its only static import is the module runtime — no `three`, no
+`@react-three`, no game code reachable from `src/site`, `src/ui`, `src/account` or `src/hud`.
+
 ## 6. Retention model — what the perks actually are
 
 The brief's shape is "easy to play, better to register". Concretely:
@@ -645,9 +780,23 @@ things*, players get to *have done things*.
 
 ## 7. What this record does not settle
 
-- **Hosting.** The Colyseus server needs a home with WebSocket support; Netlify hosts only
-  the static client today. Colyseus Cloud, Fly.io and a plain VPS are all viable and the
-  choice does not affect any code in phases 1–7.
+- **Hosting: a VPS** (decided 2026-08-04, during the phase 5–7 review). One box runs the
+  Colyseus server, which already owns the Express app that serves `/auth` and `/api`, and
+  serves the built client from the same origin. That is the arrangement the code has always
+  assumed — the dev server proxies `/auth` and `/api` to :2567 precisely so that development
+  and production share one origin and no CORS or cookie behaviour exists only in one of them.
+  Colyseus Cloud and Fly.io remain viable and the choice affects no code in phases 1–7.
+
+  **The one thing a VPS deploy must get right is that `/api` and `/auth` are not swallowed by
+  the SPA fallback.** An `nginx` `try_files ... /index.html` or a catch-all rewrite that also
+  matches the API returns the client's own HTML, with status 200, to every API call. That was
+  a live crash on the static-only deploy: `safeJson` turns the HTML into `{}`, an empty object
+  passes every `response.ok` check, and the sign-in page then read `config.providers.length`
+  off `undefined` and rendered nothing at all. `accountClient.request` now rejects a 200 whose
+  content type is not JSON, so the failure surfaces as "the account service did not answer"
+  through each page's existing error path instead of a blank screen — but the proxy still has
+  to route those two prefixes to the game server, and the guard is a safety net rather than
+  the fix. `netlify.toml` is kept for static previews and is not the deployment target.
 - **Email delivery.** Password reset needs a provider. The template uses Resend. Deferred to
   phase 5, and anonymous plus OAuth sign-in both work without it.
 - **Anti-cheat.** Out of scope here and still unbuilt. Note that the input-class tag from

@@ -96,6 +96,16 @@ Presence is visible **to accepted friends only**. Broadcasting which room any na
 in is a stalking primitive, and in a game whose entire premise is concealment it is also a
 gameplay leak.
 
+**The registry is keyed by SESSION, not by account**, and that correction matters because one
+account genuinely can be in two rooms at once — `recordSession` says so itself where it
+explains why the career write is an incrementing `UPDATE` rather than read-modify-write. A flat
+`Map<accountId, roomId>` looked sufficient and was not: the second join overwrote the first,
+and then the second *leave* deleted the entry outright while the player was still in the other
+room, so a friend who was demonstrably playing read as offline. It is now
+`Map<accountId, Map<sessionId, roomId>>`, and an account disappears from presence only when
+its last session does. The endpoint still publishes one room per friend — it answers "is this
+friend in a game", and listing every room a person is in would publish more, not less.
+
 ### 3.4 Clans are founded by supporters and joined by anyone
 
 `foundClan` is already a supporter capability; joining is not gated at all. That asymmetry is
@@ -132,6 +142,7 @@ friendships
   state          'pending' | 'accepted'
   created_at     text
   responded_at   text null
+  pair_key       text unique     -- min(a,b):max(a,b). See below; added in a later migration
   unique (requester_id, addressee_id)
   index (addressee_id, state)     -- "my incoming requests"
   index (requester_id, state)
@@ -172,6 +183,34 @@ is the entire visible point of a clan.
 
 **Friendship is stored once, not twice.** A row is the edge; "my friends" queries both
 columns. Two rows per friendship is the shape that eventually disagrees with itself.
+
+**`pair_key` is what actually enforces that, and `unique (requester_id, addressee_id)` never
+could.** This was written down wrong first, and the wrong version was in a code comment
+claiming the repository normalised the order before inserting — it did not, and normalising
+the columns would not have been right either, because `friendState` reads
+`requester_id` to tell `pending_out` from `pending_in`, so the direction is load-bearing
+information rather than an artifact.
+
+The hole: `(A,B)` and `(B,A)` are *different* keys to that index. `requestFriend` reads the
+existing edge in both directions and then inserts, which is a window — two people pressing
+"add friend" in the same moment both saw no edge, both inserted, and the index accepted both.
+The result was two pending rows for one pair, `edge()` returning whichever the engine handed
+back first, and an accept that resolved one of them while the other stayed pending in the
+recipient's request list forever.
+
+So the direction columns stay authoritative and `pair_key` carries no information of its own:
+it is `min(id, id):max(id, id)`, numeric rather than lexicographic (as text, `"10"` sorts
+before `"9"`, which would give `(9,10)` and `(10,9)` two different keys and reopen the hole),
+and it exists only so the database can refuse. `requestFriend` catches the unique violation
+and returns the state the *other* request settled on, because the friendship it was asked for
+does now exist — reporting an error for something that in fact happened is the wrong answer.
+
+The migration backfills the column in application code rather than SQL, because two-argument
+`min()` is SQLite's spelling and `least()` is Postgres's, and not writing that branch twice is
+the whole reason this project uses a query builder. It creates the unique index *after* the
+backfill, so a database that already contains a duplicated pair fails the migration — which
+is correct: that is precisely the corruption the index exists to prevent, and silently
+dropping one side of it would be worse than refusing to start.
 
 ## 5. Limits, and what enforces them
 

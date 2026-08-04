@@ -174,9 +174,22 @@ it is the column that will make somebody click a stranger.
 
 ## 6. Open
 
+- **`match_participation` has no writer, and it is NOT blocked on ballistics** — it is simply
+  unbuilt, which makes it different from `engagements` and easy to mistake for done. Three
+  readers already depend on it (`playerStats`, `StatsRepository.leaderboard`, `.maps`), so
+  until a writer exists every win, loss, draw, stance duration and shot count is absent.
+  The room knows the match identity, map and join/leave times at `onLeave` already; the
+  per-player stance and shot counters are the part that does not exist.
+  Do **not** write a partial row to light the section up: a row with zeroed counters makes
+  `available.objectives` true and every figure above it a false claim. This is exactly what
+  `patienceScore` did before it was fixed — with all three stance counters at zero the formula
+  read "never moved" and answered a confident 40/100 for every player alive.
 - **Composite rank points formula.** dfhub's is not published. Ours needs to weight objective
   play and survival, not only kills, or it becomes a K/D ladder with extra steps. Unsolved.
 - **Population medians** need a nightly aggregate; computing them per request will not hold.
+  The per-request cost is now counts-in-SQL plus one read of the FATAL engagement rows
+  (`/stats/weapons`, `/stats/maps`), which is bounded by total kills rather than total shots —
+  enough for a small population and still the next thing to materialise.
 - **Game modes.** Zone and flag metrics assume King of the Hill and Capture the Flag exist.
   Neither is built; the columns are specified so the schema does not need migrating when they
   are.

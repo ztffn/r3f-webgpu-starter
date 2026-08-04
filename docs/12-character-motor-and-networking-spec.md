@@ -17,7 +17,8 @@ implementation behind it, and a two-client session harness.
 
 - Playable in the game with `?scene=motor`.
 - Two browser clients share one authoritative room over real sockets.
-- 45 headless tests under `tests/motor/`, running in bare Node with no browser globals.
+- 74 headless tests under `tests/motor/`, running in bare Node with no browser globals
+  (287 across the whole suite as of 2026-08-04; `npm test`).
 
 Weapon handling reads the motor: `?scene=scope&motor=1` carries the weapon on a collided
 body, and `WeaponHandlingContext` gets stance, planar speed and real grounded state from
@@ -26,8 +27,19 @@ than the camera, aim intent and reloading slow the player, and sprinting refuses
 differentiation cannot tell you the player is airborne, so before this `grounded` was
 whatever the app's fly/on-foot toggle said and `airborneDispersionRadians` never applied.
 
-What does **not** exist: matchmaking, reconnection, persistence, anti-cheat, vehicles, and
-animation. On the weapon side, recoil does not push the body.
+What does **not** exist: reconnection, anti-cheat, and vehicles. On the weapon side, recoil
+does not push the body.
+
+Matchmaking, persistence and animation have since landed and are owned elsewhere:
+matchmaking and accounts by `plans/2026-08-04-web-platform-and-ui-design.md` (a lobby, a
+server browser, `filterBy(["inputClass"])`, and an account resolved in a **static**
+`Room.onAuth`), and the character by
+`plans/2026-08-03-character-animation-session-handoff.md`. What that adds to *this*
+document's scope is small and listed where it belongs: `onLeave` credits the session to a
+career (capped — see the web record §5.7), presence is a session-keyed module-scope registry
+read only by the friends endpoint, and §5 invariant 10 covers room disposal. **Auth on join is
+optional by design and is not a gameplay trust boundary** — no token joins as nobody, so every
+dev URL in this document keeps working unchanged.
 
 ## 2. Module map
 
@@ -130,6 +142,21 @@ aim regardless of how many packets were lost.
    nothing gameplay-side may read it as ADS state.
 9. **Parameter properties are forbidden.** `--experimental-strip-types` runs in strip-only
    mode and rejects them outright. Already documented in `10-...md` §9.1; it bit again here.
+10. **A room created with nobody in it disposes after `seatReservationTimeout`, default 15
+    seconds** (2026-08-04). Colyseus arms an auto-dispose timer inside `Room.__init()` and
+    fires it if no client and no *reserved seat* exists by then. This is invisible until
+    something creates a room ahead of the client that will join it, which is exactly what
+    `POST /api/private-game` does: it creates the room, hands back an id, and only then does
+    the browser navigate to `/play` and lazy-load ~930 kB of `GameApp`, ~390 kB of `three`,
+    Rapier and the terrain before calling `joinById`. On a cold cache the host arrived at a
+    room that no longer existed. `GameRoom` sets `seatReservationTimeout = 45`.
+
+    **It has to be a subclass FIELD.** `__init()` runs after the constructor and before
+    `onCreate`, so a field initialiser is the last point that can change the value it reads;
+    assigning in `onCreate` is too late, and `resetAutoDisposeTimeout` is private to the base
+    class. Verified by instrumenting a bare subclass — base default 15, field 45, `__init()`
+    arms with 45 — rather than inferred from field-initialiser ordering. The cost is that an
+    empty room lingers 45 s and an unconsumed seat reservation holds its slot that long.
 
 ## 6. Traps already paid for
 

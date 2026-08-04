@@ -475,8 +475,8 @@ claim that nobody has ever killed anyone.
   those are exactly the files feat/server-ballistics is working in.
   Sent to every member, not only the creator: anyone already inside used the code to
   get there, so the only person who lacks it is the host. Verified against a live
-  server — a private room delivers `{label, joinCode}`, a public room delivers
-  `{label}` and no code, a second member joining by id gets the same code, and the
+  server — a private room delivers `{joinCode}`, a public room delivers `{}` and no
+  code, a second member joining by id gets the same code, and the
   code shown in the HUD resolves through `/api/join-code` while the room stays
   absent from the public listing. `InvitePanel` is the ONLY HUD element with
   `pointer-events: auto`; `.hud-root` is click-through so a look-drag never catches
@@ -487,6 +487,51 @@ claim that nobody has ever killed anyone.
   capabilities. That is phase 6b.
 - **Kills and deaths.** Waiting on feat/server-ballistics; `recordLongestShot`
   exists and is tested but has no caller yet.
+
+## 5.5 The simplify pass after phase 6
+
+A reviewed pass over phases 1–6, applied as separate commits. Four of its findings
+changed where a fact lives rather than what the code does, and those are the ones
+worth recording, because the next person to add a board or a page needs to know
+which file is now authoritative.
+
+- **`src/site/useAsyncAction.ts`** is the busy/error/done state for anything behind
+  a submit button. Five pages had hand-rolled it and had already drifted. `run(kind,
+  action)` never rejects — a rejected promise out of an event handler is an
+  unhandled rejection nobody sees — and pages that need their own wording pass a
+  `describe` defined at module scope so the callback identity stays stable.
+- **`src/account/lobby.ts`** is the one declaration of `ServerListing`,
+  `BoardSummary`, `LeaderboardRow`, `Leaderboard` and `normaliseJoinCode`. They were
+  written out verbatim on both sides of the client/server line and agreed only by
+  hand. It sits beside `accountTypes.ts` rather than inside it on the same line the
+  server already draws between `lobbyApi.ts` and `api.ts`: these describe the
+  matchmaker's view, not an account. **`normaliseJoinCode` had to move out of
+  `tools/`** — `src/site/` cannot import from there, which is exactly why a third
+  copy had grown in the lobby page. Minting a code stays server-side; it needs
+  `node:crypto`.
+- **`LEADERBOARD_COLUMNS` now carries `unit` and `populated`.** Both had been
+  open-coded conditionals in the route — twice — with the display unit a third
+  conditional keyed on the board *id* in `Leaderboard.tsx`. Adding a board is now
+  one entry in one table, and a renamed board id can no longer silently print raw
+  seconds.
+- **Weapon names come from `WEAPON_DEFINITIONS.displayName`** via
+  `weaponLabel()`. The character editor had invented a second set — "Bolt-action
+  rifle" where the HUD says "Sniper" — so the same rifle had two names depending on
+  the screen. Adopting the table changed the visible labels to Sniper / M4 / Glock.
+
+Also applied: one `requireAccount(repository)` middleware in place of the same
+resolve-and-401 repeated across three routes; `/api/me` and `publicProfile` issue
+their independent reads with `Promise.all` and no longer await `touch`; a new
+appended migration indexes the four career columns the boards rank by (verified —
+the planner now uses a covering index instead of a scan and sort); and three dead
+things are gone: `RoomInfo.label`, `WeaponPanel`'s always-null `utility` with its
+`.hud-utility` rule, and `ColyseusTransport.get roomInfo()`.
+
+**Deliberately not "fixed":** `recordLongestShot` has no caller because it is a
+tested seam awaiting feat/server-ballistics; `hudSignals.ts` must not import
+Three.js because a Node test imports it; and `roomInfo` living on the concrete
+`ColyseusTransport` rather than on `ClientTransport` is correct, because that
+interface is shared with the loopback and websocket doubles the Node tests drive.
 
 ## 6. Retention model — what the perks actually are
 

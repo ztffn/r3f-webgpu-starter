@@ -211,3 +211,43 @@ export function blendedStanceDimension(
 export function eyeHeightFor(state: MotorState, tuning: MotorTuning): number {
   return blendedStanceDimension(state, tuning, "eye");
 }
+
+/**
+ * The unit direction a pair of look angles points along.
+ *
+ * THE ONE PLACE this convention is written down, and it has to be: yaw 0 faces -Z
+ * with +yaw about +Y, so forward is `(-sin, -cos)` in X/Z. Getting the X sign wrong
+ * mirrors every turn, and it mirrors it identically on both sides of the wire, so a
+ * client and server that both got it wrong agree with each other and disagree with
+ * the picture. `CharacterMotor.integrateVelocity` derives movement from the same rule.
+ */
+export function lookDirection(
+  yawRadians: number,
+  pitchRadians: number,
+  out: Vec3 = { x: 0, y: 0, z: 0 }
+): Vec3 {
+  const cosPitch = Math.cos(pitchRadians);
+  out.x = -Math.sin(yawRadians) * cosPitch;
+  out.y = Math.sin(pitchRadians);
+  out.z = -Math.cos(yawRadians) * cosPitch;
+  return out;
+}
+
+/**
+ * The look angles a direction corresponds to — the exact inverse of
+ * `lookDirection`, so a shot aimed by a Vector3 can be claimed as two int16 angles.
+ *
+ * The direction need not be normalised for the yaw, but the pitch does, so it is
+ * normalised here rather than trusting the caller.
+ */
+export function lookAngles(x: number, y: number, z: number): {
+  yawRadians: number;
+  pitchRadians: number;
+} {
+  const length = Math.hypot(x, y, z);
+  if (length < 1e-9) return { yawRadians: 0, pitchRadians: 0 };
+  return {
+    yawRadians: Math.atan2(-x, -z),
+    pitchRadians: Math.asin(Math.max(-1, Math.min(1, y / length))),
+  };
+}

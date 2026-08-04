@@ -6,7 +6,7 @@ import {
   LoadoutSystem,
   type LoadoutEvent,
 } from "../../src/fps/weapons/LoadoutSystem.ts";
-import type { WeaponCommand, WeaponDefinition } from "../../src/fps/weapons/WeaponDefinition.ts";
+import type { WeaponCommand, WeaponDefinition } from "../../src/combat/WeaponDefinition.ts";
 import { WeaponSystem, type WeaponEvent } from "../../src/fps/weapons/WeaponSystem.ts";
 import type { WeaponHandlingContext } from "../../src/fps/weapons/WeaponHandling.ts";
 import {
@@ -15,12 +15,12 @@ import {
   SAW_DEFINITION,
   SNIPER_DEFINITION,
   WEAPON_DEFINITIONS,
-} from "../../src/fps/weapons/weaponDefinitions.ts";
+} from "../../src/combat/weaponDefinitions.ts";
 import { createDevelopmentLoadout } from "../../src/fps/weapons/developmentLoadout.ts";
 import {
   ammunitionFromSearch,
   DEFAULT_AMMUNITION,
-} from "../../src/fps/weapons/AmmunitionDefinition.ts";
+} from "../../src/combat/AmmunitionDefinition.ts";
 import { scopeAdjustmentActionForKey } from "../../src/fps/core/ScopeAdjustmentController.ts";
 import { weaponPresentationFor } from "../../src/fps/presentation/WeaponPresentationDefinition.ts";
 

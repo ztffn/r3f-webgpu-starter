@@ -1,12 +1,12 @@
-import type * as THREE from "three/webgpu";
-import type { WorldHitKind } from "../core/WorldQuery";
-import type { ImpactEvent } from "./ImpactEvent";
+import type { WorldHitKind } from "./WorldQuery.ts";
+import type { ImpactEvent } from "./ImpactEvent.ts";
+import type { Vec3Like } from "./math.ts";
 
 export type ShotTraceMode = "hitscan" | "ballistic";
 
 export interface ShotImpact {
-  readonly point: THREE.Vector3;
-  readonly normal: THREE.Vector3 | null;
+  readonly point: Vec3Like;
+  readonly normal: Vec3Like | null;
   readonly kind: WorldHitKind;
   readonly targetId: string | null;
   readonly objectName: string;
@@ -18,12 +18,12 @@ export interface ShotTrace {
   readonly sourceId: string;
   readonly mode: ShotTraceMode;
   /** Optical aim after sway and pre-shot recoil, before the scope turret. */
-  readonly sightDirection: THREE.Vector3;
+  readonly sightDirection: Vec3Like;
   /** Mean bore: the sightline after elevation zero and windage, before spread. */
-  readonly boreDirection: THREE.Vector3;
+  readonly boreDirection: Vec3Like;
   /** Accepted projectile direction: the mean bore plus this shot's dispersion. */
-  readonly initialDirection: THREE.Vector3;
-  readonly points: readonly THREE.Vector3[];
+  readonly initialDirection: Vec3Like;
+  readonly points: readonly Vec3Like[];
   readonly interactions: readonly ImpactEvent[];
   readonly impact: ShotImpact | null;
   readonly flightTimeSeconds: number;

@@ -1,13 +1,13 @@
-import type { BallisticEnvironment } from "../combat/BallisticEnvironment";
-import type { ShotResult } from "../combat/ShotResult";
-import type { ShotTraceMode } from "../combat/ShotTrace";
+import type { BallisticEnvironment } from "../../combat/BallisticEnvironment.ts";
+import type { ShotResult } from "../../combat/ShotResult.ts";
+import type { ShotTraceMode } from "../../combat/ShotTrace.ts";
 import type { PlayerStance } from "../core/PlayerMotor";
 import type { ScopeAdjustmentSnapshot } from "../core/ScopeAdjustmentController";
 import type { WeaponSnapshot } from "../weapons/WeaponSystem";
-import type { AmmunitionId } from "../weapons/AmmunitionDefinition";
-import type { PenetrationOutcome } from "../combat/PenetrationResolver";
-import type { SurfaceId } from "../combat/SurfaceProfile";
-import type { ImpactEvent } from "../combat/ImpactEvent";
+import type { AmmunitionId } from "../../combat/AmmunitionDefinition.ts";
+import type { PenetrationOutcome } from "../../combat/PenetrationResolver.ts";
+import type { SurfaceId } from "../../combat/SurfaceProfile.ts";
+import type { ImpactEvent } from "../../combat/ImpactEvent.ts";
 
 export type CombatRangeKind = "terrain" | "target" | "world";
 

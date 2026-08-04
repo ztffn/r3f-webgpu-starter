@@ -25,6 +25,9 @@ import {
   decodeSnapshot,
   decodeWelcome,
   encodeCommands,
+  encodeFire,
+  encodeReload,
+  encodeSelectWeapon,
   encodeSetVisualDial,
   packetTypeOf,
   quantiseCommand,
@@ -40,6 +43,8 @@ export interface RemotePlayer {
   /** Interpolated presentation yaw; the wire target is `state.yawRadians`. */
   yawRadians: number;
   state: MotorState;
+  /** Server-owned hit points. 0 is dead — this is what will drive a death clip. */
+  health: number;
 }
 
 export interface GameClientOptions {
@@ -83,6 +88,26 @@ export class GameClient {
   replayedCommands = 0;
   /** The transport dropped. Prediction keeps running locally; sends stay gated. */
   connectionLost = false;
+
+  /**
+   * The local player's hit points, as the server last reported them.
+   *
+   * NOT PREDICTED, and deliberately so. Prediction exists for things a client can
+   * derive from its own inputs; whether somebody else's round arrived is not one of
+   * them, and a mispredicted death is the worst correction in a shooter. This lags
+   * by up to one patch and is always the truth.
+   */
+  health = 0;
+  /** Own shot counter, echoed in each claim so a resend cannot fire twice. */
+  private fireSequence = 0;
+  /** Own weapon-claim counter, shared by select and reload for the same reason. */
+  private weaponSequence = 0;
+  /**
+   * Server tick of the last snapshot applied — what remote players on screen
+   * are currently showing, since remotes chase the latest snapshot. Sent with
+   * each fire claim as the lag-compensation rewind target.
+   */
+  private lastSnapshotTick = 0;
 
   /**
    * The room's weather and dials, or null until the server has said.
@@ -198,6 +223,53 @@ export class GameClient {
     this.transport.send(encodeSetVisualDial(id, value));
   }
 
+  /**
+   * Tells the server this client fired, and along which direction.
+   *
+   * INTENT ONLY. The origin is not sent — the server uses the eye position its own
+   * simulation holds, so there is nowhere to put a spoofed one — and the direction
+   * is clamped server-side against the look angles it already has. Nothing about the
+   * outcome is decided here: damage arrives in a later snapshot, or not at all.
+   *
+   * Local impact effects and tracers stay client-side presentation and are unchanged;
+   * this is only what makes another player's health fall.
+   */
+  fire(yawRadians: number, pitchRadians: number): void {
+    if (this.localId === null || !this.transport.connected) return;
+    this.fireSequence += 1;
+    this.transport.send(
+      encodeFire({
+        tick: this.tick,
+        sequence: this.fireSequence,
+        yawRadians,
+        pitchRadians,
+        // What the shooter was looking at: remotes render the latest applied
+        // snapshot, so its tick is the honest rewind target.
+        viewTick: this.lastSnapshotTick,
+      })
+    );
+  }
+
+  /**
+   * Tells the server which weapon is now in hand. A CLAIM the server re-times
+   * with its own switch delay — damage keys off the server's record, so a
+   * client that skips this simply keeps firing its old gun's ballistics.
+   */
+  selectWeapon(weaponIndex: number): void {
+    if (this.localId === null || !this.transport.connected) return;
+    this.weaponSequence += 1;
+    this.transport.send(
+      encodeSelectWeapon({ sequence: this.weaponSequence, weaponIndex })
+    );
+  }
+
+  /** Tells the server a reload started; rounds move on the server's timer. */
+  reload(): void {
+    if (this.localId === null || !this.transport.connected) return;
+    this.weaponSequence += 1;
+    this.transport.send(encodeReload(this.weaponSequence));
+  }
+
   private receive(bytes: Uint8Array): void {
     const type = packetTypeOf(bytes);
     if (type === PacketType.Welcome) {
@@ -218,8 +290,10 @@ export class GameClient {
     if (type !== PacketType.Snapshot) return;
 
     const snapshot = decodeSnapshot(bytes);
+    this.lastSnapshotTick = snapshot.tick;
     for (const player of snapshot.players) {
       if (player.id === this.playerId) {
+        this.health = player.health;
         this.reconcile(player.state, snapshot.acknowledgedCommandTick);
         continue;
       }
@@ -230,9 +304,11 @@ export class GameClient {
           position: { ...player.state.position },
           yawRadians: player.state.yawRadians,
           state: player.state,
+          health: player.health,
         });
       } else {
         existing.state = player.state;
+        existing.health = player.health;
       }
     }
 

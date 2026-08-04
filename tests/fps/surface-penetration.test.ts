@@ -5,16 +5,16 @@ import { Object3D, Vector3 } from "three/webgpu";
 import {
   BallisticProjectileSystem,
   type BallisticResult,
-} from "../../src/fps/combat/BallisticProjectileSystem.ts";
-import type { BallisticEnvironment } from "../../src/fps/combat/BallisticEnvironment.ts";
-import { HealthDamageable } from "../../src/fps/combat/Damageable.ts";
-import { resolvePenetration } from "../../src/fps/combat/PenetrationResolver.ts";
-import { SURFACE_PROFILES, type SurfaceId } from "../../src/fps/combat/SurfaceProfile.ts";
+} from "../../src/combat/BallisticProjectileSystem.ts";
+import type { BallisticEnvironment } from "../../src/combat/BallisticEnvironment.ts";
+import { HealthDamageable } from "../../src/combat/Damageable.ts";
+import { resolvePenetration } from "../../src/combat/PenetrationResolver.ts";
+import { SURFACE_PROFILES, type SurfaceId } from "../../src/combat/SurfaceProfile.ts";
 import type { WorldQuery } from "../../src/fps/core/WorldQuery.ts";
 import {
   AMMUNITION_DEFINITIONS,
   type AmmunitionId,
-} from "../../src/fps/weapons/AmmunitionDefinition.ts";
+} from "../../src/combat/AmmunitionDefinition.ts";
 
 const STILL: BallisticEnvironment = {
   gravity: { x: 0, y: 0, z: 0 },

@@ -1,5 +1,5 @@
 import type { PlayerStance } from "../core/PlayerMotor.ts";
-import type { WeaponAccuracyDefinition } from "./WeaponDefinition.ts";
+import type { WeaponAccuracyDefinition } from "../../combat/WeaponDefinition.ts";
 
 export interface WeaponHandlingContext {
   readonly stance: PlayerStance;

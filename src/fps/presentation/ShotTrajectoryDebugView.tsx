@@ -3,7 +3,7 @@ import * as THREE from "three/webgpu";
 import { LineGeometry } from "three/addons/lines/LineGeometry.js";
 import { Line2 } from "three/addons/lines/webgpu/Line2.js";
 import { shotDebugStore } from "../debug/ShotDebugStore";
-import type { ShotTrace } from "../combat/ShotTrace";
+import type { ShotTrace } from "../../combat/ShotTrace.ts";
 
 const INITIAL_AIM_LENGTH = 25;
 const NORMAL_LENGTH = 1.25;
@@ -24,7 +24,10 @@ function makeLine(color: THREE.ColorRepresentation, widthPixels: number): Line2 
   return line;
 }
 
-function setLinePoints(line: Line2, points: readonly THREE.Vector3[]): void {
+function setLinePoints(
+  line: Line2,
+  points: readonly { x: number; y: number; z: number }[]
+): void {
   const positions = new Float32Array(points.length * 3);
   for (let index = 0; index < points.length; index += 1) {
     const point = points[index];
@@ -127,24 +130,56 @@ export function ShotTrajectoryDebugView() {
       group.visible = true;
       setLinePoints(path, trace.points);
 
-      const start = trace.points[0];
-      const aimEnd = start.clone().addScaledVector(trace.sightDirection, INITIAL_AIM_LENGTH);
+      const start = new THREE.Vector3(
+        trace.points[0].x,
+        trace.points[0].y,
+        trace.points[0].z
+      );
+      const aimEnd = start.clone().addScaledVector(
+        new THREE.Vector3(
+          trace.sightDirection.x,
+          trace.sightDirection.y,
+          trace.sightDirection.z
+        ),
+        INITIAL_AIM_LENGTH
+      );
       setLinePoints(initialAim, [start, aimEnd]);
       // The yellow line is the turret-adjusted mean bore, not the dispersed
       // projectile direction; drawing the latter would report random spread as
       // scope elevation and windage.
-      const boreEnd = start.clone().addScaledVector(trace.boreDirection, INITIAL_AIM_LENGTH);
+      const boreEnd = start.clone().addScaledVector(
+        new THREE.Vector3(
+          trace.boreDirection.x,
+          trace.boreDirection.y,
+          trace.boreDirection.z
+        ),
+        INITIAL_AIM_LENGTH
+      );
       setLinePoints(bore, [start, boreEnd]);
 
       const resolvedImpact = trace.impact;
       impact.visible = resolvedImpact !== null;
       normal.visible = resolvedImpact?.normal != null;
       if (resolvedImpact) {
-        impact.position.copy(resolvedImpact.point);
+        const impactPoint = new THREE.Vector3(
+          resolvedImpact.point.x,
+          resolvedImpact.point.y,
+          resolvedImpact.point.z
+        );
+        impact.position.copy(impactPoint);
         if (resolvedImpact.normal) {
           setLinePoints(normal, [
-            resolvedImpact.point,
-            resolvedImpact.point.clone().addScaledVector(resolvedImpact.normal, NORMAL_LENGTH),
+            impactPoint,
+            impactPoint
+              .clone()
+              .addScaledVector(
+                new THREE.Vector3(
+                  resolvedImpact.normal.x,
+                  resolvedImpact.normal.y,
+                  resolvedImpact.normal.z
+                ),
+                NORMAL_LENGTH
+              ),
           ]);
         }
       }

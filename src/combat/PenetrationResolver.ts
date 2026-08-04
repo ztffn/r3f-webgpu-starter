@@ -1,8 +1,16 @@
-import type { AmmunitionDefinition } from "../weapons/AmmunitionDefinition";
-import { kineticEnergyJoules } from "../weapons/AmmunitionDefinition.ts";
-import type { SurfaceProfile } from "./SurfaceProfile";
+import type { AmmunitionDefinition } from "./AmmunitionDefinition.ts";
+import { kineticEnergyJoules } from "./AmmunitionDefinition.ts";
+import type { SurfaceProfile } from "./SurfaceProfile.ts";
+import { clamp } from "./math.ts";
 
 export type PenetrationOutcome = "penetrated" | "stopped";
+
+/**
+ * How far past the computed exit a continuing round is advanced. Shared by the
+ * projectile integrator and the hitscan walk so a handed-off round has crossed
+ * exactly the same material either way.
+ */
+export const EXIT_EPSILON_METRES = 0.002;
 
 export interface PenetrationInput {
   readonly ammunition: AmmunitionDefinition;
@@ -19,6 +27,20 @@ export interface PenetrationResult {
   readonly energyBeforeJoules: number;
   readonly energyAfterJoules: number;
   readonly speedAfterMetresPerSecond: number;
+}
+
+/**
+ * Nominal-damage multiplier for a contact, from energy before that interaction
+ * (docs/11 §12.3). Full damage until energy falls below 70% of muzzle energy,
+ * never below the 10% floor. ONE implementation — the projectile integrator and
+ * the near-field hitscan walk both call this, so client and server damage
+ * cannot drift apart.
+ */
+export function terminalDamageScale(
+  energyBeforeJoules: number,
+  muzzleEnergyJoules: number
+): number {
+  return clamp(energyBeforeJoules / (muzzleEnergyJoules * 0.7), 0.1, 1);
 }
 
 /** Pure deterministic terminal model shared by live projectiles and tests. */

@@ -1,8 +1,8 @@
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo } from "react";
 import * as THREE from "three/webgpu";
-import type { ImpactEvent } from "../combat/ImpactEvent";
-import { SURFACE_PROFILES, type ImpactSoundKind } from "../combat/SurfaceProfile";
+import type { ImpactEvent } from "../../combat/ImpactEvent.ts";
+import { SURFACE_PROFILES, type ImpactSoundKind } from "../../combat/SurfaceProfile.ts";
 import { impactEffectBus } from "./ImpactEffectBus";
 
 const PARTICLE_CAPACITY = 384;
@@ -78,7 +78,7 @@ class ImpactParticlePool {
 
   private emitAt(
     event: ImpactEvent,
-    point: THREE.Vector3,
+    point: { x: number; y: number; z: number },
     count: number,
     normalDirection: 1 | -1
   ): void {

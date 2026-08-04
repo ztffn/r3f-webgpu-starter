@@ -1,4 +1,4 @@
-import type { ImpactEvent } from "../combat/ImpactEvent";
+import type { ImpactEvent } from "../../combat/ImpactEvent.ts";
 
 type Listener = (event: ImpactEvent) => void;
 

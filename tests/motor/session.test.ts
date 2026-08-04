@@ -19,6 +19,7 @@ import {
   decodeSnapshot,
   decodeWelcome,
   encodeCommands,
+  encodeFire,
   encodeSnapshot,
   quantiseCommand,
 } from "../../src/net/SnapshotCodec.ts";
@@ -33,6 +34,7 @@ import {
   DEFAULT_MOTOR_TUNING,
   MotorInput,
   createMotorState,
+  lookAngles,
   type MotorHeightSource,
 } from "../../src/motor/MotorTypes.ts";
 
@@ -53,6 +55,8 @@ interface SessionOptions {
   readonly conditions?: LinkConditions;
   readonly weatherIndex?: number;
   readonly allowClientVisualDials?: boolean;
+  readonly spawn?: (seat: number) => { x: number; y?: number; z: number };
+  readonly respawnSeconds?: number;
 }
 
 /** An options bag rather than positionals: `makeSession(2, {}, 0, true)` told a
@@ -68,12 +72,21 @@ function makeSession(clientCount: number, options: SessionOptions = {}) {
     // apart, or "refused" could be passing for the wrong reason.
     clampVisualDial,
     allowClientVisualDials: options.allowClientVisualDials ?? false,
+    ...(options.spawn !== undefined ? { spawn: options.spawn } : {}),
+    ...(options.respawnSeconds !== undefined
+      ? { respawnSeconds: options.respawnSeconds }
+      : {}),
   });
-  const clients = Array.from({ length: clientCount }, () => {
-    const transport = network.connect(options.conditions ?? {});
-    return new GameClient(RAPIER, createMotorWorld(RAPIER), GROUND, transport);
-  });
-  return { network, server, clients };
+  // The transports are returned as well as the clients, so a test can resend raw
+  // bytes on an EXISTING connection. Opening a fresh one is a different peer, which
+  // makes it impossible to test that a replayed packet from a known player is dropped.
+  const transports = Array.from({ length: clientCount }, () =>
+    network.connect(options.conditions ?? {})
+  );
+  const clients = transports.map(
+    (transport) => new GameClient(RAPIER, createMotorWorld(RAPIER), GROUND, transport)
+  );
+  return { network, server, clients, transports };
 }
 
 /** Runs the session for `ticks`, letting each client supply its own input. */
@@ -306,6 +319,278 @@ test("a client cannot dial a room that did not opt in", () => {
   assert.equal(session.server.setVisualDial(FOG_FAR, 500), 500);
   drive(session, 4, () => ({ buttons: 0, yaw: 0 }));
   assert.equal(session.clients[0]!.getRoomState()?.dials.get(FOG_FAR), 500);
+});
+
+test("a shot is resolved by the server, and damage reaches both clients", () => {
+  // Two players facing each other on flat ground. Client 0 fires; nothing about the
+  // outcome is client-side, so the only thing that can make client 1's health fall
+  // is the server having resolved the shot itself — with the BALLISTIC model, so
+  // the damage below is the Glock's 9mm at 8 m (full nominal 42, energy well above
+  // the 70% knee), not a flat constant.
+  const session = makeSession(2, {
+    spawn: (seat) => ({ x: seat === 1 ? 0 : 8, z: 0 }),
+    respawnSeconds: 0,
+  });
+  // Yaw 0 faces -Z and forward is (-sin, -cos), so +X — where player 2 stands — is
+  // -90 degrees. The shooter must actually LOOK there: the server clamps a claim to
+  // a cone around the look angles it holds, so a claim alone cannot aim the shot.
+  const towardVictim = -Math.PI / 2;
+  const aimed = (index: number) => ({ buttons: 0, yaw: index === 0 ? towardVictim : 0 });
+  drive(session, 4, aimed);
+
+  const [shooter, victim] = session.clients as [GameClient, GameClient];
+  assert.equal(shooter.health, 100, "the client was never told its own health");
+  assert.equal(session.server.healthOf(2), 100);
+
+  // The sidearm, via the server-owned loadout record: the sniper the peer spawns
+  // with would simply kill at 8 m, and this test wants a survivor to interrogate.
+  // The switch is re-timed server-side (0.35 s = 21 ticks), so firing before it
+  // completes would be refused — drive well past it.
+  shooter.selectWeapon(2);
+  drive(session, 25, aimed);
+
+  shooter.fire(towardVictim, 0);
+  drive(session, 4, aimed);
+
+  assert.equal(session.server.shotsHit, 1, "the server did not resolve the shot as a hit");
+  assert.equal(session.server.healthOf(2), 58, "ballistic damage was not applied on the server");
+  assert.equal(victim.health, 58, "the victim was not told it had been hit");
+  // The shooter sees the victim's health too, which is what a death clip will read.
+  const asSeenByShooter = [...shooter.remotePlayers].find((remote) => remote.id === 2);
+  assert.equal(asSeenByShooter?.health, 58, "a remote's health did not reach the other client");
+
+  // Turning away and firing misses, and the miss is counted rather than lost.
+  // The Glock's cadence is 9 ticks; 12 ticks of turning is past it.
+  const resolvedBefore = session.server.shotsResolved;
+  drive(session, 12, () => ({ buttons: 0, yaw: towardVictim + Math.PI }));
+  shooter.fire(towardVictim + Math.PI, 0);
+  drive(session, 4, () => ({ buttons: 0, yaw: towardVictim + Math.PI }));
+  assert.equal(session.server.shotsResolved, resolvedBefore + 1);
+  assert.equal(session.server.shotsHit, 1, "a shot fired backwards still hit");
+  assert.equal(session.server.healthOf(2), 58);
+});
+
+test("fire claims are gated by the server-owned loadout: cadence and magazine", () => {
+  const session = makeSession(2, {
+    spawn: (seat) => ({ x: seat === 1 ? 0 : 8, z: 0 }),
+    respawnSeconds: 0,
+  });
+  const towardVictim = -Math.PI / 2;
+  const aimed = (index: number) => ({ buttons: 0, yaw: index === 0 ? towardVictim : 0 });
+  drive(session, 4, aimed);
+  const shooter = session.clients[0]!;
+
+  // The spawn weapon is the sniper: 48 rounds per minute is 75 ticks. A second
+  // claim right behind the first is a rate a human trigger cannot produce on
+  // that weapon, so the server must refuse it — otherwise a modified client
+  // fires a bolt rifle like a machine gun.
+  shooter.fire(towardVictim, 0);
+  drive(session, 2, aimed);
+  assert.equal(session.server.healthOf(2), 0, "a .308 at 8 m should simply kill");
+  const rejectedBefore = session.server.fireClaimsRejected;
+  const resolvedBefore = session.server.shotsResolved;
+  shooter.fire(towardVictim, 0);
+  drive(session, 2, aimed);
+  assert.equal(session.server.shotsResolved, resolvedBefore, "a cadence claim was resolved");
+  assert.ok(
+    session.server.fireClaimsRejected > rejectedBefore,
+    "firing far above the weapon's cadence was not refused"
+  );
+
+  // The magazine is server bookkeeping too: five sniper rounds, then every claim
+  // is refused until a Reload claim has run the server's own reload clock.
+  drive(session, 80, aimed);
+  for (let round = 1; round < 5; round += 1) {
+    shooter.fire(towardVictim, 0);
+    drive(session, 80, aimed);
+  }
+  const emptyRejected = session.server.fireClaimsRejected;
+  shooter.fire(towardVictim, 0);
+  drive(session, 4, aimed);
+  assert.ok(
+    session.server.fireClaimsRejected > emptyRejected,
+    "an empty magazine still fired"
+  );
+
+  // Reload, wait out the server's timer, and the weapon speaks again.
+  shooter.reload();
+  drive(session, 4.2 * 60 + 10, aimed);
+  const resolvedAfterReload = session.server.shotsResolved;
+  shooter.fire(towardVictim, 0);
+  drive(session, 4, aimed);
+  assert.equal(
+    session.server.shotsResolved,
+    resolvedAfterReload + 1,
+    "a reloaded weapon did not fire"
+  );
+});
+
+test("damage falls with distance and arrives with the round's flight time", () => {
+  // 300 m apart on flat ground. This is the beyond-horizon branch: the 5.56
+  // horizon is ~93 m, so the round crosses it as hitscan and flies the rest as
+  // an integrated projectile — drop, drag and all — against live state.
+  const session = makeSession(2, {
+    spawn: (seat) => ({ x: seat === 1 ? -150 : 150, z: 0 }),
+    respawnSeconds: 0,
+  });
+  const towardVictim = -Math.PI / 2;
+  const aimed = (index: number) => ({ buttons: 0, yaw: index === 0 ? towardVictim : 0 });
+  drive(session, 4, aimed);
+  // The M4: 5.56 keeps the expected number away from both the full-damage knee
+  // and an outright kill, so the falloff is visible in the health value.
+  session.clients[0]!.selectWeapon(1);
+  drive(session, 25, aimed);
+
+  session.clients[0]!.fire(towardVictim, 0);
+  // ~0.36 s of flight at 60 Hz is ~22 ticks. Four ticks in, the round is mid-air:
+  // damage arriving instantly at 300 m would mean the hitscan branch overreached.
+  drive(session, 4, aimed);
+  assert.equal(session.server.healthOf(2), 100, "damage landed before the round could arrive");
+
+  drive(session, 40, aimed);
+  const health = session.server.healthOf(2)!;
+  assert.ok(health < 100, "the round never arrived");
+  assert.ok(health > 0, "a 5.56 at 300 m should wound, not kill");
+  // At 300 m a 5.56 retains roughly half its energy, so §12.3 scales the nominal
+  // 68 down hard. Wide bounds on purpose: this pins the SHAPE of the model —
+  // less than nominal, more than the floor — not one calibration number.
+  const damage = 100 - health;
+  assert.ok(damage > 20 && damage < 62, `expected mid-range falloff damage, got ${damage}`);
+});
+
+test("the near field is lag compensated: a claim lands where the shooter saw the target", () => {
+  const session = makeSession(2, {
+    spawn: (seat) => ({ x: seat === 1 ? 0 : 8, z: 0 }),
+    respawnSeconds: 0,
+  });
+  const shooterAim = { yaw: -Math.PI / 2 };
+  const input = (index: number, sprinting: boolean) => ({
+    buttons: index === 1 && sprinting ? MotorInput.Forward | MotorInput.Sprint : 0,
+    yaw: index === 0 ? shooterAim.yaw : 0,
+  });
+  // Let the victim reach sprint speed first, so the displacement between the
+  // seen tick and the fire tick is a full capsule diameter and more.
+  drive(session, 40, (index) => input(index, true));
+
+  const seenTick = session.server.room.tick;
+  const seen = { ...session.server.room.get("2")!.state.position };
+  // The shooter aims at the position it SEES — the victim at seenTick.
+  const aim = lookAngles(seen.x - 0, 0, seen.z - 0);
+  shooterAim.yaw = aim.yawRadians;
+  drive(session, 12, (index) => input(index, true));
+
+  const now = session.server.room.get("2")!.state.position;
+  const displacement = Math.hypot(now.x - seen.x, now.z - seen.z);
+  assert.ok(
+    displacement > 0.8,
+    `the victim moved only ${displacement.toFixed(2)} m; the miss/hit contrast needs more`
+  );
+
+  // The claim says "I was looking at tick seenTick". Without rewind, the shot
+  // along the old aim line passes more than a capsule diameter behind the
+  // victim's live position; with it, the server restores the seen capsule.
+  session.transports[0]!.send(
+    encodeFire({
+      tick: 0,
+      sequence: 1,
+      yawRadians: shooterAim.yaw,
+      pitchRadians: 0,
+      viewTick: seenTick,
+    })
+  );
+  drive(session, 4, (index) => input(index, false));
+  assert.ok(
+    session.server.healthOf(2)! < 100,
+    "a claim aimed at the seen position missed: the rewind did not happen"
+  );
+});
+
+test("a fire claim cannot be replayed, spoofed round, or fired while dead", () => {
+  const session = makeSession(2, {
+    spawn: (seat) => ({ x: seat === 1 ? 0 : 8, z: 0 }),
+    respawnSeconds: 0,
+  });
+  const towardVictim = -Math.PI / 2;
+  const aimed = (index: number) => ({ buttons: 0, yaw: index === 0 ? towardVictim : 0 });
+  // Connect first — a claim sent before the welcome has no player id and is
+  // dropped client-side. Then the sidearm, so the victim survives the first hit
+  // and the replay has a health value to preserve; drive past the 21-tick switch.
+  drive(session, 4, aimed);
+  session.clients[0]!.selectWeapon(2);
+  drive(session, 25, aimed);
+
+  // THE SAME SEQUENCE TWICE must land once. A client resends its unacknowledged
+  // tail, so a fire packet arriving twice is ordinary traffic rather than an attack
+  // — and a shot that applies twice is a weapon with double its damage. Resent on
+  // the shooter's OWN transport, because a fresh connection would be a third player.
+  session.clients[0]!.fire(towardVictim, 0);
+  drive(session, 2, aimed);
+  const afterFirst = session.server.healthOf(2)!;
+  assert.ok(afterFirst < 100, "the first shot did not land, so the replay proves nothing");
+  assert.ok(afterFirst > 0, "the sidearm must wound, not kill, or the replay proves nothing");
+  drive(session, 12, aimed); // past the Glock's cadence, so ONLY the dedupe can refuse it
+  session.transports[0]!.send(
+    encodeFire({ tick: 4, sequence: 1, yawRadians: towardVictim, pitchRadians: 0, viewTick: 0 })
+  );
+  drive(session, 4, aimed);
+  assert.equal(session.server.healthOf(2), afterFirst, "a replayed fire claim applied damage");
+
+  // A claim 90 degrees off the server's own look is CLAMPED, not honoured. The
+  // shooter turns to face -Z while claiming a shot along +X, where the victim is.
+  const hitsBefore = session.server.shotsHit;
+  drive(session, 12, () => ({ buttons: 0, yaw: 0 }));
+  session.clients[0]!.fire(towardVictim, 0);
+  drive(session, 4, () => ({ buttons: 0, yaw: 0 }));
+  assert.equal(
+    session.server.shotsHit,
+    hitsBefore,
+    "a claim far off the authoritative look was honoured instead of clamped"
+  );
+
+  // Dead players cannot shoot. Without this a corpse keeps firing for as long as the
+  // client keeps sending, which is invisible until someone dies mid-burst.
+  session.server.damagePlayer(1, 500);
+  assert.equal(session.server.healthOf(1), 0);
+  const rejectedBefore = session.server.fireClaimsRejected;
+  session.clients[0]!.fire(towardVictim, 0);
+  drive(session, 4, aimed);
+  assert.ok(
+    session.server.fireClaimsRejected > rejectedBefore,
+    "a dead player's shot was accepted"
+  );
+});
+
+test("a killed player respawns with full health at a spawn point", () => {
+  const session = makeSession(2, {
+    spawn: (seat) => ({ x: seat === 1 ? 0 : 8, z: 0 }),
+    respawnSeconds: 1,
+  });
+  const towardVictim = -Math.PI / 2;
+  const aimed = (index: number) => ({ buttons: 0, yaw: index === 0 ? towardVictim : 0 });
+  drive(session, 4, aimed);
+
+  // The spawn sniper: a .308 at 8 m is one round, one kill.
+  session.clients[0]!.fire(towardVictim, 0);
+  drive(session, 2, aimed);
+  assert.equal(session.server.healthOf(2), 0, "a lethal hit did not kill");
+
+  // A dead player is not a target: without this, a corpse keeps absorbing rounds
+  // that should carry on to whoever is behind it. Switch to a weapon with its own
+  // fresh cadence so the shot is ACCEPTED inside the respawn window — the check
+  // cannot be allowed to pass by the claim merely being refused.
+  session.clients[0]!.selectWeapon(3);
+  drive(session, 25, aimed);
+  const hitsBefore = session.server.shotsHit;
+  const resolvedBefore = session.server.shotsResolved;
+  session.clients[0]!.fire(towardVictim, 0);
+  drive(session, 2, aimed);
+  assert.equal(session.server.shotsResolved, resolvedBefore + 1, "the corpse-check shot was refused");
+  assert.equal(session.server.shotsHit, hitsBefore, "a dead player was still shootable");
+
+  // One second at 60 Hz; the run so far is ~33 ticks, so drive past the rest.
+  drive(session, 45, aimed);
+  assert.equal(session.server.healthOf(2), 100, "a dead player never respawned");
+  assert.equal(session.clients[1]!.health, 100, "the respawn did not reach the client");
 });
 
 test("the visual dial wire order is append-only and every range is usable", () => {

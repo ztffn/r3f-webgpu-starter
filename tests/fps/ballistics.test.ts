@@ -5,12 +5,12 @@ import { BoxGeometry, Mesh, MeshBasicMaterial, Object3D, Vector3 } from "three/w
 import {
   BallisticProjectileSystem,
   type BallisticResult,
-} from "../../src/fps/combat/BallisticProjectileSystem.ts";
+} from "../../src/combat/BallisticProjectileSystem.ts";
 import {
   readBallisticEnvironment,
   type BallisticEnvironment,
-} from "../../src/fps/combat/BallisticEnvironment.ts";
-import { HealthDamageable } from "../../src/fps/combat/Damageable.ts";
+} from "../../src/combat/BallisticEnvironment.ts";
+import { HealthDamageable } from "../../src/combat/Damageable.ts";
 import {
   CompositeWorldQuery,
   type HeightfieldQuerySource,
@@ -19,7 +19,7 @@ import {
 import {
   AMMUNITION_DEFINITIONS,
   DEFAULT_AMMUNITION,
-} from "../../src/fps/weapons/AmmunitionDefinition.ts";
+} from "../../src/combat/AmmunitionDefinition.ts";
 
 const MISS_QUERY: WorldQuery = { raycast: () => null };
 const BASE_SHOT = {
@@ -87,7 +87,12 @@ test("fixed-step outcome is independent of render-frame cadence", () => {
     assert.ok(Math.abs(candidate.flightTimeSeconds - at30.flightTimeSeconds) < 1e-9);
     assert.ok(Math.abs(candidate.verticalDropMetres - at30.verticalDropMetres) < 1e-9);
     assert.ok(Math.abs(candidate.lateralDriftMetres - at30.lateralDriftMetres) < 1e-9);
-    assert.deepEqual(candidate.points.at(-1)?.toArray(), at30.points.at(-1)?.toArray());
+    const candidateEnd = candidate.points.at(-1)!;
+    const referenceEnd = at30.points.at(-1)!;
+    assert.deepEqual(
+      [candidateEnd.x, candidateEnd.y, candidateEnd.z],
+      [referenceEnd.x, referenceEnd.y, referenceEnd.z]
+    );
   }
 });
 
@@ -103,8 +108,16 @@ test("ballistic trace preserves separate optical sight and adjusted bore directi
       result = next;
     });
   }
-  assert.deepEqual(result.trace.sightDirection.toArray(), sight.toArray());
-  assert.ok(result.trace.initialDirection.angleTo(bore) < 1e-9);
+  assert.deepEqual(
+    [result.trace.sightDirection.x, result.trace.sightDirection.y, result.trace.sightDirection.z],
+    sight.toArray()
+  );
+  const initial = new Vector3(
+    result.trace.initialDirection.x,
+    result.trace.initialDirection.y,
+    result.trace.initialDirection.z
+  );
+  assert.ok(initial.angleTo(bore) < 1e-9);
 });
 
 test("swept collision delays damage until the projectile reaches a thin target", () => {

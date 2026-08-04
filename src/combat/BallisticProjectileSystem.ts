@@ -1,46 +1,70 @@
-import * as THREE from "three/webgpu";
-import type { WorldHit, WorldQuery } from "../core/WorldQuery";
-import type { AmmunitionDefinition } from "../weapons/AmmunitionDefinition";
-import { kineticEnergyJoules } from "../weapons/AmmunitionDefinition.ts";
-import type { BallisticEnvironment } from "./BallisticEnvironment";
+// Fixed-step gameplay projectile pool — THE ballistic flight model, shared.
+//
+// Runs identically in the browser (local shots, presentation) and in Node (the
+// authority's beyond-horizon shots), which is why it is Three-free: vectors are
+// plain {x,y,z} and the world is reached only through the WorldQuery interface.
+// docs/11 §10 and §12 are the spec; behavior here must not fork per runtime.
+
+import type { WorldHit, WorldQuery } from "./WorldQuery.ts";
+import type { AmmunitionDefinition } from "./AmmunitionDefinition.ts";
+import { kineticEnergyJoules } from "./AmmunitionDefinition.ts";
+import type { BallisticEnvironment } from "./BallisticEnvironment.ts";
 import {
   DEFAULT_G1_REFERENCE_DRAG_PER_METRE,
   integrateBallisticVelocity,
   type MutableVelocity,
 } from "./BallisticModel.ts";
-import type { ShotResult } from "./ShotResult";
-import type { ShotTrace } from "./ShotTrace";
-import type { TargetHitReport } from "./TargetHitReport";
-import type { ImpactEvent } from "./ImpactEvent";
-import { resolvePenetration } from "./PenetrationResolver.ts";
+import type { ShotResult } from "./ShotResult.ts";
+import type { ShotTrace } from "./ShotTrace.ts";
+import type { TargetHitReport } from "./TargetHitReport.ts";
+import type { ImpactEvent } from "./ImpactEvent.ts";
+import {
+  EXIT_EPSILON_METRES,
+  resolvePenetration,
+  terminalDamageScale,
+} from "./PenetrationResolver.ts";
 import { SURFACE_PROFILES } from "./SurfaceProfile.ts";
+import { clamp, lerp, type MutableVec3, type Vec3Like } from "./math.ts";
 
 export interface BallisticShot {
   readonly sourceId: string;
   readonly sequence: number;
-  readonly origin: THREE.Vector3Like;
-  readonly direction: THREE.Vector3Like;
-  readonly sightDirection?: THREE.Vector3Like;
+  readonly origin: Vec3Like;
+  readonly direction: Vec3Like;
+  readonly sightDirection?: Vec3Like;
   /**
    * Turret-adjusted mean bore before this shot's dispersion sample. Diagnostics
    * need it separately; without it the dispersed direction gets misreported as
    * scope elevation and windage. Defaults to `direction`.
    */
-  readonly boreDirection?: THREE.Vector3Like;
+  readonly boreDirection?: Vec3Like;
   readonly maxDistance: number;
   readonly maxFlightSeconds: number;
   readonly damage: number;
   readonly ammunition: AmmunitionDefinition;
   /** False is intended for authority load tests/remote rounds, not local debug. */
   readonly captureTrace?: boolean;
+  /** Skip one object id for the whole flight — the shooter's own capsule. */
+  readonly excludeObjectId?: string;
+  /**
+   * Continuation launch state, for a round that already flew its first stretch
+   * somewhere else (the server's near-field hitscan). Speed replaces the muzzle
+   * velocity; distance, elapsed time, and interaction count start the budgets
+   * where the previous leg left them. Damage scale still measures against TRUE
+   * muzzle energy, so a handed-off round wounds exactly like a flown one.
+   */
+  readonly initialSpeedMetresPerSecond?: number;
+  readonly initialDistanceMetres?: number;
+  readonly initialElapsedSeconds?: number;
+  readonly initialInteractionCount?: number;
 }
 
 export interface SpawnedBallisticShot
   extends Omit<BallisticShot, "origin" | "direction" | "sightDirection" | "boreDirection"> {
-  readonly origin: THREE.Vector3;
-  readonly direction: THREE.Vector3;
-  readonly sightDirection: THREE.Vector3;
-  readonly boreDirection: THREE.Vector3;
+  readonly origin: Vec3Like;
+  readonly direction: Vec3Like;
+  readonly sightDirection: Vec3Like;
+  readonly boreDirection: Vec3Like;
 }
 
 export interface BallisticResult extends ShotResult<SpawnedBallisticShot> {}
@@ -68,8 +92,7 @@ export interface BallisticMetrics {
 const DEFAULT_CAPACITY = 2_048;
 const DEFAULT_TRACE_POINTS = 1_024;
 const EPSILON = 1e-9;
-const EXIT_EPSILON_METRES = 0.002;
-const MAX_SURFACE_INTERACTIONS = 8;
+export const MAX_SURFACE_INTERACTIONS = 8;
 const IMPACT_EVENT_CAPACITY = 4_096;
 
 /**
@@ -114,9 +137,9 @@ export class BallisticProjectileSystem {
   private readonly interactions: Array<ImpactEvent[] | null>;
   private readonly reports: Array<TargetHitReport[] | null>;
 
-  private readonly segmentOrigin = new THREE.Vector3();
-  private readonly segmentDirection = new THREE.Vector3();
-  private readonly impactDirection = new THREE.Vector3();
+  private readonly segmentOrigin: MutableVec3 = { x: 0, y: 0, z: 0 };
+  private readonly segmentDirection: MutableVec3 = { x: 0, y: 0, z: 0 };
+  private readonly impactDirection: MutableVec3 = { x: 0, y: 0, z: 0 };
   private readonly nextVelocity: MutableVelocity = { x: 0, y: 0, z: 0 };
   private accumulator = 0;
   private readonly results: BallisticResult[] = [];
@@ -200,28 +223,27 @@ export class BallisticProjectileSystem {
   }
 
   spawn(input: BallisticShot): boolean {
-    const direction = new THREE.Vector3(input.direction.x, input.direction.y, input.direction.z);
-    const sightDirection = new THREE.Vector3(
-      input.sightDirection?.x ?? direction.x,
-      input.sightDirection?.y ?? direction.y,
-      input.sightDirection?.z ?? direction.z
-    );
-    const boreDirection = new THREE.Vector3(
-      input.boreDirection?.x ?? direction.x,
-      input.boreDirection?.y ?? direction.y,
-      input.boreDirection?.z ?? direction.z
-    );
-    const directionLengthSq = direction.lengthSq();
-    const sightDirectionLengthSq = sightDirection.lengthSq();
-    const boreDirectionLengthSq = boreDirection.lengthSq();
+    const directionLengthSq =
+      input.direction.x * input.direction.x +
+      input.direction.y * input.direction.y +
+      input.direction.z * input.direction.z;
+    const sight = input.sightDirection ?? input.direction;
+    const bore = input.boreDirection ?? input.direction;
+    const sightLengthSq = sight.x * sight.x + sight.y * sight.y + sight.z * sight.z;
+    const boreLengthSq = bore.x * bore.x + bore.y * bore.y + bore.z * bore.z;
+    const launchSpeed =
+      input.initialSpeedMetresPerSecond ?? input.ammunition.muzzleVelocityMetresPerSecond;
+    const initialDistance = input.initialDistanceMetres ?? 0;
+    const initialElapsed = input.initialElapsedSeconds ?? 0;
+    const initialInteractions = input.initialInteractionCount ?? 0;
     if (
       this.freeCount === 0 ||
       !Number.isFinite(directionLengthSq) ||
       directionLengthSq <= EPSILON ||
-      !Number.isFinite(sightDirectionLengthSq) ||
-      sightDirectionLengthSq <= EPSILON ||
-      !Number.isFinite(boreDirectionLengthSq) ||
-      boreDirectionLengthSq <= EPSILON ||
+      !Number.isFinite(sightLengthSq) ||
+      sightLengthSq <= EPSILON ||
+      !Number.isFinite(boreLengthSq) ||
+      boreLengthSq <= EPSILON ||
       !Number.isFinite(input.origin.x) ||
       !Number.isFinite(input.origin.y) ||
       !Number.isFinite(input.origin.z) ||
@@ -238,20 +260,46 @@ export class BallisticProjectileSystem {
       !Number.isFinite(input.ammunition.projectileMassKilograms) ||
       !(input.ammunition.projectileMassKilograms > 0) ||
       !Number.isFinite(input.ammunition.penetrationMultiplier) ||
-      !(input.ammunition.penetrationMultiplier > 0)
+      !(input.ammunition.penetrationMultiplier > 0) ||
+      !Number.isFinite(launchSpeed) ||
+      !(launchSpeed > 0) ||
+      !Number.isFinite(initialDistance) ||
+      initialDistance < 0 ||
+      initialDistance >= input.maxDistance ||
+      !Number.isFinite(initialElapsed) ||
+      initialElapsed < 0 ||
+      initialElapsed >= input.maxFlightSeconds ||
+      !Number.isInteger(initialInteractions) ||
+      initialInteractions < 0 ||
+      initialInteractions >= MAX_SURFACE_INTERACTIONS
     ) {
       this.rejectedSpawns += 1;
       return false;
     }
 
-    direction.normalize();
+    const inverseLength = 1 / Math.sqrt(directionLengthSq);
+    const direction: Vec3Like = {
+      x: input.direction.x * inverseLength,
+      y: input.direction.y * inverseLength,
+      z: input.direction.z * inverseLength,
+    };
+    const inverseSight = 1 / Math.sqrt(sightLengthSq);
+    const inverseBore = 1 / Math.sqrt(boreLengthSq);
     const slot = this.freeSlots[--this.freeCount];
     const shot: SpawnedBallisticShot = {
       ...input,
-      origin: new THREE.Vector3(input.origin.x, input.origin.y, input.origin.z),
+      origin: { x: input.origin.x, y: input.origin.y, z: input.origin.z },
       direction,
-      sightDirection: sightDirection.normalize(),
-      boreDirection: boreDirection.normalize(),
+      sightDirection: {
+        x: sight.x * inverseSight,
+        y: sight.y * inverseSight,
+        z: sight.z * inverseSight,
+      },
+      boreDirection: {
+        x: bore.x * inverseBore,
+        y: bore.y * inverseBore,
+        z: bore.z * inverseBore,
+      },
     };
     this.shots[slot] = shot;
     this.px[slot] = this.ox[slot] = shot.origin.x;
@@ -260,9 +308,9 @@ export class BallisticProjectileSystem {
     this.dx[slot] = direction.x;
     this.dy[slot] = direction.y;
     this.dz[slot] = direction.z;
-    this.vx[slot] = direction.x * input.ammunition.muzzleVelocityMetresPerSecond;
-    this.vy[slot] = direction.y * input.ammunition.muzzleVelocityMetresPerSecond;
-    this.vz[slot] = direction.z * input.ammunition.muzzleVelocityMetresPerSecond;
+    this.vx[slot] = direction.x * launchSpeed;
+    this.vy[slot] = direction.y * launchSpeed;
+    this.vz[slot] = direction.z * launchSpeed;
     const horizontalRightLength = Math.hypot(direction.z, direction.x);
     if (horizontalRightLength > EPSILON) {
       this.rightX[slot] = -direction.z / horizontalRightLength;
@@ -271,11 +319,11 @@ export class BallisticProjectileSystem {
       this.rightX[slot] = 1;
       this.rightZ[slot] = 0;
     }
-    this.distance[slot] = 0;
-    this.elapsed[slot] = 0;
+    this.distance[slot] = initialDistance;
+    this.elapsed[slot] = initialElapsed;
     this.damageApplied[slot] = 0;
     this.destroyed[slot] = 0;
-    this.interactionCounts[slot] = 0;
+    this.interactionCounts[slot] = initialInteractions;
     this.interactions[slot] = null;
     this.reports[slot] = null;
     this.traceCounts[slot] = 0;
@@ -399,24 +447,30 @@ export class BallisticProjectileSystem {
         continue;
       }
 
-      this.segmentOrigin.set(this.px[slot], this.py[slot], this.pz[slot]);
-      this.segmentDirection.set(stepX, stepY, stepZ).multiplyScalar(1 / segmentLength);
+      this.segmentOrigin.x = this.px[slot];
+      this.segmentOrigin.y = this.py[slot];
+      this.segmentOrigin.z = this.pz[slot];
+      const inverseSegmentLength = 1 / segmentLength;
+      this.segmentDirection.x = stepX * inverseSegmentLength;
+      this.segmentDirection.y = stepY * inverseSegmentLength;
+      this.segmentDirection.z = stepZ * inverseSegmentLength;
       const segmentHit = this.worldQuery.raycast(
         this.segmentOrigin,
         this.segmentDirection,
-        segmentLength
+        segmentLength,
+        shot.excludeObjectId
       );
       this.segmentQueries += 1;
       if (segmentHit) {
-        const hitFraction = THREE.MathUtils.clamp(segmentHit.distance / segmentLength, 0, 1);
+        const hitFraction = clamp(segmentHit.distance / segmentLength, 0, 1);
         this.elapsed[slot] += dt * stepFraction * hitFraction;
         this.distance[slot] += segmentHit.distance;
         this.px[slot] = segmentHit.point.x;
         this.py[slot] = segmentHit.point.y;
         this.pz[slot] = segmentHit.point.z;
-        this.vx[slot] = THREE.MathUtils.lerp(oldVx, nextVx, stepFraction * hitFraction);
-        this.vy[slot] = THREE.MathUtils.lerp(oldVy, nextVy, stepFraction * hitFraction);
-        this.vz[slot] = THREE.MathUtils.lerp(oldVz, nextVz, stepFraction * hitFraction);
+        this.vx[slot] = lerp(oldVx, nextVx, stepFraction * hitFraction);
+        this.vy[slot] = lerp(oldVy, nextVy, stepFraction * hitFraction);
+        this.vz[slot] = lerp(oldVz, nextVz, stepFraction * hitFraction);
         this.appendTracePoint(slot, this.px[slot], this.py[slot], this.pz[slot]);
         this.handleImpact(activeIndex, slot, segmentHit);
         continue;
@@ -425,9 +479,9 @@ export class BallisticProjectileSystem {
       this.px[slot] += stepX;
       this.py[slot] += stepY;
       this.pz[slot] += stepZ;
-      this.vx[slot] = THREE.MathUtils.lerp(oldVx, nextVx, stepFraction);
-      this.vy[slot] = THREE.MathUtils.lerp(oldVy, nextVy, stepFraction);
-      this.vz[slot] = THREE.MathUtils.lerp(oldVz, nextVz, stepFraction);
+      this.vx[slot] = lerp(oldVx, nextVx, stepFraction);
+      this.vy[slot] = lerp(oldVy, nextVy, stepFraction);
+      this.vz[slot] = lerp(oldVz, nextVz, stepFraction);
       this.elapsed[slot] += dt * stepFraction;
       this.distance[slot] += segmentLength;
       if (shot.captureTrace !== false) {
@@ -458,11 +512,16 @@ export class BallisticProjectileSystem {
       return;
     }
 
-    this.impactDirection
-      .set(this.vx[slot], this.vy[slot], this.vz[slot])
-      .multiplyScalar(1 / speedBefore);
+    const inverseSpeed = 1 / speedBefore;
+    this.impactDirection.x = this.vx[slot] * inverseSpeed;
+    this.impactDirection.y = this.vy[slot] * inverseSpeed;
+    this.impactDirection.z = this.vz[slot] * inverseSpeed;
     const incidenceCosine = hit.normal
-      ? Math.abs(this.impactDirection.dot(hit.normal))
+      ? Math.abs(
+          this.impactDirection.x * hit.normal.x +
+            this.impactDirection.y * hit.normal.y +
+            this.impactDirection.z * hit.normal.z
+        )
       : 1;
     const response = resolvePenetration({
       ammunition: shot.ammunition,
@@ -475,13 +534,17 @@ export class BallisticProjectileSystem {
     const canContinue =
       response.outcome === "penetrated" && interactionIndex < MAX_SURFACE_INTERACTIONS - 1;
     const outcome = canContinue ? "penetrated" : "stopped";
-    const exitPoint = canContinue
-      ? hit.point
-          .clone()
-          .addScaledVector(
-            this.impactDirection,
-            response.effectiveThicknessMetres + EXIT_EPSILON_METRES
-          )
+    const hitPoint: Vec3Like = { x: hit.point.x, y: hit.point.y, z: hit.point.z };
+    const hitNormal: Vec3Like | null = hit.normal
+      ? { x: hit.normal.x, y: hit.normal.y, z: hit.normal.z }
+      : null;
+    const traversalDistance = response.effectiveThicknessMetres + EXIT_EPSILON_METRES;
+    const exitPoint: Vec3Like | null = canContinue
+      ? {
+          x: hitPoint.x + this.impactDirection.x * traversalDistance,
+          y: hitPoint.y + this.impactDirection.y * traversalDistance,
+          z: hitPoint.z + this.impactDirection.z * traversalDistance,
+        }
       : null;
 
     let targetId: string | null = null;
@@ -499,15 +562,15 @@ export class BallisticProjectileSystem {
       );
       // Preserve nominal weapon damage through ordinary flight while still
       // reducing lethality after substantial drag or prior penetration.
-      const damageScale = THREE.MathUtils.clamp(
-        response.energyBeforeJoules / (muzzleEnergy * 0.7),
-        0.1,
-        1
-      );
+      const damageScale = terminalDamageScale(response.energyBeforeJoules, muzzleEnergy);
       const damage = hit.damageable.applyDamage({
         amount: shot.damage * damageScale,
-        point: hit.point,
-        direction: this.impactDirection,
+        point: hitPoint,
+        direction: {
+          x: this.impactDirection.x,
+          y: this.impactDirection.y,
+          z: this.impactDirection.z,
+        },
         sourceId: shot.sourceId,
         shotSequence: shot.sequence,
       });
@@ -518,12 +581,16 @@ export class BallisticProjectileSystem {
       interactionDestroyed = damage.destroyed;
       const report: TargetHitReport = {
         targetId,
-        objectName: hit.object.name,
+        objectName: hit.objectName,
         sourceId: shot.sourceId,
         shotSequence: shot.sequence,
-        point: hit.point.clone(),
-        normal: hit.normal?.clone() ?? null,
-        rangeMetres: shot.origin.distanceTo(hit.point),
+        point: hitPoint,
+        normal: hitNormal,
+        rangeMetres: Math.hypot(
+          hitPoint.x - shot.origin.x,
+          hitPoint.y - shot.origin.y,
+          hitPoint.z - shot.origin.z
+        ),
         damageApplied: damage.applied,
         healthBefore,
         healthAfter: damage.health,
@@ -539,7 +606,7 @@ export class BallisticProjectileSystem {
       ammunitionId: shot.ammunition.id,
       kind: hit.kind,
       objectId: hit.objectId,
-      objectName: hit.object.name,
+      objectName: hit.objectName,
       targetId,
       damageApplied: interactionDamage,
       healthBefore: interactionHealthBefore,
@@ -547,9 +614,9 @@ export class BallisticProjectileSystem {
       destroyed: interactionDestroyed,
       surfaceId: hit.surfaceId,
       outcome,
-      point: hit.point.clone(),
+      point: hitPoint,
       exitPoint,
-      normal: hit.normal?.clone() ?? null,
+      normal: hitNormal,
       effectiveThicknessMetres: response.effectiveThicknessMetres,
       speedBeforeMetresPerSecond: speedBefore,
       speedAfterMetresPerSecond: canContinue ? response.speedAfterMetresPerSecond : 0,
@@ -567,7 +634,6 @@ export class BallisticProjectileSystem {
       return;
     }
 
-    const traversalDistance = response.effectiveThicknessMetres + EXIT_EPSILON_METRES;
     const averageSpeed = Math.max(
       EPSILON,
       (speedBefore + response.speedAfterMetresPerSecond) * 0.5
@@ -608,14 +674,20 @@ export class BallisticProjectileSystem {
     const shot = this.shots[slot];
     if (!shot) return;
     const impactSpeed = Math.hypot(impactVx, impactVy, impactVz);
-    const impactPoint = new THREE.Vector3(this.px[slot], this.py[slot], this.pz[slot]);
-    const lineOfSightDistance = shot.origin.distanceTo(impactPoint);
+    const impactPoint: Vec3Like = { x: this.px[slot], y: this.py[slot], z: this.pz[slot] };
+    const lineOfSightDistance = Math.hypot(
+      impactPoint.x - shot.origin.x,
+      impactPoint.y - shot.origin.y,
+      impactPoint.z - shot.origin.z
+    );
     const hit: WorldHit | null = segmentHit
       ? {
           ...segmentHit,
           distance: lineOfSightDistance,
           point: impactPoint,
-          normal: segmentHit.normal?.clone() ?? null,
+          normal: segmentHit.normal
+            ? { x: segmentHit.normal.x, y: segmentHit.normal.y, z: segmentHit.normal.z }
+            : null,
         }
       : null;
     const reports = this.reports[slot] ?? [];
@@ -637,18 +709,18 @@ export class BallisticProjectileSystem {
       shotSequence: shot.sequence,
       sourceId: shot.sourceId,
       mode: "ballistic",
-      sightDirection: shot.sightDirection.clone(),
-      boreDirection: shot.boreDirection.clone(),
-      initialDirection: shot.direction.clone(),
+      sightDirection: shot.sightDirection,
+      boreDirection: shot.boreDirection,
+      initialDirection: shot.direction,
       points: this.buildTracePoints(slot, impactPoint),
       interactions: this.interactions[slot] ?? [],
       impact: hit
         ? {
-            point: impactPoint.clone(),
-            normal: hit.normal?.clone() ?? null,
+            point: impactPoint,
+            normal: hit.normal,
             kind: hit.kind,
             targetId: hit.damageable?.id ?? null,
-            objectName: hit.object.name,
+            objectName: hit.objectName,
           }
         : null,
       flightTimeSeconds: this.elapsed[slot],
@@ -676,20 +748,26 @@ export class BallisticProjectileSystem {
     if (this.traceCounts[slot] < this.maxTracePoints) this.traceCounts[slot] += 1;
   }
 
-  private buildTracePoints(slot: number, finalPoint: THREE.Vector3): THREE.Vector3[] {
+  private buildTracePoints(slot: number, finalPoint: Vec3Like): Vec3Like[] {
     const traceBuffer = this.traceBuffers[slot];
-    if (!traceBuffer) return [this.shots[slot]!.origin.clone(), finalPoint.clone()];
+    if (!traceBuffer) {
+      const origin = this.shots[slot]!.origin;
+      return [
+        { x: origin.x, y: origin.y, z: origin.z },
+        { x: finalPoint.x, y: finalPoint.y, z: finalPoint.z },
+      ];
+    }
     const count = this.traceCounts[slot];
-    const points = new Array<THREE.Vector3>(Math.max(2, count));
+    const points = new Array<Vec3Like>(Math.max(2, count));
     for (let point = 0; point < count; point += 1) {
       const offset = point * 3;
-      points[point] = new THREE.Vector3(
-        traceBuffer[offset],
-        traceBuffer[offset + 1],
-        traceBuffer[offset + 2]
-      );
+      points[point] = {
+        x: traceBuffer[offset],
+        y: traceBuffer[offset + 1],
+        z: traceBuffer[offset + 2],
+      };
     }
-    if (count === 1) points[1] = finalPoint.clone();
+    if (count === 1) points[1] = { x: finalPoint.x, y: finalPoint.y, z: finalPoint.z };
     return points;
   }
 

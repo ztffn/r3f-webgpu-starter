@@ -1,4 +1,4 @@
-import type { BallisticEnvironment } from "./BallisticEnvironment";
+import type { BallisticEnvironment } from "./BallisticEnvironment.ts";
 
 export interface MutableVelocity {
   x: number;

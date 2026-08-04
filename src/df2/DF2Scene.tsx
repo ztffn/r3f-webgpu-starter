@@ -25,7 +25,7 @@ import { WEATHER_PRESETS, readWeather, type WeatherPreset } from "./weather";
 import { createAtmosphere } from "./atmosphere";
 import { createPrecipitation } from "./Precipitation";
 import { buildBladeGeometry } from "./bladeGeometry";
-import { readBallisticEnvironment } from "../fps/combat/BallisticEnvironment";
+import { readBallisticEnvironment } from "../combat/BallisticEnvironment.ts";
 import { bakeSyntheticMaps } from "./syntheticMaps";
 import { bakeGrassJitter } from "./grassJitter";
 import { buildHeightTexture } from "./heightTexture";
@@ -417,6 +417,35 @@ export function DF2Scene({
    */
   const room = useRoomVisuals(gameClient);
   const netWeather = room?.preset ?? null;
+  /**
+   * Claims an accepted shot to the server, or nothing when playing alone.
+   *
+   * Damage on another player is SERVER-ONLY. Offline there is no authority to ask,
+   * so nothing is claimed and combat stays what it was — a local ballistic
+   * simulation against local targets.
+   */
+  const claimShot = useMemo(
+    () =>
+      gameClient === null
+        ? null
+        : (yawRadians: number, pitchRadians: number) =>
+            gameClient.fire(yawRadians, pitchRadians),
+    [gameClient]
+  );
+  // Weapon switches and reloads are claims for the same reason shots are: the
+  // server owns the loadout record that scores damage, so it has to hear about
+  // what the player is holding and when the magazine cycles.
+  const claimWeaponSelect = useMemo(
+    () =>
+      gameClient === null
+        ? null
+        : (weaponIndex: number) => gameClient.selectWeapon(weaponIndex),
+    [gameClient]
+  );
+  const claimReload = useMemo(
+    () => (gameClient === null ? null : () => gameClient.reload()),
+    [gameClient]
+  );
 
   // --- weather ---------------------------------------------------------------
   // ONE grade object for the three materials that sample the colormap, so a preset
@@ -890,6 +919,9 @@ export function DF2Scene({
           lookSensitivity={lookSensitivity}
           motorPose={motorDemo ? motorPose : null}
           weaponIntent={motorDemo ? weaponIntent : null}
+          onShotFired={claimShot}
+          onWeaponSelected={claimWeaponSelect}
+          onReloadStarted={claimReload}
         />
       )}
     </>

@@ -12,6 +12,9 @@ import type RAPIER from "@dimforge/rapier3d-compat";
 import { MotorRoom } from "../motor/MotorRoom.ts";
 import {
   DEFAULT_MOTOR_TUNING,
+  blendedStanceDimension,
+  eyeHeightFor,
+  lookDirection,
   type MotorHeightSource,
   type MotorTuning,
   type PlayerCommand,
@@ -19,15 +22,30 @@ import {
 import {
   PacketType,
   decodeCommands,
+  decodeFire,
+  decodeReload,
+  decodeSelectWeapon,
   decodeSetVisualDial,
   encodeRoomState,
   encodeSnapshot,
   encodeWelcome,
   packetTypeOf,
+  wrapPi,
   type RoomState,
   type SnapshotPlayer,
 } from "./SnapshotCodec.ts";
 import type { ServerConnection, ServerTransport } from "./Transport.ts";
+import { ServerWorldQuery, type CapsuleCandidate } from "./ServerWorldQuery.ts";
+import { StateHistory } from "./StateHistory.ts";
+import { BallisticProjectileSystem } from "../combat/BallisticProjectileSystem.ts";
+import { DEFAULT_BALLISTIC_ENVIRONMENT } from "../combat/BallisticEnvironment.ts";
+import {
+  hitscanHorizonMetres,
+  resolveHitscanShot,
+} from "../combat/HitscanBallistics.ts";
+import type { Damageable } from "../combat/Damageable.ts";
+import type { WeaponDefinition } from "../combat/WeaponDefinition.ts";
+import { WEAPON_DEFINITIONS, weaponByWireIndex } from "../combat/weaponDefinitions.ts";
 
 export interface GameServerOptions {
   readonly tuning?: MotorTuning;
@@ -68,11 +86,56 @@ export interface GameServerOptions {
    * gates the CLIENT path only.
    */
   readonly allowClientVisualDials?: boolean;
+  /** Hit points a player spawns with. Rides the snapshot as a u8, so 1-255. */
+  readonly maxHealth?: number;
+  /** Seconds a dead player stays dead. 0 disables respawn entirely. */
+  readonly respawnSeconds?: number;
+  /**
+   * How far a claimed shot direction may differ from the look angles the server
+   * already holds for that tick, in radians.
+   *
+   * The shot leaves along the weapon's aimed direction after sway, recoil and
+   * dispersion, none of which the server simulates — so the claim cannot simply be
+   * rejected when it disagrees. Clamping it to a cone around the authoritative look
+   * bounds the lie: a client can be wrong by a weapon's worth of spread and cannot
+   * shoot behind itself. Full server-side weapon simulation is what would remove
+   * this, and it is not built.
+   */
+  readonly maxAimDeviationRadians?: number;
 }
 
 interface Peer {
   readonly connection: ServerConnection;
   readonly roomId: string;
+  /** Server-owned hit points. The client is TOLD this, never asked. */
+  health: number;
+  /** Tick this peer respawns on, or -1 when alive. */
+  respawnTick: number;
+  /** Highest shot sequence accepted, so a replayed fire packet cannot double-hit. */
+  highestFireSequence: number;
+  /** Highest weapon claim (select/reload) consumed; same dedupe idea as fire. */
+  highestWeaponSequence: number;
+  /**
+   * SERVER-OWNED loadout. The client's WeaponSystem runs the same rules for
+   * prediction and presentation, but what can actually wound somebody is this
+   * record: which weapon is in hand, what its magazines hold, and the ticks
+   * before which firing is a refused claim rather than a shot.
+   */
+  weaponIndex: number;
+  readonly magazines: number[];
+  readonly reserves: number[];
+  /**
+   * First tick each weapon may fire again — PER WEAPON, like the client's
+   * per-WeaponSystem timers, or a sniper shot would lend its 75-tick cooldown
+   * to the sidearm the player switches to, refusing a completely legal play.
+   */
+  readonly nextFireTicks: number[];
+  /** Tick a weapon switch completes, or -1 when not switching. */
+  switchCompleteTick: number;
+  /** Tick the running reload completes, or -1 when not reloading. */
+  reloadCompleteTick: number;
+  /** The peer's health as a Damageable, for the shared ballistic model. */
+  readonly damageable: Damageable;
   /** Commands received but not yet consumed, ordered by tick. */
   readonly queue: PlayerCommand[];
   acknowledgedTick: number;
@@ -87,6 +150,31 @@ interface Peer {
 }
 
 const DEFAULT_PATCH_HZ = 20;
+const DEFAULT_MAX_HEALTH = 100;
+const DEFAULT_RESPAWN_SECONDS = 3;
+/** About 11 degrees: wider than any authored cone, far short of a turn. */
+const DEFAULT_MAX_AIM_DEVIATION_RADIANS = 0.2;
+/** Beyond this a rifle round is not the thing that killed anybody. */
+const MAX_SHOT_DISTANCE_METRES = 1200;
+/**
+ * How far back a fire claim's viewTick may rewind targets: 250 ms at 60 Hz.
+ * Past that the shooter's picture is too stale to honor — the peeker's
+ * advantage has to end somewhere, and a quarter second is the genre's answer.
+ */
+const MAX_REWIND_TICKS = 15;
+/** Ring depth for the rewind buffer; a little past the rewind cap. */
+const HISTORY_TICKS = 32;
+/** Mirrors LoadoutSystem's default switch duration on the client. */
+const WEAPON_SWITCH_SECONDS = 0.35;
+/**
+ * One tick of cadence forgiveness. The client's cadence cursor and the server's
+ * tick counter quantise differently, and a legitimate shot arriving one tick
+ * early must not be eaten — the cost is a sustained fire rate at most one tick
+ * per shot faster than authored, which no human trigger can bank.
+ */
+const CADENCE_TOLERANCE_TICKS = 1;
+/** Server projectile pool. Shots in flight, not shots per match. */
+const SERVER_PROJECTILE_CAPACITY = 256;
 
 /**
  * Command buffer management. Draining exactly one command per tick is the
@@ -112,6 +200,12 @@ export class GameServer {
   malformedPacketsDropped = 0;
   /** Client dial writes refused: not allowed, unknown id, or out of range. */
   visualDialWritesRefused = 0;
+  /** Shots resolved, hits landed, and claims thrown away. Telemetry. */
+  shotsResolved = 0;
+  shotsHit = 0;
+  fireClaimsRejected = 0;
+  /** Select/reload claims refused: unknown weapon, mid-switch, full magazine… */
+  weaponClaimsRejected = 0;
   /** Room packets broadcast. One per patch tick at most, however fast a client talks. */
   roomStatePacketsSent = 0;
 
@@ -141,6 +235,23 @@ export class GameServer {
    * hostile client using it as an amplifier.
    */
   private roomStateDirty = false;
+  private readonly maxHealth: number;
+  private readonly respawnTicks: number;
+  private readonly maxAimDeviation: number;
+  private readonly spawn: (seat: number) => { x: number; y?: number; z: number };
+  /** Reused, so resolving a shot allocates nothing on a 64-player room's tick. */
+  private readonly aimScratch = { x: 0, y: 0, z: 0 };
+  /** Rewind buffer: per-tick capsules for lag-compensated near-field shots. */
+  private readonly history = new StateHistory(HISTORY_TICKS);
+  /** Rewind target of the claim being resolved; read by the rewound query. */
+  private rewindTick = -1;
+  /** Capsules as the shooter saw them (rewound), for the hitscan branch. */
+  private readonly rewoundQuery: ServerWorldQuery;
+  /** Capsules as they are NOW, for projectiles in flight. */
+  private readonly liveQuery: ServerWorldQuery;
+  /** Beyond-horizon rounds in flight, on the shared ballistic model. */
+  private readonly ballistics: BallisticProjectileSystem;
+  private readonly ticksPerSecond: number;
 
   constructor(
     rapier: typeof RAPIER,
@@ -163,9 +274,39 @@ export class GameServer {
         : {}),
     });
     const spawn = options.spawn ?? defaultSpawn;
+    this.spawn = spawn;
+    this.maxHealth = Math.max(1, Math.min(255, options.maxHealth ?? DEFAULT_MAX_HEALTH));
+    this.respawnTicks = Math.round(
+      (options.respawnSeconds ?? DEFAULT_RESPAWN_SECONDS) / tuning.fixedTimestepSeconds
+    );
+    this.maxAimDeviation =
+      options.maxAimDeviationRadians ?? DEFAULT_MAX_AIM_DEVIATION_RADIANS;
     this.weather = (options.weatherIndex ?? 0) & 0xff;
     this.clampDial = options.clampVisualDial ?? null;
     this.allowClientVisualDials = options.allowClientVisualDials ?? false;
+    this.ticksPerSecond = 1 / tuning.fixedTimestepSeconds;
+    // Two views of the same world. The rewound query reads the history ring at
+    // whatever tick `rewindTick` names while a claim resolves; the live query
+    // reads the motors directly for projectiles in flight. Both damage through
+    // the same per-peer Damageable, so health falls in exactly one place.
+    this.liveQuery = new ServerWorldQuery(
+      heightSource,
+      () => this.liveCapsules(),
+      (id) => this.peers.get(id)?.damageable ?? null
+    );
+    this.rewoundQuery = new ServerWorldQuery(
+      heightSource,
+      () => this.history.capsulesAt(this.rewindTick) ?? [...this.liveCapsules()],
+      (id) => this.peers.get(id)?.damageable ?? null
+    );
+    // The same environment the client's local simulation uses by default. URL
+    // wind overrides are ignored by networked clients for the same reason
+    // `?weather=` is — see docs/12 §8.1.
+    this.ballistics = new BallisticProjectileSystem(
+      this.liveQuery,
+      DEFAULT_BALLISTIC_ENVIRONMENT,
+      { capacity: SERVER_PROJECTILE_CAPACITY, maxTracePoints: 2 }
+    );
 
     transport.onConnection((connection) => {
       const roomId = String(connection.id);
@@ -173,6 +314,17 @@ export class GameServer {
       this.peers.set(connection.id, {
         connection,
         roomId,
+        health: this.maxHealth,
+        respawnTick: -1,
+        highestFireSequence: -1,
+        highestWeaponSequence: -1,
+        weaponIndex: 0,
+        magazines: WEAPON_DEFINITIONS.map((definition) => definition.ammo.magazineSize),
+        reserves: WEAPON_DEFINITIONS.map((definition) => definition.ammo.initialReserve),
+        nextFireTicks: WEAPON_DEFINITIONS.map(() => 0),
+        switchCompleteTick: -1,
+        reloadCompleteTick: -1,
+        damageable: this.createDamageable(connection.id),
         queue: [],
         acknowledgedTick: 0,
         highestQueuedTick: -1,
@@ -193,6 +345,18 @@ export class GameServer {
       const type = packetTypeOf(bytes);
       if (type === PacketType.SetVisualDial) {
         this.receiveVisualDial(connection, bytes);
+        return;
+      }
+      if (type === PacketType.Fire) {
+        this.receiveFire(connection, bytes);
+        return;
+      }
+      if (type === PacketType.SelectWeapon) {
+        this.receiveSelectWeapon(connection, bytes);
+        return;
+      }
+      if (type === PacketType.Reload) {
+        this.receiveReload(connection, bytes);
         return;
       }
       if (type !== PacketType.Commands) return;
@@ -313,6 +477,294 @@ export class GameServer {
     }
   }
 
+  /** A player's server-owned hit points, or null if they are not in this room. */
+  healthOf(playerId: number): number | null {
+    return this.peers.get(playerId)?.health ?? null;
+  }
+
+  /**
+   * Applies damage on the server's authority. THE ONLY PLACE health falls — the
+   * fire path lands here, and so will a grenade or a fall. Returns the health left,
+   * or null for an unknown or already-dead target.
+   */
+  damagePlayer(playerId: number, amount: number): number | null {
+    const peer = this.peers.get(playerId);
+    if (peer === undefined || peer.health === 0) return null;
+    peer.health = Math.max(0, peer.health - Math.max(0, Math.round(amount)));
+    if (peer.health === 0 && this.respawnTicks > 0) {
+      peer.respawnTick = this.room.tick + this.respawnTicks;
+    }
+    return peer.health;
+  }
+
+  /**
+   * A client claiming it fired.
+   *
+   * The claim carries INTENT ONLY — a tick, a shot sequence, the direction the
+   * weapon was pointing, and the snapshot tick the shooter was rendering.
+   * Everything that decides the outcome is the server's: the origin is the
+   * shooter's own authoritative eye, THE WEAPON is the peer's server-owned
+   * loadout record, the targets are the capsules the simulation holds (rewound
+   * for the near field), and terrain occlusion is the same height field the
+   * motor collides with. Nothing here reads a bone and no bullet becomes a
+   * Rapier body (docs/10 §10).
+   *
+   * HYBRID RESOLUTION. Inside the ammunition's hitscan horizon — the distance
+   * where drop stays under tolerance — the shot is instant against capsules
+   * rewound to the claimed viewTick: lag compensation where twitch fights
+   * happen. A round still flying at the horizon hands off to the shared
+   * projectile integrator against LIVE state: at range, flight time dwarfs
+   * latency and holding lead is the game.
+   *
+   * Rejections are silent and counted, same rule as a dial write: telling a client
+   * which claim was thrown away tells it what to send next.
+   */
+  private receiveFire(connection: ServerConnection, bytes: Uint8Array): void {
+    const peer = this.peers.get(connection.id);
+    const claim = decodeFire(bytes);
+    if (peer === undefined || claim === null || peer.health === 0) {
+      this.fireClaimsRejected += 1;
+      return;
+    }
+    // A resend or a replayed packet must not fire twice. The sequence is the
+    // shooter's own counter, so this is the same dedupe idea as the command queue.
+    if (claim.sequence <= peer.highestFireSequence) {
+      this.fireClaimsRejected += 1;
+      return;
+    }
+    peer.highestFireSequence = claim.sequence;
+
+    const motor = this.room.get(peer.roomId);
+    if (motor === undefined) {
+      this.fireClaimsRejected += 1;
+      return;
+    }
+
+    // The weapon is NOT in the claim: what fires is what the server says is in
+    // hand, gated by its own switch, reload, magazine and cadence bookkeeping.
+    // The client's WeaponSystem enforces the same rules, so an honest client
+    // never trips these; they exist for the client that stops being honest.
+    this.settleWeapon(peer);
+    const definition = this.equippedDefinition(peer);
+    const tick = this.room.tick;
+    if (
+      tick < peer.switchCompleteTick ||
+      peer.reloadCompleteTick >= 0 ||
+      peer.magazines[peer.weaponIndex] <= 0 ||
+      tick < peer.nextFireTicks[peer.weaponIndex]
+    ) {
+      this.fireClaimsRejected += 1;
+      return;
+    }
+    peer.magazines[peer.weaponIndex] -= 1;
+    peer.nextFireTicks[peer.weaponIndex] =
+      tick +
+      Math.max(
+        1,
+        this.secondsToTicks(60 / definition.shot.roundsPerMinute) - CADENCE_TOLERANCE_TICKS
+      );
+
+    // CLAMPED TO THE SERVER'S OWN LOOK, not trusted. The weapon's aimed direction
+    // legitimately differs from the look angles by sway, recoil and dispersion, none
+    // of which is simulated here, so the claim is bounded rather than rejected.
+    const yaw = clampToward(motor.state.yawRadians, claim.yawRadians, this.maxAimDeviation);
+    const pitch = clampToward(
+      motor.state.pitchRadians,
+      claim.pitchRadians,
+      this.maxAimDeviation
+    );
+    // The eye, from the blended stance the simulation holds — so a shot from a
+    // player who is halfway into a crouch leaves where the server says their head is.
+    const originY = motor.state.position.y + eyeHeightFor(motor.state, this.room.tuning);
+    const aim = lookDirection(yaw, pitch, this.aimScratch);
+    const origin = { x: motor.state.position.x, y: originY, z: motor.state.position.z };
+    const ammunition = definition.shot.ammunition;
+    const maxRange = Math.min(definition.shot.range, MAX_SHOT_DISTANCE_METRES);
+    const horizon = Math.min(hitscanHorizonMetres(ammunition), maxRange);
+    const sourceId = String(connection.id);
+
+    // NEAR: instant, against the world the shooter was LOOKING AT. The claimed
+    // viewTick is clamped into the rewind window; history the ring no longer
+    // holds falls back to live capsules inside the query — worse, never wrong.
+    this.rewindTick = Math.min(tick, Math.max(claim.viewTick, tick - MAX_REWIND_TICKS));
+    const near = resolveHitscanShot({
+      query: this.rewoundQuery,
+      sourceId,
+      sequence: claim.sequence,
+      origin,
+      direction: aim,
+      maxDistanceMetres: horizon,
+      damage: definition.shot.damage,
+      ammunition,
+      excludeObjectId: sourceId,
+    });
+    this.shotsResolved += 1;
+    for (const interaction of near.interactions) {
+      if (interaction.targetId !== null && interaction.damageApplied > 0) {
+        this.shotsHit += 1;
+        break;
+      }
+    }
+
+    // FAR: still flying at the horizon — the rest of the arc belongs to the
+    // shared integrator: drop, drift, energy decay, further penetrations.
+    if (near.continuation !== null && near.continuation.distanceTravelledMetres < maxRange) {
+      this.ballistics.spawn({
+        sourceId,
+        sequence: claim.sequence,
+        origin: near.continuation.point,
+        direction: near.continuation.direction,
+        maxDistance: maxRange,
+        maxFlightSeconds: definition.shot.maxFlightSeconds,
+        damage: definition.shot.damage,
+        ammunition,
+        captureTrace: false,
+        excludeObjectId: sourceId,
+        initialSpeedMetresPerSecond: near.continuation.speedMetresPerSecond,
+        initialDistanceMetres: near.continuation.distanceTravelledMetres,
+        initialElapsedSeconds: near.continuation.elapsedSeconds,
+        initialInteractionCount: near.continuation.interactionCount,
+      });
+    }
+  }
+
+  /**
+   * A client changing weapons. The record flips after the same switch delay the
+   * client's LoadoutSystem imposes; an unfinished reload is abandoned with its
+   * rounds unmoved, exactly as putting the weapon away abandons it in hand.
+   */
+  private receiveSelectWeapon(connection: ServerConnection, bytes: Uint8Array): void {
+    const peer = this.peers.get(connection.id);
+    const claim = decodeSelectWeapon(bytes);
+    if (peer === undefined || claim === null || claim.sequence <= peer.highestWeaponSequence) {
+      this.weaponClaimsRejected += 1;
+      return;
+    }
+    peer.highestWeaponSequence = claim.sequence;
+    const definition = weaponByWireIndex(claim.weaponIndex);
+    if (definition === null || claim.weaponIndex === peer.weaponIndex) {
+      this.weaponClaimsRejected += 1;
+      return;
+    }
+    // A reload that has already completed keeps its rounds before the switch.
+    this.settleWeapon(peer);
+    peer.weaponIndex = claim.weaponIndex;
+    peer.reloadCompleteTick = -1;
+    peer.switchCompleteTick = this.room.tick + this.secondsToTicks(WEAPON_SWITCH_SECONDS);
+  }
+
+  /** A client starting a reload. Rounds move when the server's timer says. */
+  private receiveReload(connection: ServerConnection, bytes: Uint8Array): void {
+    const peer = this.peers.get(connection.id);
+    const claim = decodeReload(bytes);
+    if (peer === undefined || claim === null || claim.sequence <= peer.highestWeaponSequence) {
+      this.weaponClaimsRejected += 1;
+      return;
+    }
+    peer.highestWeaponSequence = claim.sequence;
+    this.settleWeapon(peer);
+    const definition = this.equippedDefinition(peer);
+    if (
+      peer.health === 0 ||
+      this.room.tick < peer.switchCompleteTick ||
+      peer.reloadCompleteTick >= 0 ||
+      peer.magazines[peer.weaponIndex] >= definition.ammo.magazineSize ||
+      peer.reserves[peer.weaponIndex] <= 0
+    ) {
+      this.weaponClaimsRejected += 1;
+      return;
+    }
+    peer.reloadCompleteTick =
+      this.room.tick + this.secondsToTicks(definition.reload.durationSeconds);
+  }
+
+  /** The equipped weapon's definition. The index is validated at intake. */
+  private equippedDefinition(peer: Peer): WeaponDefinition {
+    return WEAPON_DEFINITIONS[peer.weaponIndex] ?? WEAPON_DEFINITIONS[0];
+  }
+
+  private secondsToTicks(seconds: number): number {
+    return Math.max(1, Math.round(seconds * this.ticksPerSecond));
+  }
+
+  /**
+   * Applies a completed reload LAZILY — checked when the next claim needs the
+   * magazine truth rather than scanned every tick for every peer. The rounds
+   * move at the recorded completion tick either way.
+   */
+  private settleWeapon(peer: Peer): void {
+    if (peer.reloadCompleteTick < 0 || this.room.tick < peer.reloadCompleteTick) return;
+    const definition = this.equippedDefinition(peer);
+    const index = peer.weaponIndex;
+    const fill = Math.min(
+      definition.ammo.magazineSize - peer.magazines[index],
+      peer.reserves[index]
+    );
+    peer.magazines[index] += fill;
+    peer.reserves[index] -= fill;
+    peer.reloadCompleteTick = -1;
+  }
+
+  /** The peer's health as the shared model's Damageable. Lazy peer lookup, so
+   * the adapter can be built before the peer record exists and survives it. */
+  private createDamageable(playerId: number): Damageable {
+    const server = this;
+    return {
+      id: String(playerId),
+      get maxHealth() {
+        return server.maxHealth;
+      },
+      get health() {
+        return server.peers.get(playerId)?.health ?? 0;
+      },
+      applyDamage(info) {
+        const before = server.peers.get(playerId)?.health ?? 0;
+        const after = server.damagePlayer(playerId, info.amount);
+        if (after === null) return { applied: 0, health: before, destroyed: false };
+        return { applied: before - after, health: after, destroyed: after === 0 };
+      },
+      reset() {},
+    };
+  }
+
+  /** Live capsules, blended to the stance the simulation holds. Dead players
+   * are not shootable. */
+  private *liveCapsules(): Generator<CapsuleCandidate> {
+    for (const peer of this.peers.values()) {
+      if (peer.health === 0) continue;
+      const motor = this.room.get(peer.roomId);
+      if (motor === undefined) continue;
+      yield {
+        id: peer.connection.id,
+        feetX: motor.state.position.x,
+        feetY: motor.state.position.y,
+        feetZ: motor.state.position.z,
+        radius: blendedStanceDimension(motor.state, this.room.tuning, "radius"),
+        height: blendedStanceDimension(motor.state, this.room.tuning, "height"),
+      };
+    }
+  }
+
+  /** Puts dead players back, at a fresh spawn, with full health and full kit. */
+  private respawnDue(): void {
+    for (const peer of this.peers.values()) {
+      if (peer.respawnTick < 0 || this.room.tick < peer.respawnTick) continue;
+      const motor = this.room.get(peer.roomId);
+      peer.respawnTick = -1;
+      peer.health = this.maxHealth;
+      for (let index = 0; index < WEAPON_DEFINITIONS.length; index += 1) {
+        peer.magazines[index] = WEAPON_DEFINITIONS[index].ammo.magazineSize;
+        peer.reserves[index] = WEAPON_DEFINITIONS[index].ammo.initialReserve;
+      }
+      peer.nextFireTicks.fill(0);
+      peer.switchCompleteTick = -1;
+      peer.reloadCompleteTick = -1;
+      if (motor === undefined) continue;
+      const at = this.spawn(peer.connection.id);
+      motor.teleport({ x: at.x, y: at.y ?? motor.state.position.y, z: at.z });
+    }
+  }
+
   /** Advances one simulation tick and broadcasts if this tick is a patch tick. */
   tick(): void {
     this.commands.clear();
@@ -343,6 +795,18 @@ export class GameServer {
       peer.acknowledgedTick = consumed.tick;
     }
     this.room.step(this.commands);
+    // Rounds beyond the hitscan horizon fly here, against live capsules. Damage
+    // lands through each peer's Damageable, so it is still `damagePlayer` that
+    // moves health. The 1/120 s inner step runs twice per 60 Hz room tick.
+    this.ballistics.update(this.room.tuning.fixedTimestepSeconds);
+    this.ballistics.drainImpactEvents(() => {});
+    this.ballistics.drainResults((result) => {
+      if (result.reports.some((report) => report.damageApplied > 0)) this.shotsHit += 1;
+    });
+    this.respawnDue();
+    // AFTER respawn placement, so the ring holds exactly what this tick's
+    // snapshot will show — viewTick rewinds must land on rendered truth.
+    this.history.record(this.room.tick, this.liveCapsules());
     if (this.room.tick % this.ticksPerPatch === 0) this.broadcast();
   }
 
@@ -369,7 +833,11 @@ export class GameServer {
     for (const peer of this.peers.values()) {
       const motor = this.room.get(peer.roomId);
       if (motor === undefined) continue;
-      this.snapshotPlayers.push({ id: peer.connection.id, state: motor.state });
+      this.snapshotPlayers.push({
+        id: peer.connection.id,
+        state: motor.state,
+        health: peer.health,
+      });
     }
     if (this.snapshotPlayers.length === 0) return;
     // Each client needs its own acknowledgement, so the payload is re-encoded
@@ -393,6 +861,20 @@ export class GameServer {
     for (const peer of this.peers.values()) peer.connection.send(bytes);
     this.roomStatePacketsSent += 1;
   }
+}
+
+/**
+ * Moves `from` toward `to` by at most `limit` radians, the short way round.
+ *
+ * Shortest-arc, so a claim of 10 degrees against a look of 350 is 20 degrees apart
+ * rather than 340 — the naive subtraction makes every shot near north look like a
+ * spoof and clamps it backwards.
+ */
+function clampToward(from: number, to: number, limit: number): number {
+  const delta = wrapPi(to - from);
+  if (delta > limit) return from + limit;
+  if (delta < -limit) return from - limit;
+  return to;
 }
 
 function defaultSpawn(seat: number): { x: number; z: number } {

@@ -1,6 +1,6 @@
-import type { WorldHit } from "../core/WorldQuery";
-import type { ShotTrace } from "./ShotTrace";
-import type { TargetHitReport } from "./TargetHitReport";
+import type { WorldHit } from "./WorldQuery.ts";
+import type { ShotTrace } from "./ShotTrace.ts";
+import type { TargetHitReport } from "./TargetHitReport.ts";
 
 export interface ResolvedShotIdentity {
   readonly sourceId: string;

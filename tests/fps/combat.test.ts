@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Vector3 } from "three/webgpu";
-import { HealthDamageable } from "../../src/fps/combat/Damageable.ts";
+import { HealthDamageable } from "../../src/combat/Damageable.ts";
 import { HitscanResolver } from "../../src/fps/combat/HitscanResolver.ts";
 import type { WorldQuery } from "../../src/fps/core/WorldQuery.ts";
 import { ShotDebugStore } from "../../src/fps/debug/ShotDebugStore.ts";
@@ -17,10 +17,10 @@ test("hitscan resolves against world query and applies target damage", () => {
       normal: new Vector3(0, 0, 1),
       kind: "target",
       objectId: "target",
+      objectName: "target-mesh",
       surfaceId: "flesh",
       penetrationThicknessMetres: 0.24,
       damageable: target,
-      object: { name: "target-mesh" } as never,
     }),
   };
   const resolver = new HitscanResolver(query);
@@ -44,7 +44,10 @@ test("hitscan resolves against world query and applies target damage", () => {
   assert.equal(result.report?.rangeMetres, 42);
   assert.equal(result.trace.mode, "hitscan");
   assert.equal(result.trace.points.length, 2);
-  assert.deepEqual(result.trace.points[1].toArray(), [0, 1, -42]);
+  assert.deepEqual(
+    [result.trace.points[1].x, result.trace.points[1].y, result.trace.points[1].z],
+    [0, 1, -42]
+  );
   assert.equal(result.trace.impact?.targetId, "target");
   target.reset();
   assert.equal(target.health, 100);
@@ -64,7 +67,10 @@ test("terrain hits and misses never mutate target health", () => {
   assert.equal(result.damageApplied, 0);
   assert.equal(result.report, null);
   assert.equal(result.trace.impact, null);
-  assert.deepEqual(result.trace.points[1].toArray(), [0, 0, -100]);
+  assert.deepEqual(
+    [result.trace.points[1].x, result.trace.points[1].y, result.trace.points[1].z],
+    [0, 0, -100]
+  );
 });
 
 test("telemetry retains five reports and debug store retains only the latest trace", () => {

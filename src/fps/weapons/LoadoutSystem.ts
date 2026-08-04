@@ -1,4 +1,4 @@
-import type { WeaponCommand, WeaponSlotId } from "./WeaponDefinition";
+import type { WeaponCommand, WeaponSlotId } from "../../combat/WeaponDefinition.ts";
 import type { WeaponHandlingContext } from "./WeaponHandling.ts";
 import { WeaponSystem, type WeaponEvent, type WeaponSnapshot } from "./WeaponSystem.ts";
 

@@ -10,7 +10,7 @@ import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three/webgpu";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import type { Heightfield } from "../df2/Heightfield";
-import { HealthDamageable } from "./combat/Damageable";
+import { HealthDamageable } from "../combat/Damageable.ts";
 import type { RegisteredWorldQuery } from "./core/WorldQuery";
 
 /**

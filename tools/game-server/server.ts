@@ -155,7 +155,9 @@ class GameRoom extends Room {
           `${usedMs.toFixed(2)} ms/tick (${((usedMs / tickMs) * 100).toFixed(1)}% budget), ` +
           `${this.game.snapshotsSent} snapshots, ` +
           `${this.game.commandsDiscarded} discarded, ` +
-          `${this.game.malformedPacketsDropped} malformed`
+          `${this.game.malformedPacketsDropped} malformed, ` +
+          `${this.game.shotsHit}/${this.game.shotsResolved} shots hit, ` +
+          `${this.game.fireClaimsRejected} claims rejected`
       );
     }, 5000);
   }

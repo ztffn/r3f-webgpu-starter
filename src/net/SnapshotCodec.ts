@@ -19,6 +19,12 @@ export const PacketType = {
   RoomState: 4,
   /** Up: an admin asking for one dial change. Refused unless the server allows it. */
   SetVisualDial: 5,
+  /** Up: the client claiming it fired. Carries intent, never a result. */
+  Fire: 6,
+  /** Up: the client changed weapons. The server holds the loadout truth. */
+  SelectWeapon: 7,
+  /** Up: the client started a reload. Rounds move when the server's timer says. */
+  Reload: 8,
 } as const;
 
 /** tick u32 + buttons u16 + yaw i16 + pitch i16. Buttons outgrew a byte when
@@ -26,8 +32,14 @@ export const PacketType = {
 export const BYTES_PER_COMMAND = 10;
 /** id u16 + position 3xf32 + velocity 3xi16 + yaw i16 + flags u8 (stance 0-1,
  * grounded 2, sprinting 3, previous stance 4-5, aiming 6) + contact u8 +
- * pitch i16 + stance progress u8. */
-export const BYTES_PER_PLAYER = 27;
+ * pitch i16 + stance progress u8 + health u8.
+ *
+ * HEALTH IS NOT MotorState. The motor simulates movement and knows nothing about
+ * damage, so health rides beside its state rather than inside it — that is what
+ * keeps a shot out of the replay path, since a client replaying unacknowledged
+ * commands must not re-derive how much health it had. Dead is `health === 0`
+ * rather than its own flag bit, because two encodings of one fact drift. */
+export const BYTES_PER_PLAYER = 28;
 const COMMAND_HEADER_BYTES = 3;
 const SNAPSHOT_HEADER_BYTES = 10;
 
@@ -124,6 +136,8 @@ export function decodeCommands(bytes: Uint8Array): PlayerCommand[] {
 export interface SnapshotPlayer {
   readonly id: number;
   readonly state: MotorState;
+  /** Server-owned hit points, 0-255. 0 is dead. */
+  readonly health: number;
 }
 
 export interface DecodedSnapshot {
@@ -170,6 +184,7 @@ export function encodeSnapshot(
     view.setUint8(at + 23, state.contactFlags & 0xff);
     view.setInt16(at + 24, packAngle(state.pitchRadians));
     view.setUint8(at + 26, packProgress(state.stanceProgress));
+    view.setUint8(at + 27, Math.max(0, Math.min(255, Math.round(players[index]!.health))));
     at += BYTES_PER_PLAYER;
   }
   return new Uint8Array(buffer);
@@ -189,6 +204,7 @@ export function decodeSnapshot(bytes: Uint8Array): DecodedSnapshot {
     const flags = view.getUint8(at + 22);
     players.push({
       id: view.getUint16(at),
+      health: view.getUint8(at + 27),
       state: {
         tick: view.getUint32(1),
         position: {
@@ -405,6 +421,108 @@ export function decodeSetVisualDial(bytes: Uint8Array): { id: number; value: num
   const value = view.getFloat32(2);
   if (!Number.isFinite(value)) return null;
   return { id: view.getUint8(1), value };
+}
+
+/**
+ * The client claiming it fired: `type u8 + tick u32 + sequence u16 + yaw i16 +
+ * pitch i16 + viewTick u32`.
+ *
+ * NO ORIGIN, and that is the point. The server takes the shooter's eye from its own
+ * authoritative motor state, so an origin cannot be spoofed at all — there is
+ * nowhere to put one. The look angles ARE sent, because the shot leaves along the
+ * weapon's aimed direction after sway and recoil, which the server does not
+ * simulate; it clamps them against the look angles it already has for that tick
+ * (see `GameServer.receiveFire`), which bounds the lie without needing full
+ * server-side weapon simulation.
+ *
+ * NO WEAPON either: the server already holds each peer's equipped weapon
+ * (`SelectWeapon`), so a claim cannot name a bigger gun than the one in hand.
+ *
+ * `viewTick` is the server tick of the snapshot the shooter was LOOKING AT when
+ * the trigger broke — the lag-compensation rewind target. It is a claim like the
+ * direction, so the server clamps how far back it will honor it; lying forward
+ * gains nothing and lying backward is bounded to the rewind window.
+ *
+ * The sequence is the shooter's own shot counter, echoed back on the resulting hit
+ * so a client can match an authoritative outcome to the round it fired.
+ */
+const FIRE_BYTES = 15;
+
+export interface FireClaim {
+  readonly tick: number;
+  readonly sequence: number;
+  readonly yawRadians: number;
+  readonly pitchRadians: number;
+  /** Server tick of the snapshot the shooter was rendering. */
+  readonly viewTick: number;
+}
+
+export function encodeFire(claim: FireClaim): Uint8Array {
+  const buffer = new ArrayBuffer(FIRE_BYTES);
+  const view = new DataView(buffer);
+  view.setUint8(0, PacketType.Fire);
+  view.setUint32(1, claim.tick >>> 0);
+  view.setUint16(5, claim.sequence & 0xffff);
+  view.setInt16(7, packAngle(claim.yawRadians));
+  view.setInt16(9, packAngle(claim.pitchRadians));
+  view.setUint32(11, claim.viewTick >>> 0);
+  return new Uint8Array(buffer);
+}
+
+/** Null on a short buffer — this arrives from a client, so it is hostile input. */
+export function decodeFire(bytes: Uint8Array): FireClaim | null {
+  if (bytes.byteLength < FIRE_BYTES) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return {
+    tick: view.getUint32(1),
+    sequence: view.getUint16(5),
+    yawRadians: unpackAngle(view.getInt16(7)),
+    pitchRadians: unpackAngle(view.getInt16(9)),
+    viewTick: view.getUint32(11),
+  };
+}
+
+/**
+ * A weapon selection or reload claim: intent with a sequence, like fire. One
+ * shared sequence counter covers both — they are ordered on one reliable stream,
+ * and the dedupe only needs "have I consumed this claim already".
+ */
+const SELECT_WEAPON_BYTES = 4;
+const RELOAD_BYTES = 3;
+
+export interface WeaponClaim {
+  readonly sequence: number;
+  /** Index into the canonical WEAPON_DEFINITIONS wire order. */
+  readonly weaponIndex: number;
+}
+
+export function encodeSelectWeapon(claim: WeaponClaim): Uint8Array {
+  const buffer = new ArrayBuffer(SELECT_WEAPON_BYTES);
+  const view = new DataView(buffer);
+  view.setUint8(0, PacketType.SelectWeapon);
+  view.setUint16(1, claim.sequence & 0xffff);
+  view.setUint8(3, claim.weaponIndex & 0xff);
+  return new Uint8Array(buffer);
+}
+
+export function decodeSelectWeapon(bytes: Uint8Array): WeaponClaim | null {
+  if (bytes.byteLength < SELECT_WEAPON_BYTES) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return { sequence: view.getUint16(1), weaponIndex: view.getUint8(3) };
+}
+
+export function encodeReload(sequence: number): Uint8Array {
+  const buffer = new ArrayBuffer(RELOAD_BYTES);
+  const view = new DataView(buffer);
+  view.setUint8(0, PacketType.Reload);
+  view.setUint16(1, sequence & 0xffff);
+  return new Uint8Array(buffer);
+}
+
+export function decodeReload(bytes: Uint8Array): { sequence: number } | null {
+  if (bytes.byteLength < RELOAD_BYTES) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return { sequence: view.getUint16(1) };
 }
 
 export function packetTypeOf(bytes: Uint8Array): number {

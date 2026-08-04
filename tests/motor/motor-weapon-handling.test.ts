@@ -18,8 +18,8 @@ import { createMotorWorld, flatHeightSource, initRapier } from "../../src/motor/
 import { MotorInput, type MotorState, type PlayerCommand } from "../../src/motor/MotorTypes.ts";
 import { calculateDispersionConeRadians } from "../../src/fps/weapons/WeaponHandling.ts";
 import { WeaponSystem } from "../../src/fps/weapons/WeaponSystem.ts";
-import { M4_DEFINITION } from "../../src/fps/weapons/weaponDefinitions.ts";
-import type { WeaponAccuracyDefinition } from "../../src/fps/weapons/WeaponDefinition.ts";
+import { M4_DEFINITION } from "../../src/combat/weaponDefinitions.ts";
+import type { WeaponAccuracyDefinition } from "../../src/combat/WeaponDefinition.ts";
 
 const RAPIER = await initRapier();
 

@@ -1,7 +1,7 @@
 import * as THREE from "three/webgpu";
 import { AuthoritativeAimState } from "./AuthoritativeAimState.ts";
 import type { PlayerMotorSnapshot, PlayerStance } from "./PlayerMotor.ts";
-import type { WeaponCommand } from "../weapons/WeaponDefinition.ts";
+import type { WeaponCommand } from "../../combat/WeaponDefinition.ts";
 
 export interface LocalPlayerCommands {
   weaponCommands: WeaponCommand[];

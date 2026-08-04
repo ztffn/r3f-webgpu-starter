@@ -1,7 +1,7 @@
 # Death, damage and kill feedback
 
 **Date:** 2026-08-04
-**Status:** planned, not started
+**Status:** implemented 2026-08-05; see the commits from `New feature: Carry the local player health to the HUD` onward
 **Related:** `docs/12-character-motor-and-networking-spec.md` §8 wire format, `docs/10-fps-combat-implementation-spec.md` §2 ownership, `docs/plans/2026-08-03-character-animation-session-handoff.md`
 
 ## Objective
@@ -30,7 +30,7 @@ explicitly deferred until weapon models carry a muzzle bone.
 
 ## Implementation Plan
 
-- [ ] 1. Carry local health to the HUD through the client seam, closing the gap that made this
+- [x] 1. Carry local health to the HUD through the client seam, closing the gap that made this
   session's playtest unreadable. `src/net/GameClient.ts:132` already holds a health field
   assigned only from snapshots, and `src/hud/GameHud.tsx` already takes health as a prop, but
   `src/game/GameApp.tsx:151` passes null because the merge never completed the one call site
@@ -41,7 +41,7 @@ explicitly deferred until weapon models carry a muzzle bone.
   Do not reintroduce a health field on the player state report type: that shape was deliberately
   reverted and the reasoning is recorded in the commit message.
 
-- [ ] 2. Put full health on the welcome packet so the HUD can render a fraction without
+- [x] 2. Put full health on the welcome packet so the HUD can render a fraction without
   inventing a denominator. Player maximum health is currently a server-side constant at
   `src/net/GameServer.ts:195` and never reaches the client, while world targets already carry
   theirs through the snapshot. Welcome is sent once per join and is the natural home for a
@@ -49,14 +49,14 @@ explicitly deferred until weapon models carry a muzzle bone.
   Update the welcome encoder and decoder in `src/net/SnapshotCodec.ts:260` together with their
   round-trip test.
 
-- [ ] 3. Move the character clip vocabulary to a home the authority can import, following the
+- [x] 3. Move the character clip vocabulary to a home the authority can import, following the
   precedent `docs/12-character-motor-and-networking-spec.md` §3 records for the ballistic core.
   `src/fps/presentation/characterClips.ts` is already pure and free of Three.js, but the server
   needs the death clip durations to derive a respawn delay, and the established answer when the
   authority needs something from the FPS slice is to relocate it rather than to import across
   the layer. Preserve every existing export so the animator and its tests are unaffected.
 
-- [ ] 4. Add the death clip table to that shared module: the six clip names from
+- [x] 4. Add the death clip table to that shared module: the six clip names from
   `assets/3d/characters/player1/SpecialForcesSoldier_animations.txt`, their durations, and a
   pure selector mapping a death direction sector and a headshot flag to a clip name. Per the
   user's decision the right-side clip serves left-side deaths, so the selector collapses both
@@ -64,20 +64,20 @@ explicitly deferred until weapon models carry a muzzle bone.
   stays testable in bare Node, and extend the startup validation list so a missing or renamed
   clip fails loudly at load rather than silently falling back.
 
-- [ ] 5. Extend the wire with a roster packet carrying player identity, so the feed can name
+- [x] 5. Extend the wire with a roster packet carrying player identity, so the feed can name
   people. The game protocol is numeric today, which is why the HUD prints a player number at
   `src/hud/GameHud.tsx:156`; callsigns exist in the account layer and never cross into the game.
   Send the full roster on join and an incremental entry on each join and leave, following the
   low-frequency, send-on-change discipline `docs/12-character-motor-and-networking-spec.md` §8.1
   sets out for room state. This packet is also what produces the joined and left feed lines.
 
-- [ ] 6. Extend the wire with a death broadcast carrying victim, killer, weapon, death direction
+- [x] 6. Extend the wire with a death broadcast carrying victim, killer, weapon, death direction
   sector, headshot flag and the seconds until respawn. Broadcast rather than targeted, because
   bystanders need it to play the death animation and the feed needs it to print a line. Pattern
   it on the accepted-shot relay already at `src/net/SnapshotCodec.ts` packet type nine, which is
   the closest existing analogue for a presentation-only down packet.
 
-- [ ] 7. Extend the wire with two small targeted packets: a hit confirmation to the shooter
+- [x] 7. Extend the wire with two small targeted packets: a hit confirmation to the shooter
   carrying the claim sequence, the victim and whether the hit was fatal, and a damage
   notification to the victim carrying the attacker, the bearing of the incoming round relative
   to the victim's own facing, and the amount. Two packets rather than one shared shape, because
@@ -85,7 +85,7 @@ explicitly deferred until weapon models carry a muzzle bone.
   should know. Keep both strictly presentational, as the shot relay comment already insists:
   damage arrives as health in a snapshot, never as a claim in an effect packet.
 
-- [ ] 8. Emit those three events from the server's existing resolution site. Everything needed is
+- [x] 8. Emit those three events from the server's existing resolution site. Everything needed is
   already in hand where damage is applied around `src/net/GameServer.ts:616` and
   `src/net/GameServer.ts:584`: the shooter, the victim, the weapon, the direction the round was
   travelling and the victim's own yaw. Compute the death sector from the round's bearing against
@@ -94,47 +94,47 @@ explicitly deferred until weapon models carry a muzzle bone.
   headshot flag wired but always false until a head zone exists on the capsule; do not invent
   one here.
 
-- [ ] 9. Derive the respawn delay from the death clip rather than a flat constant, per the
+- [x] 9. Derive the respawn delay from the death clip rather than a flat constant, per the
   user's decision. `src/net/GameServer.ts:589` currently schedules respawn a fixed three seconds
   after death, while four of the six death clips run longer than that, so a body would pop away
   mid-fall. Look the duration up from the shared table added earlier, add a configured pause,
   and send the resulting seconds on the death broadcast so the client's counter and the server's
   schedule cannot disagree.
 
-- [ ] 10. Feed callsigns into the room so the roster packet has something to send. The account
+- [x] 10. Feed callsigns into the room so the roster packet has something to send. The account
   behind a session is already resolved in the static room authentication hook in
   `tools/game-server/server.ts` and recorded per session, so the callsign can be read at join
   and handed to the game server through its existing options seam. Anonymous joiners keep a
   numeric fallback name, because authentication is optional by design and every documented
   development URL must keep working.
 
-- [ ] 11. Decode the new packets on the client and expose them the way the existing ones are
+- [x] 11. Decode the new packets on the client and expose them the way the existing ones are
   exposed. `src/net/GameClient.ts` should keep its own React-free and Three-free discipline and
   offer subscribe and getSnapshot pairs for the roster and for a short bounded queue of feed and
   damage events. A queue rather than a single latest value, because two kills in the same tick
   must both appear in the feed; bound it so a client that never drains cannot grow without limit.
 
-- [ ] 12. Play the death animation on every client. `src/fps/presentation/CharacterAnimator.ts`
+- [x] 12. Play the death animation on every client. `src/fps/presentation/CharacterAnimator.ts`
   already has a one-shot path at line 202 that sets loop-once and clamps the final pose, which
   is exactly what a death needs, so this is clip selection rather than new playback machinery.
   Trigger from the death broadcast, hold the final pose until the victim respawns, and make sure
   the locomotion selector cannot steal the action back while the body is down. Reproduce the
   respawn snap the user observed and confirm it is gone.
 
-- [ ] 13. Turn the mockup chat panel into a real event feed. `src/hud/GameHud.tsx:126` renders
+- [x] 13. Turn the mockup chat panel into a real event feed. `src/hud/GameHud.tsx:126` renders
   hardcoded lines behind the preview flag, styled at `src/hud/hud.css:215` with colour classes
   for message kinds already in place from the reference mockup. Drive it from the client's feed
   queue, print kills as killer, victim and weapon, print joins and leaves, expire lines after a
   few seconds, and drop the preview gate so it renders whenever there is something real to say.
   This satisfies the honesty rule the panel's own comment states rather than working around it.
 
-- [ ] 14. Add the death overlay: who killed you and how long until you respawn. Read the killer
+- [x] 14. Add the death overlay: who killed you and how long until you respawn. Read the killer
   from the death broadcast and count down from the seconds it carries. Render it as a HUD panel
   on the existing phosphor skin rather than a full-screen takeover, so a dead player can still
   read the field they are about to respawn into. Keep it strictly driven by server facts, with
   no client-side guess at the countdown.
 
-- [ ] 15. Add the directional damage indicator and the hitmarker. The victim's indicator takes
+- [x] 15. Add the directional damage indicator and the hitmarker. The victim's indicator takes
   its bearing from the damage packet and its intensity from the amount, following the
   instinct-over-cognition principle from the referenced user-experience analysis: magnitude
   should read without parsing. Keep the direction coarse and tunable behind one constant, and
@@ -143,19 +143,19 @@ explicitly deferred until weapon models carry a muzzle bone.
   earned. Structure the treatment so a later post-processing pass can add desaturation, vignette
   and blur at low health without reworking the indicator.
 
-- [ ] 16. Add the audio channel for both events, following the pooled positional pattern the
+- [x] 16. Add the audio channel for both events, following the pooled positional pattern the
   remote fire effects already use around `src/fps/RemoteFireEffects.tsx:223`. A hit cue for the
   shooter and a directional impact cue for the victim. Note that the existing remote report pool
   duplicates the impact pool, which was a deliberate earlier skip; do not add a third copy —
   reuse or consolidate.
 
-- [ ] 17. Spread the respawn points so death is visible even without the animation. The default
+- [x] 17. Spread the respawn points so death is visible even without the animation. The default
   spawn at `src/net/GameServer.ts:1134` places each seat at a fixed angle on a six-metre ring, so
   a player reappears essentially where they died. Either scatter within a larger ring or pick the
   candidate furthest from a living enemy, and let the game server pass its own spawn function
   through the options seam it already has rather than hardcoding placement in the shared server.
 
-- [ ] 18. Update the specifications to match. `docs/12-character-motor-and-networking-spec.md` §8
+- [x] 18. Update the specifications to match. `docs/12-character-motor-and-networking-spec.md` §8
   gains the four new packets and the welcome change; its §2 module map gains any relocated
   module; `docs/10-fps-combat-implementation-spec.md` §2 gains the feedback ownership rows. Record
   the concealment argument behind the indicator's vagueness where a future session will find it,

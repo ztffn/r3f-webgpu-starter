@@ -53,7 +53,9 @@ dev URL in this document keeps working unchanged.
 | `net/Transport.ts` | the four-method transport seam | framing semantics, packet meaning |
 | `net/SnapshotCodec.ts` | hand-packed binary and angle quantisation | when to send |
 | `net/GameServer.ts` | authority: command intake, tick, broadcast, room-scope state | which socket library is in use |
-| `net/GameClient.ts` | prediction, reconciliation, remote interpolation, the room-state snapshot | rendering, input devices |
+| `net/GameClient.ts` | prediction, reconciliation, remote interpolation, the room-state snapshot, the bounded combat-event log | rendering, input devices |
+| `character/characterClips.ts` | the clip vocabulary BOTH runtimes need: 8-way gait selection, and the death clips with their durations | Three.js, playback, the mixer |
+| `fps/usePlayerVitals.ts`, `fps/useCombatFeed.ts` | adapting the client's stores into React values | deciding anything |
 | `net/LoopbackTransport.ts` | an in-process link with simulated latency and loss | production use |
 | `net/ColyseusProtocol.ts` | the room name and message envelopes, SDK-free | any Colyseus import |
 | `net/ColyseusTransport.ts` | the ClientTransport over `@colyseus/sdk` | packet meaning |
@@ -238,6 +240,50 @@ a remote had an aim direction.
 input, and a u8 there does not fail — it silently drops the bit, so the server simply never
 sees that input. `tests/motor/session.test.ts` round-trips the whole bitfield rather than a
 sample, so the next bit added cannot repeat it.
+
+### 8.0 Feedback packets — death, hits, damage and the roster (2026-08-05)
+
+Four DOWN packets that carry no gameplay outcome. Damage still arrives as health in a
+snapshot and nowhere else, and a client that dropped all four would take exactly the same
+damage — they say what happened so a screen can show it. Player ids start at 1, so **zero is
+the absent id**: no killer, or an attacker who has since left.
+
+| Packet | Audience | Payload | Drives |
+| --- | --- | --- | --- |
+| `Roster` (11) | everyone, on change | `count u8 + (id u16 + len u8 + UTF-8) * n` | names in the feed; joined/left lines |
+| `PlayerDied` (12) | everyone | `victim u16 + killer u16 + weapon u8 + flags u8 + respawn tenths u8` | the death clip, the kill feed, the victim's overlay |
+| `HitConfirmed` (13) | **shooter only** | `sequence u16 + victim u16 + flags u8` | hitmarker |
+| `DamageTaken` (14) | **victim only** | `attacker u16 + bearing i16 + amount u8` | damage indicator, damage audio |
+
+**Two packets, not one with an audience flag.** They carry different facts to different
+people, and a single shape is how a shooter ends up holding something only the victim
+should know. The shooter learns *that* it landed and never how much health is left; the
+victim learns a bearing and never a position.
+
+**The bearing is the only spatial fact on the wire, and that is a concealment decision.**
+Telling a victim exactly where a shooter is hands back what the grass and the fog spent the
+engagement taking away (`00-...md` pillars). The wire carries a direction relative to the
+victim's own facing; the HUD decides how coarsely to draw it, and draws it coarsely.
+
+**The roster is whole on every change, not a delta.** A client that misses a delta is wrong
+about a name until it reconnects, whereas a missed roster is corrected by the next one — and
+the feed's joined and left lines are a diff of two rosters, so one packet does the work of
+three. The first roster a client sees is a baseline, or joining a running match prints the
+whole room walking in at once.
+
+**Respawn rides as tenths of a second** because it is derived from a death clip's own length
+(1.93–3.73 s) plus a pause, and whole seconds would round the two out of step. The server
+schedules and announces from the *same* number, which is what stops the client's countdown
+outliving the corpse.
+
+**The welcome grew a 20th byte**, `maxHealth`. It is a room constant, so it belongs on the
+packet sent once per join rather than in the snapshot, which would pay for it per player per
+tick to say nothing changed; world targets already carry their own maximum. Without it the
+client has no denominator for the health u8 and the vitals bar has to invent one.
+
+**Headshots are wired and never set.** The flag exists on `PlayerDied` and selects the
+headshot death clips, but nothing sets it until a head zone exists on the capsule — and
+inventing one from impact height would be a guess the authority has no business making.
 
 ### 8.1 Room state — the low-frequency packet (2026-08-03)
 

@@ -76,8 +76,9 @@ player instinctively recognise this?* — applies to features, not to whether a 
 - **Character (Aug 2026):** animated soldier for remote players and the V third-person
   view (`src/fps/presentation/Character*`), aim rig driven by wire pitch, 49-clip
   Draco GLB in `public/assets/characters/`. Prone deliberately renders as the capsule
-  (no prone clips baked yet). Combat/damage is still client-local — authority work is
-  briefed in `docs/plans/2026-08-03-character-animation-session-handoff.md`.
+  (no prone clips baked yet) — except a DEAD prone player, who shows the character,
+  because the fall is the whole feedback. Combat/damage is server-authoritative and its
+  feedback layer landed Aug 2026; the six death clips are wired (`docs/12` §8.0).
 - **Web product, brand and UI (Aug 2026):** the project has a public name — **Distant
   Front** — and a router. `/` is a landing page, `/faq` and `/supporter` are real pages, and
   **the whole Three.js tree lazy-loads behind `/play`** (entry chunk 115.67 KB gzipped, and its
@@ -97,6 +98,16 @@ player instinctively recognise this?* — applies to features, not to whether a 
 - **Open:** skirt artifact at eye height (`07-...md` §9), floating grass along ridgelines
   (same §), and scale calibration — calibrate scale BEFORE placing any authored asset, or
   every placement has to be redone.
+- **Death and damage feedback (Aug 2026):** server-authoritative damage was measured working
+  (17 hits / 23 resolved claims) and entirely invisible, which is what made it look broken.
+  Four presentation-only down packets now carry it out — roster, `PlayerDied`, `HitConfirmed`,
+  `DamageTaken` — driving the six death clips that had shipped unused since the character
+  export, a kill feed in the mockup's chat panel, a death overlay with the server's own
+  respawn countdown, a coarse directional damage indicator and a hitmarker. **Aliveness is
+  health, everywhere**: a dropped death packet costs the right fall, never a corpse that keeps
+  walking. Respawn now waits for the death clip to finish (`docs/12` §8.0), and respawn
+  placement moved off the player's own seat — reappearing where you fell is what made death
+  invisible. Plan: `plans/2026-08-04-death-and-damage-feedback-v1.md`.
 - **Next up (combat authority):** server-authoritative damage, weather and world state —
   the worked brief is `docs/plans/2026-08-03-character-animation-session-handoff.md`.
   Also still queued (`01-...md` Phase 1.6): human-test Green Mile, then runtime map switching.

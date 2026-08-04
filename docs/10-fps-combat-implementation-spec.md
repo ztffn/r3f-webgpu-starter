@@ -64,6 +64,8 @@ throttled snapshots to the HUD.
 | `Damageable` / world prefabs | health, authored surface/thickness, hit/destruction response | player input |
 | presentation components | GLBs, mixers, scope PiP, particles, sound, debug lines | gameplay truth |
 | `CombatTelemetry` | immutable low-frequency snapshots | raycasting or simulation |
+| `useCombatFeed` | server combat events shaped for the HUD: feed lines, the local death, latest damage | deciding aliveness — health does that |
+| `hud/combatAudio.ts` | the two UI cues (round landed, you were hit) | world audio, which stays positional in RemoteFireEffects |
 | `WeaponAimIndicator` | mutable crosshair presentation values | accepting shots or generating spread |
 
 ```text
@@ -408,6 +410,14 @@ server loads it outside the test runner, where the flag does not apply.
 
 **`engines` now declares Node >= 22.6**, which is what `--experimental-strip-types` needs. Below
 that the test script fails in a way that does not name the version as the cause.
+
+**Damage direction is coarse ON PURPOSE (2026-08-05).** The wire gives the victim a bearing
+and nothing else — no position, no range — and the HUD draws it as a soft edge arc rather
+than an arrow. This is a concealment decision, not a styling one: precision here hands a
+victim the shooter's position, which is exactly what the grass, the fog and the range spent
+the engagement taking away. Judge any change to it with the `00-...md` pillar test, not with
+a usability argument alone. The blur is also the hook a later post-processing pass replaces
+with a real screen effect.
 
 ## 10. Deliberately deferred work
 

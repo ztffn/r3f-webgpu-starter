@@ -7,10 +7,17 @@
 // Every ranked figure is computed through src/account/playerStats.ts, so the
 // board and the profile can never disagree about what a player's rank points
 // are. Design record: docs/plans/2026-08-04-player-statistics-design.md.
+//
+// THE RULE FOR EVERY QUERY HERE: aggregate in SQL, and never read a row per shot
+// when a count will do. These are public, unauthenticated routes over tables that
+// grow with the whole population, so anything O(players x rows) is a denial of
+// service that testing cannot show you while the tables are empty. Reads that
+// genuinely need individual values — a median cannot come from a count — are
+// restricted to `fatal = 1`. See the design record section 6.
 
+import { sql } from "kysely";
 import {
   combatRating,
-  consistency,
   killDeathRatio,
   median,
   rankPoints,
@@ -68,12 +75,17 @@ export class StatsRepository {
   /**
    * The board.
    *
-   * Assembled in one pass over three small aggregates rather than a query per
-   * player: the population is the whole point of this page, and N+1 reads would
-   * make it the slowest thing on the site the moment anyone uses it.
+   * Every total is summed BY THE DATABASE, grouped by player. The first version
+   * read the rows and summed them in JavaScript with
+   * `participation.filter(e => e.user_id === row.id)` inside `players.map(...)`,
+   * which is O(players x rows) — a thousand accounts against a hundred thousand
+   * participation rows is a hundred million comparisons per request, on a public
+   * endpoint. It also passed every account id as a bound parameter to
+   * `where("user_id", "in", ids)`, which has a hard ceiling in SQLite.
    *
    * Guests are excluded, as they are from every board — a per-browser account is
-   * disposable, and ranking them rewards clearing your storage.
+   * disposable, and ranking them rewards clearing your storage. The exclusion is
+   * in the aggregate joins too, so their rows are never even summed.
    */
   async leaderboard(limit = 50): Promise<LeaderboardEntry[]> {
     const players = await this.db
@@ -96,43 +108,53 @@ export class StatsRepository {
       .execute();
     if (players.length === 0) return [];
 
-    const ids = players.map((row) => row.id);
-    const [participation, engagements] = await Promise.all([
+    const [participation, fatalRanges] = await Promise.all([
       this.db
         .selectFrom("match_participation")
-        .select([
-          "user_id",
-          "result",
-          "prone_ms",
-          "moving_ms",
-          "concealed_ms",
-          "shots_fired",
+        .innerJoin("users", "users.id", "match_participation.user_id")
+        .select(({ fn }) => [
+          "match_participation.user_id",
+          fn.sum<number>("match_participation.shots_fired").as("shots_fired"),
+          fn.sum<number>("match_participation.prone_ms").as("prone_ms"),
+          fn.sum<number>("match_participation.moving_ms").as("moving_ms"),
+          fn.sum<number>("match_participation.concealed_ms").as("concealed_ms"),
         ])
-        .where("user_id", "in", ids)
+        .select(countWhere("result", "win").as("wins"))
+        .select(countWhere("result", "loss").as("losses"))
+        .select(countWhere("result", "draw").as("draws"))
+        .select(({ fn }) => fn.countAll<number>().as("appearances"))
+        .where("users.anonymous", "=", 0)
+        .groupBy("match_participation.user_id")
         .execute(),
+      // Only FATAL rows, because the median is a median of kill ranges. Reading
+      // every shot to keep the 1-in-n that killed somebody was the bulk of this
+      // query's cost.
       this.db
         .selectFrom("engagements")
-        .select(["shooter_id", "range_metres", "fatal", "headshot"])
-        .where("shooter_id", "in", ids)
+        .innerJoin("users", "users.id", "engagements.shooter_id")
+        .select(["engagements.shooter_id", "engagements.range_metres"])
+        .where("engagements.fatal", "=", 1)
+        .where("users.anonymous", "=", 0)
         .execute(),
     ]);
 
-    const byPlayer = new Map<number, { ranges: number[]; kills: number[] }>();
-    for (const row of engagements) {
-      const bucket = byPlayer.get(row.shooter_id) ?? { ranges: [], kills: [] };
-      if (row.fatal === 1) bucket.ranges.push(row.range_metres);
-      byPlayer.set(row.shooter_id, bucket);
+    const summed = new Map(participation.map((row) => [row.user_id, row]));
+    const rangesByPlayer = new Map<number, number[]>();
+    for (const row of fatalRanges) {
+      const bucket = rangesByPlayer.get(row.shooter_id);
+      if (bucket === undefined) rangesByPlayer.set(row.shooter_id, [row.range_metres]);
+      else bucket.push(row.range_metres);
     }
 
     const scored = players.map((row) => {
-      const mine = participation.filter((entry) => entry.user_id === row.id);
-      const ranges = byPlayer.get(row.id)?.ranges ?? [];
+      const mine = summed.get(row.id);
+      const ranges = rangesByPlayer.get(row.id) ?? [];
       const stats: PlayerStats = {
         combat: {
           kills: row.kills ?? 0,
           deaths: row.deaths ?? 0,
           headshots: 0,
-          shotsFired: mine.reduce((total, entry) => total + entry.shots_fired, 0),
+          shotsFired: Number(mine?.shots_fired ?? 0),
           sniperKills: 0,
           pistolKills: 0,
           knifeKills: 0,
@@ -146,22 +168,23 @@ export class StatsRepository {
           timePlayedSeconds: row.time_played_seconds ?? 0,
           firstSeen: null,
           lastSeen: null,
-          wins: mine.filter((entry) => entry.result === "win").length,
-          losses: mine.filter((entry) => entry.result === "loss").length,
-          draws: mine.filter((entry) => entry.result === "draw").length,
+          wins: Number(mine?.wins ?? 0),
+          losses: Number(mine?.losses ?? 0),
+          draws: Number(mine?.draws ?? 0),
           firstBloods: 0,
-          proneMs: mine.reduce((total, entry) => total + entry.prone_ms, 0),
-          movingMs: mine.reduce((total, entry) => total + entry.moving_ms, 0),
-          concealedMs: mine.reduce((total, entry) => total + entry.concealed_ms, 0),
+          proneMs: Number(mine?.prone_ms ?? 0),
+          movingMs: Number(mine?.moving_ms ?? 0),
+          concealedMs: Number(mine?.concealed_ms ?? 0),
         },
         ranges: [],
         medianRangeMetres: median(ranges),
         firstRoundHitRate: null,
-        available: { engagements: ranges.length > 0, objectives: mine.length > 0 },
+        available: {
+          engagements: ranges.length > 0,
+          objectives: Number(mine?.appearances ?? 0) > 0,
+        },
       };
-      // Per-match kill counts are not recorded yet, so consistency stays unknown
-      // rather than being invented from a lifetime total.
-      return { row, stats, points: rankPoints(stats), perMatchKills: [] as number[] };
+      return { row, stats, points: rankPoints(stats) };
     });
 
     const best = scored.reduce((top, entry) => Math.max(top, entry.points), 0);
@@ -181,50 +204,106 @@ export class StatsRepository {
         kd: killDeathRatio(entry.stats.combat),
         winRate: winRate(entry.stats.activity),
         medianRangeMetres: entry.stats.medianRangeMetres,
-        consistency: consistency(entry.perMatchKills),
+        // Per-match kill counts are not recorded yet, so consistency stays
+        // unknown rather than being invented from a lifetime total. `consistency`
+        // itself is tested; this is the caller it is waiting for.
+        consistency: null,
         timePlayedSeconds: entry.stats.activity.timePlayedSeconds,
       }));
   }
 
-  /** What the population actually fights with. */
-  async weapons(): Promise<WeaponRow[]> {
-    const rows = await this.db
-      .selectFrom("engagements")
-      .select(["weapon_id", "shooter_id", "range_metres", "fatal", "headshot", "hit"])
+  /**
+   * Just the names, for the compare page's two pickers.
+   *
+   * Its own query rather than `leaderboard(200)`, which is what it used to call:
+   * that ran every aggregate above, scored the whole population and sorted it, to
+   * then throw away all but two columns.
+   */
+  async players(limit = 200): Promise<{ id: number; callsign: string }[]> {
+    return await this.db
+      .selectFrom("users")
+      .select(["id", "callsign"])
+      .where("anonymous", "=", 0)
+      .orderBy("callsign", "asc")
+      .limit(Math.max(1, Math.min(500, limit)))
       .execute();
-    if (rows.length === 0) return [];
+  }
 
-    const totalKills = rows.filter((row) => row.fatal === 1).length;
-    const byWeapon = new Map<string, typeof rows>();
-    for (const row of rows) {
-      byWeapon.set(row.weapon_id, [...(byWeapon.get(row.weapon_id) ?? []), row]);
+  /**
+   * What the population actually fights with.
+   *
+   * COUNTED IN SQL. The first version selected every row of `engagements` — one
+   * row per shot fired by everyone who has ever played — and grouped them in
+   * memory with `byWeapon.set(id, [...previous, row])`, which reallocates the
+   * whole accumulated array on every row and is therefore quadratic in shots per
+   * weapon. Both halves of that were unbounded on a public endpoint.
+   *
+   * The medians still need individual values, so they are read separately and
+   * only for FATAL rows: a kill range median cannot be computed from counts, but
+   * it also does not need the 99% of shots that hit nobody.
+   */
+  async weapons(): Promise<WeaponRow[]> {
+    const [totals, fatal] = await Promise.all([
+      this.db
+        .selectFrom("engagements")
+        .select(({ fn }) => [
+          "weapon_id",
+          fn.countAll<number>().as("shots"),
+          fn.sum<number>("fatal").as("kills"),
+          fn.sum<number>("headshot").as("headshots"),
+          fn.count<number>("shooter_id").distinct().as("users"),
+        ])
+        .groupBy("weapon_id")
+        .execute(),
+      this.db
+        .selectFrom("engagements")
+        .select(["weapon_id", "range_metres"])
+        .where("fatal", "=", 1)
+        .execute(),
+    ]);
+    if (totals.length === 0) return [];
+
+    const rangesByWeapon = new Map<string, number[]>();
+    for (const row of fatal) {
+      const bucket = rangesByWeapon.get(row.weapon_id);
+      if (bucket === undefined) rangesByWeapon.set(row.weapon_id, [row.range_metres]);
+      else bucket.push(row.range_metres);
     }
 
-    return [...byWeapon.entries()]
-      .map(([weaponId, entries]) => {
-        const kills = entries.filter((entry) => entry.fatal === 1).length;
-        const headshots = entries.filter((entry) => entry.headshot === 1).length;
-        const shots = entries.length;
+    const totalKills = totals.reduce((sum, row) => sum + Number(row.kills ?? 0), 0);
+    return totals
+      .map((row) => {
+        const kills = Number(row.kills ?? 0);
+        const shots = Number(row.shots ?? 0);
+        const headshots = Number(row.headshots ?? 0);
         return {
-          weaponId,
+          weaponId: row.weapon_id,
           kills,
           share: totalKills === 0 ? 0 : kills / totalKills,
           shots,
           shotsPerKill: kills === 0 ? null : shots / kills,
           headshots,
           headshotRate: kills === 0 ? null : headshots / kills,
-          medianRangeMetres: median(
-            entries.filter((entry) => entry.fatal === 1).map((entry) => entry.range_metres)
-          ),
-          users: new Set(entries.map((entry) => entry.shooter_id)).size,
+          medianRangeMetres: median(rangesByWeapon.get(row.weapon_id) ?? []),
+          users: Number(row.users ?? 0),
         };
       })
       .sort((a, b) => b.kills - a.kills);
   }
 
-  /** How each map actually plays. */
+  /**
+   * How each map actually plays.
+   *
+   * The engagement ranges are attributed to a map through a match_id LOOKUP, not
+   * through a join. Joining `engagements` to `match_participation` on `match_id`
+   * duplicates every engagement once per participant in that match, which was
+   * wrong twice over: it multiplied the rows read by the average player count,
+   * and it weighted each match's ranges by how many people were in it — so a
+   * 16-player match counted sixteen times as much as a duel, and the reported
+   * "median range" was not the median of anything.
+   */
   async maps(): Promise<MapRow[]> {
-    const [participation, engagements] = await Promise.all([
+    const [participation, fatal] = await Promise.all([
       this.db
         .selectFrom("match_participation")
         .select([
@@ -239,16 +318,33 @@ export class StatsRepository {
         .execute(),
       this.db
         .selectFrom("engagements")
-        .innerJoin("match_participation", "match_participation.match_id", "engagements.match_id")
-        .select(["match_participation.map", "engagements.range_metres", "engagements.fatal"])
+        .select(["match_id", "range_metres"])
+        .where("fatal", "=", 1)
         .execute(),
     ]);
     if (participation.length === 0) return [];
 
-    const names = [...new Set(participation.map((row) => row.map))];
-    return names
-      .map((map) => {
-        const rows = participation.filter((row) => row.map === map);
+    // One entry per match, so an engagement is attributed once.
+    const mapOfMatch = new Map<string, string>();
+    const byMap = new Map<string, typeof participation>();
+    for (const row of participation) {
+      mapOfMatch.set(row.match_id, row.map);
+      const bucket = byMap.get(row.map);
+      if (bucket === undefined) byMap.set(row.map, [row]);
+      else bucket.push(row);
+    }
+
+    const rangesByMap = new Map<string, number[]>();
+    for (const row of fatal) {
+      const map = mapOfMatch.get(row.match_id);
+      if (map === undefined) continue;
+      const bucket = rangesByMap.get(map);
+      if (bucket === undefined) rangesByMap.set(map, [row.range_metres]);
+      else bucket.push(row.range_metres);
+    }
+
+    return [...byMap.entries()]
+      .map(([map, rows]) => {
         const durations = rows.map(
           (row) => (Date.parse(row.left_at) - Date.parse(row.joined_at)) / 60000
         );
@@ -262,14 +358,21 @@ export class StatsRepository {
             durations.length === 0
               ? null
               : durations.reduce((a, b) => a + b, 0) / durations.length,
-          medianRangeMetres: median(
-            engagements
-              .filter((row) => row.map === map && row.fatal === 1)
-              .map((row) => row.range_metres)
-          ),
+          medianRangeMetres: median(rangesByMap.get(map) ?? []),
           proneShare: prone + moving === 0 ? null : prone / (prone + moving),
         };
       })
       .sort((a, b) => b.matches - a.matches);
   }
+}
+
+/**
+ * `sum(case when <column> = <value> then 1 else 0 end)`.
+ *
+ * A template rather than Kysely's case builder because it has to read as one
+ * aggregate in a select list, and because `count(...) filter (where ...)` — the
+ * tidier spelling — is Postgres-only and this runs on SQLite today.
+ */
+function countWhere(column: "result", value: string) {
+  return sql<number>`sum(case when ${sql.ref(`match_participation.${column}`)} = ${value} then 1 else 0 end)`;
 }

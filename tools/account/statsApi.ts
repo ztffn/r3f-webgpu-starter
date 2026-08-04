@@ -63,10 +63,9 @@ export function createStatsRouter({ accounts, community, stats }: StatsApiDeps):
 
   /** Who is on the site, so a compare page can offer names to pick. */
   router.get("/stats/players", async (_req: Request, res: Response) => {
-    res.json({ players: (await stats.leaderboard(200)).map((entry) => ({
-      id: entry.id,
-      callsign: entry.callsign,
-    })) });
+    // `stats.players()`, not `stats.leaderboard(200)` — this needs two columns,
+    // not the whole scored board.
+    res.json({ players: await stats.players() });
   });
 
   return router;

@@ -174,16 +174,10 @@ export function createApiRouter({
     });
   });
 
-  /** Anyone's public profile. No email, no session state — see PublicProfile. */
-  router.get("/players/:id", async (req: Request, res: Response) => {
-    const id = Number(req.params.id);
-    if (!Number.isInteger(id) || id <= 0) {
-      return void res.status(400).json({ error: "bad_id" });
-    }
-    const profile = await repository.publicProfile(id);
-    if (profile === null) return void res.status(404).json({ error: "not_found" });
-    res.json(profile);
-  });
+  // `GET /players/:id` used to live here and returned a bare PublicProfile that
+  // no client ever called. It now lives in communityApi.ts, where it returns the
+  // whole profile page — clan, wall, activity and the viewer's relationship —
+  // because a profile is a hub rather than a readout. One home, one shape.
 
   return router;
 }

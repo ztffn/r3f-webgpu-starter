@@ -15,11 +15,25 @@ import { AccountRepository } from "./repository.ts";
 import { configureAuth, configuredProviders } from "./authSettings.ts";
 import { createApiRouter } from "./api.ts";
 import { createLobbyRouter } from "./lobbyApi.ts";
+import { createCommunityRouter } from "./communityApi.ts";
+import { CommunityRepository } from "./communityRepository.ts";
 
 export interface MountedAccounts {
   db: AccountDb;
   repository: AccountRepository;
+  community: CommunityRepository;
   providers: string[];
+}
+
+export interface MountOptions {
+  /**
+   * Which account is in which room, for friends-only presence.
+   *
+   * Passed IN by the game server rather than read out of it: the rooms own who
+   * is playing, and this direction of dependency is what lets the account layer
+   * be mounted in a test with no rooms at all.
+   */
+  presence?: () => ReadonlyMap<number, string>;
 }
 
 /**
@@ -47,12 +61,16 @@ const CHECKOUT_ENABLED = process.env.DF2_CHECKOUT === "1";
  */
 const ADMIN_ENABLED = process.env.DF2_ADMIN === "1";
 
-export async function mountAccounts(app: Application): Promise<MountedAccounts> {
+export async function mountAccounts(
+  app: Application,
+  options: MountOptions = {}
+): Promise<MountedAccounts> {
   const db = openDatabase(DB_FILE);
   const { from, to } = await migrate(db);
   if (from !== to) console.log(`[accounts] migrated schema ${from} -> ${to}`);
 
   const repository = new AccountRepository(db);
+  const community = new CommunityRepository(db);
   configureAuth({
     repository,
     // No provider in development. onForgotPassword logs the reset link instead,
@@ -77,6 +95,15 @@ export async function mountAccounts(app: Application): Promise<MountedAccounts> 
   // Server browser, join codes and leaderboards. A separate router because these
   // read the matchmaker rather than the database.
   app.use("/api", createLobbyRouter({ repository }));
+  // Profiles, walls, friends and clans.
+  app.use(
+    "/api",
+    createCommunityRouter({
+      accounts: repository,
+      community,
+      presence: options.presence ?? (() => new Map()),
+    })
+  );
 
   console.log(
     `[accounts] ${DB_FILE} — auth at ${auth.prefix}, api at /api` +
@@ -85,5 +112,5 @@ export async function mountAccounts(app: Application): Promise<MountedAccounts> 
       (ADMIN_ENABLED ? ", ADMIN (dev tier grant open)" : "")
   );
 
-  return { db, repository, providers };
+  return { db, repository, community, providers };
 }

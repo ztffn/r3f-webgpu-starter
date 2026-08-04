@@ -7,6 +7,7 @@
 // database on every request rather than believed from the payload.
 
 import type { NextFunction, Request, RequestHandler, Response } from "express";
+import { JWT } from "@colyseus/auth";
 import type { Account } from "../../src/account/accountTypes.ts";
 import { accountFromToken } from "./authSettings.ts";
 import type { AccountRepository } from "./repository.ts";
@@ -37,4 +38,37 @@ export function accountOf(req: Request): Account {
   const account = (req as AuthenticatedRequest).account;
   if (account === undefined) throw new Error("route is missing requireAccount");
   return account;
+}
+
+/**
+ * Resolve the token if there is one, and carry on either way.
+ *
+ * For pages a signed-out visitor may read but which say MORE to someone signed
+ * in — a public profile shows its wall to everybody and a "add friend" button
+ * only to a viewer. `auth.middleware()` cannot do this: it refuses without a
+ * token, which would make every profile private.
+ *
+ * Verifies the signature itself rather than trusting the header, so an invalid
+ * token is treated as no token instead of as an identity.
+ */
+export function optionalAccount(repository: AccountRepository): RequestHandler {
+  return async (req: Request, _res: Response, next: NextFunction) => {
+    const header = req.headers.authorization;
+    const token = typeof header === "string" ? header.replace(/^Bearer\s+/i, "") : "";
+    if (token === "") return void next();
+    try {
+      const payload = await JWT.verify(token);
+      const account = await accountFromToken(repository, payload);
+      if (account !== null) (req as AuthenticatedRequest).account = account;
+    } catch {
+      // A stale or forged token reads as a signed-out visitor. Refusing would
+      // make a public page fail for someone whose session merely expired.
+    }
+    next();
+  };
+}
+
+/** The viewer, or null when nobody is signed in. Only valid behind `optionalAccount`. */
+export function viewerOf(req: Request): Account | null {
+  return (req as AuthenticatedRequest).account ?? null;
 }

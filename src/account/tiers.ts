@@ -25,6 +25,7 @@ export type Capability =
   | "careerStats"
   | "savedLoadouts"
   | "friends"
+  | "profilePosts"
   | "joinPrivateGame"
   | "hostPrivateGame"
   | "foundClan"
@@ -52,6 +53,7 @@ const ENLISTED_CAPABILITIES = [
   "careerStats",
   "savedLoadouts",
   "friends",
+  "profilePosts",
   "joinPrivateGame",
 ] as const;
 
@@ -97,7 +99,8 @@ export const CAPABILITY_LABELS: Record<Capability, string> = {
   medals: "Medals and ribbons on your profile",
   careerStats: "Career statistics across every match",
   savedLoadouts: "Saved weapon loadouts",
-  friends: "Friends list and squad invites",
+  friends: "Friends list, and see who is in a game",
+  profilePosts: "Write on other players\u2019 profiles",
   joinPrivateGame: "Join private matches by invite code",
   hostPrivateGame: "Host private matches for your friends",
   foundClan: "Found and administer a clan",

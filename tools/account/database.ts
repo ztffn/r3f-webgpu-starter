@@ -69,6 +69,55 @@ export interface MedalRow {
   awarded_at: string;
 }
 
+/**
+ * A friendship edge, stored ONCE rather than as two mirrored rows.
+ *
+ * Two rows per friendship is the shape that eventually disagrees with itself —
+ * one side accepted, the other still pending — so "my friends" queries both
+ * columns instead. Design record §4.
+ */
+export interface FriendshipRow {
+  id: Generated<number>;
+  requester_id: number;
+  addressee_id: number;
+  state: "pending" | "accepted";
+  created_at: string;
+  responded_at: string | null;
+}
+
+/** Blocking is NOT a friendship state: someone you never met can need blocking. */
+export interface BlockRow {
+  blocker_id: number;
+  blocked_id: number;
+  created_at: string;
+}
+
+/** One tagwall note. `body` is plain text and is never rendered as markup. */
+export interface ProfilePostRow {
+  id: Generated<number>;
+  /** Whose wall it is on. */
+  profile_id: number;
+  author_id: number;
+  body: string;
+  created_at: string;
+}
+
+export interface ClanRow {
+  id: Generated<number>;
+  /** 2-5 of [A-Z0-9]. The thing that appears beside a name. */
+  tag: string;
+  name: string;
+  founder_id: number;
+  created_at: string;
+}
+
+export interface ClanMemberRow {
+  clan_id: number;
+  user_id: number;
+  role: "leader" | "officer" | "member";
+  joined_at: string;
+}
+
 export interface SchemaVersionRow {
   version: number;
 }
@@ -78,6 +127,11 @@ export interface AccountDatabase {
   career: CareerRow;
   characters: CharacterRow;
   medals: MedalRow;
+  friendships: FriendshipRow;
+  blocks: BlockRow;
+  profile_posts: ProfilePostRow;
+  clans: ClanRow;
+  clan_members: ClanMemberRow;
   schema_version: SchemaVersionRow;
 }
 
@@ -206,6 +260,119 @@ const MIGRATIONS: ((db: AccountDb) => Promise<void>)[] = [
         .column(column)
         .execute();
     }
+  },
+
+  // The community layer: profiles are already public, this is everything that
+  // makes them a PLACE rather than a readout. All five tables in one step
+  // because they share a privacy model and shipping them separately would mean
+  // migrating twice. Design record: plans/2026-08-04-community-layer-design.md.
+  async (db) => {
+    await db.schema
+      .createTable("friendships")
+      .addColumn("id", "integer", (c) => c.primaryKey().autoIncrement())
+      .addColumn("requester_id", "integer", (c) =>
+        c.notNull().references("users.id").onDelete("cascade")
+      )
+      .addColumn("addressee_id", "integer", (c) =>
+        c.notNull().references("users.id").onDelete("cascade")
+      )
+      .addColumn("state", "text", (c) => c.notNull())
+      .addColumn("created_at", "text", (c) => c.notNull())
+      .addColumn("responded_at", "text")
+      .execute();
+    // One edge per pair in one direction. The repository normalises before
+    // inserting so a reversed duplicate cannot be created either.
+    await db.schema
+      .createIndex("friendships_pair")
+      .on("friendships")
+      .columns(["requester_id", "addressee_id"])
+      .unique()
+      .execute();
+    // "My incoming requests" and "my friends" are the only two reads.
+    await db.schema
+      .createIndex("friendships_addressee")
+      .on("friendships")
+      .columns(["addressee_id", "state"])
+      .execute();
+    await db.schema
+      .createIndex("friendships_requester")
+      .on("friendships")
+      .columns(["requester_id", "state"])
+      .execute();
+
+    await db.schema
+      .createTable("blocks")
+      .addColumn("blocker_id", "integer", (c) =>
+        c.notNull().references("users.id").onDelete("cascade")
+      )
+      .addColumn("blocked_id", "integer", (c) =>
+        c.notNull().references("users.id").onDelete("cascade")
+      )
+      .addColumn("created_at", "text", (c) => c.notNull())
+      .addPrimaryKeyConstraint("blocks_pk", ["blocker_id", "blocked_id"])
+      .execute();
+
+    await db.schema
+      .createTable("profile_posts")
+      .addColumn("id", "integer", (c) => c.primaryKey().autoIncrement())
+      .addColumn("profile_id", "integer", (c) =>
+        c.notNull().references("users.id").onDelete("cascade")
+      )
+      .addColumn("author_id", "integer", (c) =>
+        c.notNull().references("users.id").onDelete("cascade")
+      )
+      .addColumn("body", "text", (c) => c.notNull())
+      .addColumn("created_at", "text", (c) => c.notNull())
+      .execute();
+    // Reading a wall is newest-first for one profile; the rate limiter reads by
+    // author and time. Both are covered here.
+    await db.schema
+      .createIndex("profile_posts_wall")
+      .on("profile_posts")
+      .columns(["profile_id", "created_at"])
+      .execute();
+    await db.schema
+      .createIndex("profile_posts_author")
+      .on("profile_posts")
+      .columns(["author_id", "created_at"])
+      .execute();
+
+    await db.schema
+      .createTable("clans")
+      .addColumn("id", "integer", (c) => c.primaryKey().autoIncrement())
+      .addColumn("tag", "text", (c) => c.notNull().unique())
+      .addColumn("name", "text", (c) => c.notNull())
+      .addColumn("founder_id", "integer", (c) => c.notNull().references("users.id"))
+      .addColumn("created_at", "text", (c) => c.notNull())
+      .execute();
+    // Tags are compared case-insensitively for the same reason callsigns are.
+    await db.schema
+      .createIndex("clans_tag_lower")
+      .on("clans")
+      .expression(sql`lower(tag)`)
+      .execute();
+
+    await db.schema
+      .createTable("clan_members")
+      .addColumn("clan_id", "integer", (c) =>
+        c.notNull().references("clans.id").onDelete("cascade")
+      )
+      .addColumn("user_id", "integer", (c) =>
+        c.notNull().references("users.id").onDelete("cascade")
+      )
+      .addColumn("role", "text", (c) => c.notNull())
+      .addColumn("joined_at", "text", (c) => c.notNull())
+      .addPrimaryKeyConstraint("clan_members_pk", ["clan_id", "user_id"])
+      .execute();
+    // ONE clan per player. Not a shortcut: multi-clan membership makes "which
+    // tag appears beside this name" ambiguous, and the tag beside the name is
+    // the entire visible point of a clan.
+    await db.schema
+      .createIndex("clan_members_user")
+      .on("clan_members")
+      .column("user_id")
+      .unique()
+      .execute();
   },
 ];
 

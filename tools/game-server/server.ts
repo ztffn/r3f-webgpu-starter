@@ -233,6 +233,9 @@ class GameRoom extends Room {
     // session length is measured from here rather than guessed on the way out.
     const accountId = (client.auth as { accountId?: number | null } | undefined)?.accountId ?? null;
     this.sessions.set(client.sessionId, { accountId, joinedAtMs: Date.now() });
+    // Presence, for the friends list. Anonymous joiners are not recorded: with
+    // no account there is nobody to be a friend of.
+    if (accountId !== null) PRESENCE.set(accountId, this.roomId);
     this.bridge.connectionHandler?.(connection);
 
     // Tell this client what it needs to invite others. Sent to EVERY member of a
@@ -262,6 +265,12 @@ class GameRoom extends Room {
     // taking a client's word for them would be worse than a zero.
     const session = this.sessions.get(client.sessionId);
     this.sessions.delete(client.sessionId);
+    // Cleared before anything that can throw, and only when this room is still
+    // the one recorded — a player who reconnected into another room must not
+    // have their new location deleted by the old room's teardown.
+    if (session?.accountId != null && PRESENCE.get(session.accountId) === this.roomId) {
+      PRESENCE.delete(session.accountId);
+    }
     if (session !== undefined && session.accountId !== null) {
       const seconds = (Date.now() - session.joinedAtMs) / 1000;
       const accountId = session.accountId;
@@ -292,6 +301,21 @@ class GameRoom extends Room {
 }
 
 const transport = new WebSocketTransport();
+
+/**
+ * Who is in which room, right now. Account id -> room id.
+ *
+ * Module scope for the same reason `accounts` below is: the rooms write it and
+ * the HTTP layer reads it, and there is no instance either of them shares. In
+ * memory on purpose — presence is worthless the moment the process restarts, so
+ * persisting it would only create stale rows claiming people are playing.
+ *
+ * Read ONLY through the friends endpoint, which filters it to accepted friends.
+ * Publishing which room a named player is in would be a stalking primitive, and
+ * in a game about not being seen it is also a gameplay leak.
+ */
+const PRESENCE = new Map<number, string>();
+
 /**
  * Held at module scope because `Room.onAuth` is STATIC — Colyseus calls it before
  * any instance exists, so it cannot reach the repository through `this`.
@@ -301,7 +325,7 @@ let accounts: MountedAccounts;
 // owns an Express app, so /auth and /api are mounted on it rather than standing up
 // a second server. Assembly is in tools/account/mount.ts to keep this file the
 // game's — it refuses to start without JWT_SECRET and AUTH_SALT, deliberately.
-accounts = await mountAccounts(transport.getExpressApp());
+accounts = await mountAccounts(transport.getExpressApp(), { presence: () => PRESENCE });
 
 const server = new Server({ transport });
 // filterBy on the create option, so joinOrCreate only ever matches a room of the

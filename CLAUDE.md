@@ -122,11 +122,24 @@ player instinctively recognise this?* — applies to features, not to whether a 
   the listing filter. Private rooms use Colyseus's own `private` flag; the join code lives in
   room metadata and is stripped before any response, which is why the listing is built
   server-side. Design record §5.4 has the verification and what is still open.
-- **Next up (web product):** clans and community-hosted servers (§6b), then entitlements
-  and medals (phase 7). One known gap: kills/deaths are still unwritten pending
-  feat/server-ballistics — `recordLongestShot` exists and is tested but has no caller.
-  Touch INPUT does not exist either: mobile and iPad are first-class targets for the UI,
-  and the game still needs a keyboard.
+- **Entitlements and medals (Aug 2026, phase 7 done):** `src/account/medals.ts` is the
+  catalogue and the only award rule; every combat medal carries `earnable: false`
+  because nothing writes kills yet, and `earnedMedals` checks that flag **before** the
+  medal's own test. Medals are awarded on `onLeave` from the STORED career, never
+  granted. Tiers are written only by `repository.setTier`, reachable through the
+  dev-only `POST /api/me/tier` that exists solely when `DF2_ADMIN=1` (404 otherwise).
+  **Hosting a private game is now gated**: `POST /api/private-game` checks
+  `hostPrivateGame` and creates the room server-side, and `?private=1` is gone — it
+  used to let anyone host one. `/character` can load a lazy 3D soldier turntable that
+  deliberately does **not** reflect camo/headgear/insignia, because nothing renders
+  them yet and the page says so. Read `plans/2026-08-04-...md` §5.6 first.
+- **Next up (web product):** clans and community-hosted servers (§6b), then a real
+  checkout. Known gaps: kills/deaths are still unwritten pending
+  feat/server-ballistics — `recordLongestShot` exists and is tested but has no caller —
+  and most supporter capabilities (`foundClan`, `hostCommunityServer`, `reservedSlot`,
+  `earlyAccessMaps`, `supporterMarker`) are advertised by the tier table but enforced
+  nowhere. Touch INPUT does not exist either: mobile and iPad are first-class targets
+  for the UI, and the game still needs a keyboard.
 - **Direction:** custom assets → player-created terrain → map/terrain editor tooling
   (`01-...md` Phase 6). Real assets are the dial-in instrument, not the deliverable.
 

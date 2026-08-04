@@ -224,7 +224,7 @@ Each phase is independently shippable and leaves the tree working.
 | 5 | Accounts: auth server, schema, sign-in / register / profile / character | 1 | **done** |
 | 6 | Lobby, server browser, private games, leaderboards | 5 | **done** |
 | 6b | Clans, community-hosted servers | 6 | not started |
-| 7 | Entitlements, medals, supporter perks, checkout stub | 5 | not started |
+| 7 | Entitlements, medals, supporter perks, checkout stub | 5 | **done** |
 | 8 | Touch input scheme, after the mobile GPU measurement | 4 | not started |
 
 Phases 1–4 need no server and no schema, which is why they came first: they are the half
@@ -532,6 +532,92 @@ tested seam awaiting feat/server-ballistics; `hudSignals.ts` must not import
 Three.js because a Node test imports it; and `roomInfo` living on the concrete
 `ColyseusTransport` rather than on `ClientTransport` is correct, because that
 interface is shared with the loopback and websocket doubles the Node tests drive.
+
+## 5.6 What phase 7 landed
+
+```
+src/account/medals.ts          the catalogue, `earnable`, and earnedMedals()
+tools/account/authMiddleware.ts requireAccount / accountOf, shared by two routers
+tools/account/repository.ts     + setTier, syncMedals
+tools/account/api.ts            + POST /api/me/tier (DF2_ADMIN only)
+tools/account/lobbyApi.ts       + POST /api/private-game (capability gated)
+src/site/pages/Profile.tsx      the whole catalogue, earned / locked / unearnable
+src/site/pages/Supporter.tsx    the dev grant, shown only when the server allows it
+src/game/CharacterPreview.tsx   turntable soldier, lazy island off /character
+tests/account/medals.test.ts    17 assertions
+```
+
+**A supporter perk was enforced by nothing.** `hostPrivateGame` was checked only by
+the lobby deciding which button to render — `onCreate` read `visibility: "private"`
+straight out of untrusted room options, so `/play?…&private=1` hosted a private game
+for anyone, account or not. The room is now created by **`POST /api/private-game`**,
+which is the only layer that knows who is asking, and `&private=1` is gone along with
+`createPrivate` and the transport's `client.create` path. Verified against a live
+server: enlisted gets 403, a granted supporter gets a room id, the room is absent
+from `/api/servers`, the join code arrives in the HUD over `ROOM_INFO` as before, and
+an unauthenticated caller gets 401.
+
+**A lapsed supporter is refused.** Granting `days: -1` stores the tier and an expiry
+in the past; `/api/me` then reports `tier: "supporter"` with `effectiveTier:
+"enlisted"`, and hosting is refused. That is `effectiveTier` failing closed, measured
+rather than assumed.
+
+**`earnable` on a medal is load-bearing, not a label.** Kills and longest shot are
+not written by anything yet, so every combat medal carries `earnable: false` and
+`earnedMedals()` checks that flag *before* the medal's own test. Proven on real data:
+an account with `longest_shot_metres = 812.4` was awarded the two service medals it
+qualified for and **not** the 500 m marksman medal, whose own predicate returns true.
+Turning a medal on when the ballistics branch lands is one boolean, deliberately.
+
+Medals are evaluated on `onLeave`, after the session is written and from the STORED
+career — so the match that crosses a threshold is the one that awards it, and an
+award missed to a crash corrects itself the next time anyone plays. `setTier` and the
+medal writers are separate methods on purpose: a tier can be granted and a medal
+cannot, and keeping them apart makes that structural rather than a convention.
+
+**The dev grant answers 404, not 403, when `DF2_ADMIN` is off.** "Forbidden" tells a
+prober that a self-service tier grant exists on this deployment. It reuses `DF2_ADMIN`
+rather than adding a switch, because it answers the same question the room-wide visual
+dials already ask, and two variables would eventually be set inconsistently on the one
+box where it matters. `/api/config` reports `grantEnabled` so the supporter page shows
+the control only where it works — the same rule already applied to `checkoutEnabled`.
+
+### The character preview, and what it deliberately is not
+
+`/character` can load a turntable of the soldier with its idle clip. It is **the one
+place `src/site/` reaches the game**, through `lazy(() => import(...))`, and it is
+mounted by a button rather than on arrival because the GLB alone is 7 MB. Re-verified
+in `dist/`: the entry chunk's only static import is still the Rolldown runtime, its
+`three-*.js` reference appears solely inside `__vite__mapDeps`, and the entry grew
+from 106.75 to 108.11 kB gzipped — wiring, not a renderer.
+
+**It does not reflect the editor, and the page says so above the canvas.** Camo,
+headgear and insignia are stored, validated and gated, but nothing renders them: the
+GLB is one soldier with baked materials and there is no variant system. A preview that
+silently ignored the controls beside it would read as the player's camo being broken,
+which is worse than no preview.
+
+One thing worth knowing if this is extended: the rig's origin is **not** under the
+model's middle — a rifle held out to one side moves the bounding box — so spinning the
+parent made the soldier orbit the frame instead of turning on the spot. The fix is to
+offset the model by its own bounds centre in X and Z before rotating the pivot.
+
+### Still open after phase 7
+
+- **A hand-rolled Colyseus client can still create a private room** by passing
+  `visibility: "private"` to `joinOrCreate`. The HTTP gate closes the product
+  surface, not the protocol; sealing it needs room-scope authentication, which
+  phase 6 deliberately left optional so every documented dev URL keeps working
+  (§5.4). Consistent with the standing posture that room auth is not a gameplay
+  trust boundary.
+- **No checkout.** The grant path is real and the payment provider is not, exactly
+  as §2.4 planned. Replacing the dev handler touches one module and no schema.
+- **Combat medals are defined and unearnable**, pending feat/server-ballistics.
+- **`customInsignia`, `foundClan`, `hostCommunityServer`, `reservedSlot`,
+  `earlyAccessMaps` and `supporterMarker`** are granted by the tier table but only
+  `customInsignia` is enforced anywhere. The rest are phase 6b or later — the
+  supporter page advertises them, which is the drift `tiers.ts` exists to prevent,
+  so they are named here rather than left to be discovered.
 
 ## 6. Retention model — what the perks actually are
 

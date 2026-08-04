@@ -22,7 +22,7 @@ const POLL_MS = 5000;
 
 export function Lobby() {
   useDocumentTitle("Play");
-  const { me, can } = useAuth();
+  const { can } = useAuth();
   const navigate = useNavigate();
 
   const [servers, setServers] = useState<ServerListing[] | null>(null);
@@ -53,8 +53,20 @@ export function Lobby() {
 
   useEffect(() => {
     void refresh();
-    const timer = setInterval(() => void refresh(), POLL_MS);
-    return () => clearInterval(timer);
+    // Skipped while the tab is hidden, and refreshed once on becoming visible. A
+    // backgrounded tab parked here was making 720 matchmaker queries an hour to
+    // update a list nobody was looking at.
+    const timer = setInterval(() => {
+      if (!document.hidden) void refresh();
+    }, POLL_MS);
+    const onVisible = () => {
+      if (!document.hidden) void refresh();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [refresh]);
 
   const onJoinCode = (event: React.FormEvent<HTMLFormElement>) => {
@@ -155,7 +167,10 @@ export function Lobby() {
 
         <section className="auth-card notched notched-sm">
           <h2 className="display display-sm">Private game</h2>
-          {me === null || me.account.anonymous ? (
+          {/* The CAPABILITY, not an anonymous check: `joinPrivateGame` is what the
+              supporter page advertises, so gating on anything else lets the two
+              diverge silently. */}
+          {!can("joinPrivateGame") ? (
             <p className="auth-note">
               Joining a private game needs an account.{" "}
               <Link to="/register">Register</Link> — it is free and keeps the

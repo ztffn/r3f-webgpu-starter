@@ -9,10 +9,11 @@
 // and networked the remote players are known to GameClient but not yet published
 // anywhere the HUD can read. An empty rose is honest; invented blips are not.
 
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
 import { hudSignals } from "./hudSignals";
 
-export function RadarRose() {
+/** Memoised for the same reason as Compass: no props, self-driven from hudSignals. */
+export const RadarRose = memo(function RadarRose() {
   const ring = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -45,4 +46,4 @@ export function RadarRose() {
       </span>
     </div>
   );
-}
+});

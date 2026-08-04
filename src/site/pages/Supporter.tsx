@@ -1,38 +1,37 @@
 // Supporter page — the tiers, and the promise that bounds them.
 //
 // Renders src/account/tiers.ts rather than its own copy of the perk list, so the
-// page cannot advertise something no gate enforces. Checkout is deliberately not
-// wired yet (VITE_CHECKOUT off): the button says so instead of pretending, since
-// a dead payment button costs more trust than an honest "not yet".
+// page cannot advertise something no gate enforces. Whether checkout is live comes
+// from the SERVER (/api/config), not from a build-time flag: the button says "not
+// yet" instead of pretending, and a dead payment button costs more trust than that.
 
 import { Link } from "react-router";
-import { CAPABILITY_LABELS, TIERS, formatPrice, type Capability } from "../../account/tiers";
+import {
+  CAPABILITY_LABELS,
+  TIERS,
+  formatPrice,
+  tierById,
+  type Capability,
+} from "../../account/tiers";
+import { useAuth } from "../../account/AuthProvider";
 import { useDocumentTitle } from "../useDocumentTitle";
 import "./page.css";
 
-/** Real checkout arrives in a later phase; see the design record §2.4. */
-const CHECKOUT_ENABLED = import.meta.env.VITE_CHECKOUT === "1";
-
 /**
  * Capabilities listed on every card, so the columns line up and a reader can see
- * what a cheaper tier does *not* include rather than having to diff two lists.
+ * what a cheaper tier does NOT include rather than having to diff two lists.
+ *
+ * DERIVED from the top tier rather than hand-listed. A copy here had already
+ * drifted — it was missing `supporterMarker` — which is exactly the drift the one
+ * table exists to prevent, and it made this file's own header comment false.
  */
-const SHOWN: Capability[] = [
-  "persistentName",
-  "medals",
-  "careerStats",
-  "savedLoadouts",
-  "friends",
-  "joinPrivateGame",
-  "hostPrivateGame",
-  "foundClan",
-  "hostCommunityServer",
-  "reservedSlot",
-  "customInsignia",
-  "earlyAccessMaps",
-];
+const SHOWN: readonly Capability[] = tierById("supporter").capabilities;
 
 export function Supporter() {
+  // The SERVER decides whether checkout is live, not the build. Two flags meant
+  // the page could offer a checkout the server would refuse to honour.
+  const { config } = useAuth();
+  const checkoutEnabled = config?.checkoutEnabled === true;
   useDocumentTitle(
     "Supporter",
     "Back Distant Front: found a clan, host a community server, and get your own insignia. Nothing purchasable affects a fight."
@@ -103,7 +102,7 @@ export function Supporter() {
                   </Link>
                 )}
                 {tier.id === "supporter" &&
-                  (CHECKOUT_ENABLED ? (
+                  (checkoutEnabled ? (
                     <Link className="btn btn-primary" to="/supporter/checkout">
                       Become a supporter
                     </Link>
@@ -117,7 +116,7 @@ export function Supporter() {
           })}
         </section>
 
-        {!CHECKOUT_ENABLED && (
+        {!checkoutEnabled && (
           <section className="callout notched notched-sm">
             <h2 className="display display-sm">Why you cannot pay yet</h2>
             <div className="prose">

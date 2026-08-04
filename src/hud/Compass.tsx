@@ -10,13 +10,21 @@
 // not fire in a headless tab, so anything computed inline here would be
 // unverifiable in the environment where this gets checked.
 
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
 import { hudSignals } from "./hudSignals";
 import { buildTicks, tapeOffsetPx } from "./compassTape";
 
 const TICKS = buildTicks();
 
-export function Compass() {
+/**
+ * MEMOISED, and it matters more than it looks. GameHud re-renders whenever fly
+ * state (0.15 s) or combat telemetry (0.16 s) updates — about 13 times a second —
+ * and each render rebuilt all 216 tick elements with 216 fresh inline style
+ * objects, on the same main thread that owes the canvas 60 fps. This component
+ * takes no props and drives itself from hudSignals, so the output never depended
+ * on that render in the first place.
+ */
+export const Compass = memo(function Compass() {
   const tape = useRef<HTMLDivElement>(null);
   const readout = useRef<HTMLSpanElement>(null);
 
@@ -69,4 +77,4 @@ export function Compass() {
       </span>
     </div>
   );
-}
+});

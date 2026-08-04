@@ -20,12 +20,12 @@ const PASSWORD_MIN = 6;
 
 export function Register() {
   useDocumentTitle("Register");
-  const { me, refresh } = useAuth();
+  const { me } = useAuth();
   const navigate = useNavigate();
 
   const upgrading = me !== null && me.account.anonymous;
 
-  const [callsign, setCallsign] = useState(upgrading ? "" : "");
+  const [callsign, setCallsign] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -43,8 +43,10 @@ export function Register() {
       try {
         // The client sends whatever token it holds. If that is a guest token the
         // server upgrades that row in place; the caller does not have to ask for it.
+        // No explicit refresh: setToken notifies AuthProvider's subscription,
+        // which fetches /api/me. Awaiting one here made the same request twice,
+        // with both racing to set the same state.
         await accountClient.register(email, password, callsign);
-        await refresh();
         navigate("/profile");
       } catch (problem) {
         setError(problem instanceof AccountError ? problem.message : "Something went wrong.");

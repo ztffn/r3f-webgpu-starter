@@ -23,7 +23,6 @@ export interface AuthState {
   /** True until the first /api/me settles, so pages can avoid flashing signed-out. */
   loading: boolean;
   config: ServerConfig | null;
-  error: string | null;
   refresh: () => Promise<void>;
   signOut: () => void;
   /** Capability check against the EFFECTIVE tier. The gate every feature uses. */
@@ -42,7 +41,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [me, setMe] = useState<Me | null>(null);
   const [config, setConfig] = useState<ServerConfig | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (accountClient.getToken() === null) {
@@ -52,7 +50,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     try {
       setMe(await accountClient.me());
-      setError(null);
     } catch {
       // A dead token has already been cleared by the client; treat it as signed
       // out rather than surfacing an error on a page the visitor did not ask for.
@@ -85,13 +82,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       me,
       loading,
       config,
-      error,
       refresh,
       signOut,
       can: (capability: Capability) =>
         me === null ? false : can(me.effectiveTier, capability),
     }),
-    [me, loading, config, error, refresh, signOut]
+    [me, loading, config, refresh, signOut]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

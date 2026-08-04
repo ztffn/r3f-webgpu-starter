@@ -20,6 +20,9 @@ import { Profile } from "./pages/Profile";
 import { CharacterPage } from "./pages/CharacterPage";
 import { PlayerProfile } from "./pages/PlayerProfile";
 import { Clans, ClanPage } from "./pages/Clans";
+import { Standings } from "./pages/Standings";
+import { Arsenal, Maps } from "./pages/Arsenal";
+import { Compare } from "./pages/Compare";
 import { NotFound } from "./pages/NotFound";
 import { Booting } from "./Booting";
 
@@ -94,7 +97,13 @@ export const router = createBrowserRouter([
       { path: "faq", element: <Faq /> },
       { path: "supporter", element: <Supporter /> },
       { path: "lobby", element: <Lobby /> },
-      { path: "leaderboard", element: <Leaderboard /> },
+      // The board is the stats one now; the old single-stat boards live on at
+      // /records so the honest empty states they carry are not lost.
+      { path: "leaderboard", element: <Standings /> },
+      { path: "records", element: <Leaderboard /> },
+      { path: "weapons", element: <Arsenal /> },
+      { path: "maps", element: <Maps /> },
+      { path: "compare", element: <Compare /> },
       { path: "sign-in", element: <SignIn /> },
       { path: "register", element: <Register /> },
       // No route guard: both pages render their own signed-out state with a way

@@ -203,3 +203,74 @@ export function median(values: readonly number[]): number | null {
     ? (sorted[middle - 1]! + sorted[middle]!) / 2
     : sorted[middle]!;
 }
+
+/**
+ * Rank points: the single number the leaderboard sorts on.
+ *
+ * The formula is stated here rather than in a query because it is a DESIGN
+ * decision, not an implementation detail, and every surface that shows a rank
+ * must use the same one.
+ *
+ * Three deliberate weightings, each of which changes who reaches the top:
+ *
+ * 1. **Objective play outscores killing.** A capture is worth more than a kill,
+ *    so the board rewards the player who won the match rather than the one who
+ *    farmed it. A K/D ladder with extra steps is the failure this avoids.
+ * 2. **Range is the multiplier, not a bonus column.** This game is about the long
+ *    shot, so a kill at 900 m is worth appreciably more than one at 50 m — and
+ *    that is what stops the board reading identically to every other shooter's.
+ * 3. **Time played contributes a floor, and a small one.** Turning up matters;
+ *    turning up for two hundred hours must not, on its own, beat playing well.
+ *
+ * Team kills cost more than dying, because the thing a ladder must not reward is
+ * treating team-mates as an obstacle.
+ */
+export function rankPoints(stats: PlayerStats): number {
+  const { combat, activity } = stats;
+  const hours = activity.timePlayedSeconds / 3600;
+  // Median range, expressed as a multiplier around 1.0 at 300 m and capped so a
+  // handful of extreme shots cannot run away with the board.
+  const reach =
+    stats.medianRangeMetres === null
+      ? 1
+      : Math.min(2, Math.max(0.8, stats.medianRangeMetres / 300));
+
+  const fromCombat = combat.kills * 1 * reach;
+  const fromObjective = 0; // objective_events are not written yet; see the design record.
+  const fromResults = activity.wins * 10;
+  const fromService = hours * 2;
+  const penalties = combat.suicides * 2 + combat.teamKills * 5;
+
+  return Math.max(0, Math.round(fromCombat + fromObjective + fromResults + fromService - penalties));
+}
+
+/**
+ * Combat rating, 0-100, normalised against the best player on the board.
+ *
+ * Relative rather than absolute on purpose: an absolute scale needs a ceiling
+ * nobody can justify before the game has a population, and a rating of "62" only
+ * means anything next to somebody else's.
+ */
+export function combatRating(points: number, best: number): number {
+  if (best <= 0) return 0;
+  return Math.round(Math.min(100, (points / best) * 100));
+}
+
+/**
+ * Consistency: how much a player's per-match kill count varies, 0-100.
+ *
+ * High is steady. Reported as a score rather than a raw standard deviation
+ * because the number is compared BETWEEN players, and a σ of 12 means nothing
+ * without knowing the mean it sits against — this is the coefficient of
+ * variation, inverted and clamped.
+ */
+export function consistency(perMatchKills: readonly number[]): number | null {
+  if (perMatchKills.length < 3) return null;
+  const mean = perMatchKills.reduce((a, b) => a + b, 0) / perMatchKills.length;
+  if (mean === 0) return null;
+  const variance =
+    perMatchKills.reduce((total, value) => total + (value - mean) ** 2, 0) /
+    perMatchKills.length;
+  const cv = Math.sqrt(variance) / mean;
+  return Math.round(Math.max(0, Math.min(1, 1 - cv)) * 100);
+}

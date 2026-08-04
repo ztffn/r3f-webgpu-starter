@@ -26,6 +26,7 @@ import type {
   ProfilePost,
 } from "./community";
 import type { PlayerStats } from "./playerStats";
+import type { TierId as Tier } from "./tiers";
 import type { BoardSummary, Leaderboard, ServerListing } from "./lobby";
 import type { TierId } from "./tiers";
 
@@ -69,6 +70,50 @@ export interface PlayerPage {
     canPost: boolean;
     canFriend: boolean;
   };
+}
+
+/** One row of the board. Every figure is derived server-side from playerStats. */
+export interface LeaderboardEntry {
+  rank: number;
+  id: number;
+  callsign: string;
+  tier: Tier;
+  clanTag: string | null;
+  points: number;
+  rating: number;
+  kills: number;
+  deaths: number;
+  kd: number | null;
+  winRate: number | null;
+  medianRangeMetres: number | null;
+  consistency: number | null;
+  timePlayedSeconds: number;
+}
+
+export interface WeaponRow {
+  weaponId: string;
+  kills: number;
+  share: number;
+  shots: number;
+  shotsPerKill: number | null;
+  headshots: number;
+  headshotRate: number | null;
+  medianRangeMetres: number | null;
+  users: number;
+}
+
+export interface MapRow {
+  map: string;
+  matches: number;
+  players: number;
+  averageMatchMinutes: number | null;
+  medianRangeMetres: number | null;
+  proneShare: number | null;
+}
+
+export interface ComparedPlayer {
+  profile: PublicProfile;
+  stats: PlayerStats;
 }
 
 /** Thrown by every call in this module so callers have one thing to catch. */
@@ -358,6 +403,36 @@ export const accountClient = {
 
   async leaveClan(): Promise<void> {
     await request("/api/clan/leave", { method: "POST" });
+  },
+
+  // --- population statistics ---------------------------------------------
+
+  async statsLeaderboard(): Promise<LeaderboardEntry[]> {
+    const result = await request<{ entries: LeaderboardEntry[] }>("/api/stats/leaderboard");
+    return result.entries;
+  },
+
+  async statsWeapons(): Promise<WeaponRow[]> {
+    const result = await request<{ weapons: WeaponRow[] }>("/api/stats/weapons");
+    return result.weapons;
+  },
+
+  async statsMaps(): Promise<MapRow[]> {
+    const result = await request<{ maps: MapRow[] }>("/api/stats/maps");
+    return result.maps;
+  },
+
+  async statsPlayers(): Promise<{ id: number; callsign: string }[]> {
+    const result = await request<{ players: { id: number; callsign: string }[] }>(
+      "/api/stats/players"
+    );
+    return result.players;
+  },
+
+  async compare(a: number, b: number): Promise<{ a: ComparedPlayer; b: ComparedPlayer }> {
+    return await request<{ a: ComparedPlayer; b: ComparedPlayer }>(
+      `/api/stats/compare?a=${a}&b=${b}`
+    );
   },
 
   async leaderboards(): Promise<BoardSummary[]> {

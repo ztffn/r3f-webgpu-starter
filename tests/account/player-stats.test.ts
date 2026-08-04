@@ -18,6 +18,9 @@ import {
   killDeathRatio,
   median,
   patienceScore,
+  combatRating,
+  consistency,
+  rankPoints,
   winRate,
   type ActivityTotals,
   type CombatTotals,
@@ -162,5 +165,63 @@ describe("the verdict", () => {
     assert.equal(closeIn.role, "Skirmisher");
     assert.equal(closeIn.trait, "aggressive");
     assert.notEqual(sniper.summary, closeIn.summary);
+  });
+});
+
+describe("rank points", () => {
+  it("values a won match above a handful of kills", () => {
+    // The board must reward winning, not farming. Ten kills and no wins should
+    // not out-score four kills and two wins.
+    const farmer = rankPoints(
+      stats({ combat: combat({ kills: 10 }), medianRangeMetres: 300 })
+    );
+    const winner = rankPoints(
+      stats({ combat: combat({ kills: 4 }), activity: activity({ wins: 2 }), medianRangeMetres: 300 })
+    );
+    assert.ok(winner > farmer, `winner ${winner} should beat farmer ${farmer}`);
+  });
+
+  it("pays more for the same kills taken at range", () => {
+    const close = rankPoints(stats({ combat: combat({ kills: 20 }), medianRangeMetres: 60 }));
+    const far = rankPoints(stats({ combat: combat({ kills: 20 }), medianRangeMetres: 900 }));
+    assert.ok(far > close, "range is the multiplier this game is about");
+  });
+
+  it("does not let time played alone beat playing well", () => {
+    const grinder = rankPoints(stats({ activity: activity({ timePlayedSeconds: 200 * 3600 }) }));
+    const good = rankPoints(
+      stats({ combat: combat({ kills: 300 }), activity: activity({ wins: 40 }), medianRangeMetres: 800 })
+    );
+    assert.ok(good > grinder, `${good} should beat ${grinder}`);
+  });
+
+  it("punishes team killing harder than dying", () => {
+    const clean = rankPoints(stats({ combat: combat({ kills: 20 }), medianRangeMetres: 300 }));
+    const teamKiller = rankPoints(
+      stats({ combat: combat({ kills: 20, teamKills: 4 }), medianRangeMetres: 300 })
+    );
+    assert.ok(clean - teamKiller >= 20);
+  });
+
+  it("never goes negative", () => {
+    assert.equal(rankPoints(stats({ combat: combat({ teamKills: 99 }) })), 0);
+  });
+});
+
+describe("rating and consistency", () => {
+  it("rates against the best on the board, not an invented ceiling", () => {
+    assert.equal(combatRating(500, 1000), 50);
+    assert.equal(combatRating(1000, 1000), 100);
+    assert.equal(combatRating(10, 0), 0);
+  });
+
+  it("scores a steady player above a streaky one", () => {
+    const steady = consistency([10, 11, 9, 10, 10])!;
+    const streaky = consistency([1, 30, 2, 25, 0])!;
+    assert.ok(steady > streaky, `${steady} should beat ${streaky}`);
+  });
+
+  it("declines to score fewer than three matches", () => {
+    assert.equal(consistency([10, 12]), null);
   });
 });

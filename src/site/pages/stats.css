@@ -1,0 +1,275 @@
+/* Statistics tables: the board, weapons, maps and head-to-head.
+ *
+ * A stats table is read by scanning a column, so the rules here all serve that:
+ * every numeric is monospaced with tabular figures and right-aligned, rows are
+ * separated by a hairline rather than by fill, and exactly one value per row is
+ * allowed to be loud. Ruled like a printed range table, not striped like a
+ * spreadsheet.
+ */
+
+/* Wide tables scroll inside their own box; the page never scrolls sideways. */
+.table-scroll {
+  overflow-x: auto;
+  border: var(--hair) solid var(--line);
+  background: rgba(255, 255, 255, 0.014);
+}
+
+.stat-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+.stat-table th,
+.stat-table td {
+  padding: var(--s2) var(--s3);
+  border-bottom: var(--hair) solid rgba(232, 223, 195, 0.08);
+  white-space: nowrap;
+}
+.stat-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-raised);
+  font-family: var(--font-label);
+  font-weight: 700;
+  font-size: 0.64rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  text-align: left;
+  border-bottom-color: var(--line);
+}
+.stat-table tbody tr:last-child th,
+.stat-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+.stat-table tbody tr:hover {
+  background: rgba(184, 163, 115, 0.05);
+}
+/* Your own row, marked by a rule rather than a fill so it does not fight the
+   hover state. */
+.stat-table tbody tr.is-me {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.col-num {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-dim);
+}
+.col-num.strong {
+  color: var(--ink);
+  font-weight: 700;
+}
+.col-num.accent {
+  color: var(--accent);
+}
+.col-num.quiet {
+  color: var(--ink-faint);
+}
+.col-rank {
+  width: 3ch;
+  text-align: right;
+  font-family: var(--font-mono);
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+.col-name {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+}
+.col-name a {
+  font-family: var(--font-label);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+}
+.col-name .clan-tag {
+  font-size: 0.8rem;
+}
+/* Supporter mark: a dot, not a badge. A word in every row would be louder than
+   the data the row exists for. */
+.col-name .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* A sortable header is a real button so it is reachable by keyboard. */
+.col-sort {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.col-sort:hover {
+  color: var(--ink);
+}
+.col-sort.is-active {
+  color: var(--accent);
+}
+.col-sort.is-active::after {
+  content: " ▾";
+}
+
+/* Rating: a bar behind the number rather than beside it, so the column stays
+   one column wide and still reads as a magnitude. */
+.rating {
+  position: relative;
+  display: inline-flex;
+  justify-content: flex-end;
+  min-width: 5ch;
+  padding: 1px var(--s1);
+}
+.rating-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: rgba(184, 163, 115, 0.22);
+}
+.rating-value {
+  position: relative;
+}
+
+/* --- weapons: share bars -------------------------------------------------- */
+.col-bar {
+  min-width: 150px;
+}
+.bar {
+  display: inline-block;
+  width: 90px;
+  height: 8px;
+  background: rgba(232, 223, 195, 0.08);
+  vertical-align: middle;
+}
+.bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.bar-value {
+  margin-left: var(--s2);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--ink-faint);
+}
+
+/* --- maps: the plate is the point ---------------------------------------- */
+.map-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--s4);
+}
+.map-card {
+  border: var(--hair) solid var(--line);
+  background: rgba(255, 255, 255, 0.014);
+  overflow: hidden;
+}
+.map-plate {
+  display: block;
+  aspect-ratio: 16 / 9;
+  background-size: cover;
+  background-position: center;
+  filter: grayscale(0.4) sepia(0.3) contrast(1.1) brightness(0.8);
+  border-bottom: var(--hair) solid var(--line);
+}
+.map-body {
+  padding: var(--s4);
+}
+.map-body h2 {
+  margin: 0 0 var(--s3);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.1rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.map-body .dope dd.accent {
+  color: var(--accent);
+}
+
+/* --- compare -------------------------------------------------------------- */
+.compare-pickers {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--s4);
+}
+.compare-pickers select {
+  width: 100%;
+  min-height: var(--tap);
+  background: var(--bg-sunken);
+  border: var(--hair) solid var(--line);
+  color: var(--ink);
+  font: inherit;
+  padding: var(--s2) var(--s3);
+}
+.compare-heads {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s4);
+}
+.compare-head {
+  position: relative;
+  border: var(--hair) solid var(--line);
+  padding: var(--s4);
+  background: rgba(255, 255, 255, 0.014);
+}
+.compare-name {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1.4rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.compare-head .verdict {
+  font-size: 0.92rem;
+  margin: var(--s2) 0 0;
+  color: var(--ink-muted);
+}
+.compare-side {
+  position: absolute;
+  top: var(--s3);
+  right: var(--s4);
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1.6rem;
+  color: rgba(232, 223, 195, 0.12);
+}
+
+/* The label runs down the middle so the eye compares two columns against a
+   spine, rather than reading a label then hunting right for its pair. */
+.compare-table th.compare-label {
+  text-align: center;
+  font-family: var(--font-label);
+  font-weight: 400;
+  font-size: 0.66rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  width: 14em;
+}
+.compare-table .col-num {
+  width: 40%;
+  font-size: 1rem;
+}
+/* Exactly one side of a row is loud. */
+.compare-table .lead {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+@media (max-width: 720px) {
+  .compare-heads {
+    grid-template-columns: 1fr;
+  }
+  .compare-table th.compare-label {
+    width: auto;
+  }
+}

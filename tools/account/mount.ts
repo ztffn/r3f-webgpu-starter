@@ -17,6 +17,8 @@ import { createApiRouter } from "./api.ts";
 import { createLobbyRouter } from "./lobbyApi.ts";
 import { createCommunityRouter } from "./communityApi.ts";
 import { CommunityRepository } from "./communityRepository.ts";
+import { StatsRepository } from "./statsRepository.ts";
+import { createStatsRouter } from "./statsApi.ts";
 
 export interface MountedAccounts {
   db: AccountDb;
@@ -71,6 +73,7 @@ export async function mountAccounts(
 
   const repository = new AccountRepository(db);
   const community = new CommunityRepository(db);
+  const stats = new StatsRepository(db);
   configureAuth({
     repository,
     // No provider in development. onForgotPassword logs the reset link instead,
@@ -104,6 +107,9 @@ export async function mountAccounts(
       presence: options.presence ?? (() => new Map()),
     })
   );
+
+  // The board, weapons, maps and head-to-head. Public.
+  app.use("/api", createStatsRouter({ accounts: repository, community, stats }));
 
   console.log(
     `[accounts] ${DB_FILE} — auth at ${auth.prefix}, api at /api` +

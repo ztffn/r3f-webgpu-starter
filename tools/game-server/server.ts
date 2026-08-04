@@ -295,6 +295,24 @@ class GameRoom extends Room {
     if (accountId !== null) enterPresence(accountId, client.sessionId, this.roomId);
     this.bridge.connectionHandler?.(connection);
 
+    // The kill feed's name, once the account behind the session is known.
+    //
+    // Fire-and-forget after the peer exists, because the lookup is a database read
+    // and `onJoin` is not async: the player is in the room under the numeric
+    // fallback for one round trip and is renamed when the row arrives. An
+    // anonymous joiner keeps the fallback, which is the whole reason optional auth
+    // stays workable — every documented dev URL joins with no token at all.
+    if (accountId !== null) {
+      void accounts.repository
+        .findById(accountId)
+        .then((row) => {
+          if (row !== undefined) this.game.setDisplayName(id, row.callsign);
+        })
+        .catch((error: unknown) => {
+          console.warn(`[${this.roomId}] could not read a callsign for ${accountId}:`, error);
+        });
+    }
+
     // Tell this client what it needs to invite others. Sent to EVERY member of a
     // private room, not only its creator: anyone already inside got there with the
     // code, so they know it — the only person who does not is the host, and

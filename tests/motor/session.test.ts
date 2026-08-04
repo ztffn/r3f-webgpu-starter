@@ -66,6 +66,7 @@ interface SessionOptions {
   readonly allowClientVisualDials?: boolean;
   readonly spawn?: (seat: number) => { x: number; y?: number; z: number };
   readonly respawnSeconds?: number;
+  readonly respawnPauseSeconds?: number;
   readonly worldTargets?: readonly WorldTargetSpec[];
 }
 
@@ -86,6 +87,7 @@ function makeSession(clientCount: number, options: SessionOptions = {}) {
     spawn: options.spawn,
     worldTargets: options.worldTargets,
     respawnSeconds: options.respawnSeconds,
+    respawnPauseSeconds: options.respawnPauseSeconds,
   });
   // The transports are returned as well as the clients, so a test can resend raw
   // bytes on an EXISTING connection. Opening a fresh one is a different peer, which
@@ -801,7 +803,11 @@ test("a fire claim cannot be replayed, spoofed round, or fired while dead", () =
 test("a killed player respawns with full health at a spawn point", () => {
   const session = makeSession(2, {
     spawn: (seat) => ({ x: seat === 1 ? 0 : 8, z: 0 }),
+    // Only the fallback for a death nobody is blamed for. A death from a SHOT is
+    // rescheduled from the death clip's own length, which is the point of the
+    // assertions below.
     respawnSeconds: 1,
+    respawnPauseSeconds: 0,
   });
   const towardVictim = -Math.PI / 2;
   const aimed = (index: number) => ({ buttons: 0, yaw: index === 0 ? towardVictim : 0 });
@@ -825,8 +831,18 @@ test("a killed player respawns with full health at a spawn point", () => {
   assert.equal(session.server.shotsResolved, resolvedBefore + 1, "the corpse-check shot was refused");
   assert.equal(session.server.shotsHit, hitsBefore, "a dead player was still shootable");
 
-  // One second at 60 Hz; the run so far is ~33 ticks, so drive past the rest.
-  drive(session, 45, aimed);
+  // Well past the one-second fallback, and still down: the shot rescheduled this
+  // respawn from the death clip, and Death_From_Right runs 3.33 s. Without that
+  // the body is teleported away mid-fall, which is what the flat constant did.
+  drive(session, 90, aimed);
+  assert.equal(
+    session.server.healthOf(2),
+    0,
+    "the flat respawnSeconds still governed a death that had a clip"
+  );
+
+  // 3.33 s at 60 Hz is ~200 ticks from the kill; drive comfortably past it.
+  drive(session, 160, aimed);
   assert.equal(session.server.healthOf(2), 100, "a dead player never respawned");
   assert.equal(session.clients[1]!.health, 100, "the respawn did not reach the client");
 });

@@ -16,20 +16,13 @@ import {
   SELECTABLE_PRIMARY,
   SELECTABLE_SECONDARY,
   validateCharacter,
+  weaponLabel,
   type Character,
 } from "../../account/characters";
 import { useAsyncAction } from "../useAsyncAction";
 import { useDocumentTitle } from "../useDocumentTitle";
 import "./page.css";
 import "./auth.css";
-
-const WEAPON_LABELS: Record<string, string> = {
-  "prototype-sniper": "Bolt-action rifle",
-  m4: "Carbine",
-  "glock-9mm": "9 mm pistol",
-};
-
-const label = (id: string) => WEAPON_LABELS[id] ?? id;
 
 /**
  * A refusal from the API lists every field it objected to, and all of them are
@@ -212,7 +205,7 @@ export function CharacterPage() {
                 disabled={!canSaveLoadout}
                 onClick={() => setLoadout({ primary: id })}
               >
-                {label(id)}
+                {weaponLabel(id)}
               </button>
             ))}
           </div>
@@ -229,7 +222,7 @@ export function CharacterPage() {
                 disabled={!canSaveLoadout}
                 onClick={() => setLoadout({ secondary: id })}
               >
-                {label(id)}
+                {weaponLabel(id)}
               </button>
             ))}
           </div>

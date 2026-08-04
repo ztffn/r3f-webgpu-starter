@@ -65,6 +65,18 @@ export interface Character {
 export const SELECTABLE_PRIMARY: readonly WeaponId[] = ["prototype-sniper", "m4"];
 export const SELECTABLE_SECONDARY: readonly WeaponId[] = ["glock-9mm"];
 
+/**
+ * What to call a weapon on screen.
+ *
+ * Read from the engine's own table rather than restated beside the editor: the
+ * HUD already shows `displayName`, so a second list of names means the same rifle
+ * is called two different things depending on which screen the player is looking
+ * at, and neither one is wrong enough to notice.
+ */
+export function weaponLabel(id: WeaponId): string {
+  return WEAPON_DEFINITIONS.find((weapon) => weapon.id === id)?.displayName ?? id;
+}
+
 export const DEFAULT_CHARACTER: Character = {
   appearance: { faction: "ranger", camo: "woodland", headgear: "boonie", insignia: null },
   // The bolt gun by default: it is the weapon this game is built around, and the

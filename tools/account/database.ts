@@ -83,6 +83,36 @@ export interface FriendshipRow {
   state: "pending" | "accepted";
   created_at: string;
   responded_at: string | null;
+  /**
+   * `pairKey(requester_id, addressee_id)` — the pair, order removed, UNIQUE.
+   *
+   * The one index that can actually enforce "at most one edge between two
+   * people". A unique index on `(requester_id, addressee_id)` cannot: `(A,B)` and
+   * `(B,A)` are distinct keys, so two people pressing "add friend" at the same
+   * moment both passed the repository's check-then-insert and both rows landed,
+   * leaving two pending edges that no accept could fully resolve.
+   *
+   * The direction columns STAY, and are still the source of truth for who asked —
+   * `friendState` needs it to tell pending_out from pending_in. This column
+   * carries no information of its own; it exists so the database can refuse.
+   */
+  pair_key: string;
+}
+
+/**
+ * The unordered identity of a pair of accounts.
+ *
+ * Numeric sort, not lexicographic: `"10"` sorts before `"9"` as text, so a string
+ * comparison would give `(9,10)` and `(10,9)` two different keys and defeat the
+ * whole point of the column.
+ */
+export function pairKey(a: number, b: number): string {
+  return a < b ? `${a}:${b}` : `${b}:${a}`;
+}
+
+/** SQLite reports a unique constraint failure by message; there is no code. */
+export function isUniqueViolation(error: unknown): boolean {
+  return error instanceof Error && /UNIQUE constraint failed/i.test(error.message);
 }
 
 /** Blocking is NOT a friendship state: someone you never met can need blocking. */
@@ -133,7 +163,24 @@ export interface SessionRow {
   seconds: number;
 }
 
-/** One player's participation in one match. Not blocked on ballistics. */
+/**
+ * One player's participation in one match.
+ *
+ * NOTHING WRITES THIS YET, and unlike `engagements` it is not blocked on
+ * ballistics — it is simply unbuilt. Three readers already depend on it
+ * (`playerStats`, `StatsRepository.leaderboard`, `StatsRepository.maps`), so until
+ * a writer exists every win, loss, draw, stance duration and shot count they
+ * report is absent rather than zero, and the derived figures return null instead
+ * of a number. `patienceScore` explains what that cost when it did not.
+ *
+ * A row needs the match identity (the room id and its map), the join and leave
+ * times, and the stance/shot counters the room would have to accumulate per
+ * player per tick. The first three the room already knows at `onLeave`; the
+ * counters are the part that does not exist.
+ *
+ * Do not write a partial row to "turn the section on": a row with zeroed counters
+ * makes `available.objectives` true and every figure above it a false claim.
+ */
 export interface MatchParticipationRow {
   id: Generated<number>;
   user_id: number;
@@ -566,6 +613,41 @@ const MIGRATIONS: ((db: AccountDb) => Promise<void>)[] = [
       .createIndex("objective_user")
       .on("objective_events")
       .columns(["user_id", "at"])
+      .execute();
+  },
+
+  // Make "one edge per pair" something the DATABASE enforces.
+  //
+  // `friendships_pair` was already unique on (requester_id, addressee_id) and its
+  // comment claimed the repository normalised the order before inserting. It did
+  // not, and the index could not have caught it anyway: (A,B) and (B,A) are two
+  // different keys. Two simultaneous opposite requests both passed the
+  // check-then-insert and both landed. This adds the order-free key that can.
+  //
+  // Backfilled in application code rather than in SQL because `min(a,b)` over two
+  // arguments is SQLite's spelling and `least(a,b)` is Postgres's — and the whole
+  // reason this project uses a query builder is to not write that branch twice.
+  async (db) => {
+    await db.schema.alterTable("friendships").addColumn("pair_key", "text").execute();
+    const existing = await db
+      .selectFrom("friendships")
+      .select(["id", "requester_id", "addressee_id"])
+      .execute();
+    for (const row of existing) {
+      await db
+        .updateTable("friendships")
+        .set({ pair_key: pairKey(row.requester_id, row.addressee_id) })
+        .where("id", "=", row.id)
+        .execute();
+    }
+    // Any duplicate pair already in the table would fail here, which is the
+    // correct outcome: it is exactly the corruption this index exists to stop, and
+    // a migration that silently dropped one side of it would be worse.
+    await db.schema
+      .createIndex("friendships_pair_key")
+      .on("friendships")
+      .column("pair_key")
+      .unique()
       .execute();
   },
 ];

@@ -17,7 +17,7 @@ import type { GrassUniforms } from "../df2/GrassMaterial";
 import { GRASS_STEPS } from "../df2/config";
 import { BENCH } from "../df2/bench";
 
-export interface GrassDebugProps {
+export interface GrassPanelProps {
   uniforms: GrassUniforms | null;
 }
 
@@ -123,7 +123,7 @@ const DEBUG_MODES = [
   "Fog colour",
 ];
 
-export function GrassPanel({ uniforms }: GrassDebugProps) {
+export function GrassPanel({ uniforms }: GrassPanelProps) {
   // Mirror of uniform values, so the sliders have positions to show. Seeded once
   // from the material rather than from config, so it always reflects what is live.
   const [vals, setVals] = useState<Record<string, number>>({});

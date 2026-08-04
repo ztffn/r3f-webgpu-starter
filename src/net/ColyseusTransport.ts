@@ -123,11 +123,6 @@ export class ColyseusClientTransport implements ClientTransport {
     return this.room !== null;
   }
 
-  /** The room's join code and label, or null until the room says. */
-  get roomInfo(): RoomInfo | null {
-    return this.info;
-  }
-
   /**
    * Subscribe to the room's facts.
    *

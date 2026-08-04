@@ -309,14 +309,6 @@
   font-size: 24px;
   margin: 0 2px;
 }
-.hud-utility {
-  position: absolute;
-  right: var(--s4);
-  bottom: var(--s4);
-  color: var(--ink-dim);
-  font-size: 13px;
-}
-
 /* --- vitals (bottom centre) --------------------------------------------- */
 .hud-vitals {
   left: 50%;

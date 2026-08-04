@@ -143,7 +143,6 @@ export function GameHud({ fly, health, joinCode, fpsMode, preview }: GameHudProp
           fireMode={combat.weapon?.fireMode ?? null}
           magazine={combat.weapon?.magazine ?? null}
           reserve={combat.weapon?.reserve ?? null}
-          utility={null}
         />
       )}
 

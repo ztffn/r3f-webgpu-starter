@@ -31,6 +31,4 @@ export const ROOM_INFO = 3;
 export interface RoomInfo {
   /** Present only for a private room. Absent means the room is public. */
   joinCode?: string;
-  /** Shown beside the code so a host knows which game they are inviting to. */
-  label?: string;
 }

@@ -10,11 +10,9 @@ export interface WeaponPanelProps {
   fireMode: string | null;
   magazine: number | null;
   reserve: number | null;
-  /** Grenades and similar. Null until an inventory exists. */
-  utility: number | null;
 }
 
-export function WeaponPanel({ name, fireMode, magazine, reserve, utility }: WeaponPanelProps) {
+export function WeaponPanel({ name, fireMode, magazine, reserve }: WeaponPanelProps) {
   return (
     <section className="hud-panel hud-weapon notched" data-dev="hud-weapon">
       <header className="hud-weapon-head">
@@ -39,12 +37,6 @@ export function WeaponPanel({ name, fireMode, magazine, reserve, utility }: Weap
         <span>/</span>
         {reserve ?? "—"}
       </div>
-
-      {utility !== null && (
-        <div className="hud-utility" data-dev="weapon-utility">
-          ▣ {utility}
-        </div>
-      )}
     </section>
   );
 }

@@ -15,7 +15,7 @@ import { WEATHER_PRESET_IDS } from "../df2/weather";
 import { VISUAL_DIALS, type VisualDialGroup } from "../df2/visualDials";
 import type { RoomVisuals } from "../fps/useRoomVisuals";
 
-export interface WeatherDebugProps {
+export interface WeatherPanelProps {
   scene: SceneHandles | null;
 }
 
@@ -146,7 +146,7 @@ function Group({
  */
 export const WeatherPanel = memo(function WeatherPanel({
   scene,
-}: WeatherDebugProps): React.ReactElement | null {
+}: WeatherPanelProps): React.ReactElement | null {
   if (!scene) return null;
   // The room owns the weather when there is one, so a local switch is refused; and
   // whether the dials may be moved is on that object. Both DERIVED here rather than

@@ -239,12 +239,9 @@ class GameRoom extends Room {
     // private room, not only its creator: anyone already inside got there with the
     // code, so they know it — the only person who does not is the host, and
     // singling them out would mean tracking who created the room for no gain.
-    // Public rooms get a label and no code, because there is nothing to gate.
+    // A public room sends an empty object, because there is nothing to gate.
     const meta = this.metadata as RoomMetadata | undefined;
-    const info: RoomInfo = {
-      label: meta?.label,
-      ...(meta?.joinCode !== undefined ? { joinCode: meta.joinCode } : {}),
-    };
+    const info: RoomInfo = meta?.joinCode !== undefined ? { joinCode: meta.joinCode } : {};
     client.send(ROOM_INFO, info);
 
     console.log(

@@ -69,7 +69,10 @@ export function PlayerProfile() {
   const { me } = useAuth();
 
   const [page, setPage] = useState<PlayerPage | null>(null);
-  const [missing, setMissing] = useState(false);
+  // Three states, not two. "Not found" and "could not load" are different claims:
+  // only one of them is about the player, and asserting the wrong one after a
+  // dropped connection tells a reader their friend's profile is gone.
+  const [failure, setFailure] = useState<"missing" | "unreachable" | null>(null);
   const [draft, setDraft] = useState("");
   const action = useAsyncAction<"post" | "friend" | "block">(describeAction);
 
@@ -78,14 +81,23 @@ export function PlayerProfile() {
   const load = useCallback(async () => {
     try {
       setPage(await accountClient.player(playerId));
-    } catch {
-      setMissing(true);
+      setFailure(null);
+    } catch (problem) {
+      setFailure(
+        problem instanceof AccountError && problem.status === 404 ? "missing" : "unreachable"
+      );
     }
   }, [playerId]);
 
   useEffect(() => {
+    // RESET both, because this component is reused across /player/:id navigations
+    // rather than remounted. Without it one failed load latched `failure` forever:
+    // every later profile fetched fine, set `page`, and still rendered "No such
+    // player" because the early return below won — recoverable only by a reload.
+    setPage(null);
+    setFailure(null);
     if (!Number.isInteger(playerId) || playerId <= 0) {
-      setMissing(true);
+      setFailure("missing");
       return;
     }
     void load();
@@ -93,14 +105,28 @@ export function PlayerProfile() {
     // decides every button on this page — is computed per reader.
   }, [load, playerId, me?.account.id]);
 
-  if (missing) {
+  if (failure !== null) {
     return (
       <div className="shell notfound">
-        <p className="eyebrow">Not found</p>
-        <h1 className="display display-lg">No such player.</h1>
-        <Link className="btn btn-ghost" to="/leaderboard">
-          Back to the standings
-        </Link>
+        <p className="eyebrow">{failure === "missing" ? "Not found" : "Unavailable"}</p>
+        <h1 className="display display-lg">
+          {failure === "missing" ? "No such player." : "Could not reach the service."}
+        </h1>
+        {failure === "unreachable" && (
+          <p className="prose">
+            The player may well exist — this request did not get through.
+          </p>
+        )}
+        <div className="row">
+          {failure === "unreachable" && (
+            <button type="button" className="btn" data-dev="profile-retry" onClick={() => void load()}>
+              Try again
+            </button>
+          )}
+          <Link className="btn btn-ghost" to="/leaderboard">
+            Back to the standings
+          </Link>
+        </div>
       </div>
     );
   }

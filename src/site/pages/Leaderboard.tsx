@@ -108,7 +108,9 @@ export function Leaderboard() {
                   <li key={row.id} className={isMe ? "board-me" : undefined}>
                     <span className="board-rank">{row.rank}</span>
                     <span className="board-name">
-                      {row.callsign}
+                      {/* A name on a board is a person. Linking it is what turns
+                          a ranking into a way to find someone. */}
+                      <Link to={`/players/${row.id}`}>{row.callsign}</Link>
                       {row.tier === "supporter" && (
                         <span className="badge badge-accent">Supporter</span>
                       )}

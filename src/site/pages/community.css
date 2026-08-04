@@ -1,0 +1,238 @@
+/* Profiles, walls, friends and clans — the community pages.
+ *
+ * Site skin, not the HUD's: these are pages on a website, and the loadout screen
+ * is the one place that reads as an instrument. The layout follows the
+ * MapMakers Heaven member page — the record on one side, the social column on
+ * the other — because that is the shape that makes a profile feel like a place.
+ *
+ * Every selector here has this file as its only home.
+ */
+
+.profile-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--s4);
+  flex-wrap: wrap;
+}
+.profile-actions {
+  flex-wrap: wrap;
+}
+.clan-tag {
+  color: var(--accent);
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-decoration: none;
+}
+.clan-tag:hover {
+  text-decoration: underline;
+}
+
+/* The record narrower than the wall: the wall is where the words are, and a
+   column of short stat rows does not need half the page. */
+.profile-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: var(--s5);
+  align-items: start;
+}
+
+/* --- the wall ------------------------------------------------------------ */
+.wall-form textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 84px;
+  background: var(--bg-sunken);
+  border: var(--hair) solid var(--line);
+  color: var(--ink);
+  font: inherit;
+  padding: var(--s3);
+}
+.wall-form textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.wall-form-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+}
+.wall-count {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.wall {
+  list-style: none;
+  margin: var(--s4) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+}
+.wall > li {
+  border-top: var(--hair) solid var(--line);
+  padding-top: var(--s3);
+}
+.wall-meta {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+}
+.wall-meta a {
+  font-family: var(--font-label);
+  font-weight: 700;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.wall-meta em {
+  font-style: normal;
+  font-size: 0.76rem;
+  color: var(--ink-faint);
+}
+/* Pushed to the end so the delete affordance is never between the name and the
+   time, where it would read as part of the byline. */
+.wall-delete {
+  margin-left: auto;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--ink-faint);
+  cursor: pointer;
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0 var(--s1);
+}
+.wall-delete:hover {
+  color: var(--bad);
+}
+.wall-body {
+  margin: var(--s1) 0 0;
+  line-height: 1.55;
+  /* Author-controlled text on someone else's page: a single unbroken 280-character
+     word would otherwise push the whole column sideways. */
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+/* --- activity ------------------------------------------------------------ */
+.activity {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.activity > li {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s3);
+  padding: var(--s2) 0;
+  border-bottom: var(--hair) solid var(--line);
+  font-size: 0.86rem;
+}
+.activity > li:last-child {
+  border-bottom: 0;
+}
+.activity em {
+  font-style: normal;
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+/* --- friends -------------------------------------------------------------- */
+.friend-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.friend-list > li {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s2) 0;
+  border-bottom: var(--hair) solid var(--line);
+}
+.friend-list > li:last-child {
+  border-bottom: 0;
+}
+.friend-list a {
+  font-family: var(--font-label);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+}
+/* "In a game" is the whole point of the friends list — it is the one thing on
+   any of these pages that pulls somebody back into a match. */
+.friend-live {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  font-family: var(--font-label);
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--good);
+}
+.friend-live::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--good);
+}
+
+/* --- clans ---------------------------------------------------------------- */
+.clan-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.clan-list > li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s3);
+  padding: var(--s3) 0;
+  border-bottom: var(--hair) solid var(--line);
+}
+.clan-list > li:last-child {
+  border-bottom: 0;
+}
+.clan-list .clan-tag {
+  min-width: 5ch;
+}
+.clan-list-name {
+  font-weight: 600;
+}
+.clan-list-count {
+  margin-left: auto;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+.clan-role {
+  font-family: var(--font-label);
+  font-size: 0.66rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+@media (max-width: 860px) {
+  .profile-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .profile-head {
+    align-items: flex-start;
+  }
+}

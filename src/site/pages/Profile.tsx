@@ -6,17 +6,19 @@
 // supporter sees the enlisted view without anything else having to know about
 // expiry.
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router";
 import { accountClient, AccountError } from "../../account/accountClient";
 import { useAuth } from "../../account/AuthProvider";
 import { validateCallsign } from "../../account/accountTypes";
+import type { Friend } from "../../account/community";
 import { MEDALS } from "../../account/medals";
 import { tierById } from "../../account/tiers";
 import { useAsyncAction } from "../useAsyncAction";
 import { useDocumentTitle } from "../useDocumentTitle";
 import "./page.css";
 import "./auth.css";
+import "./community.css";
 
 const fmt = (n: number) => n.toLocaleString("en-US");
 
@@ -36,6 +38,21 @@ export function Profile() {
 
   const [callsign, setCallsign] = useState("");
   const { busy, error, done: saved, run } = useAsyncAction<"rename">(describeRename);
+  const [social, setSocial] = useState<{ friends: Friend[]; incoming: Friend[] } | null>(null);
+
+  const loadFriends = useCallback(async () => {
+    try {
+      setSocial(await accountClient.friends());
+    } catch {
+      // A guest has no friends endpoint to speak of; an empty list is the honest
+      // render and this section simply does not appear.
+      setSocial({ friends: [], incoming: [] });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (me !== null && !me.account.anonymous) void loadFriends();
+  }, [loadFriends, me]);
 
   if (loading) {
     return (
@@ -167,6 +184,62 @@ export function Profile() {
             })}
           </ul>
         </section>
+
+        {social !== null && !account.anonymous && (
+          <section className="auth-card notched notched-sm">
+            <h2 className="display display-sm">Friends</h2>
+
+            {social.incoming.length > 0 && (
+              <>
+                <span className="eyebrow">Waiting on you</span>
+                <ul className="friend-list" data-dev="friend-requests">
+                  {social.incoming.map((friend) => (
+                    <li key={friend.id}>
+                      <Link to={`/players/${friend.id}`}>{friend.callsign}</Link>
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        style={{ marginLeft: "auto" }}
+                        data-dev={`accept-${friend.id}`}
+                        onClick={() => {
+                          void accountClient.acceptFriend(friend.id).then(loadFriends);
+                        }}
+                      >
+                        Accept
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+
+            {social.friends.length === 0 ? (
+              <p className="auth-note">
+                Nobody yet. Open a name on the{" "}
+                <Link to="/leaderboard">standings</Link> and add them.
+              </p>
+            ) : (
+              <ul className="friend-list" data-dev="friend-list">
+                {social.friends.map((friend) => (
+                  <li key={friend.id}>
+                    <Link to={`/players/${friend.id}`}>{friend.callsign}</Link>
+                    {/* The one thing on this page that pulls somebody back into
+                        a match. Presence is friends-only by design. */}
+                    {friend.roomId !== undefined && (
+                      <Link
+                        className="friend-live"
+                        data-dev={`friend-live-${friend.id}`}
+                        to={`/play?scene=scope&motor=1&net=1&room=${encodeURIComponent(friend.roomId)}`}
+                      >
+                        In a game — join
+                      </Link>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        )}
 
         <section className="auth-card notched notched-sm">
           <h2 className="display display-sm">Callsign</h2>

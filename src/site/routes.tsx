@@ -18,6 +18,8 @@ import { SignIn } from "./pages/SignIn";
 import { Register } from "./pages/Register";
 import { Profile } from "./pages/Profile";
 import { CharacterPage } from "./pages/CharacterPage";
+import { PlayerProfile } from "./pages/PlayerProfile";
+import { Clans, ClanPage } from "./pages/Clans";
 import { NotFound } from "./pages/NotFound";
 import { Booting } from "./Booting";
 
@@ -100,6 +102,10 @@ export const router = createBrowserRouter([
       // guard that runs before /api/me settles bounces a signed-in visitor.
       { path: "profile", element: <Profile /> },
       { path: "character", element: <CharacterPage /> },
+      // The community layer. `players/:id` is the hub every callsign links to.
+      { path: "players/:id", element: <PlayerProfile /> },
+      { path: "clans", element: <Clans /> },
+      { path: "clans/:tag", element: <ClanPage /> },
       { path: "*", element: <NotFound /> },
     ],
   },

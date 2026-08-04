@@ -15,8 +15,16 @@
 // The token is handed to the game's Colyseus client before it joins a room, which
 // is why it lives here and not inside the transport.
 
-import type { Account, Career, AwardedMedal } from "./accountTypes";
+import type { Account, Career, AwardedMedal, PublicProfile } from "./accountTypes";
 import type { Character, CharacterProblem } from "./characters";
+import type {
+  ActivityEntry,
+  Clan,
+  ClanSummary,
+  Friend,
+  FriendState,
+  ProfilePost,
+} from "./community";
 import type { BoardSummary, Leaderboard, ServerListing } from "./lobby";
 import type { TierId } from "./tiers";
 
@@ -36,6 +44,27 @@ export interface ServerConfig {
   checkoutEnabled: boolean;
   /** `DF2_ADMIN=1` on the server: the dev tier grant is reachable. */
   grantEnabled: boolean;
+}
+
+/**
+ * Everything a profile page draws, in one response.
+ *
+ * `viewer` is the server's answer to "what may THIS reader do here", resolved
+ * against the effective tier — so the page never renders a button the endpoint
+ * would refuse.
+ */
+export interface PlayerPage {
+  profile: PublicProfile;
+  clan: ClanSummary | null;
+  wall: ProfilePost[];
+  activity: ActivityEntry[];
+  viewer: {
+    id: number | null;
+    friendState: FriendState;
+    isSelf: boolean;
+    canPost: boolean;
+    canFriend: boolean;
+  };
 }
 
 /** Thrown by every call in this module so callers have one thing to catch. */
@@ -253,6 +282,78 @@ export const accountClient = {
       body: JSON.stringify(inputClass === undefined ? {} : { inputClass }),
     });
     return result.roomId;
+  },
+
+  // --- community ---------------------------------------------------------
+  // One request draws a whole profile; the rest are the buttons on it.
+
+  async player(id: number): Promise<PlayerPage> {
+    return await request<PlayerPage>(`/api/players/${id}`);
+  },
+
+  async postToWall(id: number, body: string): Promise<ProfilePost> {
+    const result = await request<{ post: ProfilePost }>(`/api/players/${id}/wall`, {
+      method: "POST",
+      body: JSON.stringify({ body }),
+    });
+    return result.post;
+  },
+
+  async deletePost(postId: number): Promise<void> {
+    await request(`/api/wall/${postId}`, { method: "DELETE" });
+  },
+
+  async requestFriend(id: number): Promise<FriendState> {
+    const result = await request<{ state: FriendState }>(`/api/players/${id}/friend`, {
+      method: "POST",
+    });
+    return result.state;
+  },
+
+  async acceptFriend(id: number): Promise<void> {
+    await request(`/api/players/${id}/friend/accept`, { method: "POST" });
+  },
+
+  async removeFriend(id: number): Promise<void> {
+    await request(`/api/players/${id}/friend`, { method: "DELETE" });
+  },
+
+  async block(id: number): Promise<void> {
+    await request(`/api/players/${id}/block`, { method: "POST" });
+  },
+
+  async unblock(id: number): Promise<void> {
+    await request(`/api/players/${id}/block`, { method: "DELETE" });
+  },
+
+  async friends(): Promise<{ friends: Friend[]; incoming: Friend[] }> {
+    return await request<{ friends: Friend[]; incoming: Friend[] }>("/api/friends");
+  },
+
+  async clans(): Promise<ClanSummary[]> {
+    const result = await request<{ clans: ClanSummary[] }>("/api/clans");
+    return result.clans;
+  },
+
+  async clan(tag: string): Promise<Clan> {
+    const result = await request<{ clan: Clan }>(`/api/clans/${encodeURIComponent(tag)}`);
+    return result.clan;
+  },
+
+  async foundClan(tag: string, name: string): Promise<Clan> {
+    const result = await request<{ clan: Clan }>("/api/clans", {
+      method: "POST",
+      body: JSON.stringify({ tag, name }),
+    });
+    return result.clan;
+  },
+
+  async joinClan(tag: string): Promise<void> {
+    await request(`/api/clans/${encodeURIComponent(tag)}/join`, { method: "POST" });
+  },
+
+  async leaveClan(): Promise<void> {
+    await request("/api/clan/leave", { method: "POST" });
   },
 
   async leaderboards(): Promise<BoardSummary[]> {

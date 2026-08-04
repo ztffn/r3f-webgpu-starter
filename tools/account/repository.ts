@@ -20,6 +20,7 @@ import {
   coerceCharacter,
   type Character,
 } from "../../src/account/characters.ts";
+import type { LeaderboardUnit } from "../../src/account/lobby.ts";
 import type { TierId } from "../../src/account/tiers.ts";
 import type { AccountDb, UserRow } from "./database.ts";
 
@@ -75,12 +76,41 @@ export type LeaderboardColumn =
   | "longest_shot_metres"
   | "time_played_seconds";
 
-/** Board id (what the URL says) to column, and the label the client shows. */
-export const LEADERBOARD_COLUMNS: Record<string, { column: LeaderboardColumn; label: string }> = {
-  matches: { column: "matches", label: "Matches played" },
-  kills: { column: "kills", label: "Kills" },
-  distance: { column: "longest_shot_metres", label: "Longest shot" },
-  time: { column: "time_played_seconds", label: "Time played" },
+/**
+ * Everything a board is: which column it ranks, what to call it, how its numbers
+ * read, and whether anything writes them yet.
+ *
+ * All four in one row because they are four facts about the same board, and the
+ * two that were not here — the unit and `populated` — had grown into open-coded
+ * conditionals in the route and a third one in the page, which agreed with this
+ * table only by somebody remembering to update all three.
+ */
+export interface LeaderboardDefinition {
+  column: LeaderboardColumn;
+  label: string;
+  unit: LeaderboardUnit;
+  /** False while nothing writes the column. The page says which kind of empty. */
+  populated: boolean;
+}
+
+/** Board id (what the URL says) to its definition. */
+export const LEADERBOARD_COLUMNS: Record<string, LeaderboardDefinition> = {
+  matches: { column: "matches", label: "Matches played", unit: "count", populated: true },
+  // Kills and longest shot wait on server-authoritative damage; `recordLongestShot`
+  // exists and is tested but nothing calls it yet.
+  kills: { column: "kills", label: "Kills", unit: "count", populated: false },
+  distance: {
+    column: "longest_shot_metres",
+    label: "Longest shot",
+    unit: "metres",
+    populated: false,
+  },
+  time: {
+    column: "time_played_seconds",
+    label: "Time played",
+    unit: "seconds",
+    populated: true,
+  },
 };
 
 const nowIso = (): string => new Date().toISOString();

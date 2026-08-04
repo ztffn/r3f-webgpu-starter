@@ -25,9 +25,19 @@ export interface ServerListing {
   locked: boolean;
 }
 
+/**
+ * What a board's numbers mean, so the page can format them.
+ *
+ * Sent rather than inferred from the board id: the page used to switch on
+ * `"distance"` and `"time"` by name, which silently prints raw seconds the day a
+ * board is added or renamed server-side.
+ */
+export type LeaderboardUnit = "count" | "metres" | "seconds";
+
 export interface BoardSummary {
   id: string;
   label: string;
+  unit: LeaderboardUnit;
   /**
    * Whether anything currently writes this stat.
    *

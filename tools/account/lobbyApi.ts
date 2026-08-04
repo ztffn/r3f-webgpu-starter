@@ -116,9 +116,11 @@ export function createLobbyRouter({ repository }: LobbyApiDeps): Router {
     res.json({
       board,
       label: entry.label,
-      // Named so the client can be honest about a blank table rather than
-      // implying nobody has played.
-      populated: entry.column === "matches" || entry.column === "time_played_seconds",
+      // Unit and `populated` are read from the table rather than decided here, so
+      // adding a board is one entry in one place. `populated` is what lets the
+      // page be honest about a blank table instead of implying nobody has played.
+      unit: entry.unit,
+      populated: entry.populated,
       rows: await repository.leaderboard(entry.column, Number.isFinite(limit) ? limit : 25),
     });
   });
@@ -129,7 +131,8 @@ export function createLobbyRouter({ repository }: LobbyApiDeps): Router {
       boards: Object.entries(LEADERBOARD_COLUMNS).map(([id, entry]) => ({
         id,
         label: entry.label,
-        populated: entry.column === "matches" || entry.column === "time_played_seconds",
+        unit: entry.unit,
+        populated: entry.populated,
       })),
     });
   });

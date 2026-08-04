@@ -10,17 +10,17 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { accountClient } from "../../account/accountClient";
-import type { BoardSummary, Leaderboard as Board } from "../../account/lobby";
+import type { BoardSummary, Leaderboard as Board, LeaderboardUnit } from "../../account/lobby";
 import { useAuth } from "../../account/AuthProvider";
 import { useDocumentTitle } from "../useDocumentTitle";
 import "./page.css";
 import "./auth.css";
 import "./lobby.css";
 
-/** Boards whose numbers are metres or seconds need their own formatting. */
-function formatValue(board: string, value: number): string {
-  if (board === "distance") return `${Math.round(value)} m`;
-  if (board === "time") {
+/** Formatting follows the unit the server declares, not the board's id. */
+function formatValue(unit: LeaderboardUnit, value: number): string {
+  if (unit === "metres") return `${Math.round(value)} m`;
+  if (unit === "seconds") {
     const hours = Math.floor(value / 3600);
     const minutes = Math.floor((value % 3600) / 60);
     return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
@@ -113,7 +113,7 @@ export function Leaderboard() {
                         <span className="badge badge-accent">Supporter</span>
                       )}
                     </span>
-                    <span className="board-value">{formatValue(board.board, row.value)}</span>
+                    <span className="board-value">{formatValue(board.unit, row.value)}</span>
                   </li>
                 );
               })}

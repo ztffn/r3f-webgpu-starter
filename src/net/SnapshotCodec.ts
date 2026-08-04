@@ -255,12 +255,24 @@ export function decodeSnapshot(bytes: Uint8Array): DecodedSnapshot {
  * own starting point, and every join begins with a teleport the width of the
  * guess — measured at 6 m against a ring spawn before this field existed.
  */
-const WELCOME_BYTES = 19;
+/**
+ * 19 bytes, plus `maxHealth` as the 20th (2026-08-04).
+ *
+ * Full health is a per-ROOM constant, so it rides the one packet that is already
+ * sent exactly once per join rather than the snapshot, which would pay for it
+ * every player every tick to say nothing changed. Without it the client cannot
+ * turn the health u8 into a fraction and has to invent a denominator — the HUD
+ * would either hardcode a second 100 or read a bar against the wrong scale on any
+ * server configured differently. World targets already carry their own maximum
+ * for the same reason.
+ */
+const WELCOME_BYTES = 20;
 
 export function encodeWelcome(
   playerId: number,
   tick: number,
-  spawn: { x: number; y: number; z: number }
+  spawn: { x: number; y: number; z: number },
+  maxHealth: number
 ): Uint8Array {
   const buffer = new ArrayBuffer(WELCOME_BYTES);
   const view = new DataView(buffer);
@@ -270,6 +282,7 @@ export function encodeWelcome(
   view.setFloat32(7, spawn.x);
   view.setFloat32(11, spawn.y);
   view.setFloat32(15, spawn.z);
+  view.setUint8(19, clamp(Math.round(maxHealth), 1, 255));
   return new Uint8Array(buffer);
 }
 
@@ -278,6 +291,7 @@ export function decodeWelcome(bytes: Uint8Array): {
   playerId: number;
   tick: number;
   spawn: { x: number; y: number; z: number };
+  maxHealth: number;
 } | null {
   if (bytes.byteLength < WELCOME_BYTES) return null;
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -289,6 +303,9 @@ export function decodeWelcome(bytes: Uint8Array): {
     playerId: view.getUint16(1),
     tick: view.getUint32(3),
     spawn,
+    // A zero here would make every health fraction a division by zero, so the
+    // floor is 1 on the way out as well as on the way in.
+    maxHealth: Math.max(1, view.getUint8(19)),
   };
 }
 

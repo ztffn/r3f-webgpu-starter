@@ -83,6 +83,8 @@ export default function GameApp() {
   // The room's join code, once a private room has sent it. Null for a public room
   // and when playing offline.
   const [roomInfo, setRoomInfo] = useState<RoomInfo | null>(null);
+  /** Null offline and until the first snapshot; see VitalsPanel for why not 1. */
+  const [health, setHealth] = useState<number | null>(null);
   const [status, setStatus] = useState<{ loading: boolean; terrain: LoadedTerrain | null }>({
     loading: true,
     terrain: null,
@@ -93,6 +95,7 @@ export default function GameApp() {
   const onPerf = useCallback((s: PerfSample) => setPerf(s), []);
   const onFly = useCallback((s: FlyState) => setFly(s), []);
   const onRoomInfo = useCallback((info: RoomInfo | null) => setRoomInfo(info), []);
+  const onHealth = useCallback((value: number | null) => setHealth(value), []);
 
   // Held so the debug panel can write uniform values directly. Not state the scene
   // reads back, so changing a slider never re-renders the canvas tree.
@@ -145,10 +148,11 @@ export default function GameApp() {
       ) : (
         <GameHud
           fly={fly}
-          // Null until server-authoritative damage lands and publishes the
-          // local player's hit points; VitalsPanel shows that as an empty
-          // dashed track rather than a full bar.
-          health={null}
+          // The one call site `faab73f` said would change when the authority
+          // landed. It reaches here from GameClient through usePlayerVitals and
+          // DF2Scene, so the HUD still does not know how health is sourced —
+          // and it is null offline, where no authority reports hit points.
+          health={health}
           joinCode={roomInfo?.joinCode ?? null}
           fpsMode={scopeDemo}
           preview={hudPreview}
@@ -189,6 +193,7 @@ export default function GameApp() {
           onPerf={onPerf}
           onFly={onFly}
           onRoomInfo={onRoomInfo}
+          onHealth={onHealth}
           onToggleGround={toggleGround}
           onStance={chooseStance}
           onGrassReady={onGrassReady}

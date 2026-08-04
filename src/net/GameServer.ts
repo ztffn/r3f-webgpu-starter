@@ -422,7 +422,9 @@ export class GameServer {
       // The resolved feet position, not the requested spawn: the motor drops
       // the player onto the terrain, so the client must be told where they
       // actually landed or it starts its prediction off the ground.
-      connection.send(encodeWelcome(connection.id, this.room.tick, motor.state.position));
+      connection.send(
+        encodeWelcome(connection.id, this.room.tick, motor.state.position, this.maxHealth)
+      );
       // Right after the welcome, because the client needs the room's sky before
       // its first frame. Fog is concealment in this game, so two players in one
       // match seeing different fog ranges is a fairness bug, not a cosmetic one.

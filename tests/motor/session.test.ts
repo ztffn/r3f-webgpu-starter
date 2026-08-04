@@ -21,6 +21,7 @@ import {
   encodeCommands,
   encodeFire,
   encodeSnapshot,
+  encodeWelcome,
   quantiseCommand,
 } from "../../src/net/SnapshotCodec.ts";
 import {
@@ -157,6 +158,22 @@ test("command and snapshot packets survive a codec round trip", () => {
   assert.equal(back.players[0]!.state.previousStance, "crouch");
   assert.ok(Math.abs(back.players[0]!.state.stanceProgress - 0.4) < 1 / 255);
   assert.equal(back.players[0]!.state.aiming, true);
+});
+
+test("the welcome carries the room's full health, so a client can read a fraction", () => {
+  // Player maxHealth is NOT in the snapshot — it is a room constant, so it rides
+  // the one packet sent once per join. Without it the client has no denominator
+  // and the vitals bar has to invent one, which is wrong on any server not using
+  // the default.
+  const welcome = decodeWelcome(encodeWelcome(7, 42, { x: 1, y: 2, z: 3 }, 150))!;
+  assert.equal(welcome.playerId, 7);
+  assert.equal(welcome.tick, 42);
+  assert.equal(welcome.maxHealth, 150);
+
+  // Clamped into the byte on the way in, and floored at 1 on the way out: a zero
+  // maximum would make every health fraction a division by zero.
+  assert.equal(decodeWelcome(encodeWelcome(1, 0, { x: 0, y: 0, z: 0 }, 0))!.maxHealth, 1);
+  assert.equal(decodeWelcome(encodeWelcome(1, 0, { x: 0, y: 0, z: 0 }, 9999))!.maxHealth, 255);
 });
 
 test("every input bit survives the wire, including the ones past a byte", () => {

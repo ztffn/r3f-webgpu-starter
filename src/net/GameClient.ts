@@ -130,6 +130,14 @@ export class GameClient {
    * by up to one patch and is always the truth.
    */
   health = 0;
+  /**
+   * Full health for this room, from the welcome packet.
+   *
+   * The denominator the HUD reads `health` against. Sent once per join rather
+   * than per tick because it is a room constant; 100 until the welcome lands, so
+   * a fraction computed in the gap is merely stale rather than infinite.
+   */
+  maxHealth = 100;
   /** Own shot counter, echoed in each claim so a resend cannot fire twice. */
   private fireSequence = 0;
   /** Own weapon-claim counter, shared by select and reload for the same reason. */
@@ -176,6 +184,7 @@ export class GameClient {
    */
   private worldTargetsValue: readonly WorldTargetState[] | null = null;
   private readonly worldTargetListeners = new Set<() => void>();
+  private readonly healthListeners = new Set<() => void>();
 
   /**
    * Subscribe / getSnapshot rather than a single callback field, following
@@ -196,6 +205,27 @@ export class GameClient {
     this.worldTargetListeners.add(listener);
     return () => this.worldTargetListeners.delete(listener);
   };
+
+  /**
+   * The local player's hit points, for a React reader.
+   *
+   * The same subscribe / getSnapshot shape as room state and world targets, and
+   * for the same reason: more than one surface wants this — the vitals bar today,
+   * a damage indicator and a death overlay next — and a single assignable callback
+   * would let the second reader silently unsubscribe the first.
+   *
+   * A NUMBER rather than an object, deliberately. `useSyncExternalStore` compares
+   * what getSnapshot returns; a fresh object every call is an infinite render loop,
+   * and a primitive cannot be one. Listeners fire only when the value actually
+   * changed, so a 20 Hz snapshot stream does not wake React 20 times a second to
+   * report the same hit points.
+   */
+  readonly subscribeHealth = (listener: () => void): (() => void) => {
+    this.healthListeners.add(listener);
+    return () => this.healthListeners.delete(listener);
+  };
+
+  readonly getHealth = (): number => this.health;
 
   readonly getWorldTargets = (): readonly WorldTargetState[] | null =>
     this.worldTargetsValue;
@@ -345,6 +375,7 @@ export class GameClient {
       if (welcome === null) return;
       this.playerId = welcome.playerId;
       this.localId = String(welcome.playerId);
+      this.maxHealth = welcome.maxHealth;
       this.room.add(this.localId, welcome.spawn);
       return;
     }
@@ -376,7 +407,13 @@ export class GameClient {
     this.lastSnapshotTick = snapshot.tick;
     for (const player of snapshot.players) {
       if (player.id === this.playerId) {
-        this.health = player.health;
+        // Notified only on a CHANGE. Health arrives in every snapshot and changes
+        // in almost none of them, so waking every reader at the patch rate would
+        // be 20 wake-ups a second to report the same number.
+        if (player.health !== this.health) {
+          this.health = player.health;
+          for (const listener of this.healthListeners) listener();
+        }
         this.reconcile(player.state, snapshot.acknowledgedCommandTick);
         continue;
       }

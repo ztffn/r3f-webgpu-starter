@@ -35,6 +35,7 @@ import { MotorControls } from "../fps/MotorControls";
 import { useGameClient } from "../fps/useGameClient";
 import type { RoomInfo } from "../net/ColyseusProtocol.ts";
 import { useRoomVisuals, type RoomVisuals } from "../fps/useRoomVisuals";
+import { usePlayerVitals } from "../fps/usePlayerVitals";
 import { applyVisualDials, type VisualDialTargets } from "./visualDials";
 import { RemotePlayers } from "../fps/RemotePlayers";
 import { CompositeWorldQuery } from "../fps/core/WorldQuery";
@@ -262,6 +263,14 @@ export interface DF2SceneProps {
   onFly?: (s: FlyState) => void;
   /** The room's join code, once a private room has sent it. */
   onRoomInfo?: (info: RoomInfo | null) => void;
+  /**
+   * The local player's health, 0–1, or null with no authority reporting it.
+   *
+   * Reported upward like room info rather than folded into `SceneHandles`: no
+   * scene material reads it, and widening that memo would republish every scene
+   * handle each time somebody took a bullet.
+   */
+  onHealth?: (health: number | null) => void;
   onToggleGround?: () => void;
   onStance?: (s: Stance) => void;
   onStatus?: (status: { loading: boolean; terrain: LoadedTerrain | null }) => void;
@@ -327,6 +336,7 @@ export function DF2Scene({
   onPerf,
   onFly,
   onRoomInfo,
+  onHealth,
   onToggleGround,
   onStance,
   onGrassReady,
@@ -424,6 +434,12 @@ export function DF2Scene({
   useEffect(() => {
     onRoomInfo?.(roomInfo);
   }, [onRoomInfo, roomInfo]);
+  // Health takes the same route for the same reason. The hook is what subscribes;
+  // this effect only forwards, so a change wakes the HUD and nothing in the scene.
+  const health = usePlayerVitals(gameClient);
+  useEffect(() => {
+    onHealth?.(health);
+  }, [onHealth, health]);
   /**
    * The room's visuals, or null when playing alone.
    *

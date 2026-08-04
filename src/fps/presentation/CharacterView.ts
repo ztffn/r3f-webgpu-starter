@@ -10,7 +10,7 @@
 import * as THREE from "three/webgpu";
 import { CharacterAnimator } from "./CharacterAnimator.ts";
 import { CharacterAimRig, type AimRigProfile } from "./CharacterAimRig.ts";
-import { localizeVelocity, type LocomotionSample } from "./characterClips.ts";
+import { localizeVelocity, type LocomotionSample } from "../../character/characterClips.ts";
 import { instantiateSoldier, type SoldierAsset } from "./soldierAssets.ts";
 import type { MotorState, PlayerStance } from "../../motor/MotorTypes.ts";
 

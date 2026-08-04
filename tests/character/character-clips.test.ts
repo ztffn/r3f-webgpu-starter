@@ -12,12 +12,16 @@ import {
   CLIP_IDLE,
   CLIP_IDLE_CROUCH,
   CLIP_JUMP_LOOP,
+  DEATH_CLIPS,
   allSelectableClips,
   chooseClip,
+  chooseDeathClip,
+  deathClipDurationDrift,
+  deathDirectionFrom,
   directionSuffix,
   localizeVelocity,
   type LocomotionSample,
-} from "../../src/fps/presentation/characterClips.ts";
+} from "../../src/character/characterClips.ts";
 
 const RUN_AT = 3;
 
@@ -99,6 +103,80 @@ test("stance, gait, and airborne mapping", () => {
   );
 
   assert.equal(chooseClip(sample({ grounded: false, speed: 5 }), RUN_AT), CLIP_JUMP_LOOP);
+});
+
+test("a death faces the side the round came FROM, not the way it was going", () => {
+  // Yaw 0 faces world -Z, so a shooter standing in front of the victim is at -Z
+  // and their round travels toward +Z. Getting this negation wrong plays a
+  // forward fall for a shot in the back, which reads as a broken animation long
+  // before anyone suspects a sign.
+  assert.equal(deathDirectionFrom(0, 1, 0), "front", "shot from the front");
+  assert.equal(deathDirectionFrom(0, -1, 0), "back", "shot from behind");
+  // Left is -X with that basis, so a round travelling -X came from the right.
+  assert.equal(deathDirectionFrom(-1, 0, 0), "side", "shot from the right");
+  assert.equal(deathDirectionFrom(1, 0, 0), "side", "shot from the left");
+
+  // The victim's own facing is what it is relative to: same world-space round,
+  // victim turned around, opposite answer.
+  assert.equal(deathDirectionFrom(0, 1, Math.PI), "back");
+});
+
+test("death clip selection covers the gaps in the pack", () => {
+  const stand = { direction: "front", headshot: false, stance: "stand" } as const;
+  assert.equal(chooseDeathClip(stand).name, "Death_From_The_Front");
+  assert.equal(chooseDeathClip({ ...stand, direction: "back" }).name, "Death_From_The_Back");
+
+  // One clip serves both flanks: the pack has no left-side death and the project
+  // chose a shared clip over a runtime mirror.
+  assert.equal(chooseDeathClip({ ...stand, direction: "side" }).name, "Death_From_Right");
+
+  // Headshots are wired but never set until a head zone exists on the capsule.
+  assert.equal(
+    chooseDeathClip({ ...stand, headshot: true }).name,
+    "Death_From_Front_Headshot"
+  );
+  assert.equal(
+    chooseDeathClip({ ...stand, headshot: true, stance: "crouch" }).name,
+    "Death_Crouching_Headshot_Front"
+  );
+  // No lateral headshot clip exists, so the fall direction wins over the wound.
+  assert.equal(
+    chooseDeathClip({ ...stand, headshot: true, direction: "side" }).name,
+    "Death_From_Right"
+  );
+  // Prone has no clips of its own and follows crouch, as locomotion does.
+  assert.equal(
+    chooseDeathClip({ ...stand, headshot: true, stance: "prone" }).name,
+    "Death_Crouching_Headshot_Front"
+  );
+});
+
+test("the death clip durations match the shipped manifest", () => {
+  // The server schedules a respawn from these numbers and cannot open a GLB to
+  // check them, so this is the only place a re-export that changed a clip's
+  // length gets caught before a body pops away mid-fall.
+  const manifest = readFileSync(
+    "assets/3d/characters/player1/SpecialForcesSoldier_animations.txt",
+    "utf8"
+  );
+  const shipped = new Map<string, number>();
+  for (const line of manifest.split("\n")) {
+    const row = /^(\w+)\s+\d+\s+([\d.]+)\s*$/.exec(line);
+    if (row !== null) shipped.set(row[1]!, Number(row[2]));
+  }
+
+  for (const clip of Object.values(DEATH_CLIPS)) {
+    const actual = shipped.get(clip.name);
+    assert.ok(actual !== undefined, `${clip.name} is not in the manifest`);
+    assert.ok(
+      Math.abs(actual - clip.seconds) < 0.01,
+      `${clip.name}: table says ${clip.seconds}s, manifest says ${actual}s`
+    );
+  }
+
+  // And the drift reporter agrees with itself when handed the same numbers.
+  assert.deepEqual(deathClipDurationDrift((name) => shipped.get(name)), []);
+  assert.equal(deathClipDurationDrift(() => 99).length, Object.values(DEATH_CLIPS).length);
 });
 
 test("every selectable clip ships in the GLB's clip manifest", () => {

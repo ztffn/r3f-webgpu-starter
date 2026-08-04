@@ -13,7 +13,7 @@
 import { Canvas, extend, useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three/webgpu";
-import { CLIP_IDLE } from "../fps/presentation/characterClips";
+import { CLIP_IDLE } from "../character/characterClips";
 import { instantiateSoldier, loadSoldier, type SoldierAsset } from "../fps/presentation/soldierAssets";
 
 // Make the three namespace available as JSX elements. Idempotent, and this

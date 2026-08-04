@@ -15,7 +15,7 @@ import {
   CLIP_JUMP_LOOP,
   chooseClip,
   type LocomotionSample,
-} from "./characterClips.ts";
+} from "../../character/characterClips.ts";
 
 const CROSSFADE_SECONDS = 0.2;
 const LANDING_FADE_SECONDS = 0.12;

@@ -12,7 +12,7 @@ import * as THREE from "three/webgpu";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
 import { clone as cloneWithSkeleton } from "three/addons/utils/SkeletonUtils.js";
-import { allSelectableClips } from "./characterClips.ts";
+import { allSelectableClips } from "../../character/characterClips.ts";
 import { measureClipSpeeds, type ClipSpeeds } from "./CharacterAnimator.ts";
 
 const SOLDIER_URL = "/assets/characters/player1/soldier.glb";

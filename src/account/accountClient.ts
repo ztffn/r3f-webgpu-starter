@@ -16,7 +16,8 @@
 // is why it lives here and not inside the transport.
 
 import type { Account, Career, AwardedMedal } from "./accountTypes";
-import type { Character } from "./characters";
+import type { Character, CharacterProblem } from "./characters";
+import type { BoardSummary, Leaderboard, ServerListing } from "./lobby";
 import type { TierId } from "./tiers";
 
 const TOKEN_KEY = "df2.account.token";
@@ -35,53 +36,13 @@ export interface ServerConfig {
   checkoutEnabled: boolean;
 }
 
-/** One row of the server browser. Mirrors ServerListing in tools/account/lobbyApi.ts. */
-export interface ServerListing {
-  roomId: string;
-  label: string;
-  map: string;
-  weather: string;
-  inputClass: string;
-  players: number;
-  maxPlayers: number;
-  community: boolean;
-  hostCallsign: string | null;
-  locked: boolean;
-}
-
-export interface BoardSummary {
-  id: string;
-  label: string;
-  /**
-   * Whether anything currently writes this stat.
-   *
-   * The server reports it so the page can distinguish "nobody has done this yet"
-   * from "nothing records this yet" — an empty kills board would otherwise read as
-   * nobody having ever killed anyone, which is not what is true.
-   */
-  populated: boolean;
-}
-
-export interface LeaderboardRow {
-  rank: number;
-  id: number;
-  callsign: string;
-  tier: TierId;
-  value: number;
-}
-
-export interface Leaderboard extends BoardSummary {
-  board: string;
-  rows: LeaderboardRow[];
-}
-
 /** Thrown by every call in this module so callers have one thing to catch. */
 export class AccountError extends Error {
   readonly status: number;
   /** Field-level problems from the character endpoint, when present. */
-  readonly problems: { field: string; message: string }[];
+  readonly problems: CharacterProblem[];
 
-  constructor(message: string, status: number, problems: { field: string; message: string }[] = []) {
+  constructor(message: string, status: number, problems: CharacterProblem[] = []) {
     super(message);
     this.name = "AccountError";
     this.status = status;
@@ -157,7 +118,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
   if (!response.ok) {
     const error = (body as { error?: string }).error;
-    const problems = (body as { problems?: { field: string; message: string }[] }).problems ?? [];
+    const problems = (body as { problems?: CharacterProblem[] }).problems ?? [];
     // A 401 on any call means the stored token is no longer usable. Clearing it
     // here is what stops the app looping on a dead session.
     if (response.status === 401 && path !== "/auth/login") setToken(null);

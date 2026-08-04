@@ -12,27 +12,13 @@
 
 import express, { type Request, type Response, type Router } from "express";
 import { matchMaker } from "@colyseus/core";
+import { normaliseJoinCode, type ServerListing } from "../../src/account/lobby.ts";
 import { GAME_ROOM } from "../../src/net/ColyseusProtocol.ts";
 import { LEADERBOARD_COLUMNS, type AccountRepository } from "./repository.ts";
 import type { RoomMetadata } from "./roomMetadata.ts";
 
 export interface LobbyApiDeps {
   repository: AccountRepository;
-}
-
-/** What the browser shows for one server. Deliberately not IRoomCache. */
-export interface ServerListing {
-  roomId: string;
-  label: string;
-  map: string;
-  weather: string;
-  inputClass: string;
-  players: number;
-  maxPlayers: number;
-  /** True when a supporter is hosting it rather than the project. */
-  community: boolean;
-  hostCallsign: string | null;
-  locked: boolean;
 }
 
 export function createLobbyRouter({ repository }: LobbyApiDeps): Router {
@@ -92,7 +78,7 @@ export function createLobbyRouter({ repository }: LobbyApiDeps): Router {
     if (typeof raw !== "string" || raw.trim() === "") {
       return void res.status(400).json({ error: "code_required" });
     }
-    const code = raw.trim().toUpperCase();
+    const code = normaliseJoinCode(raw);
     try {
       const rooms = await matchMaker.query({ name: GAME_ROOM });
       const match = rooms.find(

@@ -45,6 +45,10 @@ const CODE_LENGTH = 6;
  * `crypto.randomInt` rather than `Math.random`: the code is the only thing
  * protecting a private match, so it must not be predictable from another code
  * generated moments earlier.
+ *
+ * Minting stays here because it needs `node:crypto`; NORMALISING a typed code is
+ * `normaliseJoinCode` in src/account/lobby.ts, because the lobby page has to
+ * apply the same rule and cannot import from tools/.
  */
 export function makeJoinCode(): string {
   let code = "";
@@ -52,11 +56,6 @@ export function makeJoinCode(): string {
     code += CODE_ALPHABET[crypto.randomInt(CODE_ALPHABET.length)];
   }
   return code;
-}
-
-/** Normalise a typed code for comparison. Callers compare uppercase. */
-export function normaliseJoinCode(raw: string): string {
-  return raw.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
 export interface RoomOptions {

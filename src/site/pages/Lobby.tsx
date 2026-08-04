@@ -10,7 +10,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
-import { accountClient, AccountError, type ServerListing } from "../../account/accountClient";
+import { accountClient, AccountError } from "../../account/accountClient";
+import { normaliseJoinCode, type ServerListing } from "../../account/lobby";
 import { useAuth } from "../../account/AuthProvider";
 import { useAsyncAction } from "../useAsyncAction";
 import { useDocumentTitle } from "../useDocumentTitle";
@@ -43,7 +44,7 @@ export function Lobby() {
   // stays editable — a link that silently auto-joined would give someone no chance
   // to notice they had opened the wrong one.
   const [params] = useSearchParams();
-  const [code, setCode] = useState(() => (params.get("code") ?? "").toUpperCase());
+  const [code, setCode] = useState(() => normaliseJoinCode(params.get("code") ?? ""));
   const { busy, error: codeError, run } = useAsyncAction<"join">(describeJoin);
 
   const refresh = useCallback(async () => {
@@ -186,7 +187,7 @@ export function Lobby() {
                   maxLength={8}
                   value={code}
                   data-dev="join-code-input"
-                  onChange={(event) => setCode(event.target.value.toUpperCase())}
+                  onChange={(event) => setCode(normaliseJoinCode(event.target.value))}
                 />
                 <p className="field-hint">
                   Six characters. Ambiguous letters and digits are never used, so
@@ -202,7 +203,7 @@ export function Lobby() {
                 type="submit"
                 className="btn"
                 data-dev="join-code-submit"
-                disabled={busy !== null || code.trim().length < 4}
+                disabled={busy !== null || code.length < 4}
               >
                 {busy !== null ? "Joining…" : "Join private game"}
               </button>

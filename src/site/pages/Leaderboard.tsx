@@ -9,7 +9,8 @@
 
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
-import { accountClient, type BoardSummary, type Leaderboard as Board } from "../../account/accountClient";
+import { accountClient } from "../../account/accountClient";
+import type { BoardSummary, Leaderboard as Board } from "../../account/lobby";
 import { useAuth } from "../../account/AuthProvider";
 import { useDocumentTitle } from "../useDocumentTitle";
 import "./page.css";

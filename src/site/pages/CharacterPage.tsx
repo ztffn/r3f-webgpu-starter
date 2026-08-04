@@ -5,7 +5,7 @@
 // beside it, rather than enabled and then refused by the API. The refusal still
 // exists server-side — this is a courtesy, not the gate.
 
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Link } from "react-router";
 import { accountClient, AccountError } from "../../account/accountClient";
 import { useAuth } from "../../account/AuthProvider";
@@ -29,6 +29,16 @@ import "./auth.css";
  * worth showing — the validator returns problems rather than throwing precisely
  * so a form can show them at once.
  */
+/**
+ * The ONE place src/site/ is allowed to reach the game, and only through
+ * `lazy()`.
+ *
+ * A static import here would pull Three.js and the renderer into the site's entry
+ * chunk — the boundary that keeps the landing page cheap fails silently, so this
+ * split is re-checked in dist/ rather than assumed.
+ */
+const CharacterPreview = lazy(() => import("../../game/CharacterPreview"));
+
 const describeSave = (failure: unknown) =>
   failure instanceof AccountError
     ? failure.problems.map((problem) => problem.message).join(" ") || failure.message
@@ -40,6 +50,9 @@ export function CharacterPage() {
 
   const [draft, setDraft] = useState<Character | null>(null);
   const { busy, error, done: saved, run } = useAsyncAction<"save">(describeSave);
+  // Mounted on request, not on arrival: the model is 7 MB and the renderer is
+  // another 1.5, on a page whose whole point is that it costs nothing to open.
+  const [showPreview, setShowPreview] = useState(false);
 
   // Seeded from the account once it arrives. Not derived on every render, or
   // typing in the insignia field would be overwritten by the stored value.
@@ -106,6 +119,39 @@ export function CharacterPage() {
       </header>
 
       <div className="shell page-body auth-page">
+        <section className="auth-card notched notched-sm">
+          <h2 className="display display-sm">The soldier</h2>
+          <p className="auth-note">
+            {/* Said before the model loads, not after. A preview that silently
+                ignores the controls beside it is worse than no preview — the
+                player would read it as their camo being broken. */}
+            This is the model and its idle animation.{" "}
+            <strong>It does not show your choices yet</strong> — camouflage,
+            headgear and insignia are saved and enforced, but nothing renders them
+            on the soldier so far.
+          </p>
+          {showPreview ? (
+            <Suspense
+              fallback={
+                <p className="auth-note" data-dev="character-preview-pending">
+                  Loading the viewer…
+                </p>
+              }
+            >
+              <CharacterPreview />
+            </Suspense>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-ghost"
+              data-dev="character-preview-load"
+              onClick={() => setShowPreview(true)}
+            >
+              Load the 3D view (about 9 MB)
+            </button>
+          )}
+        </section>
+
         <section className="auth-card notched notched-sm">
           <h2 className="display display-sm">Appearance</h2>
 

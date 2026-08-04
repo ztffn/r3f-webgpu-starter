@@ -130,7 +130,15 @@ export default function GameApp() {
           </div>
         </div>
       ) : (
-        <GameHud fly={fly} fpsMode={scopeDemo} preview={hudPreview} />
+        <GameHud
+          fly={fly}
+          // Null until server-authoritative damage lands and publishes the
+          // local player's hit points; VitalsPanel shows that as an empty
+          // dashed track rather than a full bar.
+          health={null}
+          fpsMode={scopeDemo}
+          preview={hudPreview}
+        />
       )}
 
       {/* The console is always mountable now, not gated on ?debug=1 — that

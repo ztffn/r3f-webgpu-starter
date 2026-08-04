@@ -21,11 +21,18 @@ import { VitalsPanel, type Vital } from "./VitalsPanel";
 import { WeaponPanel } from "./WeaponPanel";
 import "./hud.css";
 
-/** Server default (GameServer DEFAULT_MAX_HEALTH). Used to scale the bar. */
-const MAX_HEALTH = 100;
-
 export interface GameHudProps {
   fly: FlyState | null;
+  /**
+   * Local player health, 0–1, or null when nothing authoritative reports it.
+   *
+   * A PROP rather than something derived from `fly` here, because health is
+   * server-owned and the authority work that publishes it is not finished. When it
+   * lands, exactly one call site changes — this is the seam. Passing null is not a
+   * placeholder for 100%: VitalsPanel renders an empty dashed track for it, which
+   * is the honest reading when there is no damage model.
+   */
+  health: number | null;
   /** True in the scope demo — the crosshair and weapon block only apply there. */
   fpsMode: boolean;
   /** `?hudpreview=1`: also render the panels that have no data source yet. */
@@ -41,7 +48,7 @@ function windBearing(x: number, z: number): string {
   return points[Math.round(degrees / 45) % 8]!;
 }
 
-export function GameHud({ fly, fpsMode, preview }: GameHudProps) {
+export function GameHud({ fly, health, fpsMode, preview }: GameHudProps) {
   const combat = useSyncExternalStore(
     combatTelemetry.subscribe,
     combatTelemetry.getSnapshot,
@@ -49,10 +56,11 @@ export function GameHud({ fly, fpsMode, preview }: GameHudProps) {
   );
 
   const net = fly?.net ?? null;
-  // Health is the ONLY wired vital. Offline there is no damage model for the
-  // local player at all, so it is null rather than 100 — see VitalsPanel.
+  // Stamina, hydration and armour are systems that do not exist. They render a
+  // dashed empty track and a dash rather than a bar — see VitalsPanel for why
+  // showing 100% armour with no armour system would be worse than showing nothing.
   const vitals: Record<Vital, number | null> = {
-    health: net === null ? null : Math.max(0, Math.min(1, net.health / MAX_HEALTH)),
+    health: health === null ? null : Math.max(0, Math.min(1, health)),
     stamina: null,
     hydration: null,
     armour: null,

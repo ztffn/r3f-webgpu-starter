@@ -474,13 +474,7 @@ export function MotorControls({
               speed: 0,
               grounded: false,
             };
-      if (client !== null) {
-        report.net = {
-          phase: client.phase,
-          playerId: client.playerId,
-          health: client.health,
-        };
-      }
+      if (client !== null) report.net = { phase: client.phase, playerId: client.playerId };
       onState?.(report);
     }
   });

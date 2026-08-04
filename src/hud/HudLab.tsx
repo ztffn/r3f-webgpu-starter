@@ -35,7 +35,7 @@ const SAMPLE_FLY: FlyState = {
   agl: 1.7,
   speed: 0,
   grounded: true,
-  net: { phase: "playing", playerId: 1, health: 100 },
+  net: { phase: "playing", playerId: 1 },
 };
 
 export default function HudLab() {
@@ -111,7 +111,7 @@ export default function HudLab() {
             decoding="async"
           />
         )}
-        <GameHud fly={SAMPLE_FLY} fpsMode preview />
+        <GameHud fly={SAMPLE_FLY} health={1} fpsMode preview />
         {live && <HeadingSweep />}
       </div>
     </div>

@@ -222,7 +222,8 @@ Each phase is independently shippable and leaves the tree working.
 | 3 | Dev console: existing panels moved behind it | 1 | **done** |
 | 4 | HUD redesign against the mockup, desktop and touch layouts | 1, 3 | **done** |
 | 5 | Accounts: auth server, schema, sign-in / register / profile / character | 1 | **done** |
-| 6 | Lobby, server browser, private games, community servers, clans | 5 | not started |
+| 6 | Lobby, server browser, private games, leaderboards | 5 | **done** |
+| 6b | Clans, community-hosted servers | 6 | not started |
 | 7 | Entitlements, medals, supporter perks, checkout stub | 5 | not started |
 | 8 | Touch input scheme, after the mobile GPU measurement | 4 | not started |
 
@@ -408,6 +409,69 @@ and `discord_id` are not selected. A test asserts they stay off the wire.
   `DATABASE_URL` plus the `pg` driver, deferred until there is somewhere to deploy.
 - **Email delivery.** `onForgotPassword` logs the reset link when no provider is
   configured, which is a working development flow and an obvious production gap.
+
+## 5.4 What phase 6 landed
+
+```
+tools/account/roomMetadata.ts  join codes, room options, what a room publishes
+tools/account/lobbyApi.ts      /api/servers, /api/join-code, /api/leaderboard(s)
+tools/account/repository.ts     + recordSession, recordLongestShot, leaderboard
+tools/game-server/server.ts     static onAuth, room metadata, private rooms,
+                                session reporting, filterBy(["inputClass"])
+src/net/ColyseusTransport.ts    token + join options (by id / create private)
+src/site/pages/Lobby.tsx        quick match, browser, join by code, host private
+src/site/pages/Leaderboard.tsx  four boards with an honest empty state
+tests/account/lobby.test.ts     12 assertions
+```
+
+**The career pipeline is now real, and that is what makes a leaderboard possible.**
+`Room.onAuth` is **static**, so it runs before any instance exists and cannot reach
+the repository through `this` — hence the module-scope `accounts` handle in
+server.ts. It resolves the token to an account id, `onJoin` stamps the join time,
+and `onLeave` writes matches and seconds played. Verified end to end against a live
+server: two joins produced `matches: 2, timePlayedSeconds: 6` and the account
+appeared on the matches board at rank 1.
+
+**Room auth is deliberately optional.** An absent or bad token joins as nobody
+rather than being refused, because every documented dev URL predates accounts and
+`?scene=scope&motor=1&net=1` must keep working. Identity buys career recording,
+nothing else. It is **not** a gameplay trust boundary.
+
+**No cross-play is enforced twice, on purpose.** `filterBy(["inputClass"])` stops
+`joinOrCreate` matching across queues, and the browser filters the listing. Verified:
+`?input=desktop` returned nothing while a touch room was open, and `?input=touch`
+returned it.
+
+**Private rooms rely on Colyseus's own `private` flag** rather than custom state, so
+they are excluded from matchmaking and from the browser by the framework. The join
+code lives in room metadata and is filtered out before any response — which is why
+the listing is built server-side rather than by letting the client call Colyseus's
+matchmaking endpoint. Verified: a private room returned `{"servers":[]}` while open,
+its code resolved to the right room id, lowercase-with-spaces resolved identically,
+and a wrong code returned `no_such_game` with no hint that anything exists.
+
+Join codes use a 25-character alphabet with **no O/0, I/1/L, S/5, B/8 or Z/2**,
+generated with `crypto.randomInt` rather than `Math.random` — the code is the only
+thing protecting a private match, so it must not be predictable from another one
+minted moments earlier.
+
+**Empty boards say WHICH kind of empty they are.** Matches and time played fill up
+as soon as anyone plays; kills and longest shot are not written by anything yet. The
+server marks each board `populated` so the page can distinguish "nobody has done
+this" from "nothing records this", because an empty kills board otherwise reads as a
+claim that nobody has ever killed anyone.
+
+### Still open after phase 6
+
+- **The host cannot see their own join code.** The room mints one and logs it; there
+  is no message that delivers it to the host, so the Lobby says so plainly instead
+  of promising a code it cannot show. Needs a packet on the game connection.
+- **Clans and community-hosted servers are not built.** The metadata carries
+  `community` and `hostCallsign` and the browser renders them, but nothing sets
+  them — `foundClan`, `hostCommunityServer` and `reservedSlot` remain ungranted
+  capabilities. That is phase 6b.
+- **Kills and deaths.** Waiting on feat/server-ballistics; `recordLongestShot`
+  exists and is tested but has no caller yet.
 
 ## 6. Retention model — what the perks actually are
 

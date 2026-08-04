@@ -111,11 +111,23 @@ player instinctively recognise this?* — applies to features, not to whether a 
   package's default password salt is a public literal, and its salt is process-wide rather
   than per-user (design record §5.3 has the limitation and the proper fix).
   `npm run typecheck` now also checks `tools/` via `tsconfig.server.json`.
-- **Next up (web product):** lobby / server browser / private games / clans, then
-  entitlements and medals. Phases 6–7 of `plans/2026-08-04-...md`. Note the game room
-  still does **not** verify the auth token — that belongs with matchmaking in phase 6.
-  Touch INPUT does not exist yet either: mobile and iPad are first-class targets for the
-  UI, and the game still needs a keyboard.
+- **Lobby, servers and leaderboards (Aug 2026):** `/lobby` is quick match plus a live
+  server browser, join-by-code and host-private; `/leaderboard` has four boards.
+  `Room.onAuth` is **static** — it runs before any instance exists, so the repository is
+  reached through a module-scope handle in `server.ts`, not `this`. It resolves the token to
+  an account and `onLeave` writes matches and time played, which is what makes the boards
+  real. **Auth is optional on join by design:** no token joins as nobody, so every
+  documented dev URL keeps working; it buys career recording and is not a gameplay trust
+  boundary. No cross-play is enforced twice — `filterBy(["inputClass"])` on matchmaking AND
+  the listing filter. Private rooms use Colyseus's own `private` flag; the join code lives in
+  room metadata and is stripped before any response, which is why the listing is built
+  server-side. Design record §5.4 has the verification and what is still open.
+- **Next up (web product):** clans and community-hosted servers (§6b), then entitlements
+  and medals (phase 7). Two known gaps: **the host cannot see their own join code** (the
+  room logs it; nothing delivers it), and kills/deaths are still unwritten pending
+  feat/server-ballistics — `recordLongestShot` exists and is tested but has no caller.
+  Touch INPUT does not exist either: mobile and iPad are first-class targets for the UI,
+  and the game still needs a keyboard.
 - **Direction:** custom assets → player-created terrain → map/terrain editor tooling
   (`01-...md` Phase 6). Real assets are the dial-in instrument, not the deliverable.
 

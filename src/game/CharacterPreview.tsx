@@ -24,7 +24,7 @@ extend(THREE as never);
 const TURNTABLE_RATE = 0.35;
 
 /** Headroom around the figure once it is fitted. 1 would touch every edge. */
-const FRAME_MARGIN = 1.12;
+const FRAME_MARGIN = 1.05;
 
 function Soldier({ asset }: { asset: SoldierAsset }) {
   const pivot = useRef<THREE.Group>(null);
@@ -53,21 +53,23 @@ function Soldier({ asset }: { asset: SoldierAsset }) {
   // parent made the soldier ORBIT the frame instead of turning on the spot.
   useEffect(() => {
     const bounds = new THREE.Box3().setFromObject(object);
-    const extent = bounds.getSize(new THREE.Vector3());
     const centre = bounds.getCenter(new THREE.Vector3());
     object.position.set(-centre.x, 0, -centre.z);
 
-    // Fitted from the actual field of view and aspect rather than from a
-    // multiplier on the model's height. A guessed multiplier framed correctly at
-    // one window size and cropped the soldier's head at another, because the
-    // binding axis changes with the shape of the stage: a tall narrow column is
-    // limited by WIDTH, a short wide one by height.
+    // Fitted from the bounding SPHERE, not the box.
+    //
+    // A box fit has to pick which extent binds, and the rifle makes `extent.x`
+    // much larger than the figure — so at some window aspects the chosen axis
+    // under-fits and the soldier is cropped at the head and feet. A sphere has
+    // no orientation, so `radius / sin(halfFov)` frames it at every aspect and
+    // the only remaining question is which of the two half-angles is smaller.
     const perspective = camera as THREE.PerspectiveCamera;
     const aspect = size.height > 0 ? size.width / size.height : 1;
     const halfFov = (perspective.fov * Math.PI) / 360;
-    const fitHeight = extent.y / 2 / Math.tan(halfFov);
-    const fitWidth = extent.x / 2 / (Math.tan(halfFov) * aspect);
-    const distance = Math.max(fitHeight, fitWidth) * FRAME_MARGIN;
+    const halfFovX = Math.atan(Math.tan(halfFov) * aspect);
+    const sphere = bounds.getBoundingSphere(new THREE.Sphere());
+    const distance =
+      (sphere.radius / Math.sin(Math.min(halfFov, halfFovX))) * FRAME_MARGIN;
 
     perspective.position.set(0, centre.y, distance);
     perspective.lookAt(0, centre.y, 0);

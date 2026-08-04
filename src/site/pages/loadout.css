@@ -142,7 +142,7 @@
 /* --- weapon slot: the row that names what is in your hands --------------- */
 .slot {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: auto 1fr auto;
   align-items: center;
   gap: var(--s1) var(--s3);
   width: 100%;
@@ -168,7 +168,7 @@
   opacity: 0.45;
 }
 .slot-role {
-  grid-column: 1;
+  grid-column: 2;
   font-family: var(--font-label);
   font-size: 0.62rem;
   font-weight: 700;
@@ -176,8 +176,27 @@
   text-transform: uppercase;
   color: var(--ink-faint);
 }
-.slot-name {
+/* The silhouette, masked so it takes the slot's ink. A weapon with no render
+   collapses to zero width rather than leaving a gap where a picture should be. */
+.slot-icon {
   grid-column: 1;
+  grid-row: 1 / span 2;
+  width: 96px;
+  height: 34px;
+  align-self: center;
+  background-color: currentColor;
+  opacity: 0.85;
+  -webkit-mask-image: var(--weapon-icon);
+  mask-image: var(--weapon-icon);
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-position: left center;
+  mask-position: left center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+.slot-name {
+  grid-column: 2;
   font-family: var(--font-display);
   font-weight: 700;
   font-size: 1.05rem;
@@ -188,7 +207,7 @@
 /* The equipped tick sits in the right column across both rows, so a selected
    slot is legible from the corner of the eye without reading the name. */
 .slot-mark {
-  grid-column: 2;
+  grid-column: 3;
   grid-row: 1 / span 2;
   font-size: 0.8rem;
   color: var(--accent);

@@ -25,6 +25,7 @@ import {
   type Camo,
   type Character,
 } from "../../account/characters";
+import { weaponIconStyle } from "../../ui/weaponIcons";
 import { useAsyncAction } from "../useAsyncAction";
 import { useDocumentTitle } from "../useDocumentTitle";
 import "./page.css";
@@ -173,6 +174,9 @@ export function CharacterPage() {
                 disabled={!canSaveLoadout}
                 onClick={() => setLoadout({ primary: id })}
               >
+                {weaponIconStyle(id) !== undefined && (
+                  <span className="slot-icon" style={weaponIconStyle(id)} aria-hidden="true" />
+                )}
                 <span className="slot-name">{weaponLabel(id)}</span>
                 <span className="slot-mark" aria-hidden="true">
                   ◆
@@ -193,6 +197,9 @@ export function CharacterPage() {
                 disabled={!canSaveLoadout}
                 onClick={() => setLoadout({ secondary: id })}
               >
+                {weaponIconStyle(id) !== undefined && (
+                  <span className="slot-icon" style={weaponIconStyle(id)} aria-hidden="true" />
+                )}
                 <span className="slot-name">{weaponLabel(id)}</span>
                 <span className="slot-mark" aria-hidden="true">
                   ◆

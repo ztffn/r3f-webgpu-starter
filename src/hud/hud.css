@@ -246,50 +246,33 @@
   text-shadow: 0 0 9px rgba(191, 215, 121, 0.16);
 }
 
-/* Rifle silhouette, composed rather than drawn: it has to tint with the palette. */
+/* Weapon silhouette: an authored render used as a MASK, not an image.
+   Masking is what lets one greyscale asset paint in the phosphor palette — the
+   element's own colour shows through the shape, so the icon tints with the HUD
+   instead of arriving as a fixed-colour picture that fights it. Replaces five
+   divs that approximated a rifle out of clip-paths. */
 .hud-rifle {
   position: absolute;
-  left: 22px;
-  top: 52px;
-  width: 146px;
-  height: 34px;
-}
-.hud-rifle i {
-  position: absolute;
-  background: #a4b170;
-}
-.hud-rifle .barrel {
-  left: 61px;
-  top: 13px;
-  width: 80px;
-  height: 4px;
-}
-.hud-rifle .body {
-  left: 22px;
-  top: 8px;
-  width: 57px;
-  height: 15px;
-}
-.hud-rifle .stock {
-  left: 0;
-  top: 11px;
-  width: 30px;
-  height: 10px;
-  clip-path: polygon(0 15%, 100% 0, 100% 100%, 0 85%);
-}
-.hud-rifle .mag {
-  left: 58px;
-  top: 22px;
-  width: 14px;
-  height: 17px;
-  transform: skew(-8deg);
-}
-.hud-rifle .grip {
-  left: 44px;
-  top: 21px;
-  width: 8px;
-  height: 16px;
-  transform: rotate(12deg);
+  /* Sits above the ammo figure rather than behind it: the big magazine count
+     was overlapping the rifle's stock, and two things sharing that corner made
+     both harder to read at a glance. */
+  left: 18px;
+  top: 38px;
+  width: 158px;
+  height: 40px;
+  background-color: #a4b170;
+  /* The renders are 1920x470 with generous margins, so `contain` sits the
+     weapon inside the box without cropping the muzzle or the stock. */
+  -webkit-mask-image: var(--weapon-icon);
+  mask-image: var(--weapon-icon);
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  /* No icon for this weapon means no shape at all rather than a filled block. */
+  opacity: 0.92;
 }
 
 .hud-ammo {

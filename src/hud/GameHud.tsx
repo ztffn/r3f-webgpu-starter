@@ -139,6 +139,7 @@ export function GameHud({ fly, health, joinCode, fpsMode, preview }: GameHudProp
 
       {fpsMode && (
         <WeaponPanel
+          weaponId={(combat.weapon?.weaponId as never) ?? null}
           name={combat.weapon?.displayName ?? null}
           fireMode={combat.weapon?.fireMode ?? null}
           magazine={combat.weapon?.magazine ?? null}

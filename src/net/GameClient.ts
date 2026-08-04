@@ -39,6 +39,7 @@ import {
   type WorldTargetState,
 } from "./SnapshotCodec.ts";
 import type { ClientTransport } from "./Transport.ts";
+import { clamp, lerp } from "../combat/math.ts";
 
 export interface RemotePlayer {
   readonly id: number;
@@ -370,10 +371,7 @@ export class GameClient {
 
     const snapshot = decodeSnapshot(bytes);
     if (this.lastSnapshotTick > 0 && snapshot.tick > this.lastSnapshotTick) {
-      this.snapshotIntervalTicks = Math.min(
-        12,
-        Math.max(1, snapshot.tick - this.lastSnapshotTick)
-      );
+      this.snapshotIntervalTicks = clamp(snapshot.tick - this.lastSnapshotTick, 1, 12);
     }
     this.lastSnapshotTick = snapshot.tick;
     for (const player of snapshot.players) {
@@ -384,11 +382,14 @@ export class GameClient {
       }
       const existing = this.remotes.get(player.id);
       if (existing === undefined) {
+        const state = cloneMotorState(player.state);
         this.remotes.set(player.id, {
           id: player.id,
-          position: { ...player.state.position },
-          yawRadians: player.state.yawRadians,
-          state: cloneMotorState(player.state),
+          // The SAME object as the interpolated state's position — one fact,
+          // two names for consumer convenience, zero per-frame syncing.
+          position: state.position,
+          yawRadians: state.yawRadians,
+          state,
           health: player.health,
         });
       } else {
@@ -486,26 +487,24 @@ export class GameClient {
       }
     }
     const span = to.tick - from.tick;
-    const t = span > 0 ? Math.min(1, Math.max(0, (atTick - from.tick) / span)) : 1;
+    const t = span > 0 ? clamp((atTick - from.tick) / span, 0, 1) : 1;
 
-    state.position.x = from.state.position.x + (to.state.position.x - from.state.position.x) * t;
-    state.position.y = from.state.position.y + (to.state.position.y - from.state.position.y) * t;
-    state.position.z = from.state.position.z + (to.state.position.z - from.state.position.z) * t;
-    state.velocity.x = from.state.velocity.x + (to.state.velocity.x - from.state.velocity.x) * t;
-    state.velocity.y = from.state.velocity.y + (to.state.velocity.y - from.state.velocity.y) * t;
-    state.velocity.z = from.state.velocity.z + (to.state.velocity.z - from.state.velocity.z) * t;
+    state.position.x = lerp(from.state.position.x, to.state.position.x, t);
+    state.position.y = lerp(from.state.position.y, to.state.position.y, t);
+    state.position.z = lerp(from.state.position.z, to.state.position.z, t);
+    state.velocity.x = lerp(from.state.velocity.x, to.state.velocity.x, t);
+    state.velocity.y = lerp(from.state.velocity.y, to.state.velocity.y, t);
+    state.velocity.z = lerp(from.state.velocity.z, to.state.velocity.z, t);
     // Shortest-arc, so a 350°-to-10° turn does not spin the long way round.
     state.yawRadians = from.state.yawRadians + wrapPi(to.state.yawRadians - from.state.yawRadians) * t;
-    state.pitchRadians =
-      from.state.pitchRadians + (to.state.pitchRadians - from.state.pitchRadians) * t;
+    state.pitchRadians = lerp(from.state.pitchRadians, to.state.pitchRadians, t);
     if (
       from.state.stance === to.state.stance &&
       from.state.previousStance === to.state.previousStance
     ) {
       state.stance = to.state.stance;
       state.previousStance = to.state.previousStance;
-      state.stanceProgress =
-        from.state.stanceProgress + (to.state.stanceProgress - from.state.stanceProgress) * t;
+      state.stanceProgress = lerp(from.state.stanceProgress, to.state.stanceProgress, t);
     } else {
       // A stance change inside the bracket has no meaningful blend between the
       // two encodings; adopt the newer pair and let its own progress animate.
@@ -518,10 +517,7 @@ export class GameClient {
     state.aiming = to.state.aiming;
     state.contactFlags = to.state.contactFlags;
     state.tick = Math.round(atTick);
-
-    remote.position.x = state.position.x;
-    remote.position.y = state.position.y;
-    remote.position.z = state.position.z;
+    // `position` aliases state.position; only the scalar needs mirroring.
     remote.yawRadians = state.yawRadians;
   }
 

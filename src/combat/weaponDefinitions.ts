@@ -166,6 +166,14 @@ export const WEAPON_DEFINITIONS = [
   SAW_DEFINITION,
 ] as const;
 
+/**
+ * Seconds a weapon switch takes. ONE number for both sides of the wire: the
+ * client's LoadoutSystem animates it and the server's loadout record gates
+ * fire acceptance on it — copied literals here would drift into the server
+ * refusing legal shots after every switch.
+ */
+export const WEAPON_SWITCH_SECONDS = 0.35;
+
 /** Wire index for a weapon id, or null for a weapon the wire cannot name. */
 export function weaponWireIndex(weaponId: string): number | null {
   const index = WEAPON_DEFINITIONS.findIndex((definition) => definition.id === weaponId);

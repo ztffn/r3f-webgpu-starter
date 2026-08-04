@@ -48,7 +48,12 @@ import {
 } from "../combat/HitscanBallistics.ts";
 import type { Damageable } from "../combat/Damageable.ts";
 import type { WeaponDefinition } from "../combat/WeaponDefinition.ts";
-import { WEAPON_DEFINITIONS, weaponByWireIndex } from "../combat/weaponDefinitions.ts";
+import {
+  WEAPON_DEFINITIONS,
+  WEAPON_SWITCH_SECONDS,
+  weaponByWireIndex,
+} from "../combat/weaponDefinitions.ts";
+import type { BallisticResult } from "../combat/BallisticProjectileSystem.ts";
 
 export interface GameServerOptions {
   readonly tuning?: MotorTuning;
@@ -201,8 +206,6 @@ const MAX_SHOT_DISTANCE_METRES = 1200;
 const MAX_REWIND_TICKS = 15;
 /** Ring depth for the rewind buffer; a little past the rewind cap. */
 const HISTORY_TICKS = 32;
-/** Mirrors LoadoutSystem's default switch duration on the client. */
-const WEAPON_SWITCH_SECONDS = 0.35;
 /**
  * One tick of cadence forgiveness. The client's cadence cursor and the server's
  * tick counter quantise differently, and a legitimate shot arriving one tick
@@ -282,6 +285,7 @@ export class GameServer {
   private readonly respawnTicks: number;
   private readonly maxAimDeviation: number;
   private readonly spawn: (seat: number) => { x: number; y?: number; z: number };
+  private readonly heights: MotorHeightSource;
   /** Reused, so resolving a shot allocates nothing on a 64-player room's tick. */
   private readonly aimScratch = { x: 0, y: 0, z: 0 };
   /** Rewind buffer: per-tick capsules for lag-compensated near-field shots. */
@@ -297,12 +301,31 @@ export class GameServer {
   private readonly targets = new Map<number, ServerTarget>();
   /** Target state changed and has not been sent. Same coalescing as room state. */
   private targetsDirty = false;
-  /** Rewind target of the claim being resolved; read by the rewound query. */
-  private rewindTick = -1;
-  /** Capsules as the shooter saw them (rewound), for the hitscan branch. */
-  private readonly rewoundQuery: ServerWorldQuery;
   /** Capsules as they are NOW, for projectiles in flight. */
   private readonly liveQuery: ServerWorldQuery;
+  /**
+   * Grow-only backing store and reused view for the live capsules. Refilled in
+   * place per tick and per claim, so the 60 Hz history feed and every
+   * projectile raycast read records instead of allocating a generator's worth
+   * of fresh objects — the same reuse rule StateHistory already follows.
+   */
+  private readonly capsuleEntries: Array<{
+    id: number;
+    feetX: number;
+    feetY: number;
+    feetZ: number;
+    radius: number;
+    height: number;
+    name: string | undefined;
+  }> = [];
+  private readonly capsuleView: CapsuleCandidate[] = [];
+  /** One damageable lookup for every query this server builds. */
+  private readonly damageableFor = (id: number): Damageable | null =>
+    this.peers.get(id)?.damageable ?? this.targets.get(id)?.damageable ?? null;
+  /** Prebuilt drain visitor: counts projectile hits without a per-tick closure. */
+  private readonly countProjectileHit = (result: BallisticResult): void => {
+    if (result.reports.some((report) => report.damageApplied > 0)) this.shotsHit += 1;
+  };
   /** Beyond-horizon rounds in flight, on the shared ballistic model. */
   private readonly ballistics: BallisticProjectileSystem;
   private readonly ticksPerSecond: number;
@@ -343,16 +366,8 @@ export class GameServer {
     // whatever tick `rewindTick` names while a claim resolves; the live query
     // reads the motors directly for projectiles in flight. Both damage through
     // the same per-peer Damageable, so health falls in exactly one place.
-    this.liveQuery = new ServerWorldQuery(
-      heightSource,
-      () => this.liveCapsules(),
-      (id) => this.peers.get(id)?.damageable ?? this.targets.get(id)?.damageable ?? null
-    );
-    this.rewoundQuery = new ServerWorldQuery(
-      heightSource,
-      () => this.history.capsulesAt(this.rewindTick) ?? [...this.liveCapsules()],
-      (id) => this.peers.get(id)?.damageable ?? this.targets.get(id)?.damageable ?? null
-    );
+    this.heights = heightSource;
+    this.liveQuery = new ServerWorldQuery(heightSource, () => this.capsuleView, this.damageableFor);
     (options.worldTargets ?? []).forEach((spec, index) => {
       const id = WORLD_TARGET_ID_BASE + index;
       this.targets.set(id, {
@@ -363,13 +378,13 @@ export class GameServer {
         z: spec.z,
         radius: spec.radiusMetres ?? DEFAULT_TARGET_RADIUS_METRES,
         height: spec.heightMetres ?? DEFAULT_TARGET_HEIGHT_METRES,
-        maxHealth: Math.max(1, Math.min(255, spec.maxHealth ?? DEFAULT_TARGET_MAX_HEALTH)),
+        maxHealth: targetHealth(spec),
         respawnTicks: Math.round(
           (spec.respawnSeconds ?? DEFAULT_TARGET_RESPAWN_SECONDS) / tuning.fixedTimestepSeconds
         ),
         name: `world-target-${index + 1}`,
         damageable: this.createTargetDamageable(id),
-        health: Math.max(1, Math.min(255, spec.maxHealth ?? DEFAULT_TARGET_MAX_HEALTH)),
+        health: targetHealth(spec),
         respawnTick: -1,
       });
     });
@@ -379,7 +394,8 @@ export class GameServer {
     this.ballistics = new BallisticProjectileSystem(
       this.liveQuery,
       DEFAULT_BALLISTIC_ENVIRONMENT,
-      { capacity: SERVER_PROJECTILE_CAPACITY, maxTracePoints: 2 }
+      // No traces and no impact-event queue: this owner is headless.
+      { capacity: SERVER_PROJECTILE_CAPACITY, maxTracePoints: 2, captureImpactEvents: false }
     );
 
     transport.onConnection((connection) => {
@@ -680,14 +696,21 @@ export class GameServer {
     // viewTick is clamped into the rewind window AND to the newest tick this
     // server ever broadcast — nobody has seen a fresher world than that.
     // History the ring no longer holds falls back to live capsules inside the
-    // query — worse, never wrong.
+    // query — worse, never wrong. The rewound query is built PER CLAIM so the
+    // rewind target is an explicit input, not a field someone must remember to
+    // assign first.
+    this.refillLiveCapsules();
     const newestSeeable = this.lastBroadcastTick < 0 ? tick : Math.min(tick, this.lastBroadcastTick);
-    this.rewindTick = Math.min(
+    const rewindTick = Math.min(
       newestSeeable,
       Math.max(claim.viewTick, tick - MAX_REWIND_TICKS)
     );
     const near = resolveHitscanShot({
-      query: this.rewoundQuery,
+      query: new ServerWorldQuery(
+        this.heights,
+        () => this.history.capsulesAt(rewindTick) ?? this.capsuleView,
+        this.damageableFor
+      ),
       sourceId,
       sequence: claim.sequence,
       origin,
@@ -698,11 +721,8 @@ export class GameServer {
       excludeObjectId: sourceId,
     });
     this.shotsResolved += 1;
-    for (const interaction of near.interactions) {
-      if (interaction.targetId !== null && interaction.damageApplied > 0) {
-        this.shotsHit += 1;
-        break;
-      }
+    if (near.interactions.some((i) => i.targetId !== null && i.damageApplied > 0)) {
+      this.shotsHit += 1;
     }
 
     // FAR: still flying at the horizon — the rest of the arc belongs to the
@@ -804,56 +824,60 @@ export class GameServer {
     peer.reloadCompleteTick = -1;
   }
 
-  /** The peer's health as the shared model's Damageable. Lazy peer lookup, so
-   * the adapter can be built before the peer record exists and survives it. */
+  /** The peer's health as the shared model's Damageable. */
   private createDamageable(playerId: number): Damageable {
-    const server = this;
-    return {
-      id: String(playerId),
-      get maxHealth() {
-        return server.maxHealth;
-      },
-      get health() {
-        return server.peers.get(playerId)?.health ?? 0;
-      },
-      applyDamage(info) {
-        const before = server.peers.get(playerId)?.health ?? 0;
-        const after = server.damagePlayer(playerId, info.amount);
-        if (after === null) return { applied: 0, health: before, destroyed: false };
-        return { applied: before - after, health: after, destroyed: after === 0 };
-      },
-      reset() {},
-    };
+    return damageableAdapter(
+      playerId,
+      () => this.maxHealth,
+      () => this.peers.get(playerId)?.health,
+      (amount) => this.damagePlayer(playerId, amount)
+    );
   }
 
-  /** Live capsules, blended to the stance the simulation holds. Dead players
-   * are not shootable, and neither is a destroyed target waiting to stand up. */
-  private *liveCapsules(): Generator<CapsuleCandidate> {
+  /** Refills the reused capsule view: live players blended to the stance the
+   * simulation holds, then standing targets. Dead players are not shootable,
+   * and neither is a destroyed target waiting to stand up. */
+  private refillLiveCapsules(): void {
+    let count = 0;
     for (const peer of this.peers.values()) {
       if (peer.health === 0) continue;
       const motor = this.room.get(peer.roomId);
       if (motor === undefined) continue;
-      yield {
-        id: peer.connection.id,
-        feetX: motor.state.position.x,
-        feetY: motor.state.position.y,
-        feetZ: motor.state.position.z,
-        radius: blendedStanceDimension(motor.state, this.room.tuning, "radius"),
-        height: blendedStanceDimension(motor.state, this.room.tuning, "height"),
-      };
+      const entry = this.capsuleEntry(count);
+      count += 1;
+      entry.id = peer.connection.id;
+      entry.feetX = motor.state.position.x;
+      entry.feetY = motor.state.position.y;
+      entry.feetZ = motor.state.position.z;
+      entry.radius = blendedStanceDimension(motor.state, this.room.tuning, "radius");
+      entry.height = blendedStanceDimension(motor.state, this.room.tuning, "height");
+      entry.name = undefined;
     }
     for (const target of this.targets.values()) {
       if (target.health === 0) continue;
-      yield {
-        id: target.id,
-        feetX: target.x,
-        feetY: target.y,
-        feetZ: target.z,
-        radius: target.radius,
-        height: target.height,
-        name: target.name,
-      };
+      const entry = this.capsuleEntry(count);
+      count += 1;
+      entry.id = target.id;
+      entry.feetX = target.x;
+      entry.feetY = target.y;
+      entry.feetZ = target.z;
+      entry.radius = target.radius;
+      entry.height = target.height;
+      entry.name = target.name;
     }
+    this.capsuleView.length = count;
+    for (let index = 0; index < count; index += 1) {
+      this.capsuleView[index] = this.capsuleEntries[index];
+    }
+  }
+
+  private capsuleEntry(index: number) {
+    let entry = this.capsuleEntries[index];
+    if (entry === undefined) {
+      entry = { id: 0, feetX: 0, feetY: 0, feetZ: 0, radius: 0, height: 0, name: undefined };
+      this.capsuleEntries[index] = entry;
+    }
+    return entry;
   }
 
   /** One place the target packet is described, so join and change cannot drift. */
@@ -892,23 +916,12 @@ export class GameServer {
 
   /** The target's health as the shared model's Damageable. */
   private createTargetDamageable(targetId: number): Damageable {
-    const server = this;
-    return {
-      id: String(targetId),
-      get maxHealth() {
-        return server.targets.get(targetId)?.maxHealth ?? 0;
-      },
-      get health() {
-        return server.targets.get(targetId)?.health ?? 0;
-      },
-      applyDamage(info) {
-        const before = server.targets.get(targetId)?.health ?? 0;
-        const after = server.damageWorldTarget(targetId, info.amount);
-        if (after === null) return { applied: 0, health: before, destroyed: false };
-        return { applied: before - after, health: after, destroyed: after === 0 };
-      },
-      reset() {},
-    };
+    return damageableAdapter(
+      targetId,
+      () => this.targets.get(targetId)?.maxHealth ?? 0,
+      () => this.targets.get(targetId)?.health,
+      (amount) => this.damageWorldTarget(targetId, amount)
+    );
   }
 
   /** Puts dead players back, at a fresh spawn, with full health and full kit. */
@@ -970,15 +983,14 @@ export class GameServer {
     // Rounds beyond the hitscan horizon fly here, against live capsules. Damage
     // lands through each peer's Damageable, so it is still `damagePlayer` that
     // moves health. The 1/120 s inner step runs twice per 60 Hz room tick.
+    this.refillLiveCapsules();
     this.ballistics.update(this.room.tuning.fixedTimestepSeconds);
-    this.ballistics.drainImpactEvents(() => {});
-    this.ballistics.drainResults((result) => {
-      if (result.reports.some((report) => report.damageApplied > 0)) this.shotsHit += 1;
-    });
+    this.ballistics.drainResults(this.countProjectileHit);
     this.respawnDue();
-    // AFTER respawn placement, so the ring holds exactly what this tick's
-    // snapshot will show — viewTick rewinds must land on rendered truth.
-    this.history.record(this.room.tick, this.liveCapsules());
+    // Refilled AFTER respawn placement, so the ring holds exactly what this
+    // tick's snapshot will show — viewTick rewinds must land on rendered truth.
+    this.refillLiveCapsules();
+    this.history.record(this.room.tick, this.capsuleView);
     if (this.room.tick % this.ticksPerPatch === 0) this.broadcast();
   }
 
@@ -1057,6 +1069,41 @@ function clampToward(from: number, to: number, limit: number): number {
   if (delta > limit) return from + limit;
   if (delta < -limit) return from - limit;
   return to;
+}
+
+/** The wire's 1-255 clamp for a target's authored health. */
+function targetHealth(spec: WorldTargetSpec): number {
+  return Math.max(1, Math.min(255, spec.maxHealth ?? DEFAULT_TARGET_MAX_HEALTH));
+}
+
+/**
+ * One adapter shape for every mortal thing the server owns: lazy record lookup
+ * (so it can be built before the record exists and survives it), damage routed
+ * through the record's own authoritative method, applied/destroyed derived
+ * from the health that method returns.
+ */
+function damageableAdapter(
+  id: number,
+  maxHealth: () => number,
+  health: () => number | undefined,
+  damage: (amount: number) => number | null
+): Damageable {
+  return {
+    id: String(id),
+    get maxHealth() {
+      return maxHealth();
+    },
+    get health() {
+      return health() ?? 0;
+    },
+    applyDamage(info) {
+      const before = health() ?? 0;
+      const after = damage(info.amount);
+      if (after === null) return { applied: 0, health: before, destroyed: false };
+      return { applied: before - after, health: after, destroyed: after === 0 };
+    },
+    reset() {},
+  };
 }
 
 function defaultSpawn(seat: number): { x: number; z: number } {

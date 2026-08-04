@@ -7,13 +7,10 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  capsuleRayDistance,
-  resolveShot,
-  terrainRayDistance,
-} from "../../src/motor/HitQuery.ts";
+import { capsuleRayDistance, terrainRayDistance } from "../../src/motor/HitQuery.ts";
 import {
   DEFAULT_MOTOR_TUNING,
+  blendedStanceDimension,
   createMotorState,
   type MotorHeightSource,
   type MotorState,
@@ -98,16 +95,12 @@ test("a stance mid-transition is the size the simulation says, not either endpoi
   halfway.stanceProgress = 0.5;
 
   const blended = (TUNING.stances.stand.height + TUNING.stances.prone.height) * 0.5;
+  const radius = blendedStanceDimension(halfway, TUNING, "radius");
+  const height = blendedStanceDimension(halfway, TUNING, "height");
   // Just under the blended height connects; just over it does not.
-  const hit = resolveShot(
-    1, -10, blended - 0.1, 0, 1, 0, 0, 100,
-    [{ id: 2, state: halfway }], TUNING, null
-  );
-  assert.equal(hit?.playerId, 2, "a mid-transition body was not hit at its blended height");
-  const miss = resolveShot(
-    1, -10, blended + 0.3, 0, 1, 0, 0, 100,
-    [{ id: 2, state: halfway }], TUNING, null
-  );
+  const hit = capsuleRayDistance(-10, blended - 0.1, 0, 1, 0, 0, 0, 0, 0, radius, height);
+  assert.ok(hit !== null, "a mid-transition body was not hit at its blended height");
+  const miss = capsuleRayDistance(-10, blended + 0.3, 0, 1, 0, 0, 0, 0, 0, radius, height);
   assert.equal(miss, null, "a mid-transition body was hit above its blended height");
 });
 
@@ -125,45 +118,4 @@ test("terrain stops a ray, and a ray already underground reports zero", () => {
   assert.equal(terrainRayDistance(0, 5, 0, 1, 0, 0, 100, ground), 0, "a ray under the ground marched out of it");
   // Level, above the ground, never descends: no hit at all rather than a false one.
   assert.equal(terrainRayDistance(0, 15, 0, 1, 0, 0, 100, ground), null);
-});
-
-test("terrain blocks a shot at a player behind it", () => {
-  // A wall of ground between shooter and target: the target is still the nearest
-  // capsule along the ray, so without the terrain check this is a wallhack.
-  const ridge: MotorHeightSource = {
-    cellSize: 2,
-    sample: (x) => (x > 4 && x < 6 ? 50 : 0),
-  };
-  const target = standing(10, 0, 0);
-  const blocked = resolveShot(
-    1, 0, 1.3, 0, 1, 0, 0, 100, [{ id: 2, state: target }], TUNING, ridge
-  );
-  assert.equal(blocked?.playerId, null, "a shot through a ridge reached the player behind it");
-
-  // Same geometry with the ridge removed connects, which is what proves the ridge
-  // was the thing that stopped it rather than the ray missing.
-  const clear = resolveShot(
-    1, 0, 1.3, 0, 1, 0, 0, 100, [{ id: 2, state: target }], TUNING, flat(0)
-  );
-  assert.equal(clear?.playerId, 2, "the same shot missed with the ridge removed");
-});
-
-test("the shooter cannot hit themselves, and the nearest target wins", () => {
-  const shooter = standing(0, 0, 0);
-  const near = standing(5, 0, 0);
-  const far = standing(20, 0, 0);
-  const hit = resolveShot(
-    1, 0, 1.3, 0, 1, 0, 0, 100,
-    [
-      { id: 1, state: shooter },
-      { id: 3, state: far },
-      { id: 2, state: near },
-    ],
-    TUNING,
-    null
-  );
-  // Listed out of order on purpose: the answer must come from the distance, not
-  // from iteration order. The round leaves the shooter's own eye, which is inside
-  // their own capsule, so skipping self is required rather than a nicety.
-  assert.equal(hit?.playerId, 2, "the nearest target did not win");
 });

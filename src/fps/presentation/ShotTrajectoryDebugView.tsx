@@ -24,6 +24,10 @@ function makeLine(color: THREE.ColorRepresentation, widthPixels: number): Line2 
   return line;
 }
 
+function toVec3(point: { x: number; y: number; z: number }): THREE.Vector3 {
+  return new THREE.Vector3(point.x, point.y, point.z);
+}
+
 function setLinePoints(
   line: Line2,
   points: readonly { x: number; y: number; z: number }[]
@@ -130,56 +134,31 @@ export function ShotTrajectoryDebugView() {
       group.visible = true;
       setLinePoints(path, trace.points);
 
-      const start = new THREE.Vector3(
-        trace.points[0].x,
-        trace.points[0].y,
-        trace.points[0].z
-      );
-      const aimEnd = start.clone().addScaledVector(
-        new THREE.Vector3(
-          trace.sightDirection.x,
-          trace.sightDirection.y,
-          trace.sightDirection.z
-        ),
-        INITIAL_AIM_LENGTH
-      );
+      const start = toVec3(trace.points[0]);
+      const aimEnd = start
+        .clone()
+        .addScaledVector(toVec3(trace.sightDirection), INITIAL_AIM_LENGTH);
       setLinePoints(initialAim, [start, aimEnd]);
       // The yellow line is the turret-adjusted mean bore, not the dispersed
       // projectile direction; drawing the latter would report random spread as
       // scope elevation and windage.
-      const boreEnd = start.clone().addScaledVector(
-        new THREE.Vector3(
-          trace.boreDirection.x,
-          trace.boreDirection.y,
-          trace.boreDirection.z
-        ),
-        INITIAL_AIM_LENGTH
-      );
+      const boreEnd = start
+        .clone()
+        .addScaledVector(toVec3(trace.boreDirection), INITIAL_AIM_LENGTH);
       setLinePoints(bore, [start, boreEnd]);
 
       const resolvedImpact = trace.impact;
       impact.visible = resolvedImpact !== null;
       normal.visible = resolvedImpact?.normal != null;
       if (resolvedImpact) {
-        const impactPoint = new THREE.Vector3(
-          resolvedImpact.point.x,
-          resolvedImpact.point.y,
-          resolvedImpact.point.z
-        );
+        const impactPoint = toVec3(resolvedImpact.point);
         impact.position.copy(impactPoint);
         if (resolvedImpact.normal) {
           setLinePoints(normal, [
             impactPoint,
             impactPoint
               .clone()
-              .addScaledVector(
-                new THREE.Vector3(
-                  resolvedImpact.normal.x,
-                  resolvedImpact.normal.y,
-                  resolvedImpact.normal.z
-                ),
-                NORMAL_LENGTH
-              ),
+              .addScaledVector(toVec3(resolvedImpact.normal), NORMAL_LENGTH),
           ]);
         }
       }

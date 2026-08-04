@@ -151,10 +151,7 @@ export class ThreeWorldQuery implements RegisteredWorldQuery {
       const registration = candidate.registration;
       // Exclusion matches the registration's stable identity; a collider
       // registered without one cannot be excluded, deliberately.
-      if (
-        excludeObjectId !== undefined &&
-        (registration.objectId ?? registration.root.name) === excludeObjectId
-      ) {
+      if (excludeObjectId !== undefined && registrationIdOf(registration) === excludeObjectId) {
         continue;
       }
       this.candidateRoots.push(registration.root);
@@ -182,7 +179,7 @@ export class ThreeWorldQuery implements RegisteredWorldQuery {
       point: nearest.point.clone(),
       normal: nearest.face?.normal.clone().transformDirection(nearest.object.matrixWorld) ?? null,
       kind: owner.kind,
-      objectId: owner.objectId || owner.root.name || nearest.object.uuid,
+      objectId: registrationIdOf(owner) || nearest.object.uuid,
       objectName: nearest.object.name,
       surfaceId: owner.surfaceId ?? DEFAULT_SURFACE_BY_KIND[owner.kind],
       penetrationThicknessMetres:
@@ -298,6 +295,15 @@ export class ThreeWorldQuery implements RegisteredWorldQuery {
       }
     }
   }
+}
+
+/**
+ * A registration's stable identity, computed ONE way for both the hit result
+ * and exclusion — two fallback chains here would let a collider answer to one
+ * id when hit and a different id when excluded.
+ */
+function registrationIdOf(registration: WorldQueryRegistration): string {
+  return registration.objectId || registration.root.name;
 }
 
 const TERRAIN_ROOT_EPSILON = 1e-7;

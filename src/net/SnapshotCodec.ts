@@ -10,6 +10,7 @@
 // `quantiseCommand` exists so a client cannot forget.
 
 import type { MotorState, PlayerCommand, PlayerStance } from "../motor/MotorTypes.ts";
+import { clamp } from "../combat/math.ts";
 
 export const PacketType = {
   Commands: 1,
@@ -620,10 +621,10 @@ export function encodeWorldTargets(targets: readonly WorldTargetState[]): Uint8A
     view.setFloat32(at + 2, target.x);
     view.setFloat32(at + 6, target.y);
     view.setFloat32(at + 10, target.z);
-    view.setUint8(at + 14, Math.max(1, Math.min(255, Math.round(target.radiusMetres * 100))));
-    view.setUint8(at + 15, Math.max(1, Math.min(255, Math.round(target.heightMetres * 50))));
-    view.setUint8(at + 16, Math.max(0, Math.min(255, Math.round(target.health))));
-    view.setUint8(at + 17, Math.max(1, Math.min(255, Math.round(target.maxHealth))));
+    view.setUint8(at + 14, clamp(Math.round(target.radiusMetres * 100), 1, 255));
+    view.setUint8(at + 15, clamp(Math.round(target.heightMetres * 50), 1, 255));
+    view.setUint8(at + 16, clamp(Math.round(target.health), 0, 255));
+    view.setUint8(at + 17, clamp(Math.round(target.maxHealth), 1, 255));
     at += BYTES_PER_WORLD_TARGET;
   }
   return new Uint8Array(buffer);

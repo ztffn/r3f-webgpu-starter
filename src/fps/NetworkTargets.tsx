@@ -5,6 +5,7 @@
 // presentation colliders so YOUR OWN rounds still kick dust off them. Local
 // hits apply NO damage — health moves when the server says it moved.
 
+import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import * as THREE from "three/webgpu";
 import { color, mix, uniform } from "three/tsl";
@@ -121,23 +122,15 @@ export function NetworkTargets({ client, worldQuery, atmosphere }: NetworkTarget
     }
   }, [targets, group, worldQuery, atmosphere]);
 
-  // Decay hit flashes on the render clock, not on packet arrival.
-  useEffect(() => {
-    let frame = 0;
-    let last = performance.now();
-    const step = (now: number) => {
-      const dt = Math.min(0.1, (now - last) / 1000);
-      last = now;
-      for (const visual of pool.current.values()) {
-        if (visual.flash.value > 0) {
-          visual.flash.value = Math.max(0, visual.flash.value - dt * FLASH_DECAY_PER_SECOND);
-        }
+  // Decay hit flashes per rendered frame, on the same loop everything else uses.
+  useFrame((_, delta) => {
+    const dt = Math.min(0.1, Math.max(0, delta));
+    for (const visual of pool.current.values()) {
+      if (visual.flash.value > 0) {
+        visual.flash.value = Math.max(0, visual.flash.value - dt * FLASH_DECAY_PER_SECOND);
       }
-      frame = requestAnimationFrame(step);
-    };
-    frame = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(frame);
-  }, []);
+    }
+  });
 
   useEffect(
     () => () => {

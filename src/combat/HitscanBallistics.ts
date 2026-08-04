@@ -6,15 +6,9 @@
 // same quadratic-drag model the projectile integrator steps. docs/11 §12.
 
 import type { AmmunitionDefinition } from "./AmmunitionDefinition.ts";
-import { kineticEnergyJoules } from "./AmmunitionDefinition.ts";
 import { DEFAULT_G1_REFERENCE_DRAG_PER_METRE } from "./BallisticModel.ts";
 import type { ImpactEvent } from "./ImpactEvent.ts";
-import {
-  EXIT_EPSILON_METRES,
-  resolvePenetration,
-  terminalDamageScale,
-} from "./PenetrationResolver.ts";
-import { SURFACE_PROFILES } from "./SurfaceProfile.ts";
+import { resolveSurfaceContact } from "./SurfaceContact.ts";
 import type { WorldQuery } from "./WorldQuery.ts";
 import { MAX_SURFACE_INTERACTIONS } from "./BallisticProjectileSystem.ts";
 import type { Vec3Like } from "./math.ts";
@@ -127,10 +121,6 @@ export function resolveHitscanShot(input: HitscanShotInput): HitscanShotResult {
     z: input.direction.z / directionLength,
   };
   const referenceDrag = input.referenceG1DragPerMetre ?? DEFAULT_G1_REFERENCE_DRAG_PER_METRE;
-  const muzzleEnergy = kineticEnergyJoules(
-    input.ammunition,
-    input.ammunition.muzzleVelocityMetresPerSecond
-  );
 
   const interactions: ImpactEvent[] = [];
   let position: Vec3Like = input.origin;
@@ -165,95 +155,36 @@ export function resolveHitscanShot(input: HitscanShotInput): HitscanShotResult {
     const speedAtContact = flatFireSpeedAt(input.ammunition, hit.distance, speed, referenceDrag);
     elapsed += flatFireElapsedSeconds(input.ammunition, hit.distance, speed, referenceDrag);
     travelled += hit.distance;
-    const incidenceCosine = hit.normal
-      ? Math.abs(
-          direction.x * hit.normal.x + direction.y * hit.normal.y + direction.z * hit.normal.z
-        )
-      : 1;
-    const response = resolvePenetration({
-      ammunition: input.ammunition,
-      surface: SURFACE_PROFILES[hit.surfaceId],
+    const contact = resolveSurfaceContact({
+      hit,
+      direction,
       speedMetresPerSecond: speedAtContact,
-      thicknessMetres: hit.penetrationThicknessMetres,
-      incidenceCosine,
-    });
-    const canContinue =
-      response.outcome === "penetrated" && interactionCount < MAX_SURFACE_INTERACTIONS - 1;
-    const hitPoint: Vec3Like = { x: hit.point.x, y: hit.point.y, z: hit.point.z };
-    const hitNormal: Vec3Like | null = hit.normal
-      ? { x: hit.normal.x, y: hit.normal.y, z: hit.normal.z }
-      : null;
-    const traversalDistance = response.effectiveThicknessMetres + EXIT_EPSILON_METRES;
-    const exitPoint: Vec3Like | null = canContinue
-      ? {
-          x: hitPoint.x + direction.x * traversalDistance,
-          y: hitPoint.y + direction.y * traversalDistance,
-          z: hitPoint.z + direction.z * traversalDistance,
-        }
-      : null;
-
-    let targetId: string | null = null;
-    let interactionDamage = 0;
-    let interactionHealthBefore: number | null = null;
-    let interactionHealthAfter: number | null = null;
-    let interactionDestroyed = false;
-    if (hit.damageable) {
-      targetId = hit.damageable.id;
-      interactionHealthBefore = hit.damageable.health;
-      const damage = hit.damageable.applyDamage({
-        amount: input.damage * terminalDamageScale(response.energyBeforeJoules, muzzleEnergy),
-        point: hitPoint,
-        direction,
-        sourceId: input.sourceId,
-        shotSequence: input.sequence,
-      });
-      interactionDamage = damage.applied;
-      interactionHealthAfter = damage.health;
-      interactionDestroyed = damage.destroyed;
-    }
-
-    interactions.push({
+      ammunition: input.ammunition,
+      nominalDamage: input.damage,
       sourceId: input.sourceId,
-      shotSequence: input.sequence,
+      sequence: input.sequence,
       interactionIndex: interactionCount,
-      ammunitionId: input.ammunition.id,
-      kind: hit.kind,
-      objectId: hit.objectId,
-      objectName: hit.objectName,
-      targetId,
-      damageApplied: interactionDamage,
-      healthBefore: interactionHealthBefore,
-      healthAfter: interactionHealthAfter,
-      destroyed: interactionDestroyed,
-      surfaceId: hit.surfaceId,
-      outcome: canContinue ? "penetrated" : "stopped",
-      point: hitPoint,
-      exitPoint,
-      normal: hitNormal,
-      effectiveThicknessMetres: response.effectiveThicknessMetres,
-      speedBeforeMetresPerSecond: speedAtContact,
-      speedAfterMetresPerSecond: canContinue ? response.speedAfterMetresPerSecond : 0,
-      energyBeforeJoules: response.energyBeforeJoules,
-      energyAfterJoules: canContinue ? response.energyAfterJoules : 0,
+      maxInteractions: MAX_SURFACE_INTERACTIONS,
     });
+    interactions.push(contact.interaction);
     interactionCount += 1;
 
-    if (!canContinue || !exitPoint) return { interactions, continuation: null };
+    if (!contact.canContinue || !contact.exitPoint) return { interactions, continuation: null };
 
     const averageSpeed = Math.max(
       EPSILON,
-      (speedAtContact + response.speedAfterMetresPerSecond) * 0.5
+      (speedAtContact + contact.speedAfterMetresPerSecond) * 0.5
     );
-    travelled += traversalDistance;
-    elapsed += traversalDistance / averageSpeed;
-    position = exitPoint;
-    speed = response.speedAfterMetresPerSecond;
+    travelled += contact.traversalDistanceMetres;
+    elapsed += contact.traversalDistanceMetres / averageSpeed;
+    position = contact.exitPoint;
+    speed = contact.speedAfterMetresPerSecond;
 
     if (travelled >= input.maxDistanceMetres) {
       return {
         interactions,
         continuation: {
-          point: exitPoint,
+          point: contact.exitPoint,
           direction,
           speedMetresPerSecond: speed,
           distanceTravelledMetres: travelled,

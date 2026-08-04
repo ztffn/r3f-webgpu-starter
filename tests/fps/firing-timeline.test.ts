@@ -216,7 +216,10 @@ function runCadence(renderHz: number, track: PoseTrack, totalSeconds = 2): Caden
         pathLengthMetres: result.trace.pathLengthMetres,
         verticalDropMetres: result.trace.verticalDropMetres,
         lateralDriftMetres: result.trace.lateralDriftMetres,
-        finalPoint: (({ x, y, z }) => [x, y, z])(result.trace.points.at(-1)!),
+        finalPoint: (() => {
+          const end = result.trace.points.at(-1)!;
+          return [end.x, end.y, end.z];
+        })(),
       });
     });
 

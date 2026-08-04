@@ -6,23 +6,7 @@
 // browser-only. Pure functions over MotorState — no simulation, no allocation per
 // query beyond the result.
 
-import {
-  blendedStanceDimension,
-  type MotorHeightSource,
-  type MotorState,
-  type MotorTuning,
-} from "./MotorTypes.ts";
-
-export interface HitCandidate {
-  readonly id: number;
-  readonly state: MotorState;
-}
-
-export interface ShotHit {
-  /** Player id, or null when the ray stopped on terrain. */
-  readonly playerId: number | null;
-  readonly distance: number;
-}
+import type { MotorHeightSource } from "./MotorTypes.ts";
 
 /**
  * Distance along a ray to a capsule standing on `feet`, or null for a miss.
@@ -68,29 +52,47 @@ export function capsuleRayDistance(
     const discriminant = b * b - a * c;
     if (discriminant >= 0) {
       const root = Math.sqrt(discriminant);
-      for (const t of [(-b - root) / a, (-b + root) / a]) {
-        if (t < 0) continue;
-        const y = originY + dirY * t;
-        if (y < baseY || y > topY) continue;
-        if (best === null || t < best) best = t;
+      const nearT = (-b - root) / a;
+      const farT = (-b + root) / a;
+      if (nearT >= 0) {
+        const y = originY + dirY * nearT;
+        if (y >= baseY && y <= topY && (best === null || nearT < best)) best = nearT;
+      }
+      if (farT >= 0) {
+        const y = originY + dirY * farT;
+        if (y >= baseY && y <= topY && (best === null || farT < best)) best = farT;
       }
     }
   }
 
   // Caps. Needed even when the cylinder hit, because a ray entering through a cap
-  // can reach it before the cylinder's own entry point.
-  for (const capY of spine > 0 ? [baseY, topY] : [baseY]) {
-    const oy = originY - capY;
-    const b = ox * dirX + oy * dirY + oz * dirZ;
-    const c = ox * ox + oy * oy + oz * oz - radius * radius;
-    const discriminant = b * b - c;
-    if (discriminant < 0) continue;
-    const root = Math.sqrt(discriminant);
-    for (const t of [-b - root, -b + root]) {
-      if (t < 0) continue;
-      if (best === null || t < best) best = t;
-    }
-  }
+  // can reach it before the cylinder's own entry point. Unrolled — this is the
+  // innermost loop of every server raycast and must not allocate.
+  best = capRayBest(ox, originY - baseY, oz, dirX, dirY, dirZ, radius, best);
+  if (spine > 0) best = capRayBest(ox, originY - topY, oz, dirX, dirY, dirZ, radius, best);
+  return best;
+}
+
+/** Nearest non-negative ray-sphere root for one cap, folded into `best`. */
+function capRayBest(
+  ox: number,
+  oy: number,
+  oz: number,
+  dirX: number,
+  dirY: number,
+  dirZ: number,
+  radius: number,
+  best: number | null
+): number | null {
+  const b = ox * dirX + oy * dirY + oz * dirZ;
+  const c = ox * ox + oy * oy + oz * oz - radius * radius;
+  const discriminant = b * b - c;
+  if (discriminant < 0) return best;
+  const root = Math.sqrt(discriminant);
+  const nearT = -b - root;
+  const farT = -b + root;
+  if (nearT >= 0 && (best === null || nearT < best)) best = nearT;
+  if (farT >= 0 && (best === null || farT < best)) best = farT;
   return best;
 }
 
@@ -202,55 +204,4 @@ export function terrainNormalAt(
   out.y = 1 / length;
   out.z = -slopeZ / length;
   return out;
-}
-
-/**
- * Resolves one shot against the room: the nearest player capsule, unless terrain
- * blocks it first.
- *
- * TERRAIN IS CHECKED, and it is not optional — without it every shot is a wallhack,
- * because a capsule behind a hill is still the nearest capsule along the ray.
- * The shooter is skipped: a round leaves its own eye, which is inside its own
- * capsule, so self-intersection is guaranteed rather than incidental.
- */
-export function resolveShot(
-  shooterId: number,
-  originX: number,
-  originY: number,
-  originZ: number,
-  dirX: number,
-  dirY: number,
-  dirZ: number,
-  maxDistance: number,
-  candidates: Iterable<HitCandidate>,
-  tuning: MotorTuning,
-  heights: MotorHeightSource | null
-): ShotHit | null {
-  const terrain = heights === null
-    ? null
-    : terrainRayDistance(
-        originX, originY, originZ, dirX, dirY, dirZ, maxDistance, heights
-      );
-  const limit = terrain ?? maxDistance;
-
-  let hitId: number | null = null;
-  let hitDistance = limit;
-  for (const candidate of candidates) {
-    if (candidate.id === shooterId) continue;
-    const distance = capsuleRayDistance(
-      originX, originY, originZ,
-      dirX, dirY, dirZ,
-      candidate.state.position.x,
-      candidate.state.position.y,
-      candidate.state.position.z,
-      blendedStanceDimension(candidate.state, tuning, "radius"),
-      blendedStanceDimension(candidate.state, tuning, "height")
-    );
-    if (distance === null || distance > hitDistance) continue;
-    hitDistance = distance;
-    hitId = candidate.id;
-  }
-
-  if (hitId !== null) return { playerId: hitId, distance: hitDistance };
-  return terrain === null ? null : { playerId: null, distance: terrain };
 }

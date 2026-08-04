@@ -103,6 +103,8 @@ class RemoteReportPool {
   }
 }
 
+const NOOP = () => {};
+
 export interface RemoteFireEffectsProps {
   client: GameClient;
   worldQuery: WorldQuery;
@@ -225,7 +227,7 @@ export function RemoteFireEffects({ client, worldQuery }: RemoteFireEffectsProps
     // Dust, sparks and thuds ride the SAME bus the local shots use, so remote
     // impacts look identical to yours. Damage on these events is always zero.
     objects.ballistics.drainImpactEvents(impactEffectBus.publish);
-    objects.ballistics.drainResults(() => {});
+    objects.ballistics.drainResults(NOOP);
 
     let tracerCount = 0;
     objects.ballistics.visitActiveProjectiles((x, y, z, vx, vy, vz) => {
@@ -242,20 +244,18 @@ export function RemoteFireEffects({ client, worldQuery }: RemoteFireEffectsProps
     objects.tracers.count = tracerCount;
     if (tracerCount > 0) objects.tracers.instanceMatrix.needsUpdate = true;
 
+    // Decay, draw, and compact the flash pool in ONE pass — survivors are
+    // copied down over the expired, no per-frame filter/spread allocation.
     let flashCount = 0;
     for (const flash of objects.flashPool) {
       flash.remaining -= clamped;
       if (flash.remaining <= 0) continue;
-      objects.position.set(flash.x, flash.y, flash.z);
       objects.matrix.makeTranslation(flash.x, flash.y, flash.z);
       objects.flashes.setMatrixAt(flashCount, objects.matrix);
+      objects.flashPool[flashCount] = flash;
       flashCount += 1;
     }
-    objects.flashPool.splice(
-      0,
-      objects.flashPool.length,
-      ...objects.flashPool.filter((flash) => flash.remaining > 0)
-    );
+    objects.flashPool.length = flashCount;
     objects.flashes.count = flashCount;
     if (flashCount > 0) objects.flashes.instanceMatrix.needsUpdate = true;
   });

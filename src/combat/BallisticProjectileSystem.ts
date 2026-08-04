@@ -7,7 +7,6 @@
 
 import type { WorldHit, WorldQuery } from "./WorldQuery.ts";
 import type { AmmunitionDefinition } from "./AmmunitionDefinition.ts";
-import { kineticEnergyJoules } from "./AmmunitionDefinition.ts";
 import type { BallisticEnvironment } from "./BallisticEnvironment.ts";
 import {
   DEFAULT_G1_REFERENCE_DRAG_PER_METRE,
@@ -18,12 +17,7 @@ import type { ShotResult } from "./ShotResult.ts";
 import type { ShotTrace } from "./ShotTrace.ts";
 import type { TargetHitReport } from "./TargetHitReport.ts";
 import type { ImpactEvent } from "./ImpactEvent.ts";
-import {
-  EXIT_EPSILON_METRES,
-  resolvePenetration,
-  terminalDamageScale,
-} from "./PenetrationResolver.ts";
-import { SURFACE_PROFILES } from "./SurfaceProfile.ts";
+import { resolveSurfaceContact } from "./SurfaceContact.ts";
 import { clamp, lerp, type MutableVec3, type Vec3Like } from "./math.ts";
 
 export interface BallisticShot {
@@ -74,6 +68,12 @@ export interface BallisticSystemOptions {
   readonly maxTracePoints?: number;
   /** Reference retardation divided by G1 BC, expressed per metre. */
   readonly referenceG1DragPerMetre?: number;
+  /**
+   * False stops the impact-event queue from being populated at all — for a
+   * headless owner (the server) with no presentation to drain it, rather than
+   * a ritual no-op drain every tick.
+   */
+  readonly captureImpactEvents?: boolean;
 }
 
 export interface BallisticMetrics {
@@ -105,6 +105,7 @@ export class BallisticProjectileSystem {
   private readonly capacity: number;
   private readonly maxTracePoints: number;
   private readonly referenceG1DragPerMetre: number;
+  private readonly captureImpactEvents: boolean;
 
   private readonly activeSlots: Int32Array;
   private readonly freeSlots: Int32Array;
@@ -166,6 +167,7 @@ export class BallisticProjectileSystem {
     this.maxTracePoints = Math.max(2, Math.floor(options.maxTracePoints ?? DEFAULT_TRACE_POINTS));
     this.referenceG1DragPerMetre =
       options.referenceG1DragPerMetre ?? DEFAULT_G1_REFERENCE_DRAG_PER_METRE;
+    this.captureImpactEvents = options.captureImpactEvents ?? true;
     if (!Number.isFinite(this.referenceG1DragPerMetre) || !(this.referenceG1DragPerMetre > 0)) {
       throw new Error("Ballistic reference drag must be finite and positive");
     }
@@ -537,136 +539,68 @@ export class BallisticProjectileSystem {
     this.impactDirection.x = this.vx[slot] * inverseSpeed;
     this.impactDirection.y = this.vy[slot] * inverseSpeed;
     this.impactDirection.z = this.vz[slot] * inverseSpeed;
-    const incidenceCosine = hit.normal
-      ? Math.abs(
-          this.impactDirection.x * hit.normal.x +
-            this.impactDirection.y * hit.normal.y +
-            this.impactDirection.z * hit.normal.z
-        )
-      : 1;
-    const response = resolvePenetration({
-      ammunition: shot.ammunition,
-      surface: SURFACE_PROFILES[hit.surfaceId],
+    const contact = resolveSurfaceContact({
+      hit,
+      direction: this.impactDirection,
       speedMetresPerSecond: speedBefore,
-      thicknessMetres: hit.penetrationThicknessMetres,
-      incidenceCosine,
+      ammunition: shot.ammunition,
+      nominalDamage: shot.damage,
+      sourceId: shot.sourceId,
+      sequence: shot.sequence,
+      interactionIndex: this.interactionCounts[slot],
+      maxInteractions: MAX_SURFACE_INTERACTIONS,
     });
-    const interactionIndex = this.interactionCounts[slot];
-    const canContinue =
-      response.outcome === "penetrated" && interactionIndex < MAX_SURFACE_INTERACTIONS - 1;
-    const outcome = canContinue ? "penetrated" : "stopped";
-    const hitPoint: Vec3Like = { x: hit.point.x, y: hit.point.y, z: hit.point.z };
-    const hitNormal: Vec3Like | null = hit.normal
-      ? { x: hit.normal.x, y: hit.normal.y, z: hit.normal.z }
-      : null;
-    const traversalDistance = response.effectiveThicknessMetres + EXIT_EPSILON_METRES;
-    const exitPoint: Vec3Like | null = canContinue
-      ? {
-          x: hitPoint.x + this.impactDirection.x * traversalDistance,
-          y: hitPoint.y + this.impactDirection.y * traversalDistance,
-          z: hitPoint.z + this.impactDirection.z * traversalDistance,
-        }
-      : null;
+    const interaction = contact.interaction;
 
-    let targetId: string | null = null;
-    let interactionDamage = 0;
-    let interactionHealthBefore: number | null = null;
-    let interactionHealthAfter: number | null = null;
-    let interactionDestroyed = false;
-    if (hit.damageable) {
-      targetId = hit.damageable.id;
-      const healthBefore = hit.damageable.health;
-      interactionHealthBefore = healthBefore;
-      const muzzleEnergy = kineticEnergyJoules(
-        shot.ammunition,
-        shot.ammunition.muzzleVelocityMetresPerSecond
-      );
-      // Preserve nominal weapon damage through ordinary flight while still
-      // reducing lethality after substantial drag or prior penetration.
-      const damageScale = terminalDamageScale(response.energyBeforeJoules, muzzleEnergy);
-      const damage = hit.damageable.applyDamage({
-        amount: shot.damage * damageScale,
-        point: hitPoint,
-        direction: {
-          x: this.impactDirection.x,
-          y: this.impactDirection.y,
-          z: this.impactDirection.z,
-        },
-        sourceId: shot.sourceId,
-        shotSequence: shot.sequence,
-      });
-      this.damageApplied[slot] += damage.applied;
-      if (damage.destroyed) this.destroyed[slot] = 1;
-      interactionDamage = damage.applied;
-      interactionHealthAfter = damage.health;
-      interactionDestroyed = damage.destroyed;
+    if (interaction.targetId !== null) {
+      this.damageApplied[slot] += interaction.damageApplied;
+      if (interaction.destroyed) this.destroyed[slot] = 1;
       const report: TargetHitReport = {
-        targetId,
+        targetId: interaction.targetId,
         objectName: hit.objectName,
         sourceId: shot.sourceId,
         shotSequence: shot.sequence,
-        point: hitPoint,
-        normal: hitNormal,
+        point: interaction.point,
+        normal: interaction.normal,
         rangeMetres: Math.hypot(
-          hitPoint.x - shot.origin.x,
-          hitPoint.y - shot.origin.y,
-          hitPoint.z - shot.origin.z
+          interaction.point.x - shot.origin.x,
+          interaction.point.y - shot.origin.y,
+          interaction.point.z - shot.origin.z
         ),
-        damageApplied: damage.applied,
-        healthBefore,
-        healthAfter: damage.health,
-        destroyed: damage.destroyed,
+        damageApplied: interaction.damageApplied,
+        healthBefore: interaction.healthBefore ?? 0,
+        healthAfter: interaction.healthAfter ?? 0,
+        destroyed: interaction.destroyed,
       };
       (this.reports[slot] ??= []).push(report);
     }
 
-    const interaction: ImpactEvent = {
-      sourceId: shot.sourceId,
-      shotSequence: shot.sequence,
-      interactionIndex,
-      ammunitionId: shot.ammunition.id,
-      kind: hit.kind,
-      objectId: hit.objectId,
-      objectName: hit.objectName,
-      targetId,
-      damageApplied: interactionDamage,
-      healthBefore: interactionHealthBefore,
-      healthAfter: interactionHealthAfter,
-      destroyed: interactionDestroyed,
-      surfaceId: hit.surfaceId,
-      outcome,
-      point: hitPoint,
-      exitPoint,
-      normal: hitNormal,
-      effectiveThicknessMetres: response.effectiveThicknessMetres,
-      speedBeforeMetresPerSecond: speedBefore,
-      speedAfterMetresPerSecond: canContinue ? response.speedAfterMetresPerSecond : 0,
-      energyBeforeJoules: response.energyBeforeJoules,
-      energyAfterJoules: canContinue ? response.energyAfterJoules : 0,
-    };
     this.interactionCounts[slot] += 1;
     this.surfaceInteractions += 1;
     (this.interactions[slot] ??= []).push(interaction);
-    if (this.impactEvents.length < IMPACT_EVENT_CAPACITY) this.impactEvents.push(interaction);
-    else this.droppedImpactEvents += 1;
+    if (this.captureImpactEvents) {
+      if (this.impactEvents.length < IMPACT_EVENT_CAPACITY) this.impactEvents.push(interaction);
+      else this.droppedImpactEvents += 1;
+    }
 
-    if (!canContinue || !exitPoint) {
+    if (!contact.canContinue || !contact.exitPoint) {
       this.resolve(activeIndex, slot, hit, this.vx[slot], this.vy[slot], this.vz[slot]);
       return;
     }
 
+    const exitPoint = contact.exitPoint;
     const averageSpeed = Math.max(
       EPSILON,
-      (speedBefore + response.speedAfterMetresPerSecond) * 0.5
+      (speedBefore + contact.speedAfterMetresPerSecond) * 0.5
     );
-    this.distance[slot] += traversalDistance;
-    this.elapsed[slot] += traversalDistance / averageSpeed;
+    this.distance[slot] += contact.traversalDistanceMetres;
+    this.elapsed[slot] += contact.traversalDistanceMetres / averageSpeed;
     this.px[slot] = exitPoint.x;
     this.py[slot] = exitPoint.y;
     this.pz[slot] = exitPoint.z;
-    this.vx[slot] = this.impactDirection.x * response.speedAfterMetresPerSecond;
-    this.vy[slot] = this.impactDirection.y * response.speedAfterMetresPerSecond;
-    this.vz[slot] = this.impactDirection.z * response.speedAfterMetresPerSecond;
+    this.vx[slot] = this.impactDirection.x * contact.speedAfterMetresPerSecond;
+    this.vy[slot] = this.impactDirection.y * contact.speedAfterMetresPerSecond;
+    this.vz[slot] = this.impactDirection.z * contact.speedAfterMetresPerSecond;
     this.appendTracePoint(slot, exitPoint.x, exitPoint.y, exitPoint.z);
 
     const expired = this.elapsed[slot] + EPSILON >= shot.maxFlightSeconds;

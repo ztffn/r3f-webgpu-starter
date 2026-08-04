@@ -1,6 +1,7 @@
 import type { WeaponCommand, WeaponSlotId } from "../../combat/WeaponDefinition.ts";
 import type { WeaponHandlingContext } from "./WeaponHandling.ts";
 import { WeaponSystem, type WeaponEvent, type WeaponSnapshot } from "./WeaponSystem.ts";
+import { WEAPON_SWITCH_SECONDS } from "../../combat/weaponDefinitions.ts";
 
 export interface LoadoutSlot {
   readonly inputSlot: number;
@@ -70,12 +71,12 @@ export class LoadoutSystem {
     this.equippedWeapon.setHandlingContext(context);
   }
 
-  requestEquipInputSlot(inputSlot: number, durationSeconds = 0.35): boolean {
+  requestEquipInputSlot(inputSlot: number, durationSeconds = WEAPON_SWITCH_SECONDS): boolean {
     const slot = this.inputSlots.get(inputSlot);
     return slot ? this.requestEquip(slot, durationSeconds) : false;
   }
 
-  requestEquip(slot: WeaponSlotId, durationSeconds = 0.35): boolean {
+  requestEquip(slot: WeaponSlotId, durationSeconds = WEAPON_SWITCH_SECONDS): boolean {
     if (slot === this.equippedSlot || slot === this.switchingTo || !this.slots.has(slot)) {
       return false;
     }

@@ -83,8 +83,12 @@ export class ServerWorldQuery implements WorldQuery {
 
     let nearest: CapsuleCandidate | null = null;
     let nearestDistance = terrain ?? maxDistance;
+    // Numeric once, compared numerically per candidate: String(id) per capsule
+    // per raycast is an allocation on the 120 Hz projectile path. A non-numeric
+    // exclusion id parses to NaN and matches nothing, same as before.
+    const excludeId = excludeObjectId === undefined ? null : Number(excludeObjectId);
     for (const candidate of this.candidates()) {
-      if (excludeObjectId !== undefined && String(candidate.id) === excludeObjectId) continue;
+      if (excludeId !== null && candidate.id === excludeId) continue;
       const distance = capsuleRayDistance(
         origin.x,
         origin.y,

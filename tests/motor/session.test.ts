@@ -73,11 +73,10 @@ function makeSession(clientCount: number, options: SessionOptions = {}) {
     // apart, or "refused" could be passing for the wrong reason.
     clampVisualDial,
     allowClientVisualDials: options.allowClientVisualDials ?? false,
-    ...(options.spawn !== undefined ? { spawn: options.spawn } : {}),
-    ...(options.worldTargets !== undefined ? { worldTargets: options.worldTargets } : {}),
-    ...(options.respawnSeconds !== undefined
-      ? { respawnSeconds: options.respawnSeconds }
-      : {}),
+    // Undefined falls through to each option's own default inside GameServer.
+    spawn: options.spawn,
+    worldTargets: options.worldTargets,
+    respawnSeconds: options.respawnSeconds,
   });
   // The transports are returned as well as the clients, so a test can resend raw
   // bytes on an EXISTING connection. Opening a fresh one is a different peer, which

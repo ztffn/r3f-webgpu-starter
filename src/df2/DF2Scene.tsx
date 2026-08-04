@@ -430,26 +430,20 @@ export function DF2Scene({
    * so nothing is claimed and combat stays what it was — a local ballistic
    * simulation against local targets.
    */
-  const claimShot = useMemo(
-    () =>
-      gameClient === null
-        ? null
-        : (yawRadians: number, pitchRadians: number) =>
-            gameClient.fire(yawRadians, pitchRadians),
-    [gameClient]
-  );
   // Weapon switches and reloads are claims for the same reason shots are: the
   // server owns the loadout record that scores damage, so it has to hear about
-  // what the player is holding and when the magazine cycles.
-  const claimWeaponSelect = useMemo(
+  // what the player is holding and when the magazine cycles. One memo, three
+  // callbacks — they share a lifetime because they share the client.
+  const claims = useMemo(
     () =>
       gameClient === null
         ? null
-        : (weaponIndex: number) => gameClient.selectWeapon(weaponIndex),
-    [gameClient]
-  );
-  const claimReload = useMemo(
-    () => (gameClient === null ? null : () => gameClient.reload()),
+        : {
+            shot: (yawRadians: number, pitchRadians: number) =>
+              gameClient.fire(yawRadians, pitchRadians),
+            selectWeapon: (weaponIndex: number) => gameClient.selectWeapon(weaponIndex),
+            reload: () => gameClient.reload(),
+          },
     [gameClient]
   );
 
@@ -937,9 +931,9 @@ export function DF2Scene({
           lookSensitivity={lookSensitivity}
           motorPose={motorDemo ? motorPose : null}
           weaponIntent={motorDemo ? weaponIntent : null}
-          onShotFired={claimShot}
-          onWeaponSelected={claimWeaponSelect}
-          onReloadStarted={claimReload}
+          onShotFired={claims?.shot ?? null}
+          onWeaponSelected={claims?.selectWeapon ?? null}
+          onReloadStarted={claims?.reload ?? null}
         />
       )}
     </>

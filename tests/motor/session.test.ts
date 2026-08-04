@@ -800,6 +800,84 @@ test("a fire claim cannot be replayed, spoofed round, or fired while dead", () =
   );
 });
 
+test("a kill reaches the shooter, the victim and the room, each with what it needs", () => {
+  const session = makeSession(2, {
+    spawn: (seat) => ({ x: seat === 1 ? 0 : 8, z: 0 }),
+    respawnSeconds: 1,
+    respawnPauseSeconds: 0,
+  });
+  const towardVictim = -Math.PI / 2;
+  const aimed = (index: number) => ({ buttons: 0, yaw: index === 0 ? towardVictim : 0 });
+  drive(session, 4, aimed);
+
+  session.clients[0]!.fire(towardVictim, 0);
+  drive(session, 3, aimed);
+
+  const shooterSaw = session.clients[0]!.getCombatEvents();
+  const victimSaw = session.clients[1]!.getCombatEvents();
+
+  // The SHOOTER is told its round landed and that it was fatal, and is never
+  // told how much health was left.
+  const hit = shooterSaw.find((event) => event.kind === "hit");
+  assert.ok(hit !== undefined, "the shooter was never told its round landed");
+  assert.equal(hit.victimId, 2);
+  assert.equal(hit.fatal, true);
+  assert.ok(!("amount" in hit), "a hit confirmation must not carry the victim's health");
+
+  // The VICTIM is told a bearing and an amount, and nothing about where the
+  // shooter is. Yaw 0 faces -Z, which makes the left axis -X (docs/12 §4), so a
+  // shooter at x=0 against a victim at x=8 is on the victim's LEFT — and left is
+  // the positive direction.
+  const damage = victimSaw.find((event) => event.kind === "damage");
+  assert.ok(damage !== undefined, "the victim was never told it was hit");
+  assert.ok(damage.amount > 0);
+  assert.ok(
+    Math.abs(damage.bearingRadians - Math.PI / 2) < 0.2,
+    `a shot from the victim's left should read near +pi/2, got ${damage.bearingRadians}`
+  );
+  assert.ok(!("point" in damage), "a damage report must not carry a position");
+
+  // The DEATH reaches BOTH, because every client plays the clip on that body.
+  for (const [label, seen] of [["shooter", shooterSaw], ["victim", victimSaw]] as const) {
+    const died = seen.find((event) => event.kind === "died");
+    assert.ok(died !== undefined, `${label} never heard the death`);
+    assert.equal(died.victimId, 2);
+    assert.equal(died.killerId, 1);
+    assert.equal(died.direction, "side", "the clip must face the side the round came from");
+    assert.equal(died.headshot, false, "nothing sets headshot until a head zone exists");
+    // Scheduled and announced from one number, so the counter cannot outlive the
+    // corpse: Death_From_Right is 3.33 s and the pause is zero here.
+    assert.ok(Math.abs(died.respawnSeconds - 3.33) < 0.1, `respawn was ${died.respawnSeconds}s`);
+  }
+
+  // Events are ordered and resumable rather than drained, because three readers
+  // need the same death and the first to drain would starve the other two.
+  assert.ok(victimSaw.every((event, index) => index === 0 || event.seq > victimSaw[index - 1]!.seq));
+  assert.deepEqual(session.clients[1]!.getCombatEvents(), victimSaw, "reading must not consume");
+});
+
+test("the roster names every player, and a leaver disappears from it", () => {
+  const session = makeSession(2, { spawn: (seat) => ({ x: seat * 4, z: 0 }) });
+  drive(session, 3, () => ({ buttons: 0, yaw: 0 }));
+
+  // The numeric fallback, until a room resolves an account and renames them.
+  assert.deepEqual(session.clients[0]!.getRoster(), [
+    { id: 1, name: "Player 1" },
+    { id: 2, name: "Player 2" },
+  ]);
+  assert.equal(session.clients[1]!.nameOf(1), "Player 1");
+  assert.equal(session.clients[1]!.nameOf(99), null, "an unknown id has no name, not a guess");
+
+  session.server.setDisplayName(2, "Ada");
+  drive(session, 2, () => ({ buttons: 0, yaw: 0 }));
+  assert.equal(session.clients[0]!.nameOf(2), "Ada", "a rename never reached the other client");
+
+  // Leaving rewrites the roster, which is what the feed diffs to print "left".
+  session.transports[1]!.close();
+  drive(session, 2, () => ({ buttons: 0, yaw: 0 }));
+  assert.deepEqual(session.clients[0]!.getRoster(), [{ id: 1, name: "Player 1" }]);
+});
+
 test("a killed player respawns with full health at a spawn point", () => {
   const session = makeSession(2, {
     spawn: (seat) => ({ x: seat === 1 ? 0 : 8, z: 0 }),

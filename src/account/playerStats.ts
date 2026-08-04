@@ -6,6 +6,12 @@
 // stored — a derived ratio goes stale the moment a source row is corrected, so
 // K/D, the range bands and the play-style verdict are all computed on read.
 //
+// EVERY FUNCTION HERE RETURNS null FOR UNKNOWN, never a number. The trap is not
+// the obvious zero, it is the plausible middle: `patienceScore` answered a
+// confident 40/100 for every player alive, because zero stance telemetry reads as
+// "never moved" and a perfect restraint score. When adding a metric, ask what it
+// answers with no source rows, and make that answer null.
+//
 // The vocabulary is dfhub.net's, which is Delta Force's, because this project is
 // that game's successor and its players already know what these terms mean.
 // Design record: docs/plans/2026-08-04-player-statistics-design.md.
@@ -119,6 +125,14 @@ export function killsPerMinute(combat: CombatTotals, activity: ActivityTotals): 
 export function patienceScore(activity: ActivityTotals): number | null {
   const total = activity.timePlayedSeconds * 1000;
   if (total <= 0) return null;
+  // No stance telemetry at all means UNMEASURED, not "never moved".
+  //
+  // Without this the formula answered 40/100 for everybody: `match_participation`
+  // has no writer yet, so all three of these are zero, which made `stillness` 0
+  // and `restraint` a perfect 1 — and 0 x 0.6 + 1 x 0.4 is a plausible-looking
+  // score computed entirely from data that does not exist. A missing figure has to
+  // read as missing; the pages already have the branch for it.
+  if (activity.proneMs + activity.movingMs + activity.concealedMs === 0) return null;
   const stillness = (activity.proneMs + activity.concealedMs) / 2 / total;
   const restraint = 1 - Math.min(1, activity.movingMs / total);
   return Math.round(Math.max(0, Math.min(1, stillness * 0.6 + restraint * 0.4)) * 100);

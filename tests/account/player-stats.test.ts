@@ -141,6 +141,30 @@ describe("patience", () => {
   it("is unknown with no time played, not zero", () => {
     assert.equal(patienceScore(activity()), null);
   });
+
+  it("is unknown when no stance telemetry was recorded, not a plausible 40", () => {
+    // `match_participation` has no writer yet, so all three stance counters are
+    // zero for everybody. Zero prone and zero concealed made `stillness` 0, and
+    // zero moving made `restraint` a perfect 1 — so the formula answered
+    // 0 x 0.6 + 1 x 0.4 = 40/100 for every player who had ever been in a match,
+    // computed entirely from data that does not exist. Unmeasured has to read as
+    // unmeasured; the profile page already has the branch for it.
+    const played = activity({
+      timePlayedSeconds: 3600,
+      proneMs: 0,
+      movingMs: 0,
+      concealedMs: 0,
+    });
+    assert.equal(patienceScore(played), null);
+    assert.equal(aggressionIndex(played), null);
+  });
+
+  it("still scores a player who genuinely only ever moved", () => {
+    // One non-zero counter is enough to mean "this was measured", so the low score
+    // a sprinter earns is not confused with the absence of any measurement.
+    const sprinter = activity({ timePlayedSeconds: 100, movingMs: 100_000 });
+    assert.equal(patienceScore(sprinter), 0);
+  });
 });
 
 describe("the verdict", () => {

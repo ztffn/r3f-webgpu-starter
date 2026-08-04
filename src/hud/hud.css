@@ -682,3 +682,114 @@
     width: 165px;
   }
 }
+
+/* --- combat feedback (2026-08-05) ---------------------------------------- */
+
+/* Hitmarker: centred on the crosshair, because that is where the eye already is
+   and a confirmation read peripherally is one the shooter has to look for.
+   Pure CSS one-shot — React keys it by event sequence so a repeat restarts it. */
+.hud-hitmarker {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+  pointer-events: none;
+  animation: hud-hitmarker-flash 260ms ease-out forwards;
+}
+.hud-hitmarker::before,
+.hud-hitmarker::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 2px solid var(--hud-olive-hi, #cfe0a8);
+}
+.hud-hitmarker::before {
+  clip-path: polygon(0 0, 34% 0, 0 34%, 0 0, 100% 100%, 66% 100%, 100% 66%);
+}
+.hud-hitmarker::after {
+  clip-path: polygon(100% 0, 66% 0, 100% 34%, 100% 0, 0 100%, 34% 100%, 0 66%);
+}
+/* A kill reads AMBER and larger. Intensity without a second glyph to parse —
+   the instinct-over-cognition rule from the damage-indicator analysis. */
+.hud-hitmarker.fatal {
+  width: 30px;
+  height: 30px;
+  margin: -15px 0 0 -15px;
+}
+.hud-hitmarker.fatal::before,
+.hud-hitmarker.fatal::after {
+  border-color: var(--hud-amber, #e8b33a);
+}
+@keyframes hud-hitmarker-flash {
+  from { opacity: 1; transform: scale(0.72); }
+  60%  { opacity: 1; transform: scale(1); }
+  to   { opacity: 0; transform: scale(1.08); }
+}
+
+/* Damage direction: an arc at the screen edge, rotated to the bearing.
+   DELIBERATELY COARSE and soft-edged. A crisp arrow would hand the victim the
+   shooter's position, which is exactly what the grass and the fog spent the
+   engagement taking away — see the design record. The blur is also the hook the
+   post-processing pass will replace with a real screen effect. */
+.hud-damage {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  /* Rotated about the screen centre; 0rad is straight ahead, matching the wire's
+     bearing convention (positive to the left, so the element negates it). */
+  transform: rotate(var(--bearing, 0rad));
+  background: radial-gradient(
+    120% 62% at 50% 0%,
+    rgba(190, 46, 38, 0.55) 0%,
+    rgba(190, 46, 38, 0.22) 38%,
+    rgba(190, 46, 38, 0) 70%
+  );
+  animation: hud-damage-fade 900ms ease-out forwards;
+}
+@keyframes hud-damage-fade {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+/* Death: a panel, not a takeover. A dead player should still be able to read the
+   ground they are about to respawn into. */
+.hud-death {
+  position: absolute;
+  left: 50%;
+  top: 34%;
+  transform: translateX(-50%);
+  min-width: 260px;
+  padding: 16px 22px;
+  text-align: center;
+}
+.hud-death-title {
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--hud-dim, #9aa38c);
+}
+.hud-death-killer {
+  margin-top: 6px;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--hud-amber, #e8b33a);
+}
+.hud-death-respawn {
+  margin-top: 10px;
+  font-size: 14px;
+  /* Tabular so the tenths do not jitter the panel's width as they count down. */
+  font-variant-numeric: tabular-nums;
+  color: var(--hud-olive-hi, #cfe0a8);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* The flash and the fade are the whole signal, so they still run — but the
+     scaling, which is the part that provokes, does not. */
+  .hud-hitmarker { animation-name: hud-hitmarker-flash-static; }
+  @keyframes hud-hitmarker-flash-static {
+    from { opacity: 1; }
+    to   { opacity: 0; }
+  }
+}

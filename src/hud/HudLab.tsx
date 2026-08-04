@@ -14,6 +14,7 @@
 import { useEffect, useState } from "react";
 import { GameHud } from "./GameHud";
 import "./hudlab.css";
+import { EMPTY_COMBAT_FEED } from "../fps/useCombatFeed";
 import type { FlyState } from "../df2/FlyControls";
 import { hudSignals } from "./hudSignals";
 
@@ -112,7 +113,14 @@ export default function HudLab() {
           />
         )}
         {/* A sample code so the invite panel can be judged in the lab too. */}
-        <GameHud fly={SAMPLE_FLY} health={1} joinCode="QGHRD9" fpsMode preview />
+        <GameHud
+          fly={SAMPLE_FLY}
+          health={1}
+          feed={EMPTY_COMBAT_FEED}
+          joinCode="QGHRD9"
+          fpsMode
+          preview
+        />
         {live && <HeadingSweep />}
       </div>
     </div>

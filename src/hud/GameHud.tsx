@@ -10,7 +10,7 @@
 // hairlines into mush, and the touch layout has to move panels out of the thumb
 // zones rather than shrink the desktop one.
 
-import { useSyncExternalStore } from "react";
+import { useSyncExternalStore, type CSSProperties } from "react";
 import { combatTelemetry } from "../fps/ui/CombatTelemetry";
 import { HipfireCrosshair } from "../fps/ui/HipfireCrosshair";
 import { impactTelemetryKey } from "../fps/ui/CombatTelemetry";
@@ -20,6 +20,7 @@ import { RadarRose } from "./RadarRose";
 import { InvitePanel } from "./InvitePanel";
 import { VitalsPanel, type Vital } from "./VitalsPanel";
 import { WeaponPanel } from "./WeaponPanel";
+import { useRespawnCountdown, type CombatFeed, type LocalDeath } from "../fps/useCombatFeed";
 import "./hud.css";
 
 export interface GameHudProps {
@@ -34,6 +35,13 @@ export interface GameHudProps {
    * is the honest reading when there is no damage model.
    */
   health: number | null;
+  /**
+   * Deaths, kills and incoming fire, already shaped for display.
+   *
+   * A prop like health, and for the same reason: the HUD renders what it is
+   * given and never learns where combat events come from.
+   */
+  feed: CombatFeed;
   /**
    * The private room's invite code, or null.
    *
@@ -56,7 +64,7 @@ function windBearing(x: number, z: number): string {
   return points[Math.round(degrees / 45) % 8]!;
 }
 
-export function GameHud({ fly, health, joinCode, fpsMode, preview }: GameHudProps) {
+export function GameHud({ fly, health, feed, joinCode, fpsMode, preview }: GameHudProps) {
   const combat = useSyncExternalStore(
     combatTelemetry.subscribe,
     combatTelemetry.getSnapshot,
@@ -74,6 +82,10 @@ export function GameHud({ fly, health, joinCode, fpsMode, preview }: GameHudProp
     armour: null,
   };
 
+  // Aliveness is HEALTH, never whether a death event is still in the log — a
+  // stale overlay outliving a respawn is worse than none.
+  const dead = health === 0;
+
   const wind = combat.ballistics;
   const windSpeed =
     wind === null
@@ -83,6 +95,35 @@ export function GameHud({ fly, health, joinCode, fpsMode, preview }: GameHudProp
   return (
     <div className="hud-root skin-hud" data-dev="hud" data-dev-preview={preview || undefined}>
       {fpsMode && <HipfireCrosshair />}
+      {/* Keyed by the event's own sequence so a repeated hit restarts the CSS
+          animation instead of being ignored as an unchanged element. No timers:
+          the flash is a one-shot animation that ends on its own. */}
+      {fpsMode && feed.hit !== null && (
+        <div
+          key={feed.hit.seq}
+          className={`hud-hitmarker${feed.hit.fatal ? " fatal" : ""}`}
+          data-dev="hud-hitmarker"
+          data-dev-fatal={feed.hit.fatal || undefined}
+          aria-hidden="true"
+        />
+      )}
+
+      {/* Direction is deliberately COARSE. Precision here would hand a victim the
+          shooter's position, which is what the grass and the fog spent the
+          engagement taking away — a concealment decision, not a styling one.
+          See the design record. */}
+      {feed.damage !== null && (
+        <div
+          key={feed.damage.seq}
+          className="hud-damage"
+          data-dev="hud-damage"
+          data-dev-bearing={feed.damage.bearingRadians.toFixed(2)}
+          style={{ "--bearing": `${-feed.damage.bearingRadians}rad` } as CSSProperties}
+          aria-hidden="true"
+        />
+      )}
+
+      <DeathOverlay death={dead ? feed.death : null} />
 
       {combat.lastImpact && combat.lastImpact.damageApplied > 0 && (
         <div className="hit-marker" key={impactTelemetryKey(combat.lastImpact)}>
@@ -117,24 +158,29 @@ export function GameHud({ fly, health, joinCode, fpsMode, preview }: GameHudProp
       )}
 
       {preview && (
-        <>
-          <section className="hud-panel hud-objective notched notched-sm" data-dev="hud-objective">
-            <div className="hud-objective-title">Objective updated</div>
-            <div className="hud-objective-body">Proceed to extraction point</div>
-          </section>
+        <section className="hud-panel hud-objective notched notched-sm" data-dev="hud-objective">
+          <div className="hud-objective-title">Objective updated</div>
+          <div className="hud-objective-body">Proceed to extraction point</div>
+        </section>
+      )}
 
-          <section className="hud-panel hud-chat notched notched-sm" data-dev="hud-chat">
-            <div>
-              <span className="hud-team">[TEAM]</span> Viper: Eyes on tower
+      {/* The mockup's chat block, now carrying real events. It renders whenever
+          there is something true to say rather than under the preview flag,
+          which is what the panel's own honesty rule asked for all along. */}
+      {feed.lines.length > 0 && (
+        <section className="hud-panel hud-chat notched notched-sm" data-dev="hud-chat">
+          {feed.lines.map((line) => (
+            <div key={line.id} data-dev={`feed-${line.kind}`}>
+              {line.kind === "kill" ? (
+                line.text
+              ) : (
+                <>
+                  <span className="hud-team">[NET]</span> {line.text}
+                </>
+              )}
             </div>
-            <div>
-              <span className="hud-team">[TEAM]</span> Raven: Moving to ridge
-            </div>
-            <div>
-              <span className="hud-lead">[LEAD]</span> Proceed to extraction point
-            </div>
-          </section>
-        </>
+          ))}
+        </section>
       )}
 
       {fpsMode && (
@@ -170,5 +216,35 @@ export function GameHud({ fly, health, joinCode, fpsMode, preview }: GameHudProp
           one), so a narrow screen is told rather than left to discover it. */}
       <p className="touch-note">Movement needs a keyboard — drag to look around.</p>
     </div>
+  );
+}
+
+/**
+ * Who killed you, and how long until you are back.
+ *
+ * A panel on the phosphor skin rather than a full-screen takeover: a dead player
+ * should still be able to read the ground they are about to respawn into, and
+ * blacking that out costs them the one thing worth learning from dying.
+ *
+ * The countdown is the SERVER's number — the same one it scheduled the respawn
+ * from — so the two cannot disagree.
+ */
+function DeathOverlay({ death }: { death: LocalDeath | null }) {
+  const seconds = useRespawnCountdown(death);
+  if (death === null || seconds === null) return null;
+  return (
+    <section className="hud-panel hud-death notched" data-dev="hud-death" role="status">
+      <div className="hud-death-title">
+        {death.killerName === null ? "You died" : "You were killed by"}
+      </div>
+      {death.killerName !== null && (
+        <div className="hud-death-killer" data-dev="death-killer">
+          {death.killerName}
+        </div>
+      )}
+      <div className="hud-death-respawn" data-dev="death-respawn">
+        Respawn in {seconds.toFixed(1)}s
+      </div>
+    </section>
   );
 }

@@ -101,11 +101,21 @@ player instinctively recognise this?* — applies to features, not to whether a 
   it renders a stand-in canopy, but egypt / R66 / blizzard / vul001 ship their own strips and
   load as `grassSource: "real"` (`06-...md` §7). Preparing one of those is the cheapest way to
   exercise it.
-- **Next up (web product):** accounts on `@colyseus/auth` (adopted; `@colyseus/database` is
-  **rejected** — broken `types` field, peer-pins core 0.15, incomplete migrations — use Kysely
-  directly), then lobby / server browser / clans, then entitlements. Phases 5–7 of
-  `plans/2026-08-04-...md`. Touch INPUT does not exist yet: mobile and iPad are first-class
-  targets for the UI, and the game still needs a keyboard.
+- **Accounts (Aug 2026):** `@colyseus/auth` + **Kysely** (not `@colyseus/database`, which is
+  rejected — see the design record §2.2), running **inside the game server process** on the
+  Express app the Colyseus transport already owns. `mountAccounts()` is the whole seam.
+  Email/password, Discord OAuth (env-gated), and **guests that upgrade in place** — registering
+  keeps the same row, so career, medals and character survive; verified end to end.
+  `src/account/` is shared, `tools/account/` is server-only, and the boundary is the
+  directory. **The server refuses to start without `JWT_SECRET` and `AUTH_SALT`** — the
+  package's default password salt is a public literal, and its salt is process-wide rather
+  than per-user (design record §5.3 has the limitation and the proper fix).
+  `npm run typecheck` now also checks `tools/` via `tsconfig.server.json`.
+- **Next up (web product):** lobby / server browser / private games / clans, then
+  entitlements and medals. Phases 6–7 of `plans/2026-08-04-...md`. Note the game room
+  still does **not** verify the auth token — that belongs with matchmaking in phase 6.
+  Touch INPUT does not exist yet either: mobile and iPad are first-class targets for the
+  UI, and the game still needs a keyboard.
 - **Direction:** custom assets → player-created terrain → map/terrain editor tooling
   (`01-...md` Phase 6). Real assets are the dial-in instrument, not the deliverable.
 

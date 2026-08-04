@@ -221,7 +221,7 @@ Each phase is independently shippable and leaves the tree working.
 | 2 | Landing, FAQ, supporter pages. Static, no backend | 1 | **done** |
 | 3 | Dev console: existing panels moved behind it | 1 | **done** |
 | 4 | HUD redesign against the mockup, desktop and touch layouts | 1, 3 | **done** |
-| 5 | Accounts: auth server, schema, sign-in / register / profile / character | 1 | not started |
+| 5 | Accounts: auth server, schema, sign-in / register / profile / character | 1 | **done** |
 | 6 | Lobby, server browser, private games, community servers, clans | 5 | not started |
 | 7 | Entitlements, medals, supporter perks, checkout stub | 5 | not started |
 | 8 | Touch input scheme, after the mobile GPU measurement | 4 | not started |
@@ -296,6 +296,96 @@ Four things that were each invisible until something was measured — the same s
    emitted the HudLab chunk into `dist/` regardless. The `lazy()` call has to sit inside the
    branch. Confirmed by grepping `dist/assets/`, which is the only way this is visible —
    nothing errors, the chunk is simply shipped and never fetched.
+
+## 5.3 What phase 5 landed
+
+```
+src/account/     accountTypes.ts (Account, effectiveTier, callsign rules)
+                 characters.ts   (appearance + loadout, validation, coercion)
+                 accountClient.ts (token, /auth and /api calls)
+                 AuthProvider.tsx (context + the `can()` gate)
+src/site/pages/  SignIn, Register, Profile, CharacterPage, auth.css
+tools/account/   database.ts   (Kysely schema + versioned migrations)
+                 repository.ts (every account query; row -> Account mapping)
+                 authSettings.ts (the seven @colyseus/auth callbacks)
+                 api.ts, mount.ts
+tests/account/   account-types, characters, repository (47 assertions)
+tsconfig.server.json  — `npm run typecheck` now covers tools/ as well
+```
+
+Accounts run **in the game server process**, mounted on the Express app the
+Colyseus transport already owns (`transport.getExpressApp()`), so there is one port
+and one deployment. `mountAccounts(app)` is the whole seam; `tools/game-server/server.ts`
+gained two lines.
+
+**The funnel is verified end to end**, in the browser and against the real server:
+a guest signs in with no fields, picks winter camo and a helmet, registers, and
+comes out as the SAME account row (`id` unchanged) with those cosmetics intact,
+`anonymous` false and tier `enlisted`. That works because `@colyseus/auth`'s
+register handler hands `options.upgradingToken` — the verified payload of the
+caller's current token — to `onRegisterWithEmailAndPassword`, and the repository
+UPDATEs that row instead of inserting a new one.
+
+**One rule, two callers.** `validateCharacter(value, tier)` builds the editor
+(disabling what the account cannot use, with the reason beside it) and validates the
+PUT. Verified: as a guest, custom insignia and a non-default primary are both
+refused by the API and disabled in the UI; after registering, the primary unlocks
+and insignia stays locked because it is a supporter capability.
+
+### Security: two real limitations of the chosen auth package
+
+Neither is a reason to drop it, and neither is hypothetical. Both are stated in code
+beside the thing they affect.
+
+1. **Passwords are hashed with ONE process-wide salt.** `Hash.make(password, salt)`
+   defaults the salt to `process.env.AUTH_SALT` or the literal `"## SALT ##"`, which
+   is published in the package source. So an unset `AUTH_SALT` means every
+   deployment shares a public salt, and even when set, two accounts with the same
+   password store the same hash — the salt is a pepper, not a per-user salt.
+   `onHashPassword` cannot fix this: the `/login` and `/register` handlers call
+   `Hash.make` directly and never consult it. **Mitigation applied:**
+   `requireSecrets()` refuses to start without `JWT_SECRET` (24+ chars) and
+   `AUTH_SALT`, and says why. **Proper fix,** when it is worth it: replace those two
+   handlers with our own and store a per-user salt.
+2. **OAuth pulls in advisories with no upgrade path.** `@colyseus/auth` depends on
+   `grant`, whose tree carries `elliptic` and `uuid` advisories that `npm audit`
+   reports with `fixAvailable: false`. **Mitigation applied:** a provider is
+   registered only when its credentials are in the environment, so with no Discord
+   keys configured the OAuth routes are never mounted and that code is unreachable.
+   `/api/config` tells the client which providers exist, so the sign-in page offers
+   a button only for one that works.
+
+Also worth knowing: tokens now **expire after 30 days** (the package default is no
+expiry at all, so a leaked token was valid forever), and they carry only
+`{ id }` — `onParseToken` reloads the account, so a rename or a tier change takes
+effect on the next request rather than the next login.
+
+### A shape trap the client is built around
+
+`@colyseus/auth` returns **two different user shapes**: `/auth/anonymous` returns
+whatever `onRegisterAnonymously` returns (our camelCase `Account`), while
+`/auth/login` and `/auth/register` return the database row (snake_case,
+`anonymous` as 0/1). So `accountClient.ts` **ignores the `user` field in every auth
+response** and reads the canonical account from `GET /api/me`. An auth call is used
+for its token and nothing else.
+
+Related: `findUserByEmail` is deliberately NARROWED to eight columns, because
+whatever it returns is echoed to the client by those two handlers. `anonymous_id`
+and `discord_id` are not selected. A test asserts they stay off the wire.
+
+### Still open after phase 5
+
+- **The game room does not check the token.** `&net=1` still joins
+  unauthenticated. Room-scope authentication belongs with matchmaking in phase 6,
+  and adding a `static onAuth` now would either break the existing dev URL or be
+  dead wiring that verifies nothing.
+- **Career and medals are never written.** Both read correctly and both are
+  honestly zero, with the profile page saying so rather than inventing numbers —
+  the match server does not report results yet.
+- **Postgres.** `openDatabase` is SQLite only; the dialect swap is one branch on
+  `DATABASE_URL` plus the `pg` driver, deferred until there is somewhere to deploy.
+- **Email delivery.** `onForgotPassword` logs the reset link when no provider is
+  configured, which is a working development flow and an obvious production gap.
 
 ## 6. Retention model — what the perks actually are
 

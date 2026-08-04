@@ -98,6 +98,20 @@ function pickWeatherIndex(): number {
     : weatherPresetIndex(WEATHER);
 }
 
+/**
+ * Most seconds one session may credit to a career. Six hours.
+ *
+ * A cap and not a measurement: the session length is wall-clock between join and
+ * leave, with no idle detection, and "Time played" is one of only two leaderboards
+ * that anything writes. Uncapped, a socket parked in a room outranks somebody who
+ * actually plays, and it does so while asleep. Six hours is longer than any real
+ * sitting and short enough that a forgotten tab cannot climb the board overnight.
+ *
+ * The honest fix is to count time the player is actually issuing commands, which
+ * needs a signal the room does not track yet.
+ */
+const MAX_SESSION_SECONDS = 6 * 3600;
+
 const RAPIER = await initRapier();
 const terrain = loadServerTerrain(TERRAIN_SLUG);
 const tickMs = DEFAULT_MOTOR_TUNING.fixedTimestepSeconds * 1000;
@@ -125,6 +139,29 @@ class RoomBridge implements ServerTransport {
 class GameRoom extends Room {
   maxClients = 64;
   patchRate = null;
+
+  /**
+   * How long a room survives with nobody in it, and how long a reserved seat is
+   * held. Colyseus's default is 15 seconds.
+   *
+   * Raised because `POST /api/private-game` creates the room BEFORE the host has
+   * loaded the game: the browser then navigates to /play, which lazy-loads a
+   * ~930 kB GameApp chunk, ~390 kB of three, Rapier and the terrain before it can
+   * call `joinById`. On a cold cache that is comfortably more than 15 seconds, and
+   * the room the host was just handed had already auto-disposed — "no such room"
+   * from a game they created a moment ago.
+   *
+   * Assigned as a subclass FIELD on purpose. Colyseus arms the first auto-dispose
+   * timer inside `__init()`, which runs after the constructor and before
+   * `onCreate`, so a field initialiser is the last point that can still change the
+   * value it reads; setting it in `onCreate` would be too late, and
+   * `resetAutoDisposeTimeout` is private to the base class.
+   *
+   * The cost is that an empty room lingers this long before disposing, and that an
+   * abandoned seat reservation holds its slot for the same time. Both are cheap
+   * next to handing someone a room id that has already stopped existing.
+   */
+  seatReservationTimeout = 45;
 
   private readonly bridge = new RoomBridge();
   private readonly connections = new Map<string, ServerConnection>();
@@ -255,7 +292,7 @@ class GameRoom extends Room {
     this.sessions.set(client.sessionId, { accountId, joinedAtMs: Date.now() });
     // Presence, for the friends list. Anonymous joiners are not recorded: with
     // no account there is nobody to be a friend of.
-    if (accountId !== null) PRESENCE.set(accountId, this.roomId);
+    if (accountId !== null) enterPresence(accountId, client.sessionId, this.roomId);
     this.bridge.connectionHandler?.(connection);
 
     // Tell this client what it needs to invite others. Sent to EVERY member of a
@@ -285,14 +322,11 @@ class GameRoom extends Room {
     // taking a client's word for them would be worse than a zero.
     const session = this.sessions.get(client.sessionId);
     this.sessions.delete(client.sessionId);
-    // Cleared before anything that can throw, and only when this room is still
-    // the one recorded — a player who reconnected into another room must not
-    // have their new location deleted by the old room's teardown.
-    if (session?.accountId != null && PRESENCE.get(session.accountId) === this.roomId) {
-      PRESENCE.delete(session.accountId);
-    }
+    // Cleared before anything that can throw. Keyed by session, so a player who
+    // is also connected from somewhere else keeps their presence there.
+    if (session?.accountId != null) leavePresence(session.accountId, client.sessionId);
     if (session !== undefined && session.accountId !== null) {
-      const seconds = (Date.now() - session.joinedAtMs) / 1000;
+      const seconds = Math.min(MAX_SESSION_SECONDS, (Date.now() - session.joinedAtMs) / 1000);
       const accountId = session.accountId;
       void accounts.repository
         .recordSession(accountId, seconds)
@@ -323,29 +357,68 @@ class GameRoom extends Room {
 const transport = new WebSocketTransport();
 
 /**
- * Who is in which room, right now. Account id -> room id.
+ * Who is in which room, right now. Account id -> its live sessions -> room id.
  *
  * Module scope for the same reason `accounts` below is: the rooms write it and
  * the HTTP layer reads it, and there is no instance either of them shares. In
  * memory on purpose — presence is worthless the moment the process restarts, so
  * persisting it would only create stale rows claiming people are playing.
  *
+ * Keyed by SESSION and not just by account, because one account genuinely can be
+ * in two rooms at once — `recordSession` says as much where it explains why the
+ * career write is an incrementing UPDATE. A flat `Map<accountId, roomId>` let the
+ * second join overwrite the first, and then the second leave deleted presence
+ * entirely while the player was still in the other room, so a friend who was
+ * playing read as offline.
+ *
  * Read ONLY through the friends endpoint, which filters it to accepted friends.
  * Publishing which room a named player is in would be a stalking primitive, and
  * in a game about not being seen it is also a gameplay leak.
  */
-const PRESENCE = new Map<number, string>();
+const PRESENCE = new Map<number, Map<string, string>>();
+
+/** Record that a session is in a room. */
+function enterPresence(accountId: number, sessionId: string, roomId: string): void {
+  const rooms = PRESENCE.get(accountId);
+  if (rooms === undefined) PRESENCE.set(accountId, new Map([[sessionId, roomId]]));
+  else rooms.set(sessionId, roomId);
+}
+
+/** Forget one session, and the account with it once its last session is gone. */
+function leavePresence(accountId: number, sessionId: string): void {
+  const rooms = PRESENCE.get(accountId);
+  if (rooms === undefined) return;
+  rooms.delete(sessionId);
+  if (rooms.size === 0) PRESENCE.delete(accountId);
+}
+
+/**
+ * Flatten to the shape the friends endpoint wants: one room per account.
+ *
+ * Any of them will do — the endpoint answers "is this friend in a game", and
+ * listing every room a person is in would publish more, not less.
+ */
+function presenceSnapshot(): ReadonlyMap<number, string> {
+  const flat = new Map<number, string>();
+  for (const [accountId, rooms] of PRESENCE) {
+    const first = rooms.values().next();
+    if (first.done !== true) flat.set(accountId, first.value);
+  }
+  return flat;
+}
 
 /**
  * Held at module scope because `Room.onAuth` is STATIC — Colyseus calls it before
  * any instance exists, so it cannot reach the repository through `this`.
+ *
+ * Accounts live in this same process and on this same port: the transport already
+ * owns an Express app, so /auth and /api are mounted on it rather than standing up
+ * a second server. Assembly is in tools/account/mount.ts to keep this file the
+ * game's — it refuses to start without JWT_SECRET and AUTH_SALT, deliberately.
  */
-let accounts: MountedAccounts;
-// Accounts live in this same process and on this same port: the transport already
-// owns an Express app, so /auth and /api are mounted on it rather than standing up
-// a second server. Assembly is in tools/account/mount.ts to keep this file the
-// game's — it refuses to start without JWT_SECRET and AUTH_SALT, deliberately.
-accounts = await mountAccounts(transport.getExpressApp(), { presence: () => PRESENCE });
+const accounts: MountedAccounts = await mountAccounts(transport.getExpressApp(), {
+  presence: presenceSnapshot,
+});
 
 const server = new Server({ transport });
 // filterBy on the create option, so joinOrCreate only ever matches a room of the

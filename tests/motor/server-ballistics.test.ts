@@ -15,9 +15,13 @@ import {
   decodeFire,
   decodeReload,
   decodeSelectWeapon,
+  decodeShotFired,
+  decodeWorldTargets,
   encodeFire,
   encodeReload,
   encodeSelectWeapon,
+  encodeShotFired,
+  encodeWorldTargets,
 } from "../../src/net/SnapshotCodec.ts";
 import {
   flatFireElapsedSeconds,
@@ -275,4 +279,51 @@ test("fire, select and reload claims survive their codec round trips", () => {
   assert.equal(decodeFire(new Uint8Array(5)), null);
   assert.equal(decodeSelectWeapon(new Uint8Array(2)), null);
   assert.equal(decodeReload(new Uint8Array(1)), null);
+});
+
+test("shot relay and world-target packets survive their codec round trips", () => {
+  const shot = decodeShotFired(
+    encodeShotFired({
+      shooterId: 3,
+      weaponIndex: 2,
+      sequence: 17,
+      origin: { x: -120.5, y: 41.25, z: 998.75 },
+      yawRadians: 2.4,
+      pitchRadians: -0.15,
+    })
+  );
+  assert.ok(shot);
+  assert.equal(shot.shooterId, 3);
+  assert.equal(shot.weaponIndex, 2);
+  assert.equal(shot.sequence, 17);
+  assert.ok(Math.abs(shot.origin.x - -120.5) < 1e-3);
+  assert.ok(Math.abs(shot.origin.y - 41.25) < 1e-3);
+  assert.ok(Math.abs(shot.yawRadians - 2.4) < 1e-3);
+  assert.ok(Math.abs(shot.pitchRadians - -0.15) < 1e-3);
+  assert.equal(decodeShotFired(new Uint8Array(10)), null);
+
+  const targets = decodeWorldTargets(
+    encodeWorldTargets([
+      {
+        id: 40_001,
+        x: 8.5,
+        y: 12.25,
+        z: -300,
+        radiusMetres: 0.35,
+        heightMetres: 1.8,
+        health: 42,
+        maxHealth: 100,
+      },
+    ])
+  );
+  assert.equal(targets.length, 1);
+  const target = targets[0]!;
+  assert.equal(target.id, 40_001);
+  assert.ok(Math.abs(target.x - 8.5) < 1e-3);
+  assert.ok(Math.abs(target.radiusMetres - 0.35) < 0.011, "radius survives the cm quantise");
+  assert.ok(Math.abs(target.heightMetres - 1.8) < 0.021, "height survives the 2 cm quantise");
+  assert.equal(target.health, 42);
+  assert.equal(target.maxHealth, 100);
+  // A truncated buffer yields only the targets that fully arrived.
+  assert.equal(decodeWorldTargets(new Uint8Array(2)).length, 0);
 });

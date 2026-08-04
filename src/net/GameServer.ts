@@ -27,12 +27,15 @@ import {
   decodeSelectWeapon,
   decodeSetVisualDial,
   encodeRoomState,
+  encodeShotFired,
   encodeSnapshot,
   encodeWelcome,
+  encodeWorldTargets,
   packetTypeOf,
   wrapPi,
   type RoomState,
   type SnapshotPlayer,
+  type WorldTargetState,
 } from "./SnapshotCodec.ts";
 import type { ServerConnection, ServerTransport } from "./Transport.ts";
 import { ServerWorldQuery, type CapsuleCandidate } from "./ServerWorldQuery.ts";
@@ -90,6 +93,14 @@ export interface GameServerOptions {
   readonly maxHealth?: number;
   /** Seconds a dead player stays dead. 0 disables respawn entirely. */
   readonly respawnSeconds?: number;
+  /**
+   * SERVER-AUTHORED world targets: destructible range figures every player in
+   * the room shares. Positions are world x/z; the feet land on the server's
+   * own terrain. This exists because the client-side contrast ladder
+   * (`TestTargets`) is placed relative to each client's camera and cannot be
+   * shared truth — a room target is placed by the room.
+   */
+  readonly worldTargets?: readonly WorldTargetSpec[];
   /**
    * How far a claimed shot direction may differ from the look angles the server
    * already holds for that tick, in radians.
@@ -149,6 +160,32 @@ interface Peer {
   highestQueuedTick: number;
 }
 
+export interface WorldTargetSpec {
+  readonly x: number;
+  readonly z: number;
+  readonly radiusMetres?: number;
+  readonly heightMetres?: number;
+  readonly maxHealth?: number;
+  /** Seconds a destroyed target stays down. 0 keeps it down forever. */
+  readonly respawnSeconds?: number;
+}
+
+interface ServerTarget {
+  readonly id: number;
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly radius: number;
+  readonly height: number;
+  readonly maxHealth: number;
+  readonly respawnTicks: number;
+  readonly name: string;
+  readonly damageable: Damageable;
+  health: number;
+  /** Tick this target stands back up, or -1 while standing. */
+  respawnTick: number;
+}
+
 const DEFAULT_PATCH_HZ = 20;
 const DEFAULT_MAX_HEALTH = 100;
 const DEFAULT_RESPAWN_SECONDS = 3;
@@ -175,6 +212,12 @@ const WEAPON_SWITCH_SECONDS = 0.35;
 const CADENCE_TOLERANCE_TICKS = 1;
 /** Server projectile pool. Shots in flight, not shots per match. */
 const SERVER_PROJECTILE_CAPACITY = 256;
+/** World-target ids live far above connection ids; u16 space is shared. */
+const WORLD_TARGET_ID_BASE = 40_000;
+const DEFAULT_TARGET_RADIUS_METRES = 0.35;
+const DEFAULT_TARGET_HEIGHT_METRES = 1.8;
+const DEFAULT_TARGET_MAX_HEALTH = 100;
+const DEFAULT_TARGET_RESPAWN_SECONDS = 5;
 
 /**
  * Command buffer management. Draining exactly one command per tick is the
@@ -243,6 +286,17 @@ export class GameServer {
   private readonly aimScratch = { x: 0, y: 0, z: 0 };
   /** Rewind buffer: per-tick capsules for lag-compensated near-field shots. */
   private readonly history = new StateHistory(HISTORY_TICKS);
+  /**
+   * Tick of the newest snapshot actually sent. A fire claim's viewTick is
+   * capped here: a client cannot have SEEN a tick that was never broadcast, so
+   * anything newer is a lie by construction — this closes "aim at the present
+   * while claiming the past window" without needing any latency estimation.
+   */
+  private lastBroadcastTick = -1;
+  /** Server-owned destructible world targets, by id. */
+  private readonly targets = new Map<number, ServerTarget>();
+  /** Target state changed and has not been sent. Same coalescing as room state. */
+  private targetsDirty = false;
   /** Rewind target of the claim being resolved; read by the rewound query. */
   private rewindTick = -1;
   /** Capsules as the shooter saw them (rewound), for the hitscan branch. */
@@ -292,13 +346,33 @@ export class GameServer {
     this.liveQuery = new ServerWorldQuery(
       heightSource,
       () => this.liveCapsules(),
-      (id) => this.peers.get(id)?.damageable ?? null
+      (id) => this.peers.get(id)?.damageable ?? this.targets.get(id)?.damageable ?? null
     );
     this.rewoundQuery = new ServerWorldQuery(
       heightSource,
       () => this.history.capsulesAt(this.rewindTick) ?? [...this.liveCapsules()],
-      (id) => this.peers.get(id)?.damageable ?? null
+      (id) => this.peers.get(id)?.damageable ?? this.targets.get(id)?.damageable ?? null
     );
+    (options.worldTargets ?? []).forEach((spec, index) => {
+      const id = WORLD_TARGET_ID_BASE + index;
+      this.targets.set(id, {
+        id,
+        x: spec.x,
+        // The server's own terrain decides the feet, exactly like a spawn.
+        y: heightSource.sample(spec.x, spec.z),
+        z: spec.z,
+        radius: spec.radiusMetres ?? DEFAULT_TARGET_RADIUS_METRES,
+        height: spec.heightMetres ?? DEFAULT_TARGET_HEIGHT_METRES,
+        maxHealth: Math.max(1, Math.min(255, spec.maxHealth ?? DEFAULT_TARGET_MAX_HEALTH)),
+        respawnTicks: Math.round(
+          (spec.respawnSeconds ?? DEFAULT_TARGET_RESPAWN_SECONDS) / tuning.fixedTimestepSeconds
+        ),
+        name: `world-target-${index + 1}`,
+        damageable: this.createTargetDamageable(id),
+        health: Math.max(1, Math.min(255, spec.maxHealth ?? DEFAULT_TARGET_MAX_HEALTH)),
+        respawnTick: -1,
+      });
+    });
     // The same environment the client's local simulation uses by default. URL
     // wind overrides are ignored by networked clients for the same reason
     // `?weather=` is — see docs/12 §8.1.
@@ -339,6 +413,10 @@ export class GameServer {
       // One packet describes the whole room: its sky and any dials that have been
       // moved, so a late joiner sees it as dialled rather than as its preset alone.
       connection.send(encodeRoomState(this.describeRoom()));
+      // The room's targets, so a late joiner sees the same husks as everyone.
+      if (this.targets.size > 0) {
+        connection.send(encodeWorldTargets(this.describeWorldTargets()));
+      }
     });
 
     transport.onMessage((connection, bytes) => {
@@ -583,10 +661,31 @@ export class GameServer {
     const horizon = Math.min(hitscanHorizonMetres(ammunition), maxRange);
     const sourceId = String(connection.id);
 
+    // Everyone else gets the shot as THEATRE — the server's own origin and
+    // clamped direction, so bystanders see the round the authority fired.
+    // Damage never rides this; it arrives as health in a snapshot, or not at all.
+    const shotEvent = encodeShotFired({
+      shooterId: connection.id,
+      weaponIndex: peer.weaponIndex,
+      sequence: claim.sequence,
+      origin,
+      yawRadians: yaw,
+      pitchRadians: pitch,
+    });
+    for (const other of this.peers.values()) {
+      if (other.connection.id !== connection.id) other.connection.send(shotEvent);
+    }
+
     // NEAR: instant, against the world the shooter was LOOKING AT. The claimed
-    // viewTick is clamped into the rewind window; history the ring no longer
-    // holds falls back to live capsules inside the query — worse, never wrong.
-    this.rewindTick = Math.min(tick, Math.max(claim.viewTick, tick - MAX_REWIND_TICKS));
+    // viewTick is clamped into the rewind window AND to the newest tick this
+    // server ever broadcast — nobody has seen a fresher world than that.
+    // History the ring no longer holds falls back to live capsules inside the
+    // query — worse, never wrong.
+    const newestSeeable = this.lastBroadcastTick < 0 ? tick : Math.min(tick, this.lastBroadcastTick);
+    this.rewindTick = Math.min(
+      newestSeeable,
+      Math.max(claim.viewTick, tick - MAX_REWIND_TICKS)
+    );
     const near = resolveHitscanShot({
       query: this.rewoundQuery,
       sourceId,
@@ -728,7 +827,7 @@ export class GameServer {
   }
 
   /** Live capsules, blended to the stance the simulation holds. Dead players
-   * are not shootable. */
+   * are not shootable, and neither is a destroyed target waiting to stand up. */
   private *liveCapsules(): Generator<CapsuleCandidate> {
     for (const peer of this.peers.values()) {
       if (peer.health === 0) continue;
@@ -743,10 +842,83 @@ export class GameServer {
         height: blendedStanceDimension(motor.state, this.room.tuning, "height"),
       };
     }
+    for (const target of this.targets.values()) {
+      if (target.health === 0) continue;
+      yield {
+        id: target.id,
+        feetX: target.x,
+        feetY: target.y,
+        feetZ: target.z,
+        radius: target.radius,
+        height: target.height,
+        name: target.name,
+      };
+    }
+  }
+
+  /** One place the target packet is described, so join and change cannot drift. */
+  private describeWorldTargets(): WorldTargetState[] {
+    return [...this.targets.values()].map((target) => ({
+      id: target.id,
+      x: target.x,
+      y: target.y,
+      z: target.z,
+      radiusMetres: target.radius,
+      heightMetres: target.height,
+      health: target.health,
+      maxHealth: target.maxHealth,
+    }));
+  }
+
+  /** The room's targets as the wire describes them. Test and tooling surface. */
+  get worldTargetStates(): readonly WorldTargetState[] {
+    return this.describeWorldTargets();
+  }
+
+  /**
+   * Applies damage to a world target on the server's authority — the target
+   * sibling of `damagePlayer`, and like it, the ONLY place target health falls.
+   */
+  damageWorldTarget(targetId: number, amount: number): number | null {
+    const target = this.targets.get(targetId);
+    if (target === undefined || target.health === 0) return null;
+    target.health = Math.max(0, target.health - Math.max(0, Math.round(amount)));
+    if (target.health === 0 && target.respawnTicks > 0) {
+      target.respawnTick = this.room.tick + target.respawnTicks;
+    }
+    this.targetsDirty = true;
+    return target.health;
+  }
+
+  /** The target's health as the shared model's Damageable. */
+  private createTargetDamageable(targetId: number): Damageable {
+    const server = this;
+    return {
+      id: String(targetId),
+      get maxHealth() {
+        return server.targets.get(targetId)?.maxHealth ?? 0;
+      },
+      get health() {
+        return server.targets.get(targetId)?.health ?? 0;
+      },
+      applyDamage(info) {
+        const before = server.targets.get(targetId)?.health ?? 0;
+        const after = server.damageWorldTarget(targetId, info.amount);
+        if (after === null) return { applied: 0, health: before, destroyed: false };
+        return { applied: before - after, health: after, destroyed: after === 0 };
+      },
+      reset() {},
+    };
   }
 
   /** Puts dead players back, at a fresh spawn, with full health and full kit. */
   private respawnDue(): void {
+    for (const target of this.targets.values()) {
+      if (target.respawnTick < 0 || this.room.tick < target.respawnTick) continue;
+      target.respawnTick = -1;
+      target.health = target.maxHealth;
+      this.targetsDirty = true;
+    }
     for (const peer of this.peers.values()) {
       if (peer.respawnTick < 0 || this.room.tick < peer.respawnTick) continue;
       const motor = this.room.get(peer.roomId);
@@ -828,6 +1000,7 @@ export class GameServer {
     // out even on a patch tick where no motor produced a snapshot, or an admin
     // dialling an empty room silently loses the edit.
     this.flushRoomState();
+    this.flushWorldTargets();
 
     this.snapshotPlayers.length = 0;
     for (const peer of this.peers.values()) {
@@ -840,8 +1013,9 @@ export class GameServer {
       });
     }
     if (this.snapshotPlayers.length === 0) return;
+    this.lastBroadcastTick = this.room.tick;
     // Each client needs its own acknowledgement, so the payload is re-encoded
-    // per peer. At 27 bytes a player this is cheaper than a shared buffer plus
+    // per peer. At 28 bytes a player this is cheaper than a shared buffer plus
     // a patch, and it keeps the format single-branch.
     for (const peer of this.peers.values()) {
       peer.connection.send(
@@ -849,6 +1023,14 @@ export class GameServer {
       );
       this.snapshotsSent += 1;
     }
+  }
+
+  /** Sends every target to everyone, if any changed since the last patch tick. */
+  private flushWorldTargets(): void {
+    if (!this.targetsDirty) return;
+    this.targetsDirty = false;
+    const bytes = encodeWorldTargets(this.describeWorldTargets());
+    for (const peer of this.peers.values()) peer.connection.send(bytes);
   }
 
   /** Sends the room to everyone, if it changed since the last patch tick. */

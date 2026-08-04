@@ -360,6 +360,27 @@ export class BallisticProjectileSystem {
     this.results.length = 0;
   }
 
+  /**
+   * Reads every live round's position and velocity, for tracer presentation.
+   * A read-only visit over the typed arrays — no allocation, no influence on
+   * the simulation, which is what keeps it legal under docs/11 §13.3.
+   */
+  visitActiveProjectiles(
+    visitor: (x: number, y: number, z: number, vx: number, vy: number, vz: number) => void
+  ): void {
+    for (let activeIndex = 0; activeIndex < this.activeCount; activeIndex += 1) {
+      const slot = this.activeSlots[activeIndex];
+      visitor(
+        this.px[slot],
+        this.py[slot],
+        this.pz[slot],
+        this.vx[slot],
+        this.vy[slot],
+        this.vz[slot]
+      );
+    }
+  }
+
   drainImpactEvents(visitor: (event: ImpactEvent) => void): void {
     for (const event of this.impactEvents) visitor(event);
     this.impactEvents.length = 0;

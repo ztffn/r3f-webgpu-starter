@@ -28,6 +28,8 @@ export interface CapsuleCandidate {
   readonly feetZ: number;
   readonly radius: number;
   readonly height: number;
+  /** Report/telemetry name. Players default to `player-<id>`. */
+  readonly name?: string;
 }
 
 export class ServerWorldQuery implements WorldQuery {
@@ -122,7 +124,7 @@ export class ServerWorldQuery implements WorldQuery {
         ),
         kind: "target",
         objectId: String(nearest.id),
-        objectName: `player-${nearest.id}`,
+        objectName: nearest.name ?? `player-${nearest.id}`,
         surfaceId: DEFAULT_SURFACE_BY_KIND.target,
         // The whole body along the ray, as the simulation sizes it: a round
         // that keeps enough energy through a diameter of flesh keeps flying.

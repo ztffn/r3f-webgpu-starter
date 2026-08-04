@@ -25,6 +25,10 @@ export const PacketType = {
   SelectWeapon: 7,
   /** Up: the client started a reload. Rounds move when the server's timer says. */
   Reload: 8,
+  /** Down: someone else's accepted shot, for tracer/flash/report presentation. */
+  ShotFired: 9,
+  /** Down: every server-owned world target — position, size, health. */
+  WorldTargets: 10,
 } as const;
 
 /** tick u32 + buttons u16 + yaw i16 + pitch i16. Buttons outgrew a byte when
@@ -523,6 +527,136 @@ export function decodeReload(bytes: Uint8Array): { sequence: number } | null {
   if (bytes.byteLength < RELOAD_BYTES) return null;
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   return { sequence: view.getUint16(1) };
+}
+
+/**
+ * Someone else's accepted shot, going DOWN: `type u8 + shooter u16 + weapon u8 +
+ * sequence u16 + origin 3xf32 + yaw i16 + pitch i16`.
+ *
+ * PRESENTATION ONLY — tracer, muzzle flash, report, impact dust. The origin and
+ * direction are the SERVER'S resolved values (its eye, its clamped aim), so the
+ * theatre a bystander sees is the shot the authority actually fired, not the
+ * claim. A client must never apply damage from this; damage arrives as health
+ * in the snapshot, or not at all. The shooter is excluded from the broadcast —
+ * their own client already played the shot locally.
+ */
+const SHOT_FIRED_BYTES = 22;
+
+export interface ShotFiredEvent {
+  readonly shooterId: number;
+  readonly weaponIndex: number;
+  readonly sequence: number;
+  readonly origin: { readonly x: number; readonly y: number; readonly z: number };
+  readonly yawRadians: number;
+  readonly pitchRadians: number;
+}
+
+export function encodeShotFired(event: ShotFiredEvent): Uint8Array {
+  const buffer = new ArrayBuffer(SHOT_FIRED_BYTES);
+  const view = new DataView(buffer);
+  view.setUint8(0, PacketType.ShotFired);
+  view.setUint16(1, event.shooterId & 0xffff);
+  view.setUint8(3, event.weaponIndex & 0xff);
+  view.setUint16(4, event.sequence & 0xffff);
+  view.setFloat32(6, event.origin.x);
+  view.setFloat32(10, event.origin.y);
+  view.setFloat32(14, event.origin.z);
+  view.setInt16(18, packAngle(event.yawRadians));
+  view.setInt16(20, packAngle(event.pitchRadians));
+  return new Uint8Array(buffer);
+}
+
+/** Null on a short buffer; a hostile server is a peer too. */
+export function decodeShotFired(bytes: Uint8Array): ShotFiredEvent | null {
+  if (bytes.byteLength < SHOT_FIRED_BYTES) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const origin = {
+    x: view.getFloat32(6),
+    y: view.getFloat32(10),
+    z: view.getFloat32(14),
+  };
+  if (![origin.x, origin.y, origin.z].every(Number.isFinite)) return null;
+  return {
+    shooterId: view.getUint16(1),
+    weaponIndex: view.getUint8(3),
+    sequence: view.getUint16(4),
+    origin,
+    yawRadians: unpackAngle(view.getInt16(18)),
+    pitchRadians: unpackAngle(view.getInt16(20)),
+  };
+}
+
+/**
+ * Every server-owned world target, going DOWN, always complete — the same
+ * "no deltas" rule as RoomState, and for the same reason: an absent id in a
+ * delta cannot be told from an unchanged one. `type u8 + count u8 + per target:
+ * id u16 + x f32 + y f32 + z f32 + radius u8 (cm) + height u8 (2 cm units) +
+ * health u8 + maxHealth u8`. Y is the FEET, like players.
+ */
+const WORLD_TARGETS_HEADER_BYTES = 2;
+const BYTES_PER_WORLD_TARGET = 18;
+
+export interface WorldTargetState {
+  readonly id: number;
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly radiusMetres: number;
+  readonly heightMetres: number;
+  readonly health: number;
+  readonly maxHealth: number;
+}
+
+export function encodeWorldTargets(targets: readonly WorldTargetState[]): Uint8Array {
+  const count = Math.min(targets.length, 0xff);
+  const buffer = new ArrayBuffer(WORLD_TARGETS_HEADER_BYTES + count * BYTES_PER_WORLD_TARGET);
+  const view = new DataView(buffer);
+  view.setUint8(0, PacketType.WorldTargets);
+  view.setUint8(1, count);
+  let at = WORLD_TARGETS_HEADER_BYTES;
+  for (let index = 0; index < count; index += 1) {
+    const target = targets[index]!;
+    view.setUint16(at, target.id & 0xffff);
+    view.setFloat32(at + 2, target.x);
+    view.setFloat32(at + 6, target.y);
+    view.setFloat32(at + 10, target.z);
+    view.setUint8(at + 14, Math.max(1, Math.min(255, Math.round(target.radiusMetres * 100))));
+    view.setUint8(at + 15, Math.max(1, Math.min(255, Math.round(target.heightMetres * 50))));
+    view.setUint8(at + 16, Math.max(0, Math.min(255, Math.round(target.health))));
+    view.setUint8(at + 17, Math.max(1, Math.min(255, Math.round(target.maxHealth))));
+    at += BYTES_PER_WORLD_TARGET;
+  }
+  return new Uint8Array(buffer);
+}
+
+export function decodeWorldTargets(bytes: Uint8Array): WorldTargetState[] {
+  if (bytes.byteLength < WORLD_TARGETS_HEADER_BYTES) return [];
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const available = Math.floor(
+    (bytes.byteLength - WORLD_TARGETS_HEADER_BYTES) / BYTES_PER_WORLD_TARGET
+  );
+  const count = Math.min(view.getUint8(1), available);
+  const targets: WorldTargetState[] = [];
+  let at = WORLD_TARGETS_HEADER_BYTES;
+  for (let index = 0; index < count; index += 1) {
+    const x = view.getFloat32(at + 2);
+    const y = view.getFloat32(at + 6);
+    const z = view.getFloat32(at + 10);
+    if ([x, y, z].every(Number.isFinite)) {
+      targets.push({
+        id: view.getUint16(at),
+        x,
+        y,
+        z,
+        radiusMetres: view.getUint8(at + 14) / 100,
+        heightMetres: view.getUint8(at + 15) / 50,
+        health: view.getUint8(at + 16),
+        maxHealth: view.getUint8(at + 17),
+      });
+    }
+    at += BYTES_PER_WORLD_TARGET;
+  }
+  return targets;
 }
 
 export function packetTypeOf(bytes: Uint8Array): number {

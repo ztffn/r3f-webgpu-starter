@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { GameClient } from "../../src/net/GameClient.ts";
-import { GameServer } from "../../src/net/GameServer.ts";
+import { GameServer, type WorldTargetSpec } from "../../src/net/GameServer.ts";
 import { LoopbackNetwork, type LinkConditions } from "../../src/net/LoopbackTransport.ts";
 import {
   BYTES_PER_PLAYER,
@@ -57,6 +57,7 @@ interface SessionOptions {
   readonly allowClientVisualDials?: boolean;
   readonly spawn?: (seat: number) => { x: number; y?: number; z: number };
   readonly respawnSeconds?: number;
+  readonly worldTargets?: readonly WorldTargetSpec[];
 }
 
 /** An options bag rather than positionals: `makeSession(2, {}, 0, true)` told a
@@ -73,6 +74,7 @@ function makeSession(clientCount: number, options: SessionOptions = {}) {
     clampVisualDial,
     allowClientVisualDials: options.allowClientVisualDials ?? false,
     ...(options.spawn !== undefined ? { spawn: options.spawn } : {}),
+    ...(options.worldTargets !== undefined ? { worldTargets: options.worldTargets } : {}),
     ...(options.respawnSeconds !== undefined
       ? { respawnSeconds: options.respawnSeconds }
       : {}),
@@ -509,6 +511,146 @@ test("the near field is lag compensated: a claim lands where the shooter saw the
     session.server.healthOf(2)! < 100,
     "a claim aimed at the seen position missed: the rewind did not happen"
   );
+});
+
+test("an accepted shot is relayed to bystanders as presentation, never to the shooter", () => {
+  const session = makeSession(2, {
+    spawn: (seat) => ({ x: seat === 1 ? 0 : 8, z: 0 }),
+    respawnSeconds: 0,
+  });
+  const towardVictim = -Math.PI / 2;
+  const aimed = (index: number) => ({ buttons: 0, yaw: index === 0 ? towardVictim : 0 });
+  drive(session, 4, aimed);
+
+  session.clients[0]!.fire(towardVictim, 0);
+  drive(session, 2, aimed);
+
+  const seenByVictim: Array<{ shooterId: number; weaponIndex: number; originY: number }> = [];
+  session.clients[1]!.drainRemoteShots((shot) =>
+    seenByVictim.push({
+      shooterId: shot.shooterId,
+      weaponIndex: shot.weaponIndex,
+      originY: shot.origin.y,
+    })
+  );
+  assert.equal(seenByVictim.length, 1, "the bystander never heard the shot");
+  assert.equal(seenByVictim[0]!.shooterId, 1);
+  assert.equal(seenByVictim[0]!.weaponIndex, 0, "the relay must carry the server's weapon");
+  assert.ok(
+    seenByVictim[0]!.originY > 1 && seenByVictim[0]!.originY < 2.2,
+    "the relayed origin must be the shooter's eye, not the feet or a zero"
+  );
+
+  let shooterHeard = 0;
+  session.clients[0]!.drainRemoteShots(() => {
+    shooterHeard += 1;
+  });
+  assert.equal(shooterHeard, 0, "the shooter must not receive its own shot as theatre");
+
+  // A REJECTED claim is not theatre: a dead shooter's spam reaches nobody.
+  session.server.damagePlayer(1, 500);
+  session.clients[0]!.fire(towardVictim, 0);
+  drive(session, 2, aimed);
+  let heardAfterDeath = 0;
+  session.clients[1]!.drainRemoteShots(() => {
+    heardAfterDeath += 1;
+  });
+  assert.equal(heardAfterDeath, 0, "a refused claim was broadcast anyway");
+});
+
+test("world targets are server-owned: shared, damaged by the room, and respawned", () => {
+  const session = makeSession(2, {
+    spawn: (seat) => ({ x: seat === 1 ? 0 : -8, z: 0 }),
+    worldTargets: [{ x: 8, z: 0, respawnSeconds: 1 }],
+  });
+  // Yaw 0 faces -Z; the target stands at +X, so the shooter looks -PI/2.
+  const towardTarget = -Math.PI / 2;
+  const aimed = (index: number) => ({ buttons: 0, yaw: index === 0 ? towardTarget : 0 });
+  drive(session, 4, aimed);
+
+  // Both clients were told the same target on join.
+  for (const client of session.clients) {
+    const targets = client.getWorldTargets();
+    assert.ok(targets !== null && targets.length === 1, "a client never learned the targets");
+    assert.equal(targets[0]!.health, 100);
+    assert.ok(Math.abs(targets[0]!.x - 8) < 1e-3);
+  }
+
+  // One .308 round: the server scores it and BOTH clients see the husk.
+  session.clients[0]!.fire(towardTarget, 0);
+  drive(session, 6, aimed);
+  assert.equal(session.server.worldTargetStates[0]!.health, 0, "the server never scored the hit");
+  for (const client of session.clients) {
+    assert.equal(
+      client.getWorldTargets()?.[0]?.health,
+      0,
+      "a destroyed target did not replicate to every client"
+    );
+  }
+
+  // And it stands back up for everyone on the server's clock, not a keypress.
+  drive(session, 80, aimed);
+  assert.equal(session.server.worldTargetStates[0]!.health, 100);
+  for (const client of session.clients) {
+    assert.equal(client.getWorldTargets()?.[0]?.health, 100, "a respawn did not replicate");
+  }
+});
+
+test("a claim cannot rewind to a tick the server never broadcast", () => {
+  // The exploit this closes: the room knows something the shooter's screen
+  // cannot yet — here, a teleport that happened after the last snapshot went
+  // out. A claim naming that fresher tick must be clamped back to broadcast
+  // truth, or a modified client gets to aim with the server's own knowledge.
+  const session = makeSession(2, {
+    spawn: (seat) => ({ x: seat === 1 ? 0 : 8, z: 0 }),
+    respawnSeconds: 0,
+  });
+  const towardA = -Math.PI / 2;
+  const aimed = (yaw: number) => (index: number) => ({ buttons: 0, yaw: index === 0 ? yaw : 0 });
+  drive(session, 4, aimed(towardA));
+  // Land exactly on a patch tick, so "the last broadcast" is the current tick.
+  while (session.server.room.tick % 3 !== 0) drive(session, 1, aimed(towardA));
+
+  // AFTER that broadcast: the victim is moved well off the old aim line. The
+  // next tick records the new position in the rewind ring but does not
+  // broadcast it (not a patch tick).
+  const victim = session.server.room.get("2")!;
+  victim.teleport({ x: 8, y: victim.state.position.y, z: 6 });
+  const towardB = lookAngles(8, 0, 6).yawRadians;
+  drive(session, 1, aimed(towardB));
+  const unbroadcastTick = session.server.room.tick;
+  assert.notEqual(unbroadcastTick % 3, 0, "the teleport tick must not have been broadcast");
+
+  // Claim: "I was looking at the newest tick" — where the victim stands at B.
+  session.transports[0]!.send(
+    encodeFire({
+      tick: 0,
+      sequence: 1,
+      yawRadians: towardB,
+      pitchRadians: 0,
+      viewTick: unbroadcastTick,
+    })
+  );
+  drive(session, 2, aimed(towardB));
+  assert.equal(session.server.shotsHit, 0, "a never-broadcast tick was honoured as a view");
+  assert.equal(session.server.healthOf(2), 100);
+
+  // Control: once the new position HAS been broadcast and the cadence clock
+  // has run, the same aim hits — so the miss above was the clamp, not the aim.
+  // A raw claim again (sequence 2): the raw sequence-1 claim above already
+  // consumed the number the client's own fire() would use first.
+  drive(session, 80, aimed(towardB));
+  session.transports[0]!.send(
+    encodeFire({
+      tick: 0,
+      sequence: 2,
+      yawRadians: towardB,
+      pitchRadians: 0,
+      viewTick: session.server.room.tick,
+    })
+  );
+  drive(session, 2, aimed(towardB));
+  assert.equal(session.server.shotsHit, 1, "the control shot at broadcast truth missed");
 });
 
 test("a fire claim cannot be replayed, spoofed round, or fired while dead", () => {

@@ -14,6 +14,7 @@ interface StoredCapsule {
   feetZ: number;
   radius: number;
   height: number;
+  name: string | undefined;
 }
 
 const DEFAULT_CAPACITY_TICKS = 32;
@@ -42,7 +43,7 @@ export class StateHistory {
       // capsules a second and none of them should be a fresh allocation.
       let entry = stored[count];
       if (entry === undefined) {
-        entry = { id: 0, feetX: 0, feetY: 0, feetZ: 0, radius: 0, height: 0 };
+        entry = { id: 0, feetX: 0, feetY: 0, feetZ: 0, radius: 0, height: 0, name: undefined };
         stored[count] = entry;
       }
       entry.id = capsule.id;
@@ -51,6 +52,7 @@ export class StateHistory {
       entry.feetZ = capsule.feetZ;
       entry.radius = capsule.radius;
       entry.height = capsule.height;
+      entry.name = capsule.name;
       count += 1;
     }
     this.counts[slot] = count;

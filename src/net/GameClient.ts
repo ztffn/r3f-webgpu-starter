@@ -22,8 +22,10 @@ import {
 import {
   PacketType,
   decodeRoomState,
+  decodeShotFired,
   decodeSnapshot,
   decodeWelcome,
+  decodeWorldTargets,
   encodeCommands,
   encodeFire,
   encodeReload,
@@ -33,6 +35,8 @@ import {
   quantiseCommand,
   wrapPi,
   type RoomState,
+  type ShotFiredEvent,
+  type WorldTargetState,
 } from "./SnapshotCodec.ts";
 import type { ClientTransport } from "./Transport.ts";
 
@@ -159,6 +163,18 @@ export class GameClient {
    */
   private roomStateValue: RoomState | null = null;
   private readonly roomStateListeners = new Set<() => void>();
+  /**
+   * Other players' accepted shots, queued for presentation. Bounded: a client
+   * that never drains (headless, hidden tab) must not grow a battle's worth of
+   * theatre it will never play.
+   */
+  private readonly remoteShotQueue: ShotFiredEvent[] = [];
+  /**
+   * The room's world targets, or null until the server has said. Replaced
+   * wholesale like room state, and for the same `useSyncExternalStore` reason.
+   */
+  private worldTargetsValue: readonly WorldTargetState[] | null = null;
+  private readonly worldTargetListeners = new Set<() => void>();
 
   /**
    * Subscribe / getSnapshot rather than a single callback field, following
@@ -174,6 +190,20 @@ export class GameClient {
   };
 
   readonly getRoomState = (): RoomState | null => this.roomStateValue;
+
+  readonly subscribeWorldTargets = (listener: () => void): (() => void) => {
+    this.worldTargetListeners.add(listener);
+    return () => this.worldTargetListeners.delete(listener);
+  };
+
+  readonly getWorldTargets = (): readonly WorldTargetState[] | null =>
+    this.worldTargetsValue;
+
+  /** Hands each queued remote shot to presentation, exactly once. */
+  drainRemoteShots(visitor: (shot: ShotFiredEvent) => void): void {
+    for (const shot of this.remoteShotQueue) visitor(shot);
+    this.remoteShotQueue.length = 0;
+  }
 
   /** Public so a UI host can adopt the client's tuning instead of its own —
    * a client tuned differently from the server reconciles every tick. */
@@ -322,6 +352,18 @@ export class GameClient {
       if (state === null) return;
       this.roomStateValue = state;
       for (const listener of this.roomStateListeners) listener();
+      return;
+    }
+    if (type === PacketType.ShotFired) {
+      const shot = decodeShotFired(bytes);
+      if (shot === null) return;
+      if (this.remoteShotQueue.length >= 64) this.remoteShotQueue.shift();
+      this.remoteShotQueue.push(shot);
+      return;
+    }
+    if (type === PacketType.WorldTargets) {
+      this.worldTargetsValue = decodeWorldTargets(bytes);
+      for (const listener of this.worldTargetListeners) listener();
       return;
     }
     if (type !== PacketType.Snapshot) return;
@@ -539,6 +581,7 @@ export class GameClient {
 
   dispose(): void {
     this.roomStateListeners.clear();
+    this.worldTargetListeners.clear();
     this.transport.close();
     this.room.dispose();
   }

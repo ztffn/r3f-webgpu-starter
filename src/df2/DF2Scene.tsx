@@ -48,6 +48,12 @@ import { LookSensitivityController } from "../fps/core/LookSensitivityController
 const TestTargets = lazy(() =>
   import("../fps/TestTargets").then((m) => ({ default: m.TestTargets }))
 );
+const NetworkTargets = lazy(() =>
+  import("../fps/NetworkTargets").then((m) => ({ default: m.NetworkTargets }))
+);
+const RemoteFireEffects = lazy(() =>
+  import("../fps/RemoteFireEffects").then((m) => ({ default: m.RemoteFireEffects }))
+);
 const BallisticTestRange = lazy(() =>
   import("../fps/BallisticTestRange").then((m) => ({ default: m.BallisticTestRange }))
 );
@@ -864,7 +870,7 @@ export function DF2Scene({
         </Suspense>
       )}
 
-      {scopeDemo && (
+      {(scopeDemo || (netDemo && gameClient !== null)) && (
         <Suspense fallback={null}>
           <ImpactEffects />
         </Suspense>
@@ -904,7 +910,19 @@ export function DF2Scene({
       )}
 
       {netDemo && gameClient !== null && (
-        <RemotePlayers client={gameClient} atmosphere={atmosphere} />
+        <>
+          <RemotePlayers client={gameClient} atmosphere={atmosphere} />
+          <Suspense fallback={null}>
+            {/* Other players' shots as theatre, and the room's shared targets.
+                Both are replicated presentation over the server's truth. */}
+            <RemoteFireEffects client={gameClient} worldQuery={worldQuery} />
+            <NetworkTargets
+              client={gameClient}
+              worldQuery={worldQuery}
+              atmosphere={atmosphere}
+            />
+          </Suspense>
+        </>
       )}
 
       {/* Kept opt-in while the existing terrain visual work remains the default.

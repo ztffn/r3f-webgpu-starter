@@ -128,6 +128,16 @@ class GameRoom extends Room {
       weatherIndex,
       clampVisualDial,
       allowClientVisualDials: ADMIN,
+      // A shared target ladder out from the spawn ring, SERVER-authored so
+      // every player shoots the same figures and sees the same husks. Ranges
+      // echo the offline contrast ladder; feet land on the real terrain.
+      worldTargets: [
+        { x: 4, z: -15 },
+        { x: -6, z: -35 },
+        { x: 8, z: -70 },
+        { x: -10, z: -140 },
+        { x: 3, z: -300 },
+      ],
     });
     console.log(`[${this.roomId}] weather: ${WEATHER_PRESET_IDS[weatherIndex]}`);
     if (WEATHER_ROTATE) {

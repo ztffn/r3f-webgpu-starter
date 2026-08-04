@@ -158,11 +158,15 @@ and hold over for drop**, exactly as offline. The numbers — per-weapon damage,
 full-damage ranges, what penetrates what — are in the
 [combat handbook](./docs/guides/combat-handbook.md).
 
-Two honest caveats. Ammunition, reload timing and fire rate are enforced by the server
+You can also *see and hear* each other shoot: every accepted round is relayed and
+re-flown on your screen as a tracer with a muzzle flash and a report, kicking real
+dust where it lands. And the room shares a ladder of shootable targets placed by the
+server — knock one down and it falls in both windows, then stands back up for
+everyone on the server's clock.
+
+One honest caveat. Ammunition, reload timing and fire rate are enforced by the server
 (an empty magazine online is genuinely empty), and the `?ammo=` / wind URL experiments
-are ignored online so both players fight under the same physics. And you cannot yet
-*see* the other player shooting — no tracer, no muzzle flash, no crack from their
-rifle. Their hits on you are real; the theatre of it is still to come.
+are ignored online so both players fight under the same physics.
 
 ## FAQ
 
@@ -175,9 +179,10 @@ rifle. Their hits on you are real; the theatre of it is still to come.
   you did not lead; the round was still in the air when you looked away — at 600 m a
   .308 takes the best part of a second; or your magazine was empty and the server
   refused the shot. Dead players are also not shootable while they wait to respawn.
-- **I killed a *practice target* and the other window didn't notice.** Practice targets
-  (`&targets=1`) are still local to each browser — only players have a server owner so
-  far. World-object authority is queued work.
+- **I killed a *practice target* and the other window didn't notice.** The room's own
+  target ladder IS shared — those husks replicate. What stays local is the offline
+  contrast ladder (`&targets=1`), which each client places relative to its own camera
+  and therefore cannot be shared truth.
 - **We see different weather.** You should not anymore: networked, the room owns the
   weather and every visual dial, precisely because fog is concealment and two players
   under different fog is a fairness bug. If two windows genuinely disagree, that is a
@@ -195,8 +200,6 @@ Being clear about this is more useful than a feature list.
 - **Nobody dies on screen.** Health falls, the kill is real, the victim respawns — but
   there is no death animation, no kill feed, no score. The death clips exist and wait
   on presentation work.
-- **You cannot see or hear the other player's fire.** No remote tracers, muzzle flash,
-  or gunshot audio yet; only the consequences replicate.
 - **There are no opponents.** No AI, no bots, nothing that shoots back on its own.
 - **Grass concealment is not a mechanic yet.** Grass genuinely hides you from a human
   looking at a screen — a prone player measures zero visible pixels even through a scope at

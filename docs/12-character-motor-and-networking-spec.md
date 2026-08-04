@@ -352,6 +352,32 @@ silently and counted:
 - **Reload** (3 bytes): `type u8 + sequence u16`. Select and reload share one
   sequence counter; the stream is ordered, so "consumed already" is one number.
 
+And three DOWN messages (2026-08-04):
+
+- **ShotFired** (22 bytes): `type u8 + shooter u16 + weapon u8 + sequence u16 +
+  origin 3×f32 + yaw i16 + pitch i16`, broadcast to everyone EXCEPT the shooter
+  on every ACCEPTED claim — a refused claim is not theatre. It carries the
+  server's own resolved origin and clamped direction, so bystanders watch the
+  round the authority actually fired. Presentation only (`RemoteFireEffects`
+  flies a damage-zero round on the shared model for the tracer, flash, report
+  and impact dust); damage never rides this packet.
+- **WorldTargets** (2 + 18/target): every server-owned target — id, feet
+  position, capsule size, health, max health — always complete, on join and on
+  change, coalesced to the patch tick. Same no-deltas rule as RoomState and for
+  the same reason. The targets are SERVER-authored (`worldTargets` option): the
+  offline contrast ladder places itself relative to each client's camera, which
+  can never be shared truth. Server targets ride the same live and rewound
+  queries as player capsules, die through `damageWorldTarget` (the only place
+  target health falls), and respawn on the server's clock. The client's
+  `NetworkTargets` renders them and registers local presentation-only colliders
+  whose `applyDamage` applies NOTHING — a local hit flashes and kicks dust; the
+  husk appears when the packet says so.
+- The rewind bound got a second wall: a claim's viewTick is also clamped to the
+  **newest tick ever broadcast** — nobody can have seen a fresher world than the
+  last snapshot sent, so "aim with the server's own knowledge" (a teleport the
+  packet has not carried yet) is structurally closed, no latency estimation
+  needed.
+
 **The server owns the loadout record**: equipped index, per-weapon magazines and
 reserves, per-weapon cadence clocks (per weapon, or a sniper shot would lend its
 75-tick cooldown to the sidearm you switch to), a 0.35 s switch clock mirroring

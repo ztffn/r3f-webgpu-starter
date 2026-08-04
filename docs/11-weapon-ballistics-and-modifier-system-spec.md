@@ -697,14 +697,26 @@ the projectile integrator against live state beyond it. Health moves only in
 `GameServer.damagePlayer` and reaches clients only in snapshots. docs/12 §8.3 is
 the wire-level description.
 
+Replicated presentation is in (2026-08-04): every accepted shot is relayed to
+bystanders as a `ShotFired` packet and re-flown client-side at damage zero for
+tracer, flash, report, and impact effects — docs/12 §8.3. Server-owned world
+targets replicate the same way.
+
 Still to replicate or reconstruct, in this contract's terms:
 
-- deterministic instance seed and shot sequence, so the server can recompute the
-  dispersion sample itself and stop trusting (and clamping) the claimed
-  direction;
+- **Server-side dispersion replay — deliberately NOT built, and here is the
+  honest blocker.** Recomputing the deterministic sample needs more than the
+  seed and sequence (§15.1): the claimed direction is `sightline + sway +
+  recoil + scope turret + dispersion`, and sway, recoil recovery, and turret
+  zero are CONTINUOUS client-side state the wire does not carry. Replaying the
+  sample without them reconstructs the wrong cone centre. What would unlock it:
+  per-player instance seeds derived from the server-assigned player id (today
+  every client uses `LOCAL_PLAYER_SEED`), plus replicating turret state and
+  recomputing sway/recoil server-side from the command stream — a weapon-state
+  replication project of its own. Until then the 0.2 rad clamp remains the
+  bound on the lie, sized to the legitimate envelope (max recoil + sway +
+  long-zero holdover + spread ≈ 0.15 rad).
 - resolved weapon/ammunition revision, once attachments/perks exist;
-- authoritative impact/tracer presentation for remote clients — today only the
-  health consequence replicates, not the bang;
 - server-owned inventory: which weapons a peer may select at all.
 
 The local player may predict their own projectiles. Remote clients should

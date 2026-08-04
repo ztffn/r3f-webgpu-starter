@@ -113,8 +113,14 @@ are dropped silently. The `?ammo=` and wind URL experiments from offline play ar
 ignored online, and the room decides the weather for everyone — fog is
 concealment here, so nobody gets a clearer sky than their opponent.
 
-What is missing online today, so it is not mistaken for a bug: you cannot see or
-hear the other player's shots (no tracers, flash, or report — only the hits are
-real), nobody plays a death animation, and the practice targets are still local
-to each browser. The current honesty list lives in
+You can see and hear the fight, too: every accepted shot in the room is relayed
+to bystanders and re-flown as presentation — tracer, muzzle flash, report, and
+impact dust where the real round landed. The server also places a shared ladder
+of destructible targets on the terrain; their husks and respawns replicate to
+everyone.
+
+What is missing online today, so it is not mistaken for a bug: nobody plays a
+death animation yet (health falls, the kill is real, the soldier just does not
+drop), and the offline practice ladder (`&targets=1`) remains per-browser — the
+shared targets are the ones the server placed. The current honesty list lives in
 [`PLAYING.md`](../../PLAYING.md#what-is-not-here-yet).

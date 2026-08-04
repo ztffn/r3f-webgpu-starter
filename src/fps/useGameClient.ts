@@ -29,9 +29,14 @@ function readServerUrl(): string {
  * How this client should get into a room, from the URL.
  *
  * The lobby navigates to /play with these already set, so the game does not need
- * to know the lobby exists: `&room=` for a specific room (a join code has already
- * been resolved to one), `&private=1` to host a new one, `&input=touch` to match
- * in the touch queue.
+ * to know the lobby exists: `&room=` for a specific room (a join code, or a
+ * private game the server just created, has already been resolved to one), and
+ * `&input=touch` to match in the touch queue.
+ *
+ * There is deliberately NO "host a private game" parameter. Hosting one is a
+ * supporter capability, and a URL the client controls cannot check a capability —
+ * the room is created by POST /api/private-game, which can, and the client
+ * arrives here with `&room=` like any other join.
  */
 function readJoinOptions(): ColyseusJoinOptions {
   const params = new URLSearchParams(window.location.search);
@@ -41,7 +46,6 @@ function readJoinOptions(): ColyseusJoinOptions {
     // unidentified client play, it just cannot credit the session to anyone.
     token: getToken(),
     roomId: params.get("room"),
-    createPrivate: params.get("private") === "1",
     inputClass: input === "touch" ? "touch" : "desktop",
     label: params.get("label"),
   };

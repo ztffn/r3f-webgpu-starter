@@ -25,10 +25,14 @@ export interface ColyseusJoinOptions {
    * documented dev URL predates accounts and must keep working.
    */
   token?: string | null;
-  /** Join this exact room instead of matchmaking. How a join code is honoured. */
+  /**
+   * Join this exact room instead of matchmaking.
+   *
+   * How a join code is honoured, and how a private game is entered: the server
+   * creates that room and hands back its id, because hosting one is a capability
+   * and a client cannot check its own.
+   */
   roomId?: string | null;
-  /** Create a private room rather than joining a public one. */
-  createPrivate?: boolean;
   /** Which queue to match in. No cross-play — the server filters on it. */
   inputClass?: "desktop" | "touch";
   /** Free-text label for a room this client creates. */
@@ -60,18 +64,17 @@ export class ColyseusClientTransport implements ClientTransport {
     }
     const joinOptions = {
       inputClass: options.inputClass ?? "desktop",
-      ...(options.createPrivate === true ? { visibility: "private" } : {}),
       ...(options.label !== null && options.label !== undefined ? { label: options.label } : {}),
     };
-    // Three ways in, and they are genuinely different: a code means one specific
-    // room, "create private" must never land in someone else's game, and the
-    // default is ordinary matchmaking.
+    // Two ways in: a room id means one specific room — a resolved join code, or a
+    // private game the server created after checking the caller's tier — and the
+    // default is ordinary matchmaking. Creating a private room is NOT one of them;
+    // it is a capability, so it happens over POST /api/private-game where the
+    // account is known, and this transport only ever joins the result by id.
     const joining =
       options.roomId !== null && options.roomId !== undefined && options.roomId !== ""
         ? client.joinById(options.roomId, joinOptions)
-        : options.createPrivate === true
-          ? client.create(GAME_ROOM, joinOptions)
-          : client.joinOrCreate(GAME_ROOM, joinOptions);
+        : client.joinOrCreate(GAME_ROOM, joinOptions);
     void joining
       .then((room) => {
         // close() during a pending join: leaving on resolve is what keeps an

@@ -11,11 +11,15 @@
 // the client.
 
 import express, { type Request, type Response, type Router } from "express";
+import { auth } from "@colyseus/auth";
 import { matchMaker } from "@colyseus/core";
+import { effectiveTier } from "../../src/account/accountTypes.ts";
 import { normaliseJoinCode, type ServerListing } from "../../src/account/lobby.ts";
+import { can } from "../../src/account/tiers.ts";
 import { GAME_ROOM } from "../../src/net/ColyseusProtocol.ts";
+import { accountOf, requireAccount } from "./authMiddleware.ts";
 import { LEADERBOARD_COLUMNS, type AccountRepository } from "./repository.ts";
-import type { RoomMetadata } from "./roomMetadata.ts";
+import { readRoomOptions, type RoomMetadata } from "./roomMetadata.ts";
 
 export interface LobbyApiDeps {
   repository: AccountRepository;
@@ -93,6 +97,53 @@ export function createLobbyRouter({ repository }: LobbyApiDeps): Router {
       res.status(503).json({ error: "matchmaker_unavailable", detail: String(error) });
     }
   });
+
+  /**
+   * Host a private game.
+   *
+   * The room is created HERE, server-side, because `hostPrivateGame` is a
+   * supporter capability and this is the only layer that knows who the caller
+   * is. It used to be a client option — `?private=1` reached `onCreate`, which
+   * honoured `visibility: "private"` from untrusted room options — so an
+   * advertised paid perk was enforced by nothing but a hidden button.
+   *
+   * Mirrors /join-code deliberately: resolve on the server, hand the client a
+   * room id, and let it navigate to /play with `&room=`. The game module still
+   * knows nothing about tiers or about a lobby.
+   *
+   * **Residual limitation, stated rather than papered over:** a hand-rolled
+   * Colyseus client can still pass `visibility: "private"` to `joinOrCreate` and
+   * get a private room. Sealing that needs room-scope authentication, which
+   * phase 6 deliberately left optional so every documented dev URL keeps working
+   * (design record §5.4). This closes the product surface, not the protocol.
+   */
+  router.post(
+    "/private-game",
+    [auth.middleware(), requireAccount(repository)],
+    async (req: Request, res: Response) => {
+      const account = accountOf(req);
+      const tier = effectiveTier(account.tier, account.tierExpiresAt, new Date());
+      if (!can(tier, "hostPrivateGame")) {
+        return void res.status(403).json({ error: "needs_supporter" });
+      }
+      // The same clamping the room applies, run here so a label that the room
+      // would reject cannot reach the matchmaker either.
+      const { inputClass, label } = readRoomOptions(req.body as Record<string, unknown>);
+      try {
+        const room = await matchMaker.createRoom(GAME_ROOM, {
+          visibility: "private",
+          inputClass,
+          ...(label !== null ? { label } : {}),
+        });
+        // The code is NOT returned. It reaches the host the way it reaches
+        // everyone else — the ROOM_INFO message on join — so there is one path
+        // for it and it never lands in a fetch response someone might log.
+        res.json({ roomId: room.roomId });
+      } catch (error) {
+        res.status(503).json({ error: "matchmaker_unavailable", detail: String(error) });
+      }
+    }
+  );
 
   /**
    * A leaderboard.

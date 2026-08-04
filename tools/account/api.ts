@@ -9,18 +9,12 @@
 // tier. A request is the only thing that can be trusted here; what the client
 // believes about its own tier is not evidence.
 
-import express, {
-  type NextFunction,
-  type Request,
-  type Response,
-  type Router,
-  type RequestHandler,
-} from "express";
+import express, { type Request, type Response, type Router } from "express";
 import { auth } from "@colyseus/auth";
-import { effectiveTier, type Account } from "../../src/account/accountTypes.ts";
+import { effectiveTier } from "../../src/account/accountTypes.ts";
 import { validateCharacter, coerceCharacter } from "../../src/account/characters.ts";
-import { TIERS } from "../../src/account/tiers.ts";
-import { accountFromToken } from "./authSettings.ts";
+import { TIERS, type TierId } from "../../src/account/tiers.ts";
+import { accountOf, requireAccount } from "./authMiddleware.ts";
 import type { AccountRepository } from "./repository.ts";
 
 export interface ApiDeps {
@@ -28,43 +22,21 @@ export interface ApiDeps {
   providers: string[];
   /** Whether a real payment provider is wired. Mirrors VITE_CHECKOUT. */
   checkoutEnabled: boolean;
-}
-
-/** What `requireAccount` hangs on the request for the handler behind it. */
-type AuthenticatedRequest = Request & { account?: Account };
-
-/**
- * Resolve the token to a LIVE account row, or refuse.
- *
- * Chained after `auth.middleware()`, which verifies the signature and leaves the
- * payload on `req.auth`. This is the second half, and it is deliberately not
- * optional: the token carries only `{ id }`, so a rename, a tier change or a
- * deleted account has to be read from the database on every request rather than
- * believed from the token. Three routes were each doing this inline, which is
- * three chances for one of them to trust the payload instead.
- */
-function requireAccount(repository: AccountRepository): RequestHandler {
-  // Async, with no try/catch: Express 5 forwards a rejected handler to the error
-  // handler, which is the same contract the routes below already rely on.
-  return async (req: Request, res: Response, next: NextFunction) => {
-    const account = await accountFromToken(repository, (req as { auth?: unknown }).auth);
-    if (account === null) return void res.status(401).json({ error: "account_not_found" });
-    (req as AuthenticatedRequest).account = account;
-    next();
-  };
-}
-
-/** The account `requireAccount` resolved. Only valid behind it. */
-function accountOf(req: Request): Account {
-  const account = (req as AuthenticatedRequest).account;
-  if (account === undefined) throw new Error("route is missing requireAccount");
-  return account;
+  /**
+   * `DF2_ADMIN=1`. Opens the dev-only tier grant below.
+   *
+   * The same switch the room-wide visual dials use, rather than a second one:
+   * both answer "is this a development server somebody is driving", and two
+   * variables would eventually be set inconsistently on the box that matters.
+   */
+  adminEnabled: boolean;
 }
 
 export function createApiRouter({
   repository,
   providers,
   checkoutEnabled,
+  adminEnabled,
 }: ApiDeps): Router {
   const router = express.Router();
   router.use(express.json({ limit: "16kb" }));
@@ -84,6 +56,9 @@ export function createApiRouter({
     res.json({
       providers,
       checkoutEnabled,
+      // So the supporter page can offer the dev grant instead of guessing from a
+      // build-time flag. Off in production, where the button must not exist.
+      grantEnabled: adminEnabled,
       tiers: TIERS.map((tier) => ({ id: tier.id, priceMinor: tier.priceMinor })),
     });
   });
@@ -152,6 +127,51 @@ export function createApiRouter({
     const character = coerceCharacter(req.body);
     await repository.saveCharacter(account.id, character);
     res.json({ character });
+  });
+
+  /**
+   * Grant yourself a tier. DEVELOPMENT ONLY.
+   *
+   * This is the grant path the design record's §2.4 promised: the entitlement
+   * model is real and the payment provider is not, so something has to be able to
+   * put an account on the supporter tier in order to exercise the gates. When a
+   * checkout exists it replaces this handler and no schema changes.
+   *
+   * Three properties, each deliberate:
+   *
+   * - **404, not 403, when `DF2_ADMIN` is off.** A route that answers "forbidden"
+   *   tells a prober that a self-service tier grant exists on this deployment.
+   *   Absent is a better answer than refused.
+   * - **Medals are untouchable.** Only `setTier` is called. Medals come from play
+   *   alone (§6), and the one endpoint that hands out entitlements is exactly
+   *   where that line would get crossed by accident.
+   * - **Expiry is REQUIRED for a paid tier.** A supporter grant with no end date
+   *   is indistinguishable from a permanent one, and `effectiveTier` would have
+   *   nothing to lapse — so the thing this endpoint exists to test would never be
+   *   tested.
+   */
+  router.post("/me/tier", authenticated, async (req: Request, res: Response) => {
+    if (!adminEnabled) return void res.status(404).json({ error: "not_found" });
+    const account = accountOf(req);
+    const body = req.body as { tier?: unknown; days?: unknown };
+    const tier = body.tier;
+    if (tier !== "guest" && tier !== "enlisted" && tier !== "supporter") {
+      return void res.status(400).json({ error: "unknown_tier" });
+    }
+    const paid = TIERS.find((entry) => entry.id === tier)?.priceMinor ?? 0;
+    const days = typeof body.days === "number" && Number.isFinite(body.days) ? body.days : 30;
+    const expiresAt =
+      paid > 0 ? new Date(Date.now() + days * 86_400_000).toISOString() : null;
+    await repository.setTier(account.id, tier satisfies TierId, expiresAt);
+    const updated = await repository.findById(account.id);
+    res.json({
+      tier,
+      tierExpiresAt: expiresAt,
+      // Echoed back resolved, so a caller granting an already-expired tier sees
+      // immediately that it did not take effect.
+      effectiveTier: effectiveTier(tier, expiresAt, new Date()),
+      callsign: updated?.callsign ?? account.callsign,
+    });
   });
 
   /** Anyone's public profile. No email, no session state — see PublicProfile. */

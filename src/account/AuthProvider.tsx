@@ -72,7 +72,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     accountClient
       .config()
       .then(setConfig)
-      .catch(() => setConfig({ providers: [], checkoutEnabled: false }));
+      .catch(() => setConfig({ providers: [], checkoutEnabled: false, grantEnabled: false }));
   }, []);
 
   const signOut = useCallback(() => accountClient.signOut(), []);

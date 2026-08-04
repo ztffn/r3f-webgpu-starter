@@ -34,6 +34,8 @@ export interface Me {
 export interface ServerConfig {
   providers: string[];
   checkoutEnabled: boolean;
+  /** `DF2_ADMIN=1` on the server: the dev tier grant is reachable. */
+  grantEnabled: boolean;
 }
 
 /** Thrown by every call in this module so callers have one thing to catch. */
@@ -187,6 +189,19 @@ export const accountClient = {
     return await request<Me>("/api/me");
   },
 
+  /**
+   * Grant yourself a tier. Only reachable on a server started with `DF2_ADMIN=1`
+   * — elsewhere the route reports 404, which is why the supporter page shows the
+   * control only when `config.grantEnabled` says so.
+   */
+  async grantTier(tier: TierId, days?: number): Promise<TierId> {
+    const result = await request<{ effectiveTier: TierId }>("/api/me/tier", {
+      method: "POST",
+      body: JSON.stringify(days === undefined ? { tier } : { tier, days }),
+    });
+    return result.effectiveTier;
+  },
+
   async setCallsign(callsign: string): Promise<string> {
     const result = await request<{ callsign: string }>("/api/me", {
       method: "PATCH",
@@ -221,6 +236,21 @@ export const accountClient = {
     const result = await request<{ roomId: string }>("/api/join-code", {
       method: "POST",
       body: JSON.stringify({ code }),
+    });
+    return result.roomId;
+  },
+
+  /**
+   * Create a private game and get its room id.
+   *
+   * The server checks `hostPrivateGame` before creating anything, so this is the
+   * gate rather than the button that hides it. The join code is not in the
+   * response — it arrives in the HUD over the room's own ROOM_INFO message.
+   */
+  async hostPrivateGame(inputClass?: string): Promise<string> {
+    const result = await request<{ roomId: string }>("/api/private-game", {
+      method: "POST",
+      body: JSON.stringify(inputClass === undefined ? {} : { inputClass }),
     });
     return result.roomId;
   },

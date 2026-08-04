@@ -33,6 +33,18 @@ const describeJoin = (failure: unknown) => {
   return "Could not join.";
 };
 
+/**
+ * A 403 here is the server's capability check, not a bug.
+ *
+ * It is reachable even though the button is hidden without the perk, because the
+ * gate is the endpoint and the button is only the courtesy — a lapsed supporter
+ * holding a stale page is exactly the case that produces it.
+ */
+const describeHost = (failure: unknown) =>
+  failure instanceof AccountError && failure.status === 403
+    ? "Hosting a private game is a supporter perk."
+    : "Could not start a game.";
+
 export function Lobby() {
   useDocumentTitle("Play");
   const { can } = useAuth();
@@ -45,7 +57,11 @@ export function Lobby() {
   // to notice they had opened the wrong one.
   const [params] = useSearchParams();
   const [code, setCode] = useState(() => normaliseJoinCode(params.get("code") ?? ""));
+  // Two instances rather than one with two kinds: they fail for unrelated reasons
+  // and their messages belong beside different controls, and a single `error`
+  // would print "no game with that code" under the host button.
   const { busy, error: codeError, run } = useAsyncAction<"join">(describeJoin);
+  const host = useAsyncAction<"host">(describeHost);
 
   const refresh = useCallback(async () => {
     try {
@@ -90,6 +106,15 @@ export function Lobby() {
       navigate(`/play?scene=scope&motor=1&net=1&room=${encodeURIComponent(roomId)}`);
     });
   };
+
+  // The server creates the room after checking the capability, so this is a
+  // request rather than a link. A link with `&private=1` used to do it, which
+  // meant the supporter perk was enforced by nothing but this button's absence.
+  const onHost = () =>
+    void host.run("host", async () => {
+      const roomId = await accountClient.hostPrivateGame();
+      navigate(`/play?scene=scope&motor=1&net=1&room=${encodeURIComponent(roomId)}`);
+    });
 
   return (
     <>
@@ -218,13 +243,20 @@ export function Lobby() {
                 The code appears in the HUD once you are in, with a button to copy
                 it or a link to send.
               </p>
-              <Link
+              {host.error !== null && (
+                <p className="field-error" role="alert" data-dev="host-private-error">
+                  {host.error}
+                </p>
+              )}
+              <button
+                type="button"
                 className="btn btn-ghost"
                 data-dev="host-private"
-                to="/play?scene=scope&motor=1&net=1&private=1"
+                disabled={host.busy !== null}
+                onClick={onHost}
               >
-                Host a private game
-              </Link>
+                {host.busy !== null ? "Opening…" : "Host a private game"}
+              </button>
             </>
           ) : (
             <p className="auth-note">

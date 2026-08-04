@@ -38,6 +38,15 @@ const DB_FILE = process.env.DF2_DB ?? "./account.db";
  */
 const CHECKOUT_ENABLED = process.env.DF2_CHECKOUT === "1";
 
+/**
+ * `DF2_ADMIN=1` — this is a development server somebody is driving.
+ *
+ * Opens the dev-only tier grant. The same variable the room-wide visual dials
+ * already use, because they answer the same question and two switches would
+ * eventually disagree on the one box where it matters.
+ */
+const ADMIN_ENABLED = process.env.DF2_ADMIN === "1";
+
 export async function mountAccounts(app: Application): Promise<MountedAccounts> {
   const db = openDatabase(DB_FILE);
   const { from, to } = await migrate(db);
@@ -56,7 +65,15 @@ export async function mountAccounts(app: Application): Promise<MountedAccounts> 
   // The package's routes: /auth/login, /register, /anonymous, /userdata,
   // /forgot-password, /reset-password, /confirm-email, plus provider callbacks.
   app.use(auth.prefix, auth.routes());
-  app.use("/api", createApiRouter({ repository, providers, checkoutEnabled: CHECKOUT_ENABLED }));
+  app.use(
+    "/api",
+    createApiRouter({
+      repository,
+      providers,
+      checkoutEnabled: CHECKOUT_ENABLED,
+      adminEnabled: ADMIN_ENABLED,
+    })
+  );
   // Server browser, join codes and leaderboards. A separate router because these
   // read the matchmaker rather than the database.
   app.use("/api", createLobbyRouter({ repository }));
@@ -64,7 +81,8 @@ export async function mountAccounts(app: Application): Promise<MountedAccounts> 
   console.log(
     `[accounts] ${DB_FILE} — auth at ${auth.prefix}, api at /api` +
       (providers.length > 0 ? `, oauth: ${providers.join(", ")}` : ", oauth: none configured") +
-      (CHECKOUT_ENABLED ? ", CHECKOUT LIVE" : "")
+      (CHECKOUT_ENABLED ? ", CHECKOUT LIVE" : "") +
+      (ADMIN_ENABLED ? ", ADMIN (dev tier grant open)" : "")
   );
 
   return { db, repository, providers };

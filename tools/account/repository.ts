@@ -375,13 +375,10 @@ export class AccountRepository {
   async publicProfile(userId: number): Promise<PublicProfile | null> {
     const row = await this.findById(userId);
     if (row === undefined) return null;
-    return {
-      id: row.id,
-      callsign: row.callsign,
-      tier: row.tier,
-      career: await this.career(userId),
-      medals: await this.medals(userId),
-    };
+    // Together, not in sequence: neither read depends on the other, and only the
+    // existence check above had to come first.
+    const [career, medals] = await Promise.all([this.career(userId), this.medals(userId)]);
+    return { id: row.id, callsign: row.callsign, tier: row.tier, career, medals };
   }
 
   async character(userId: number): Promise<Character> {

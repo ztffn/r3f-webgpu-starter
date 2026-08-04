@@ -91,16 +91,29 @@ export function createApiRouter({
   /** The caller's own account, with everything the profile page needs. */
   router.get("/me", authenticated, async (req: Request, res: Response) => {
     const account = accountOf(req);
-    await repository.touch(account.id);
+    // Not awaited: `last_seen_at` is bookkeeping nothing in this response reads,
+    // and the page should not wait a round trip for it. Caught explicitly,
+    // because an unhandled rejection takes the server down.
+    void repository.touch(account.id).catch((error: unknown) => {
+      console.warn(`[api] could not touch account ${account.id}:`, error);
+    });
+    // Three independent reads, issued together. Serial awaits cost nothing
+    // measurable on local SQLite and three round trips each on the Postgres this
+    // is meant to run against.
+    const [career, medals, character] = await Promise.all([
+      repository.career(account.id),
+      repository.medals(account.id),
+      repository.character(account.id),
+    ]);
     res.json({
       account,
       // Resolved here so the client never has to reimplement expiry. A lapsed
       // supporter reads as "enlisted" everywhere, including in the UI that
       // decides which controls to enable.
       effectiveTier: effectiveTier(account.tier, account.tierExpiresAt, new Date()),
-      career: await repository.career(account.id),
-      medals: await repository.medals(account.id),
-      character: await repository.character(account.id),
+      career,
+      medals,
+      character,
     });
   });
 

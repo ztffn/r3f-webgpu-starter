@@ -21,6 +21,7 @@ import {
   type Character,
 } from "../../src/account/characters.ts";
 import type { LeaderboardUnit } from "../../src/account/lobby.ts";
+import { earnedMedals } from "../../src/account/medals.ts";
 import type { TierId } from "../../src/account/tiers.ts";
 import type { AccountDb, UserRow } from "./database.ts";
 
@@ -368,6 +369,25 @@ export class AccountRepository {
       .execute();
   }
 
+  /**
+   * Set an account's tier and when it lapses.
+   *
+   * The ONLY writer of an entitlement. `expiresAt` is stored as given and read
+   * back through `effectiveTier`, which fails closed on an unparseable date — so
+   * a bad value downgrades the account rather than granting forever.
+   *
+   * Nothing here touches medals: those come only from play (design record §6),
+   * and keeping the two writers separate is what makes that structural rather
+   * than a convention somebody has to remember.
+   */
+  async setTier(userId: number, tier: TierId, expiresAt: string | null): Promise<void> {
+    await this.db
+      .updateTable("users")
+      .set({ tier, tier_expires_at: expiresAt })
+      .where("id", "=", userId)
+      .execute();
+  }
+
   async touch(userId: number): Promise<void> {
     await this.db
       .updateTable("users")
@@ -400,6 +420,37 @@ export class AccountRepository {
       .orderBy("awarded_at", "desc")
       .execute();
     return rows.map((row) => ({ medalId: row.medal_id, awardedAt: row.awarded_at }));
+  }
+
+  /**
+   * Award every medal this account's career now qualifies for, and report the
+   * ones that were not already held.
+   *
+   * Evaluated from the stored career rather than from the session that just
+   * ended, so a medal is a statement about the record and not about one match —
+   * and so a missed award (a crash between writing the session and awarding)
+   * corrects itself the next time anyone plays.
+   *
+   * The existing ids are read first rather than relying on the unique index
+   * alone, because "which are new" is what the caller wants to announce, and
+   * ON CONFLICT DO NOTHING cannot tell you that.
+   */
+  async syncMedals(userId: number): Promise<string[]> {
+    const career = await this.career(userId);
+    const earned = earnedMedals(career);
+    if (earned.length === 0) return [];
+    const held = new Set((await this.medals(userId)).map((medal) => medal.medalId));
+    const fresh = earned.filter((id) => !held.has(id));
+    if (fresh.length === 0) return [];
+    const awarded = nowIso();
+    await this.db
+      .insertInto("medals")
+      .values(fresh.map((id) => ({ user_id: userId, medal_id: id, awarded_at: awarded })))
+      // Belt and braces against two sessions ending at once: the unique index is
+      // the real guarantee, and without this the race surfaces as a 500.
+      .onConflict((oc) => oc.columns(["user_id", "medal_id"]).doNothing())
+      .execute();
+    return fresh;
   }
 
   async publicProfile(userId: number): Promise<PublicProfile | null> {

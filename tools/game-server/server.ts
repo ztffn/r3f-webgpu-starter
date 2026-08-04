@@ -264,8 +264,19 @@ class GameRoom extends Room {
     this.sessions.delete(client.sessionId);
     if (session !== undefined && session.accountId !== null) {
       const seconds = (Date.now() - session.joinedAtMs) / 1000;
+      const accountId = session.accountId;
       void accounts.repository
-        .recordSession(session.accountId, seconds)
+        .recordSession(accountId, seconds)
+        // Medals are evaluated AFTER the session is written and from the stored
+        // career, so the match that crosses a threshold is the one that awards
+        // it. Chained rather than fired alongside: run together, the medal check
+        // would read the career from before this session.
+        .then(async () => {
+          const fresh = await accounts.repository.syncMedals(accountId);
+          if (fresh.length > 0) {
+            console.log(`[${this.roomId}] account ${accountId} earned ${fresh.join(", ")}`);
+          }
+        })
         .catch((error: unknown) => console.warn(`[${this.roomId}] career write failed:`, error));
     }
 

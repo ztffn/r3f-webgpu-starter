@@ -152,9 +152,29 @@ export class CharacterView {
 
   /** The mandatory order: beginFrame, mixer, aim rig (docs/10 §3). Raw render
    * delta on purpose — the rig clamps internally. */
+  /**
+   * Starts, or ends, this character's death.
+   *
+   * Aliveness comes from the caller's authoritative health, never from whether a
+   * death event arrived: a dropped packet would otherwise leave a corpse walking.
+   * The event only chooses which fall plays.
+   */
+  setDead(dead: boolean, clipName: string): void {
+    if (dead) this.animator.die(clipName);
+    else this.animator.revive();
+  }
+
   update(deltaSeconds: number, pose: CharacterPose): void {
     this.group.position.set(pose.positionX, pose.positionY, pose.positionZ);
     this.group.rotation.y = pose.yawRadians;
+
+    // A dead body is still receiving snapshots and still has a pose, but its
+    // aim rig must not keep tracking: a corpse whose spine follows a look angle
+    // is the uncanny half of this that reads worst.
+    if (this.animator.isDead) {
+      this.animator.update(deltaSeconds, this.sample);
+      return;
+    }
 
     localizeVelocity(pose.velocityX, pose.velocityZ, pose.yawRadians, this.sample);
     this.sample.speed = Math.hypot(pose.velocityX, pose.velocityZ);

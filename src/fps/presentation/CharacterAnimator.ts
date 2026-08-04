@@ -19,6 +19,9 @@ import {
 
 const CROSSFADE_SECONDS = 0.2;
 const LANDING_FADE_SECONDS = 0.12;
+/** A death is abrupt. Longer than this and the body eases out of a run into a
+ * fall, which reads as a stumble rather than as being shot. */
+const DEATH_FADE_SECONDS = 0.06;
 /** The landing one-shot only plays after a real fall ending near-stationary;
  * it is a planted-feet clip, so a fast or trivial landing must skip it or the
  * body slides metres on frozen legs. */
@@ -91,6 +94,9 @@ export class CharacterAnimator {
   private currentNaturalSpeed = 0;
   /** The landing one-shot is in control until it finishes. */
   private landing = false;
+  /** Dead: the death one-shot owns the body until `revive`. */
+  private dead = false;
+  private deathClip: string | null = null;
   private wasGrounded = true;
   private airborneSeconds = 0;
   private runningGait = false;
@@ -122,7 +128,47 @@ export class CharacterAnimator {
     this.play(CLIP_IDLE, 0);
   }
 
+  /**
+   * Starts a death, and holds its final pose until `revive`.
+   *
+   * Idempotent per clip: a repeated call with the same clip is ignored, because
+   * the snapshot that says a player is dead arrives every patch and restarting
+   * the fall twenty times a second would freeze the body at frame zero.
+   */
+  die(clipName: string): void {
+    if (this.dead && this.deathClip === clipName) return;
+    this.dead = true;
+    this.deathClip = clipName;
+    this.landing = false;
+    this.playOnce(clipName, DEATH_FADE_SECONDS);
+  }
+
+  /** Back on their feet: locomotion takes the body back on the next update. */
+  revive(): void {
+    if (!this.dead) return;
+    this.dead = false;
+    this.deathClip = null;
+    // Straight to an idle rather than waiting for the next selection, so a
+    // respawn cannot render one frame of the corpse standing at the spawn point.
+    this.play(CLIP_IDLE, 0);
+  }
+
+  get isDead(): boolean {
+    return this.dead;
+  }
+
   update(deltaSeconds: number, sample: LocomotionSample): void {
+    if (this.dead) {
+      // Locomotion is not consulted at all while dead. The body is still
+      // receiving snapshots — a corpse has a position and a stance — and letting
+      // chooseClip run would fade a walk cycle over the fall.
+      this.mixer.update(deltaSeconds);
+      // NO hips reset here, deliberately. Everywhere else the baked travel is
+      // cancelled so clips pose in place, but a death is the one clip whose
+      // travel is the point: a body that falls forward should end up where it
+      // fell, not standing on the spot it died.
+      return;
+    }
     if (!sample.grounded) {
       // Going airborne cancels a landing that was still playing.
       this.landing = false;

@@ -21,6 +21,24 @@
   flex: 1;
 }
 
+/* A full-screen game screen — the loadout — fills the shell exactly.
+ *
+ * `main` becomes the flex context so the screen can take the REMAINING height
+ * without doing arithmetic on the nav's height. A `calc(100dvh - 62px)` was
+ * wrong by 13px the moment the nav grew, and the overshoot let the screen's
+ * header scroll under a translucent sticky nav, which reads as a clipped title.
+ * Flex has no number to get wrong.
+ *
+ * These rules live here rather than in loadout.css because `main` and the footer
+ * are site.css's to own — one selector, one home (design record §5.2 trap 3). */
+.site:has(.loadout) > main {
+  display: flex;
+  flex-direction: column;
+}
+.site:has(.loadout) > .site-footer {
+  display: none;
+}
+
 .skip-link {
   position: absolute;
   left: var(--s3);

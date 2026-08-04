@@ -1,0 +1,538 @@
+/* The loadout screen: a full-bleed tactical stage, not a stack of form cards.
+ *
+ * Wears `.skin-hud` rather than `.skin-site`. That is the load-bearing decision:
+ * this is a GAME screen — the last thing between the lobby and a match — and
+ * dressing it in the site's parchment made it read as a settings page. The
+ * anatomy is the one every loadout screen shares: the soldier is the subject,
+ * full height and centred, with the kit flanking them and an action bar beneath.
+ *
+ * Every selector here has this file as its only home (design record §5.2 trap 3).
+ */
+
+.loadout {
+  --stage-fade: radial-gradient(
+    ellipse 62% 58% at 50% 46%,
+    rgba(169, 189, 97, 0.11),
+    rgba(10, 13, 10, 0) 72%
+  );
+
+  display: grid;
+  /* `minmax(0, 1fr)` for the body row, and the height itself comes from FLEX —
+     site.css makes `main` a flex column when this screen is present, so the
+     screen absorbs exactly the space the nav leaves. Both halves matter for the
+     3D stage: R3F sizes its canvas from the parent box, and a parent whose
+     height resolves to `auto` collapses the canvas to its intrinsic 150px, which
+     is what made /play render a sliver (design record §5.2 trap 5). Verified by
+     measurement, not by looking. */
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  flex: 1;
+  min-height: 0;
+  background:
+    var(--stage-fade),
+    linear-gradient(180deg, var(--bg-sunken), var(--bg) 42%, var(--bg-sunken));
+  color: var(--ink);
+}
+
+/* --- header: title left, faction centre, title right --------------------- */
+.loadout-head {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: var(--s4);
+  padding: var(--s4) var(--s5);
+  border-bottom: var(--hair) solid var(--line);
+}
+.loadout-head h1,
+.loadout-head h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(1.1rem, 2.4vw, 1.75rem);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  line-height: 1;
+}
+.loadout-head h2 {
+  text-align: right;
+  color: var(--ink-dim);
+}
+
+/* Faction is the one binary choice, so it reads as a segmented control rather
+   than as two more buttons in a list of buttons. */
+.faction-tabs {
+  display: flex;
+  gap: 0;
+  border: var(--hair) solid var(--line);
+  background: rgba(6, 8, 6, 0.6);
+}
+.faction-tabs button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--ink-muted);
+  font-family: var(--font-label);
+  font-weight: 700;
+  font-size: 0.78rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  padding: var(--s2) var(--s5);
+  min-height: var(--tap);
+  cursor: pointer;
+  transition: color var(--fast) var(--ease), background var(--fast) var(--ease);
+}
+.faction-tabs button + button {
+  border-left: var(--hair) solid var(--line);
+}
+.faction-tabs button:hover:not(:disabled) {
+  color: var(--ink);
+}
+.faction-tabs button[aria-pressed="true"] {
+  color: var(--accent-ink);
+  background: var(--accent);
+}
+
+/* --- body: three columns, soldier in the middle -------------------------- */
+.loadout-body {
+  display: grid;
+  grid-template-columns: minmax(272px, 23rem) minmax(0, 1fr) minmax(272px, 23rem);
+  gap: var(--s5);
+  padding: var(--s5);
+  /* Without this the 1fr row refuses to shrink and the whole screen overflows. */
+  min-height: 0;
+}
+.loadout-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s5);
+  min-height: 0;
+  overflow-y: auto;
+  /* The columns scroll independently; hide the scrollbar gutter jump by giving
+     them room rather than letting content reflow when one appears. */
+  scrollbar-width: thin;
+  padding-right: var(--s1);
+}
+
+/* --- a titled group of controls ------------------------------------------ */
+.kit-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+.kit-title {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  font-family: var(--font-label);
+  font-weight: 700;
+  font-size: 0.68rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin: 0;
+}
+/* The rule that runs to the edge of the column after a group title — the detail
+   that makes a panel read as an instrument rather than as a heading. */
+.kit-title::after {
+  content: "";
+  flex: 1;
+  height: var(--hair);
+  background: var(--line);
+}
+
+/* --- weapon slot: the row that names what is in your hands --------------- */
+.slot {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: var(--s1) var(--s3);
+  width: 100%;
+  text-align: left;
+  appearance: none;
+  cursor: pointer;
+  background: linear-gradient(90deg, rgba(169, 189, 97, 0.07), rgba(169, 189, 97, 0));
+  border: var(--hair) solid var(--line);
+  color: var(--ink);
+  padding: var(--s3);
+  min-height: var(--tap);
+  transition: border-color var(--fast) var(--ease), background var(--fast) var(--ease);
+}
+.slot:hover:not(:disabled) {
+  border-color: var(--line-strong);
+}
+.slot[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: linear-gradient(90deg, rgba(255, 174, 36, 0.14), rgba(255, 174, 36, 0));
+}
+.slot:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.slot-role {
+  grid-column: 1;
+  font-family: var(--font-label);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.slot-name {
+  grid-column: 1;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.05rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  line-height: 1.1;
+}
+/* The equipped tick sits in the right column across both rows, so a selected
+   slot is legible from the corner of the eye without reading the name. */
+.slot-mark {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  font-size: 0.8rem;
+  color: var(--accent);
+}
+.slot[aria-pressed="false"] .slot-mark {
+  visibility: hidden;
+}
+
+/* --- specification: the dense readout ------------------------------------ */
+.spec {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0;
+  margin: 0;
+  border: var(--hair) solid var(--line);
+  background: rgba(6, 8, 6, 0.5);
+}
+.spec dt,
+.spec dd {
+  margin: 0;
+  padding: var(--s2) var(--s3);
+  font-size: 0.78rem;
+  border-bottom: var(--hair) solid rgba(167, 187, 103, 0.14);
+}
+.spec dt {
+  font-family: var(--font-label);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.spec dd {
+  text-align: right;
+  color: var(--ink);
+  /* Data, so it is monospaced and column-aligned. */
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.spec dt:nth-last-of-type(1),
+.spec dd:nth-last-of-type(1) {
+  border-bottom: 0;
+}
+
+/* --- gear tiles: camouflage and headgear --------------------------------- */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
+  gap: var(--s2);
+}
+.tile {
+  appearance: none;
+  cursor: pointer;
+  padding: 0;
+  background: var(--bg-raised);
+  border: var(--hair) solid var(--line);
+  color: var(--ink-dim);
+  display: flex;
+  flex-direction: column;
+  min-height: var(--tap);
+  transition: border-color var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+.tile:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+.tile[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+.tile:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+/* The swatch labels the OPTION; it is not a claim about the model, which does
+   not render camouflage yet. Said in words under the stage as well. */
+.tile-swatch {
+  aspect-ratio: 3 / 2;
+  background-color: var(--swatch, #3d4433);
+  /* Large overlapping blobs at 100% size — ONE set across the tile, not a tiled
+     motif. Tiling small circles produced an even dot grid that read as polka
+     dots, which is the opposite of what camouflage looks like: the whole point
+     of a disruptive pattern is that it has no repeating rhythm. */
+  background-image:
+    radial-gradient(ellipse 58% 46% at 18% 24%, var(--swatch-b, #2b3125) 0 46%, transparent 48%),
+    radial-gradient(ellipse 44% 62% at 78% 34%, var(--swatch-c, #4d5540) 0 44%, transparent 46%),
+    radial-gradient(ellipse 72% 40% at 46% 84%, var(--swatch-b, #2b3125) 0 48%, transparent 50%),
+    radial-gradient(ellipse 38% 52% at 92% 88%, var(--swatch-c, #4d5540) 0 42%, transparent 44%),
+    radial-gradient(ellipse 34% 40% at 4% 72%, var(--swatch-c, #4d5540) 0 40%, transparent 42%);
+  background-size: 100% 100%;
+}
+.tile-name {
+  font-family: var(--font-label);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: var(--s2);
+  text-align: center;
+}
+/* Headgear has no swatch — a coloured rectangle would imply a colour choice. */
+.tile-plain {
+  align-items: center;
+  justify-content: center;
+  padding: var(--s3) var(--s2);
+}
+
+/* --- insignia ------------------------------------------------------------ */
+.insignia-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: var(--s3);
+}
+.insignia-patch {
+  width: 58px;
+  height: 58px;
+  display: grid;
+  place-items: center;
+  border: var(--hair) solid var(--line);
+  background: rgba(6, 8, 6, 0.6);
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1.2rem;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+.insignia-patch[data-empty="true"] {
+  color: var(--ink-faint);
+}
+.loadout input[type="text"] {
+  width: 100%;
+  background: rgba(6, 8, 6, 0.6);
+  border: var(--hair) solid var(--line);
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  padding: var(--s2) var(--s3);
+  min-height: var(--tap);
+}
+.loadout input[type="text"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.loadout input[type="text"]:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* A locked control states the reason beside it rather than just going grey. */
+.kit-locked {
+  font-family: var(--font-label);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--amber);
+  margin: 0;
+}
+.kit-note {
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--ink-muted);
+  margin: 0;
+}
+.kit-note a {
+  color: var(--accent);
+}
+
+/* --- the stage ----------------------------------------------------------- */
+.stage {
+  position: relative;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-height: 0;
+}
+.stage-figure {
+  position: relative;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+}
+/* Corner ticks: four hairlines, not a box. A full border around the soldier
+   would fence them in; ticks read as a reticle and leave the figure free. */
+.stage-figure::before,
+.stage-figure::after {
+  content: "";
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  border: var(--hair) solid var(--line);
+  pointer-events: none;
+}
+.stage-figure::before {
+  top: 0;
+  left: 0;
+  border-right: 0;
+  border-bottom: 0;
+}
+.stage-figure::after {
+  bottom: 0;
+  right: 0;
+  border-left: 0;
+  border-top: 0;
+}
+.stage-caption {
+  text-align: center;
+  font-size: 0.76rem;
+  line-height: 1.5;
+  color: var(--ink-faint);
+  padding: var(--s3) var(--s4) 0;
+  margin: 0;
+}
+.stage-caption strong {
+  color: var(--ink-muted);
+  font-weight: 700;
+}
+
+/* The canvas host. `position: absolute` inside the figure so it cannot grow the
+   grid row it lives in — a canvas that sizes itself from a parent that sizes
+   itself from the canvas is the feedback loop that inflates a page forever. */
+.stage-canvas {
+  position: absolute;
+  inset: 0;
+}
+.stage-canvas canvas {
+  display: block;
+}
+/* While the soldier streams in. No size figure and no button: this screen is
+   onboarding, the model is the thing being sold, and the game loads the same GLB
+   anyway — `loadSoldier` memoizes it at module scope, so arriving here is a
+   PRELOAD rather than a cost. A quiet placeholder, then the soldier. */
+.stage-loading {
+  /* Over the canvas, which is already mounted and empty behind it. */
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  justify-content: center;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s3);
+  color: var(--ink-faint);
+  font-family: var(--font-label);
+  font-size: 0.7rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+.stage-loading::before {
+  content: "";
+  width: 34px;
+  height: 34px;
+  border: var(--hair) solid var(--line);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: stage-spin 900ms linear infinite;
+}
+@keyframes stage-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .stage-loading::before {
+    animation: none;
+  }
+}
+
+/* --- action bar ---------------------------------------------------------- */
+.loadout-bar {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: var(--s4);
+  padding: var(--s3) var(--s5);
+  border-top: var(--hair) solid var(--line);
+  background: rgba(6, 8, 6, 0.72);
+}
+/* Both ends sized to their content. Without these the 1fr columns stretch the
+   Back link and the Save button to a third of the bar each. */
+.loadout-bar > :first-child {
+  justify-self: start;
+}
+.loadout-bar > :last-child {
+  justify-self: end;
+}
+.bar-status {
+  text-align: center;
+  font-family: var(--font-label);
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin: 0;
+}
+.bar-status[data-tone="bad"] {
+  color: var(--bad);
+}
+.bar-status[data-tone="good"] {
+  color: var(--good);
+}
+.bar-status[data-tone="quiet"] {
+  color: var(--ink-faint);
+}
+
+/* --- narrow: one column, and the stage becomes a band -------------------- */
+@media (max-width: 900px) {
+  .loadout {
+    /* Height goes back to content-driven, so nothing depends on a percentage
+       chain here — the stage gets a definite height from its aspect ratio. */
+    height: auto;
+    min-height: 0;
+  }
+  .loadout-body {
+    grid-template-columns: minmax(0, 1fr);
+    padding: var(--s4);
+    gap: var(--s5);
+  }
+  .loadout-col {
+    overflow-y: visible;
+  }
+  /* The soldier first: on a phone the subject should not be below two screens
+     of controls. */
+  .stage {
+    order: -1;
+  }
+  .stage-figure {
+    aspect-ratio: 4 / 5;
+    max-height: 58vh;
+  }
+  .loadout-head {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    gap: var(--s3);
+    text-align: center;
+  }
+  .loadout-head h2 {
+    text-align: center;
+  }
+  .loadout-bar {
+    grid-template-columns: 1fr 1fr;
+    row-gap: var(--s2);
+  }
+  .bar-status {
+    grid-column: 1 / -1;
+    order: -1;
+  }
+}

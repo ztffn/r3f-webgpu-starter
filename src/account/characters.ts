@@ -77,6 +77,40 @@ export function weaponLabel(id: WeaponId): string {
   return WEAPON_DEFINITIONS.find((weapon) => weapon.id === id)?.displayName ?? id;
 }
 
+/** One line of a weapon's specification card: a label and its value. */
+export interface WeaponSpecLine {
+  label: string;
+  value: string;
+}
+
+/**
+ * The specification the loadout screen prints for a weapon.
+ *
+ * Every figure is READ from the definition the simulation actually fires — the
+ * cartridge, the muzzle velocity, the magazine, the rate of fire. None of it is
+ * a rating out of ten, because this game does not have ratings out of ten: a
+ * five-bar "damage" meter would be a number invented for the screen, and the one
+ * rule this project keeps everywhere is that a surface does not claim more than
+ * the system behind it knows.
+ */
+export function weaponSpec(id: WeaponId): WeaponSpecLine[] {
+  const weapon = WEAPON_DEFINITIONS.find((entry) => entry.id === id);
+  if (weapon === undefined) return [];
+  const { shot, ammo, reload, fireModes } = weapon;
+  return [
+    { label: "Cartridge", value: shot.ammunition.displayName },
+    {
+      label: "Muzzle velocity",
+      value: `${Math.round(shot.ammunition.muzzleVelocityMetresPerSecond)} m/s`,
+    },
+    { label: "Magazine", value: `${ammo.magazineSize} + ${ammo.initialReserve}` },
+    { label: "Rate of fire", value: `${shot.roundsPerMinute} rpm` },
+    { label: "Effective range", value: `${shot.range.toLocaleString("en-US")} m` },
+    { label: "Reload", value: `${reload.durationSeconds.toFixed(1)} s` },
+    { label: "Fire modes", value: fireModes.supported.join(" · ").toUpperCase() },
+  ];
+}
+
 export const DEFAULT_CHARACTER: Character = {
   appearance: { faction: "ranger", camo: "woodland", headgear: "boonie", insignia: null },
   // The bolt gun by default: it is the weapon this game is built around, and the

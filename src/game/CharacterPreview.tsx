@@ -23,9 +23,16 @@ extend(THREE as never);
 /** Radians per second. Slow enough to read the silhouette, not a spinning icon. */
 const TURNTABLE_RATE = 0.35;
 
+/** Headroom around the figure once it is fitted. 1 would touch every edge. */
+const FRAME_MARGIN = 1.12;
+
 function Soldier({ asset }: { asset: SoldierAsset }) {
   const pivot = useRef<THREE.Group>(null);
   const camera = useThree((state) => state.camera);
+  // Framing depends on the viewport, so it must be recomputed when the stage
+  // resizes — otherwise the first measurement (taken at whatever aspect existed
+  // on mount) decides the composition forever.
+  const size = useThree((state) => state.size);
 
   const { object, mixer } = useMemo(() => {
     // Cloned through SkeletonUtils by `instantiateSoldier`; a plain clone shares
@@ -46,14 +53,26 @@ function Soldier({ asset }: { asset: SoldierAsset }) {
   // parent made the soldier ORBIT the frame instead of turning on the spot.
   useEffect(() => {
     const bounds = new THREE.Box3().setFromObject(object);
-    const size = bounds.getSize(new THREE.Vector3());
+    const extent = bounds.getSize(new THREE.Vector3());
     const centre = bounds.getCenter(new THREE.Vector3());
     object.position.set(-centre.x, 0, -centre.z);
-    const distance = Math.max(size.y, size.x) * 1.35 + 0.6;
-    camera.position.set(0, centre.y, distance);
-    camera.lookAt(0, centre.y, 0);
-    camera.updateProjectionMatrix();
-  }, [object, camera]);
+
+    // Fitted from the actual field of view and aspect rather than from a
+    // multiplier on the model's height. A guessed multiplier framed correctly at
+    // one window size and cropped the soldier's head at another, because the
+    // binding axis changes with the shape of the stage: a tall narrow column is
+    // limited by WIDTH, a short wide one by height.
+    const perspective = camera as THREE.PerspectiveCamera;
+    const aspect = size.height > 0 ? size.width / size.height : 1;
+    const halfFov = (perspective.fov * Math.PI) / 360;
+    const fitHeight = extent.y / 2 / Math.tan(halfFov);
+    const fitWidth = extent.x / 2 / (Math.tan(halfFov) * aspect);
+    const distance = Math.max(fitHeight, fitWidth) * FRAME_MARGIN;
+
+    perspective.position.set(0, centre.y, distance);
+    perspective.lookAt(0, centre.y, 0);
+    perspective.updateProjectionMatrix();
+  }, [object, camera, size]);
 
   useEffect(
     () => () => {
@@ -98,40 +117,57 @@ export default function CharacterPreview() {
     };
   }, []);
 
-  if (failed) {
-    return (
-      <p className="field-error" role="alert" data-dev="character-preview-error">
-        The model could not be loaded.
-      </p>
-    );
-  }
-
   return (
-    <div className="character-preview" data-dev="character-preview">
-      {asset === null ? (
-        <p className="auth-note" data-dev="character-preview-loading">
-          Loading the model…
+    <>
+      {/* The Canvas mounts IMMEDIATELY, before the GLB has arrived, and the
+          soldier is added to it when it does.
+          Two reasons, and the first one is a bug this fixes. R3F measures its
+          container once on mount; mounting the Canvas late — after an 8-second
+          download, into an absolutely-positioned box — measured stale and left
+          the canvas at its intrinsic 300x150, the same class of collapse as
+          design record §5.2 trap 5. Mounting with the rest of the layout gets a
+          real measurement. Second, the WebGPU device now initialises in PARALLEL
+          with the model download instead of after it, which is straightforwardly
+          faster to first pixel on the screen that is meant to sell the game.
+
+          No wrapper box and no background: the host element is the stage, and
+          the canvas is transparent so the screen's own vignette shows through
+          behind the soldier. */}
+      <Canvas
+        dpr={[1, 1.5]}
+        camera={{ fov: 35, near: 0.1, far: 50, position: [0, 1, 3] }}
+        gl={async (props) => {
+          const renderer = new THREE.WebGPURenderer({
+            ...(props as ConstructorParameters<typeof THREE.WebGPURenderer>[0]),
+            alpha: true,
+          });
+          await renderer.init();
+          return renderer;
+        }}
+        onCreated={({ gl }) => {
+          gl.setClearColor(0x000000, 0);
+        }}
+      >
+        {/* Lit rather than unlit: these are the GLB's own PBR materials, and
+            `atmosphere.shade` is for unlit scene materials only (docs/08 §8).
+            A key from the front right and a cool rim from behind left, so the
+            silhouette separates from a near-black ground. */}
+        <hemisphereLight args={[0xdcd6bb, 0x2a3020, 1.9]} />
+        <directionalLight position={[2.5, 4, 3]} intensity={2.6} />
+        <directionalLight position={[-3.5, 2.5, -2.5]} intensity={1.1} color={0xa9bd61} />
+        {asset !== null && <Soldier asset={asset} />}
+      </Canvas>
+
+      {asset === null && !failed && (
+        <p className="stage-loading" data-dev="character-preview-loading">
+          Standing by
         </p>
-      ) : (
-        <Canvas
-          dpr={[1, 1.5]}
-          camera={{ fov: 35, near: 0.1, far: 50, position: [0, 1, 3] }}
-          gl={async (props) => {
-            const renderer = new THREE.WebGPURenderer(
-              props as ConstructorParameters<typeof THREE.WebGPURenderer>[0]
-            );
-            await renderer.init();
-            return renderer;
-          }}
-        >
-          {/* Lit rather than unlit: these are the GLB's own PBR materials, and
-              `atmosphere.shade` is for unlit scene materials only (docs/08 §8). */}
-          <hemisphereLight args={[0xdcd6bb, 0x30301f, 2.2]} />
-          <directionalLight position={[2.5, 4, 3]} intensity={2.4} />
-          <directionalLight position={[-3, 2, -2]} intensity={0.7} />
-          <Soldier asset={asset} />
-        </Canvas>
       )}
-    </div>
+      {failed && (
+        <p className="stage-loading" role="alert" data-dev="character-preview-error">
+          Model unavailable
+        </p>
+      )}
+    </>
   );
 }

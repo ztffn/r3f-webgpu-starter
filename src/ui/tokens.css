@@ -142,6 +142,23 @@
   --line: rgba(167, 187, 103, 0.34);
   --line-strong: rgba(193, 217, 121, 0.62);
   --bad: #e0714a;
+
+  /* Grounds. The in-game HUD needs none of these — it floats over the scene and
+     never reads --bg — but a FULL-SCREEN surface in this skin does, and the
+     loadout screen is one. Additive on purpose: nothing in src/hud/ consumes
+     these names, so completing the skin cannot change what the HUD looks like.
+     Near-black with a green cast rather than neutral, so the phosphor palette
+     sits on a ground of the same temperature instead of on grey. */
+  --bg: #0a0d0a;
+  --bg-raised: #101410;
+  --bg-sunken: #060806;
+
+  /* ONE accent, and it is the amber the HUD already uses for alerts. A second
+     accent on a screen this dense would stop meaning anything. */
+  --accent: #ffae24;
+  --accent-ink: #14100a;
+  --good: #a9bd61;
+  --warn: #ffae24;
 }
 
 *,

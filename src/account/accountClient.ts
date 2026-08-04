@@ -25,6 +25,7 @@ import type {
   FriendState,
   ProfilePost,
 } from "./community";
+import type { PlayerStats } from "./playerStats";
 import type { BoardSummary, Leaderboard, ServerListing } from "./lobby";
 import type { TierId } from "./tiers";
 
@@ -60,6 +61,7 @@ export interface PlayerPage {
   activity: ActivityEntry[];
   /** Sessions per day, oldest first, zero days included. 30 entries. */
   sessionsByDay: number[];
+  stats: PlayerStats;
   viewer: {
     id: number | null;
     friendState: FriendState;

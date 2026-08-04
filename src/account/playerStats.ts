@@ -1,0 +1,205 @@
+// Player statistics: the shapes a stats page renders, and the verdicts derived
+// from them.
+//
+// Shared and pure. The server gathers rows and calls these; the client renders
+// the result and can recompute a verdict without a round trip. Nothing here is
+// stored — a derived ratio goes stale the moment a source row is corrected, so
+// K/D, the range bands and the play-style verdict are all computed on read.
+//
+// The vocabulary is dfhub.net's, which is Delta Force's, because this project is
+// that game's successor and its players already know what these terms mean.
+// Design record: docs/plans/2026-08-04-player-statistics-design.md.
+
+/** Range bands, in metres. The histogram that separates two kinds of player. */
+export const RANGE_BANDS: readonly { label: string; min: number; max: number | null }[] = [
+  { label: "0–200", min: 0, max: 200 },
+  { label: "200–500", min: 200, max: 500 },
+  { label: "500–800", min: 500, max: 800 },
+  { label: "800–1200", min: 800, max: 1200 },
+  { label: "1200+", min: 1200, max: null },
+];
+
+export interface RangeBandCount {
+  label: string;
+  kills: number;
+}
+
+/** Raw combat figures. Counters only — every ratio below is derived from these. */
+export interface CombatTotals {
+  kills: number;
+  deaths: number;
+  headshots: number;
+  shotsFired: number;
+  sniperKills: number;
+  pistolKills: number;
+  knifeKills: number;
+  suicides: number;
+  teamKills: number;
+  bestStreak: number;
+  longestShotMetres: number;
+}
+
+export interface ActivityTotals {
+  matches: number;
+  timePlayedSeconds: number;
+  firstSeen: string | null;
+  lastSeen: string | null;
+  wins: number;
+  losses: number;
+  draws: number;
+  firstBloods: number;
+  /** Milliseconds in each stance, summed across matches. */
+  proneMs: number;
+  movingMs: number;
+  concealedMs: number;
+}
+
+/**
+ * Whether the source rows for a group exist YET.
+ *
+ * The same honesty the leaderboards use for an unpopulated board: a section with
+ * no data renders its frame and says why, rather than rendering zeroes that read
+ * as "this player has never killed anyone".
+ */
+export interface StatsAvailability {
+  engagements: boolean;
+  objectives: boolean;
+}
+
+export interface PlayerStats {
+  combat: CombatTotals;
+  activity: ActivityTotals;
+  /** Kills by range band. Empty until `engagement` rows exist. */
+  ranges: RangeBandCount[];
+  /** Metres. Null when nothing has been recorded. */
+  medianRangeMetres: number | null;
+  /** Of engagements whose first shot connected. Null when unknown. */
+  firstRoundHitRate: number | null;
+  available: StatsAvailability;
+}
+
+const ratio = (numerator: number, denominator: number): number | null =>
+  denominator === 0 ? null : numerator / denominator;
+
+/** Kills per death. Deathless players report their kill count, not Infinity. */
+export function killDeathRatio(combat: CombatTotals): number | null {
+  if (combat.deaths === 0) return combat.kills === 0 ? null : combat.kills;
+  return combat.kills / combat.deaths;
+}
+
+export function headshotRate(combat: CombatTotals): number | null {
+  return ratio(combat.headshots, combat.kills);
+}
+
+export function accuracy(combat: CombatTotals): number | null {
+  return ratio(combat.kills, combat.shotsFired);
+}
+
+export function shotsPerKill(combat: CombatTotals): number | null {
+  return ratio(combat.shotsFired, combat.kills);
+}
+
+export function winRate(activity: ActivityTotals): number | null {
+  const played = activity.wins + activity.losses + activity.draws;
+  return ratio(activity.wins, played);
+}
+
+export function killsPerMinute(combat: CombatTotals, activity: ActivityTotals): number | null {
+  return ratio(combat.kills, activity.timePlayedSeconds / 60);
+}
+
+/**
+ * How much of their time this player spends still and hidden, 0–100.
+ *
+ * The counterpart to dfhub's aggression index, and the one axis this game can
+ * measure that Delta Force's own logs could not: `concealed_ms` comes from the
+ * grass concealment field the renderer and the line-of-sight query already
+ * share. A high score is the prone-and-wait player DF2 is remembered for.
+ */
+export function patienceScore(activity: ActivityTotals): number | null {
+  const total = activity.timePlayedSeconds * 1000;
+  if (total <= 0) return null;
+  const stillness = (activity.proneMs + activity.concealedMs) / 2 / total;
+  const restraint = 1 - Math.min(1, activity.movingMs / total);
+  return Math.round(Math.max(0, Math.min(1, stillness * 0.6 + restraint * 0.4)) * 100);
+}
+
+/** The inverse framing, kept explicit so a page can show either. */
+export function aggressionIndex(activity: ActivityTotals): number | null {
+  const patience = patienceScore(activity);
+  return patience === null ? null : 100 - patience;
+}
+
+export interface PlayStyle {
+  /** The headline verdict: "Overwatch", "Assault", "Skirmisher". */
+  role: string;
+  /** The qualifier: "patient", "reckless", "opportunist". */
+  trait: string;
+  /** One line, ready to print. */
+  summary: string;
+}
+
+/**
+ * The verdict a recruiter reads.
+ *
+ * Derived from range and patience rather than from K/D, because those are the
+ * two axes this game is actually about — a 1.0 K/D at 900 metres and a 1.0 K/D
+ * at 50 metres describe two completely different players, and the role is the
+ * fastest way to say which one is being looked at.
+ *
+ * Returns a plainly hedged verdict when the inputs are missing, rather than
+ * guessing a role from nothing.
+ */
+export function describeStyle(stats: PlayerStats): PlayStyle {
+  const patience = patienceScore(stats.activity);
+  const range = stats.medianRangeMetres;
+
+  if (range === null || patience === null) {
+    return {
+      role: "Unassessed",
+      trait: "no engagements recorded",
+      summary: "Not enough engagements to judge a style yet.",
+    };
+  }
+
+  const role = range >= 600 ? "Overwatch" : range >= 250 ? "Marksman" : "Skirmisher";
+  const trait =
+    patience >= 66 ? "patient" : patience >= 33 ? "measured" : "aggressive";
+  const reach =
+    range >= 600 ? "long-range specialist" : range >= 250 ? "mid-range" : "close-quarters";
+  return { role, trait, summary: `${role} — ${trait} ${reach}.` };
+}
+
+/** Percentage, or an em dash. One formatter so every surface agrees. */
+export function formatRate(value: number | null): string {
+  return value === null ? "—" : `${(value * 100).toFixed(1)}%`;
+}
+
+export function formatRatio(value: number | null): string {
+  return value === null ? "—" : value.toFixed(2);
+}
+
+export function formatMetres(value: number | null): string {
+  return value === null || value <= 0 ? "—" : `${Math.round(value).toLocaleString("en-US")} m`;
+}
+
+/** Bucket engagement ranges into the bands above. */
+export function bandKills(rangesMetres: readonly number[]): RangeBandCount[] {
+  return RANGE_BANDS.map((band) => ({
+    label: band.label,
+    kills: rangesMetres.filter(
+      (range) => range >= band.min && (band.max === null || range < band.max)
+    ).length,
+  }));
+}
+
+/** Median of a list, or null when empty. Median not mean: one 1400 m lucky shot
+ *  should not move a close-quarters player's headline figure. */
+export function median(values: readonly number[]): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[middle - 1]! + sorted[middle]!) / 2
+    : sorted[middle]!;
+}

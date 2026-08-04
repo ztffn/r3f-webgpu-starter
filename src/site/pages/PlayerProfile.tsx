@@ -17,6 +17,18 @@ import { MEDALS } from "../../account/medals";
 import { useAuth } from "../../account/AuthProvider";
 import { useAsyncAction } from "../useAsyncAction";
 import { useDocumentTitle } from "../useDocumentTitle";
+import {
+  accuracy,
+  describeStyle,
+  formatMetres,
+  formatRate,
+  formatRatio,
+  headshotRate,
+  killDeathRatio,
+  patienceScore,
+  shotsPerKill,
+  winRate,
+} from "../../account/playerStats";
 import { ribbonStyle } from "../ribbons";
 import "./page.css";
 import "./auth.css";
@@ -101,7 +113,17 @@ export function PlayerProfile() {
     );
   }
 
-  const { profile, clan, wall, activity, sessionsByDay, viewer } = page;
+  const { profile, clan, wall, activity, sessionsByDay, stats, viewer } = page;
+  const style = describeStyle(stats);
+  // The four figures a recruiter stops on. Range sits beside K/D deliberately:
+  // the same K/D at 900 m and at 50 m describe two different players.
+  const headline = [
+    { label: "K/D", value: formatRatio(killDeathRatio(stats.combat)) },
+    { label: "Median range", value: formatMetres(stats.medianRangeMetres) },
+    { label: "Headshots", value: formatRate(headshotRate(stats.combat)) },
+    { label: "Win rate", value: formatRate(winRate(stats.activity)) },
+  ];
+  const bandPeak = Math.max(...stats.ranges.map((band) => band.kills), 0);
   // One scale for the whole plot. Per-bar normalisation would make a quiet week
   // look identical to a busy one.
   const peak = Math.max(...sessionsByDay, 0);
@@ -241,6 +263,55 @@ export function PlayerProfile() {
       <div className="shell dash-body">
         <div className="dash-col">
           <section className="panel">
+            <h2>Assessment</h2>
+            {/* The verdict first, because it is the answer to the question the
+                page is open for. It refuses to guess a role with no engagements
+                rather than defaulting to the middle one. */}
+            <p className="verdict" data-dev="player-verdict">
+              {style.summary}
+            </p>
+            <div className="headline" data-dev="player-headline">
+              {headline.map((figure) => (
+                <div key={figure.label}>
+                  <span className="headline-value">{figure.value}</span>
+                  <span className="headline-label">{figure.label}</span>
+                </div>
+              ))}
+            </div>
+            {stats.available.engagements ? (
+              <>
+                <span className="kit-title" style={{ marginTop: "var(--s4)" }}>
+                  Kills by range
+                </span>
+                <ul className="bands" data-dev="player-bands">
+                  {stats.ranges.map((band) => (
+                    <li key={band.label}>
+                      <span className="band-label">{band.label}</span>
+                      <span className="band-track">
+                        <span
+                          className="band-fill"
+                          style={{
+                            width: `${bandPeak === 0 ? 0 : (band.kills / bandPeak) * 100}%`,
+                          }}
+                        />
+                      </span>
+                      <span className="band-count">{band.kills}</span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : (
+              /* A frame with a reason, never zeroes. An empty range histogram
+                 that looked populated would be a claim about how this player
+                 fights, and nothing has measured it yet. */
+              <p className="pending" data-dev="stats-pending">
+                Range, headshots and accuracy need the combat authority work.
+                Nothing records them yet.
+              </p>
+            )}
+          </section>
+
+          <section className="panel">
             <h2>Data on previous engagements</h2>
             <dl className="dope" data-dev="player-career">
               <dt>Longest shot</dt>
@@ -260,6 +331,16 @@ export function PlayerProfile() {
                 {profile.career.timePlayedSeconds > 0
                   ? duration(profile.career.timePlayedSeconds)
                   : "—"}
+              </dd>
+              <dt>Shots per kill</dt>
+              <dd>{formatRatio(shotsPerKill(stats.combat))}</dd>
+              <dt>Accuracy</dt>
+              <dd>{formatRate(accuracy(stats.combat))}</dd>
+              <dt>Patience</dt>
+              <dd>
+                {patienceScore(stats.activity) === null
+                  ? "—"
+                  : `${patienceScore(stats.activity)}/100`}
               </dd>
             </dl>
           </section>

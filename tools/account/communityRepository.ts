@@ -25,6 +25,11 @@ import {
   type ProfilePost,
 } from "../../src/account/community.ts";
 import { medalById } from "../../src/account/medals.ts";
+import {
+  bandKills,
+  median,
+  type PlayerStats,
+} from "../../src/account/playerStats.ts";
 import type { AccountDb } from "./database.ts";
 
 const nowIso = (): string => new Date().toISOString();
@@ -528,6 +533,87 @@ export class CommunityRepository {
       const day = new Date(since.getTime() + index * 86_400_000).toISOString().slice(0, 10);
       return counts.get(day) ?? 0;
     });
+  }
+
+  /**
+   * Everything a stats page needs, assembled from the telemetry tables.
+   *
+   * `available` is the load-bearing part. Until the authority layer on
+   * feat/server-ballistics writes `engagements`, every range, headshot and
+   * accuracy figure is genuinely unknown — and unknown must not render as zero,
+   * because a zeroed kills table is a claim that nobody has killed anyone. The
+   * page draws those sections as a labelled frame instead, and fills in on its
+   * own the day rows start arriving.
+   */
+  async playerStats(userId: number): Promise<PlayerStats> {
+    const [career, participation, engagementRows] = await Promise.all([
+      this.db.selectFrom("career").selectAll().where("user_id", "=", userId).executeTakeFirst(),
+      this.db
+        .selectFrom("match_participation")
+        .selectAll()
+        .where("user_id", "=", userId)
+        .execute(),
+      this.db
+        .selectFrom("engagements")
+        .select(["range_metres", "fatal", "headshot", "hit", "first_of_engagement"])
+        .where("shooter_id", "=", userId)
+        .execute(),
+    ]);
+
+    const users = await this.db
+      .selectFrom("users")
+      .select(["created_at", "last_seen_at"])
+      .where("id", "=", userId)
+      .executeTakeFirst();
+
+    const sum = (pick: (row: (typeof participation)[number]) => number): number =>
+      participation.reduce((total, row) => total + pick(row), 0);
+
+    const fatalRanges = engagementRows
+      .filter((row) => row.fatal === 1)
+      .map((row) => row.range_metres);
+    const firstShots = engagementRows.filter((row) => row.first_of_engagement === 1);
+
+    return {
+      combat: {
+        kills: career?.kills ?? 0,
+        deaths: career?.deaths ?? 0,
+        headshots: engagementRows.filter((row) => row.headshot === 1).length,
+        shotsFired: sum((row) => row.shots_fired),
+        // Weapon breakdown needs the weapon column, which only `engagements`
+        // carries — so these stay zero and `available.engagements` says why.
+        sniperKills: 0,
+        pistolKills: 0,
+        knifeKills: 0,
+        suicides: 0,
+        teamKills: 0,
+        bestStreak: participation.reduce((best, row) => Math.max(best, row.best_streak), 0),
+        longestShotMetres: career?.longest_shot_metres ?? 0,
+      },
+      activity: {
+        matches: career?.matches ?? 0,
+        timePlayedSeconds: career?.time_played_seconds ?? 0,
+        firstSeen: users?.created_at ?? null,
+        lastSeen: users?.last_seen_at ?? null,
+        wins: participation.filter((row) => row.result === "win").length,
+        losses: participation.filter((row) => row.result === "loss").length,
+        draws: participation.filter((row) => row.result === "draw").length,
+        firstBloods: 0,
+        proneMs: sum((row) => row.prone_ms),
+        movingMs: sum((row) => row.moving_ms),
+        concealedMs: sum((row) => row.concealed_ms),
+      },
+      ranges: bandKills(fatalRanges),
+      medianRangeMetres: median(fatalRanges),
+      firstRoundHitRate:
+        firstShots.length === 0
+          ? null
+          : firstShots.filter((row) => row.hit === 1).length / firstShots.length,
+      available: {
+        engagements: engagementRows.length > 0,
+        objectives: participation.length > 0,
+      },
+    };
   }
 
   // --- activity ------------------------------------------------------------

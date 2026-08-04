@@ -133,6 +133,65 @@ export interface SessionRow {
   seconds: number;
 }
 
+/** One player's participation in one match. Not blocked on ballistics. */
+export interface MatchParticipationRow {
+  id: Generated<number>;
+  user_id: number;
+  match_id: string;
+  map: string;
+  mode: string;
+  team: string | null;
+  joined_at: string;
+  left_at: string;
+  result: "win" | "loss" | "draw" | "unknown";
+  score: number;
+  objective_score: number;
+  support_score: number;
+  prone_ms: number;
+  crouch_ms: number;
+  stand_ms: number;
+  moving_ms: number;
+  concealed_ms: number;
+  shots_fired: number;
+  best_streak: number;
+}
+
+/**
+ * One shot that resolved against a player.
+ *
+ * `range_metres` is the column Delta Force's own logs could never produce and
+ * ours can, and it is the axis this game is about — every range statistic on a
+ * profile comes from here. Written by the authority layer on feat/server-
+ * ballistics; nothing else may write it, because a client-reported kill is not
+ * evidence.
+ */
+export interface EngagementRow {
+  id: Generated<number>;
+  match_id: string;
+  shooter_id: number;
+  target_id: number | null;
+  at: string;
+  weapon_id: string;
+  range_metres: number;
+  hit: number;
+  fatal: number;
+  headshot: number;
+  shooter_stance: string;
+  /** Stationary time before the trigger. Feeds the patience score. */
+  hold_ms: number;
+  first_of_engagement: number;
+}
+
+export interface ObjectiveEventRow {
+  id: Generated<number>;
+  match_id: string;
+  user_id: number;
+  at: string;
+  kind: string;
+  zone_id: string | null;
+  held_ms: number;
+}
+
 export interface SchemaVersionRow {
   version: number;
 }
@@ -148,6 +207,9 @@ export interface AccountDatabase {
   clans: ClanRow;
   clan_members: ClanMemberRow;
   sessions: SessionRow;
+  match_participation: MatchParticipationRow;
+  engagements: EngagementRow;
+  objective_events: ObjectiveEventRow;
   schema_version: SchemaVersionRow;
 }
 
@@ -409,6 +471,101 @@ const MIGRATIONS: ((db: AccountDb) => Promise<void>)[] = [
       .createIndex("sessions_user_time")
       .on("sessions")
       .columns(["user_id", "ended_at"])
+      .execute();
+  },
+
+  // Telemetry. Three tables that every figure on a stats page derives from —
+  // nothing here stores a ratio, because a stored ratio goes stale the moment a
+  // source row is corrected. Design record:
+  // plans/2026-08-04-player-statistics-design.md section 3.
+  async (db) => {
+    await db.schema
+      .createTable("match_participation")
+      .addColumn("id", "integer", (c) => c.primaryKey().autoIncrement())
+      .addColumn("user_id", "integer", (c) =>
+        c.notNull().references("users.id").onDelete("cascade")
+      )
+      .addColumn("match_id", "text", (c) => c.notNull())
+      .addColumn("map", "text", (c) => c.notNull())
+      .addColumn("mode", "text", (c) => c.notNull())
+      .addColumn("team", "text")
+      .addColumn("joined_at", "text", (c) => c.notNull())
+      .addColumn("left_at", "text", (c) => c.notNull())
+      .addColumn("result", "text", (c) => c.notNull().defaultTo("unknown"))
+      .addColumn("score", "integer", (c) => c.notNull().defaultTo(0))
+      .addColumn("objective_score", "integer", (c) => c.notNull().defaultTo(0))
+      .addColumn("support_score", "integer", (c) => c.notNull().defaultTo(0))
+      .addColumn("prone_ms", "integer", (c) => c.notNull().defaultTo(0))
+      .addColumn("crouch_ms", "integer", (c) => c.notNull().defaultTo(0))
+      .addColumn("stand_ms", "integer", (c) => c.notNull().defaultTo(0))
+      .addColumn("moving_ms", "integer", (c) => c.notNull().defaultTo(0))
+      .addColumn("concealed_ms", "integer", (c) => c.notNull().defaultTo(0))
+      .addColumn("shots_fired", "integer", (c) => c.notNull().defaultTo(0))
+      .addColumn("best_streak", "integer", (c) => c.notNull().defaultTo(0))
+      .execute();
+    await db.schema
+      .createIndex("participation_user_time")
+      .on("match_participation")
+      .columns(["user_id", "left_at"])
+      .execute();
+    await db.schema
+      .createIndex("participation_map")
+      .on("match_participation")
+      .columns(["user_id", "map"])
+      .execute();
+
+    await db.schema
+      .createTable("engagements")
+      .addColumn("id", "integer", (c) => c.primaryKey().autoIncrement())
+      .addColumn("match_id", "text", (c) => c.notNull())
+      .addColumn("shooter_id", "integer", (c) =>
+        c.notNull().references("users.id").onDelete("cascade")
+      )
+      .addColumn("target_id", "integer", (c) => c.references("users.id").onDelete("set null"))
+      .addColumn("at", "text", (c) => c.notNull())
+      .addColumn("weapon_id", "text", (c) => c.notNull())
+      .addColumn("range_metres", "real", (c) => c.notNull())
+      .addColumn("hit", "integer", (c) => c.notNull().defaultTo(0))
+      .addColumn("fatal", "integer", (c) => c.notNull().defaultTo(0))
+      .addColumn("headshot", "integer", (c) => c.notNull().defaultTo(0))
+      .addColumn("shooter_stance", "text", (c) => c.notNull().defaultTo("stand"))
+      .addColumn("hold_ms", "integer", (c) => c.notNull().defaultTo(0))
+      .addColumn("first_of_engagement", "integer", (c) => c.notNull().defaultTo(0))
+      .execute();
+    // The four reads: a shooter's profile, a target's nemeses, a weapon's page
+    // and a range histogram. All of them start from shooter or target.
+    await db.schema
+      .createIndex("engagements_shooter")
+      .on("engagements")
+      .columns(["shooter_id", "at"])
+      .execute();
+    await db.schema
+      .createIndex("engagements_target")
+      .on("engagements")
+      .columns(["target_id", "at"])
+      .execute();
+    await db.schema
+      .createIndex("engagements_weapon")
+      .on("engagements")
+      .column("weapon_id")
+      .execute();
+
+    await db.schema
+      .createTable("objective_events")
+      .addColumn("id", "integer", (c) => c.primaryKey().autoIncrement())
+      .addColumn("match_id", "text", (c) => c.notNull())
+      .addColumn("user_id", "integer", (c) =>
+        c.notNull().references("users.id").onDelete("cascade")
+      )
+      .addColumn("at", "text", (c) => c.notNull())
+      .addColumn("kind", "text", (c) => c.notNull())
+      .addColumn("zone_id", "text")
+      .addColumn("held_ms", "integer", (c) => c.notNull().defaultTo(0))
+      .execute();
+    await db.schema
+      .createIndex("objective_user")
+      .on("objective_events")
+      .columns(["user_id", "at"])
       .execute();
   },
 ];

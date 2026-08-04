@@ -30,7 +30,7 @@ import {
   median,
   type PlayerStats,
 } from "../../src/account/playerStats.ts";
-import type { AccountDb } from "./database.ts";
+import { isUniqueViolation, pairKey, type AccountDb } from "./database.ts";
 
 const nowIso = (): string => new Date().toISOString();
 const hourAgoIso = (): string => new Date(Date.now() - 3_600_000).toISOString();
@@ -52,6 +52,23 @@ export class CommunityRepository {
 
   constructor(db: AccountDb) {
     this.db = db;
+  }
+
+  /**
+   * Refuse early for an account that does not exist.
+   *
+   * Every write here has a foreign key to `users` and `foreign_keys` is ON, so
+   * without this the answer to "block player 999999" is a constraint failure and a
+   * 500 rather than a 404. One helper because three call sites need the same
+   * check, and the one that did not have it was the one that leaked a 500.
+   */
+  private async requireAccount(userId: number): Promise<void> {
+    const row = await this.db
+      .selectFrom("users")
+      .select("id")
+      .where("id", "=", userId)
+      .executeTakeFirst();
+    if (row === undefined) throw new CommunityError("no_such_player", 404);
   }
 
   // --- tagwall -------------------------------------------------------------
@@ -92,12 +109,7 @@ export class CommunityRepository {
    * which is the spam shape.
    */
   async post(profileId: number, authorId: number, body: string): Promise<ProfilePost> {
-    const profile = await this.db
-      .selectFrom("users")
-      .select("id")
-      .where("id", "=", profileId)
-      .executeTakeFirst();
-    if (profile === undefined) throw new CommunityError("no_such_player", 404);
+    await this.requireAccount(profileId);
 
     if (await this.isBlocked(profileId, authorId)) {
       throw new CommunityError("blocked", 403);
@@ -179,6 +191,10 @@ export class CommunityRepository {
 
   async block(blockerId: number, blockedId: number): Promise<void> {
     if (blockerId === blockedId) throw new CommunityError("cannot_block_self");
+    // Checked first, like `post` and `requestFriend` already do. `blocks` has a
+    // foreign key and `foreign_keys` is ON, so blocking an id that does not exist
+    // used to surface as a constraint failure and a 500 instead of a 404.
+    await this.requireAccount(blockedId);
     await this.db
       .insertInto("blocks")
       .values({ blocker_id: blockerId, blocked_id: blockedId, created_at: nowIso() })
@@ -219,12 +235,7 @@ export class CommunityRepository {
    */
   async requestFriend(requesterId: number, addresseeId: number): Promise<FriendState> {
     if (requesterId === addresseeId) throw new CommunityError("cannot_friend_self");
-    const target = await this.db
-      .selectFrom("users")
-      .select("id")
-      .where("id", "=", addresseeId)
-      .executeTakeFirst();
-    if (target === undefined) throw new CommunityError("no_such_player", 404);
+    await this.requireAccount(addresseeId);
     // A block in EITHER direction stops the request, and reports the same error
     // both ways so neither side learns which of them blocked the other.
     if (
@@ -258,16 +269,27 @@ export class CommunityRepository {
       throw new CommunityError("too_many_requests", 429);
     }
 
-    await this.db
-      .insertInto("friendships")
-      .values({
-        requester_id: requesterId,
-        addressee_id: addresseeId,
-        state: "pending",
-        created_at: nowIso(),
-        responded_at: null,
-      })
-      .execute();
+    try {
+      await this.db
+        .insertInto("friendships")
+        .values({
+          requester_id: requesterId,
+          addressee_id: addresseeId,
+          state: "pending",
+          created_at: nowIso(),
+          responded_at: null,
+          pair_key: pairKey(requesterId, addresseeId),
+        })
+        .execute();
+    } catch (error) {
+      // The other person pressed the same button in the window between the
+      // `edge()` read above and this insert. `pair_key` is unique, so their row
+      // won and ours was refused — which is the right outcome, and reporting the
+      // resolved state is better than reporting an error for something that did
+      // in fact happen.
+      if (!isUniqueViolation(error)) throw error;
+      return await this.friendState(requesterId, addresseeId);
+    }
     return "pending_out";
   }
 

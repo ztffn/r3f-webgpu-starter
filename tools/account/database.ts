@@ -184,6 +184,29 @@ const MIGRATIONS: ((db: AccountDb) => Promise<void>)[] = [
       .unique()
       .execute();
   },
+
+  // Leaderboards. Every board is `WHERE <column> > 0 ORDER BY <column> DESC` over
+  // the whole career table, and without an index that is a full scan plus a sort
+  // on every click of every tab.
+  //
+  // The column names are written out rather than read from `LEADERBOARD_COLUMNS`
+  // on purpose: a migration records what it did on the day it ran, and a step
+  // that follows a mutable constant would mean the same version number describes
+  // a different schema depending on when it executed.
+  async (db) => {
+    for (const column of [
+      "matches",
+      "kills",
+      "longest_shot_metres",
+      "time_played_seconds",
+    ] as const) {
+      await db.schema
+        .createIndex(`career_${column}`)
+        .on("career")
+        .column(column)
+        .execute();
+    }
+  },
 ];
 
 /**

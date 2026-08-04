@@ -196,6 +196,19 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const text = await response.text();
   const body: unknown = text === "" ? {} : safeJson(text);
 
+  // A 200 that is not JSON is not a response from this API — it is a reverse proxy
+  // whose /api rule does not match, serving the SPA's own index.html instead. That
+  // has to fail here: `safeJson` turns the HTML into `{}`, and an empty object
+  // passes every `response.ok` check and then explodes at the first field a page
+  // reads (`config.providers.length` was the one that found this). Refusing gives
+  // every caller's existing error path something true to say.
+  if (response.ok && text !== "" && !isJson(response)) {
+    throw new AccountError(
+      "The account service did not answer. Is the game server running?",
+      502
+    );
+  }
+
   if (!response.ok) {
     const error = (body as { error?: string }).error;
     const problems = (body as { problems?: CharacterProblem[] }).problems ?? [];
@@ -217,6 +230,11 @@ function safeJson(text: string): unknown {
   } catch {
     return {};
   }
+}
+
+/** Did this actually come back as JSON? See the guard in `request`. */
+function isJson(response: Response): boolean {
+  return (response.headers.get("content-type") ?? "").includes("json");
 }
 
 /** Adopt the token from an auth response, ignoring its `user` field. */

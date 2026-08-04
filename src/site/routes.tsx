@@ -12,6 +12,10 @@ import { SiteLayout } from "./SiteLayout";
 import { Landing } from "./pages/Landing";
 import { Faq } from "./pages/Faq";
 import { Supporter } from "./pages/Supporter";
+import { SignIn } from "./pages/SignIn";
+import { Register } from "./pages/Register";
+import { Profile } from "./pages/Profile";
+import { CharacterPage } from "./pages/CharacterPage";
 import { NotFound } from "./pages/NotFound";
 import { Booting } from "./Booting";
 
@@ -85,6 +89,13 @@ export const router = createBrowserRouter([
       { index: true, element: <LandingOrGame /> },
       { path: "faq", element: <Faq /> },
       { path: "supporter", element: <Supporter /> },
+      { path: "sign-in", element: <SignIn /> },
+      { path: "register", element: <Register /> },
+      // No route guard: both pages render their own signed-out state with a way
+      // in. A redirect would be worse — it loses the URL someone was sent, and a
+      // guard that runs before /api/me settles bounces a signed-in visitor.
+      { path: "profile", element: <Profile /> },
+      { path: "character", element: <CharacterPage /> },
       { path: "*", element: <NotFound /> },
     ],
   },

@@ -9,7 +9,9 @@ import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router";
 import { Insignia } from "../ui/Insignia";
 import { BRAND } from "../ui/brand";
+import { useAuth } from "../account/AuthProvider";
 import "./site.css";
+import "./pages/auth.css";
 
 const NAV = [
   { to: "/faq", label: "FAQ" },
@@ -19,6 +21,7 @@ const NAV = [
 export function SiteLayout() {
   const [menuOpen, setMenuOpen] = useState(false);
   const location = useLocation();
+  const { me, loading } = useAuth();
 
   // Close the mobile menu on navigation. Without this it stays open over the
   // page you just moved to, which reads as the link having failed.
@@ -46,6 +49,24 @@ export function SiteLayout() {
           </nav>
 
           <div className="site-nav-actions">
+            {/* Account state, and never a spinner: `loading` renders nothing at
+                all, because a placeholder that becomes "Sign in" a moment later
+                reads as the nav flickering. */}
+            {!loading &&
+              (me === null ? (
+                <Link className="btn btn-ghost btn-sm nav-signin" to="/sign-in">
+                  Sign in
+                </Link>
+              ) : (
+                <Link className="nav-account" to="/profile" data-dev="nav-account">
+                  <span
+                    className={`nav-account-name${me.account.anonymous ? " guest" : ""}`}
+                  >
+                    {me.account.callsign}
+                  </span>
+                  {me.account.anonymous && <span className="badge">Guest</span>}
+                </Link>
+              ))}
             <Link className="btn btn-primary btn-sm" to="/play">
               Play now
             </Link>
@@ -69,6 +90,16 @@ export function SiteLayout() {
                 {item.label}
               </NavLink>
             ))}
+            {/* The account links live in the nav bar on desktop, where there is
+                room; on a phone the bar holds only Play, so they belong here. */}
+            {me === null ? (
+              <NavLink to="/sign-in">Sign in</NavLink>
+            ) : (
+              <>
+                <NavLink to="/profile">{me.account.callsign}</NavLink>
+                <NavLink to="/character">Character</NavLink>
+              </>
+            )}
           </nav>
         )}
       </header>

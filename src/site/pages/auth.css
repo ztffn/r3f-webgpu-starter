@@ -1,0 +1,115 @@
+/* Account pages: sign-in, register, profile, character.
+ *
+ * A single column of notched cards, capped at a comfortable form measure rather
+ * than the full shell — a login field 1180px wide is harder to use, not easier.
+ * Mobile-first, and every input already clears the 44px touch target and the 16px
+ * font floor from tokens.css (below 16px, iOS Safari zooms the page on focus).
+ */
+
+.auth-page {
+  width: min(100%, 620px);
+  gap: var(--s4);
+}
+
+.auth-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  padding: var(--s5);
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.auth-card > h2 {
+  margin: 0;
+}
+
+/* The card's own eyebrows separate control groups, so they need space above but
+   not below — the group follows immediately. */
+.auth-card .eyebrow {
+  margin-top: var(--s3);
+}
+.auth-card .eyebrow:first-of-type {
+  margin-top: 0;
+}
+
+.auth-note {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+.auth-note a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* Option rows wrap rather than scroll: five camo choices on a phone is two rows,
+   and a horizontal scroller hides options behind an edge nobody looks past. */
+.auth-card .btns.row {
+  gap: var(--s2);
+}
+.auth-card .btns.row .btn {
+  flex: 0 1 auto;
+}
+
+/* A list of errors, when the validator returns several at once. */
+ul.field-error {
+  margin: 0;
+  padding-left: 1.1em;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.medal-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+.medal-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s3);
+  padding-bottom: var(--s2);
+  border-bottom: var(--hair) solid var(--line);
+}
+.medal-list strong {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.medal-list em {
+  font-style: normal;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- account state in the site nav -------------------------------------
+   NOTE: no `display` here. site.css owns whether these are visible, and this
+   file is imported after it — declaring `display: inline-flex` here overrode
+   site.css's mobile `display: none` and pushed the nav past the viewport at
+   375px. One selector, one home; the same trap the HUD stylesheets hit. */
+.nav-account {
+  align-items: center;
+  gap: var(--s2);
+  max-width: 42vw;
+}
+.nav-account-name {
+  font-family: var(--font-label);
+  font-weight: 700;
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nav-account-name.guest {
+  color: var(--ink-muted);
+}

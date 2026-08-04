@@ -29,6 +29,7 @@ import { TERRAIN_SLUG } from "../../src/df2/config.ts";
 import { WEATHER_PRESET_IDS, weatherPresetIndex } from "../../src/df2/weather.ts";
 import { clampVisualDial } from "../../src/df2/visualDials.ts";
 import { loadServerTerrain } from "./terrain.ts";
+import { mountAccounts } from "../account/mount.ts";
 
 const PORT = Number(process.argv[2] ?? 2567);
 const PATCH_HZ = 20;
@@ -188,7 +189,14 @@ class GameRoom extends Room {
   }
 }
 
-const server = new Server({ transport: new WebSocketTransport() });
+const transport = new WebSocketTransport();
+// Accounts live in this same process and on this same port: the transport already
+// owns an Express app, so /auth and /api are mounted on it rather than standing up
+// a second server. Assembly is in tools/account/mount.ts to keep this file the
+// game's — it refuses to start without JWT_SECRET and AUTH_SALT, deliberately.
+await mountAccounts(transport.getExpressApp());
+
+const server = new Server({ transport });
 server.define(GAME_ROOM, GameRoom);
 await server.listen(PORT);
 console.log(

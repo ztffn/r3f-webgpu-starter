@@ -1,0 +1,25 @@
+{
+  // Typechecks the Node-side code, which tsconfig.json does not: its `include` is
+  // ["src", "vite.config.ts"], so before this file the account server and the game
+  // server were only ever checked by hand.
+  //
+  // `lib` keeps DOM, which looks wrong for a server config and is a deliberate
+  // trade. tools/game-server/terrain.ts imports the `TerrainMeta` TYPE from
+  // src/df2/loadTerrain.ts — nothing browser-side executes on the server, but tsc
+  // still has to check that module, and it uses `document` and `createImageBitmap`.
+  // Dropping DOM would report those as errors in a file the server never runs.
+  //
+  // What this config is FOR is catching type errors in tools/. It is not the guard
+  // against browser APIs reaching the server: that is the runtime, which throws
+  // immediately, plus the no-Three-at-runtime rule in docs/12 section 3.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    "noEmit": true
+  },
+  // Named directories, NOT all of tools/: tools/session-test/main.ts is a browser
+  // client served by Vite, and tools/vegetation/ is .mjs. Only genuinely
+  // server-side TypeScript belongs here.
+  "include": ["tools/account/**/*.ts", "tools/game-server/**/*.ts"]
+}

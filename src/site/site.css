@@ -254,3 +254,18 @@
     animation: none;
   }
 }
+
+/* The nav bar's account controls are desktop-only: on a phone the bar has room
+   for the brand and Play, and the account links live in the disclosure menu. */
+.nav-signin,
+.nav-account {
+  display: none;
+}
+@media (min-width: 768px) {
+  .nav-signin {
+    display: inline-flex;
+  }
+  .nav-account {
+    display: inline-flex;
+  }
+}

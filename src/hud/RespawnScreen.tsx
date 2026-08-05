@@ -53,7 +53,7 @@ export function RespawnScreen({ death }: RespawnScreenProps) {
     <div className="respawn" data-dev="hud-death" role="status">
       <div className="respawn-stage notched">
         <header className="respawn-head">
-          <span className="respawn-eyebrow">
+          <span className="eyebrow">
             {death.killerName === null ? "You died" : "You were killed by"}
           </span>
           {death.killerName !== null && (
@@ -75,7 +75,7 @@ export function RespawnScreen({ death }: RespawnScreenProps) {
                 <kbd>{slot.key ?? "·"}</kbd>
                 {/* No authored silhouette means no shape at all, never a block. */}
                 <span className="respawn-slot-icon" aria-hidden="true">
-                  {icon && <i style={icon} />}
+                  {icon && <i className="weapon-silhouette" style={icon} />}
                 </span>
                 <div>
                   <div className="respawn-slot-name">{slot.name ?? "—"}</div>

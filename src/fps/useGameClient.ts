@@ -23,20 +23,23 @@ import { useRapier } from "./useRapier.ts";
  * `?server=` override, following the diagnostic-URL convention.
  *
  * The default is no longer a literal localhost: net play is now what a bare
- * /play runs, so the guess has to be right in every environment. The Vite dev
- * server (:3000) proxies /auth and /api to the game server but not the game
- * WebSocket, so dev targets the game server's own port on whatever host the
- * page came from — which also covers a phone on the LAN. Anywhere else, the
- * VPS serves client and Colyseus from one origin (design record §5.2/deploy),
- * so same origin is the answer.
+ * /play runs, so the guess has to be right in every environment. Dev-ness is
+ * a build-time fact, so it is read from the build (`import.meta.env.DEV`)
+ * rather than sniffed from the port — Vite auto-increments off :3000 when it
+ * is busy, and a port test would silently reroute a LAN phone that hit :3001.
+ * A dev page targets the game server's own port on whatever host served it;
+ * anywhere else the VPS serves client and Colyseus from one origin (design
+ * record §5.2/deploy). The localhost case keeps `vite preview` working.
  */
+const GAME_SERVER_DEV_PORT = 2567;
+
 function readServerUrl(): string {
   const raw = new URLSearchParams(window.location.search).get("server");
   if (raw !== null && raw.length > 0) return raw;
-  const { protocol, hostname, host, port } = window.location;
+  const { protocol, hostname, host } = window.location;
   const ws = protocol === "https:" ? "wss:" : "ws:";
-  if (port === "3000" || hostname === "localhost" || hostname === "127.0.0.1") {
-    return `${ws}//${hostname}:2567`;
+  if (import.meta.env.DEV || hostname === "localhost" || hostname === "127.0.0.1") {
+    return `${ws}//${hostname}:${GAME_SERVER_DEV_PORT}`;
   }
   return `${ws}//${host}`;
 }

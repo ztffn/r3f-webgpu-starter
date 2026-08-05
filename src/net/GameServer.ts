@@ -714,7 +714,7 @@ export class GameServer {
     // either, because only `announceContacts` announces. Nothing but a shot can
     // damage a player today; the day something can, the announcement belongs
     // here beside the zero-crossing rather than on the shot path.
-    if (peer.health === 0) this.scheduleRespawn(peer, this.respawnTicks / this.ticksPerSecond);
+    if (peer.health === 0) this.scheduleRespawn(peer);
     return peer.health;
   }
 
@@ -722,11 +722,13 @@ export class GameServer {
    * The ONE place a respawn tick is written.
    *
    * Two writers meant the correct moment depended on which ran last, and the
-   * "is respawn enabled" test had to be repeated at every site.
+   * "is respawn enabled" test had to be repeated at every site. No parameter:
+   * every death waits the same flat window since the clip-length scheduling
+   * was dropped.
    */
-  private scheduleRespawn(peer: Peer, seconds: number): void {
+  private scheduleRespawn(peer: Peer): void {
     if (this.respawnTicks <= 0) return;
-    peer.respawnTick = this.room.tick + this.secondsToTicks(seconds);
+    peer.respawnTick = this.room.tick + this.respawnTicks;
   }
 
   /**
@@ -786,7 +788,7 @@ export class GameServer {
       // but the constant clears the longest clip, so no mid-fall teleport.
       const direction = deathDirectionFrom(travel.x, travel.z, victimYaw);
       const respawnSeconds = this.respawnTicks / this.ticksPerSecond;
-      this.scheduleRespawn(victim, respawnSeconds);
+      this.scheduleRespawn(victim);
       const died = encodePlayerDied({
         victimId: victim.connection.id,
         killerId: attackerId,

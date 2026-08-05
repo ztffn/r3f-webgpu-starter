@@ -13,7 +13,7 @@
 
 import { useEffect, useState } from "react";
 import { GameHud } from "./GameHud";
-import { allPanelsVisible } from "./hudPanels";
+import { allPanels } from "./hudPanels";
 import "./hudlab.css";
 import { EMPTY_COMBAT_FEED } from "../fps/useCombatFeed";
 import type { FlyState } from "../df2/FlyControls";
@@ -32,6 +32,10 @@ type Mode = "hud" | "split" | "reference";
  * still renders a dash for anything it has no real source for, and that behaviour
  * is the thing this page is most useful for checking.
  */
+/* Hoisted: the heading slider re-renders this page per input event, and a fresh
+   object each render would re-reconcile the whole HUD tree beneath it. */
+const ALL_PANELS = allPanels(true);
+
 const SAMPLE_FLY: FlyState = {
   position: { x: 0, y: 41, z: 320 } as FlyState["position"],
   agl: 1.7,
@@ -123,7 +127,7 @@ export default function HudLab() {
           joinCode="QGHRD9"
           fpsMode
           preview
-          panels={allPanelsVisible()}
+          panels={ALL_PANELS}
           panelAlpha={1}
         />
         {live && <HeadingSweep />}

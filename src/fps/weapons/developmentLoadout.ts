@@ -12,15 +12,7 @@ import {
 export const LOCAL_PLAYER_SEED = 1;
 
 /**
- * Keyboard-accessible development loadout. Keeping this mapping on the
- * gameplay side prevents the proxy GLTF from becoming equipment truth.
- *
- * `shooterSeed` is the loadout's stable identity. Replaying it reproduces every
- * weapon's pattern exactly, while two shooters given different seeds never
- * share one, even when they carry the same definitions.
- */
-/**
- * The authored slot table, exported so the deploy screen can SHOW the kit a
+ * The authored slot table, exported so the respawn screen can SHOW the kit a
  * player will actually carry instead of restating it. One list, two readers:
  * a restated copy is how a screen ends up promising a rifle the loadout
  * no longer contains.
@@ -36,6 +28,14 @@ export function developmentKit(
   ];
 }
 
+/**
+ * Keyboard-accessible development loadout. Keeping this mapping on the
+ * gameplay side prevents the proxy GLTF from becoming equipment truth.
+ *
+ * `shooterSeed` is the loadout's stable identity. Replaying it reproduces every
+ * weapon's pattern exactly, while two shooters given different seeds never
+ * share one, even when they carry the same definitions.
+ */
 export function createDevelopmentLoadout(
   shooterSeed: number = LOCAL_PLAYER_SEED,
   sniperDefinition: WeaponDefinition = SNIPER_DEFINITION

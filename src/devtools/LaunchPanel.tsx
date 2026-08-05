@@ -4,8 +4,9 @@
 // worse than a reload), so this panel is the honest UI for them — it edits the
 // URL those parameters actually come from, and says so on its Apply button.
 
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { WEATHER_PRESET_IDS } from "../df2/weather";
+import { KNOWN_LAUNCH_PARAMS, launchFlag, setLaunchFlag } from "../ui/launchParams";
 
 /** The scene the URL asks for. "" is the default (networked scope demo). */
 const SCENES = [
@@ -39,41 +40,40 @@ interface LaunchState {
   extras: string;
 }
 
-/** Everything this panel owns, read back out of the CURRENT url. */
+/**
+ * Everything this panel owns, read back out of the CURRENT url. Flag polarity
+ * is not restated here — `launchFlag` reads each parameter's declared default
+ * from launchParams.ts, the same vocabulary GameApp launches from.
+ */
 function readCurrent(): LaunchState {
   const q = new URLSearchParams(window.location.search);
-  const known = new Set([
-    "scene", "motor", "net", "server", "room", "label", "input", "weather",
-    "debug", "hud", "hudpreview", "loadout", "blades", "canopyall", "crosshair",
-    "shotdebug", "impacttest", "weaponanim", "bench",
-  ]);
   // Parameters this panel has no control for (dpr, steps, walk, fog dials …)
   // survive round trips through the free-text field instead of being dropped.
   const extras: string[] = [];
   q.forEach((value, key) => {
-    if (!known.has(key)) extras.push(`${key}=${value}`);
+    if (!KNOWN_LAUNCH_PARAMS.has(key)) extras.push(`${key}=${value}`);
   });
   const loadout = q.get("loadout");
   return {
     scene: q.get("scene") ?? "",
-    motor: q.get("motor") === "1",
-    net: q.get("net") === "1",
+    motor: launchFlag(q, "motor"),
+    net: launchFlag(q, "net"),
     server: q.get("server") ?? "",
     room: q.get("room") ?? "",
     label: q.get("label") ?? "",
     touch: q.get("input") === "touch",
     weather: q.get("weather") ?? "",
-    debug: q.get("debug") === "1",
-    hud: q.get("hud") !== "0",
-    hudpreview: q.get("hudpreview") === "1",
+    debug: launchFlag(q, "debug"),
+    hud: launchFlag(q, "hud"),
+    hudpreview: launchFlag(q, "hudpreview"),
     loadout: loadout === "1" ? "force" : loadout === "0" ? "skip" : "default",
-    blades: q.get("blades") !== "0",
-    canopyall: q.get("canopyall") === "1",
-    crosshair: q.get("crosshair") !== "0",
-    shotdebug: q.get("shotdebug") === "1",
-    impacttest: q.get("impacttest") === "1",
-    weaponanim: q.get("weaponanim") === "1",
-    bench: q.get("bench") === "1",
+    blades: launchFlag(q, "blades"),
+    canopyall: launchFlag(q, "canopyall"),
+    crosshair: launchFlag(q, "crosshair"),
+    shotdebug: launchFlag(q, "shotdebug"),
+    impacttest: launchFlag(q, "impacttest"),
+    weaponanim: launchFlag(q, "weaponanim"),
+    bench: launchFlag(q, "bench"),
     extras: extras.join("&"),
   };
 }
@@ -82,25 +82,25 @@ function readCurrent(): LaunchState {
 function buildSearch(s: LaunchState): string {
   const q = new URLSearchParams();
   if (s.scene !== "") q.set("scene", s.scene);
-  if (s.motor) q.set("motor", "1");
-  if (s.net) q.set("net", "1");
+  setLaunchFlag(q, "motor", s.motor);
+  setLaunchFlag(q, "net", s.net);
   if (s.server !== "") q.set("server", s.server);
   if (s.room !== "") q.set("room", s.room);
   if (s.label !== "") q.set("label", s.label);
   if (s.touch) q.set("input", "touch");
   if (s.weather !== "") q.set("weather", s.weather);
-  if (s.debug) q.set("debug", "1");
-  if (!s.hud) q.set("hud", "0");
-  if (s.hudpreview) q.set("hudpreview", "1");
+  setLaunchFlag(q, "debug", s.debug);
+  setLaunchFlag(q, "hud", s.hud);
+  setLaunchFlag(q, "hudpreview", s.hudpreview);
   if (s.loadout === "force") q.set("loadout", "1");
   if (s.loadout === "skip") q.set("loadout", "0");
-  if (!s.blades) q.set("blades", "0");
-  if (s.canopyall) q.set("canopyall", "1");
-  if (!s.crosshair) q.set("crosshair", "0");
-  if (s.shotdebug) q.set("shotdebug", "1");
-  if (s.impacttest) q.set("impacttest", "1");
-  if (s.weaponanim) q.set("weaponanim", "1");
-  if (s.bench) q.set("bench", "1");
+  setLaunchFlag(q, "blades", s.blades);
+  setLaunchFlag(q, "canopyall", s.canopyall);
+  setLaunchFlag(q, "crosshair", s.crosshair);
+  setLaunchFlag(q, "shotdebug", s.shotdebug);
+  setLaunchFlag(q, "impacttest", s.impacttest);
+  setLaunchFlag(q, "weaponanim", s.weaponanim);
+  setLaunchFlag(q, "bench", s.bench);
   let search = q.toString();
   const extras = s.extras.replace(/^[?&]+/, "").trim();
   if (extras !== "") search = search === "" ? extras : `${search}&${extras}`;
@@ -125,7 +125,11 @@ function Flag({
   );
 }
 
-export function LaunchPanel() {
+/**
+ * Memoised like WeatherPanel: no props, self-owned state — without memo it
+ * reconciles ~40 form controls at the console's telemetry-driven render rate.
+ */
+export const LaunchPanel = memo(function LaunchPanel() {
   const [state, setState] = useState<LaunchState>(readCurrent);
   const set = <K extends keyof LaunchState>(key: K, value: LaunchState[K]) =>
     setState((was) => ({ ...was, [key]: value }));
@@ -141,7 +145,7 @@ export function LaunchPanel() {
           <button
             key={scene.value}
             type="button"
-            data-dev={`launch-scene-${scene.label.split(" ")[0]}`}
+            data-dev={`launch-scene-${scene.value || "default"}`}
             aria-pressed={state.scene === scene.value}
             onClick={() => set("scene", scene.value)}
           >
@@ -280,4 +284,4 @@ export function LaunchPanel() {
       </div>
     </>
   );
-}
+});

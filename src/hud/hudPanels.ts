@@ -35,14 +35,9 @@ export type HudPanelVisibility = Record<HudPanelId, boolean>;
 const PANELS_KEY = "df2.hud.panels";
 const ALPHA_KEY = "df2.hud.panelAlpha";
 
-/** All panels visible — the state every session starts from unless it stored one. */
-export function allPanelsVisible(): HudPanelVisibility {
-  return Object.fromEntries(HUD_PANELS.map((id) => [id, true])) as HudPanelVisibility;
-}
-
-/** Every panel off — what `?hud=0` starts from. Combat feedback stays. */
-export function allPanelsHidden(): HudPanelVisibility {
-  return Object.fromEntries(HUD_PANELS.map((id) => [id, false])) as HudPanelVisibility;
+/** Every panel set one way: `allPanels(true)` to show, `allPanels(false)` for `?hud=0`. */
+export function allPanels(visible: boolean): HudPanelVisibility {
+  return Object.fromEntries(HUD_PANELS.map((id) => [id, visible])) as HudPanelVisibility;
 }
 
 /**
@@ -51,7 +46,7 @@ export function allPanelsHidden(): HudPanelVisibility {
  * session would read as a missing panel bug.
  */
 export function loadPanelVisibility(): HudPanelVisibility {
-  const base = allPanelsVisible();
+  const base = allPanels(true);
   try {
     const raw = sessionStorage.getItem(PANELS_KEY);
     if (raw === null) return base;
@@ -69,10 +64,16 @@ export function savePanelVisibility(value: HudPanelVisibility): void {
   sessionStorage.setItem(PANELS_KEY, JSON.stringify(value));
 }
 
+/** The dial's range — one home for the bounds the slider and the loader share. */
+export const PANEL_ALPHA_MIN = 0.2;
+export const PANEL_ALPHA_MAX = 1.6;
+
 /** 1 is the stylesheet's own transparency; the dial scales it either way. */
 export function loadPanelAlpha(): number {
   const raw = Number(sessionStorage.getItem(ALPHA_KEY));
-  return Number.isFinite(raw) && raw > 0 && raw <= 1.6 ? raw : 1;
+  return Number.isFinite(raw) && raw >= PANEL_ALPHA_MIN && raw <= PANEL_ALPHA_MAX
+    ? raw
+    : 1;
 }
 
 export function savePanelAlpha(value: number): void {

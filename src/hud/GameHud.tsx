@@ -10,7 +10,7 @@
 // hairlines into mush, and the touch layout has to move panels out of the thumb
 // zones rather than shrink the desktop one.
 
-import { useEffect, useRef, useSyncExternalStore, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useSyncExternalStore, type CSSProperties } from "react";
 import { combatTelemetry } from "../fps/ui/CombatTelemetry";
 import { HipfireCrosshair } from "../fps/ui/HipfireCrosshair";
 import { impactTelemetryKey } from "../fps/ui/CombatTelemetry";
@@ -131,12 +131,19 @@ export function GameHud({
       ? null
       : Math.hypot(wind.windXMetresPerSecond, wind.windZMetresPerSecond) * 3.6;
 
+  // Memoised because GameHud renders ~13x/sec on telemetry: a fresh style
+  // object each render would force React's style diff on the root every time.
+  const rootStyle = useMemo(
+    () => ({ "--hud-panel-alpha": panelAlpha }) as CSSProperties,
+    [panelAlpha]
+  );
+
   return (
     <div
       className="hud-root skin-hud"
       data-dev="hud"
       data-dev-preview={preview || undefined}
-      style={{ "--hud-panel-alpha": panelAlpha } as CSSProperties}
+      style={rootStyle}
     >
       {fpsMode && panels.crosshair && <HipfireCrosshair />}
       {/* Keyed by the event's own sequence so a repeated hit restarts the CSS

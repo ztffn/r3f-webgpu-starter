@@ -4,16 +4,35 @@
 // stare at grass, reloading to rebake a URL parameter, and still not seeing the
 // weapon block is the workflow; seeing it back next week is the safe reset.
 
-import { HUD_PANELS, HUD_PANEL_LABELS, type HudPanelId, type HudPanelVisibility } from "../hud/hudPanels";
+import { memo } from "react";
+import {
+  HUD_PANELS,
+  HUD_PANEL_LABELS,
+  PANEL_ALPHA_MAX,
+  PANEL_ALPHA_MIN,
+  type HudPanelId,
+  type HudPanelVisibility,
+} from "../hud/hudPanels";
 
 export interface HudPanelProps {
   panels: HudPanelVisibility;
   setPanel: (id: HudPanelId, visible: boolean) => void;
+  setAllPanels: (visible: boolean) => void;
   panelAlpha: number;
   setPanelAlpha: (value: number) => void;
 }
 
-export function HudPanel({ panels, setPanel, panelAlpha, setPanelAlpha }: HudPanelProps) {
+/**
+ * Memoised like WeatherPanel and for the same reason: the console re-renders at
+ * GameApp's telemetry rate (~13 Hz), and this tab's props only change on a click.
+ */
+export const HudPanel = memo(function HudPanel({
+  panels,
+  setPanel,
+  setAllPanels,
+  panelAlpha,
+  setPanelAlpha,
+}: HudPanelProps) {
   const allOn = HUD_PANELS.every((id) => panels[id]);
 
   return (
@@ -36,7 +55,7 @@ export function HudPanel({ panels, setPanel, panelAlpha, setPanelAlpha }: HudPan
         <button
           type="button"
           data-dev="hud-panels-all"
-          onClick={() => HUD_PANELS.forEach((id) => setPanel(id, !allOn))}
+          onClick={() => setAllPanels(!allOn)}
         >
           {allOn ? "Hide all" : "Show all"}
         </button>
@@ -50,8 +69,8 @@ export function HudPanel({ panels, setPanel, panelAlpha, setPanelAlpha }: HudPan
         <input
           type="range"
           data-dev="hud-panel-alpha"
-          min={0.2}
-          max={1.6}
+          min={PANEL_ALPHA_MIN}
+          max={PANEL_ALPHA_MAX}
           step={0.05}
           value={panelAlpha}
           onChange={(event) => setPanelAlpha(Number(event.target.value))}
@@ -64,8 +83,10 @@ export function HudPanel({ panels, setPanel, panelAlpha, setPanelAlpha }: HudPan
 
       <p className="note">
         Combat feedback — hitmarker, damage direction, death overlay — has no switch
-        on purpose: hidden feedback reads as a broken feedback wire.
+        on purpose: hidden feedback reads as a broken feedback wire. Two toggles are
+        conditional by design: Objective renders only under <code>?hudpreview=1</code>,
+        and Feed only once it has something true to say.
       </p>
     </>
   );
-}
+});

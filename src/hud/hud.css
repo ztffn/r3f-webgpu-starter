@@ -271,11 +271,10 @@
   text-shadow: 0 0 9px rgba(191, 215, 121, 0.16);
 }
 
-/* Weapon silhouette: an authored render used as a MASK, not an image.
-   Masking is what lets one greyscale asset paint in the phosphor palette — the
-   element's own colour shows through the shape, so the icon tints with the HUD
-   instead of arriving as a fixed-colour picture that fights it. Replaces five
-   divs that approximated a rifle out of clip-paths. */
+/* Weapon silhouette: an authored render used as a MASK, not an image — the
+   masking plumbing lives in primitives.css (.weapon-silhouette); this class
+   only places and colours it. Replaces five divs that approximated a rifle
+   out of clip-paths. */
 .hud-rifle {
   position: absolute;
   /* Sits above the ammo figure rather than behind it: the big magazine count
@@ -286,17 +285,6 @@
   width: 158px;
   height: 40px;
   background-color: #a4b170;
-  /* The renders are 1920x470 with generous margins, so `contain` sits the
-     weapon inside the box without cropping the muzzle or the stock. */
-  -webkit-mask-image: var(--weapon-icon);
-  mask-image: var(--weapon-icon);
-  -webkit-mask-size: contain;
-  mask-size: contain;
-  -webkit-mask-position: center;
-  mask-position: center;
-  -webkit-mask-repeat: no-repeat;
-  mask-repeat: no-repeat;
-  /* No icon for this weapon means no shape at all rather than a filled block. */
   opacity: 0.92;
 }
 
@@ -532,10 +520,8 @@
     padding-right: var(--s4);
     padding-bottom: var(--s3);
   }
-  /* Wind keeps the compass bar; the full-width tape fades out underneath it. */
+  /* Wind keeps the compass bar (base rule); it only gives up its min-width. */
   .hud-wind {
-    top: var(--inset-t);
-    right: var(--inset-r);
     min-width: 0;
   }
   .hud-nav {

@@ -176,24 +176,18 @@
   text-transform: uppercase;
   color: var(--ink-faint);
 }
-/* The silhouette, masked so it takes the slot's ink. A weapon with no render
-   collapses to zero width rather than leaving a gap where a picture should be. */
+/* The silhouette (see .weapon-silhouette in primitives.css for the masking).
+   A weapon with no render collapses to zero width rather than leaving a gap
+   where a picture should be. */
 .slot-icon {
   grid-column: 1;
   grid-row: 1 / span 2;
   width: 96px;
   height: 34px;
   align-self: center;
-  background-color: currentColor;
   opacity: 0.85;
-  -webkit-mask-image: var(--weapon-icon);
-  mask-image: var(--weapon-icon);
-  -webkit-mask-size: contain;
-  mask-size: contain;
   -webkit-mask-position: left center;
   mask-position: left center;
-  -webkit-mask-repeat: no-repeat;
-  mask-repeat: no-repeat;
 }
 .slot-name {
   grid-column: 2;

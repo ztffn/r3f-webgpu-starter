@@ -12,7 +12,7 @@ import { GameHud } from "../hud/GameHud";
 import { DevConsole } from "../devtools/DevConsole";
 import { useDevConsole } from "../devtools/useDevConsole";
 import {
-  allPanelsHidden,
+  allPanels,
   loadPanelAlpha,
   loadPanelVisibility,
   savePanelAlpha,
@@ -20,6 +20,7 @@ import {
   type HudPanelId,
   type HudPanelVisibility,
 } from "../hud/hudPanels";
+import { EXPLICIT_LAUNCH_PARAMS } from "../ui/launchParams";
 import { DF2Scene, type SceneHandles } from "../df2/DF2Scene";
 import type { GrassUniforms } from "../df2/GrassMaterial";
 import type { FlyState, Stance } from "../df2/FlyControls";
@@ -29,24 +30,6 @@ import type { GameClient } from "../net/GameClient";
 import type { LoadedTerrain } from "../df2/loadTerrain";
 import type { PerfSample } from "../df2/PerfMonitor";
 import { BENCH, publish } from "../df2/bench";
-
-/**
- * Parameters that make a /play URL EXPLICIT — a documented dev URL that means
- * exactly what it says. A bare /play (the site's every "Play now" button) gets
- * the defaults below instead: the full networked game behind the deploy screen.
- */
-const EXPLICIT_PARAMS = [
-  "scene",
-  "motor",
-  "net",
-  "bench",
-  "server",
-  "room",
-  "weather",
-  "blades",
-  "debug",
-  "hudpreview",
-] as const;
 
 interface LaunchConfig {
   scopeDemo: boolean;
@@ -101,7 +84,10 @@ interface LaunchConfig {
  */
 function readLaunchConfig(): LaunchConfig {
   const urlParams = new URLSearchParams(window.location.search);
-  const explicit = EXPLICIT_PARAMS.some((key) => urlParams.has(key));
+  // Which parameters are explicit — and which, like the funnel's `loadout`
+  // token or `room`, deliberately are not — is declared per-parameter in
+  // launchParams.ts, the one copy of the vocabulary.
+  const explicit = EXPLICIT_LAUNCH_PARAMS.some((key) => urlParams.has(key));
   const requestedScene = urlParams.get("scene") ?? (explicit ? null : "scope");
   const motorDemo =
     requestedScene === "motor" || urlParams.get("motor") === "1" || !explicit;
@@ -145,20 +131,23 @@ export default function GameApp() {
   // rebake a URL parameter does not cost the debugging posture — unless the URL
   // says `hud=0`, which overrides the stored posture with everything off.
   const [hudPanels, setHudPanels] = useState<HudPanelVisibility>(() =>
-    hud ? loadPanelVisibility() : allPanelsHidden()
+    hud ? loadPanelVisibility() : allPanels(false)
   );
   const setHudPanel = useCallback((id: HudPanelId, visible: boolean) => {
-    setHudPanels((was) => {
-      const next = { ...was, [id]: visible };
-      savePanelVisibility(next);
-      return next;
-    });
+    setHudPanels((was) => ({ ...was, [id]: visible }));
   }, []);
-  const [panelAlpha, setPanelAlphaState] = useState<number>(loadPanelAlpha);
-  const setPanelAlpha = useCallback((value: number) => {
-    setPanelAlphaState(value);
-    savePanelAlpha(value);
+  const setAllHudPanels = useCallback((visible: boolean) => {
+    setHudPanels(allPanels(visible));
   }, []);
+  const [panelAlpha, setPanelAlpha] = useState<number>(loadPanelAlpha);
+  // Persisted in effects rather than inside the setters: the updater stays pure
+  // (StrictMode double-invokes it), "show all" costs one write instead of nine,
+  // and the opacity slider's drag persists once per commit instead of per event.
+  useEffect(() => savePanelVisibility(hudPanels), [hudPanels]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => savePanelAlpha(panelAlpha), 300);
+    return () => window.clearTimeout(timer);
+  }, [panelAlpha]);
 
   const [wireframe, setWireframe] = useState(false);
   const [grass, setGrass] = useState(BENCH.grass ?? true);
@@ -282,6 +271,7 @@ export default function GameApp() {
           fpsMode={scopeDemo}
           panels={hudPanels}
           setPanel={setHudPanel}
+          setAllPanels={setAllHudPanels}
           panelAlpha={panelAlpha}
           setPanelAlpha={setPanelAlpha}
         />

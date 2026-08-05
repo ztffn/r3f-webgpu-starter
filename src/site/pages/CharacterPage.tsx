@@ -10,7 +10,8 @@
 // the simulation fires rather than invented bars.
 
 import { lazy, Suspense, useEffect, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
+import { loadGameApp, PLAY_DIRECT_URL } from "../../ui/launchParams";
 import { accountClient, AccountError } from "../../account/accountClient";
 import { useAuth } from "../../account/AuthProvider";
 import {
@@ -71,13 +72,6 @@ const CAMO_SWATCH: Record<Camo, [string, string, string]> = {
 /** Deploy countdown. Long enough to read the kit, short enough to forgive. */
 const DEPLOY_SECONDS = 20;
 
-/**
- * Where "Deploy now" goes: a bare /play would bounce straight back here, so the
- * loadout stop is explicitly spent. GameApp still applies the full networked
- * defaults to this URL — `loadout` is not one of its explicit parameters.
- */
-const DEPLOY_URL = "/play?loadout=0";
-
 export function CharacterPage() {
   useDocumentTitle("Loadout");
   const { me, loading, refresh, can } = useAuth();
@@ -87,10 +81,11 @@ export function CharacterPage() {
    * `?deploy=1`: this screen is the stop between "Play now" and the match. Same
    * page, two extra things — a countdown that deploys on zero, and a guest path
    * that seeds the default character instead of demanding a sign-in, because the
-   * FAQ promises a match without an account.
+   * FAQ promises a match without an account. The handshake's other half lives
+   * in launchParams.ts beside the /play parameter vocabulary.
    */
-  const deployMode =
-    new URLSearchParams(useLocation().search).get("deploy") === "1";
+  const [searchParams] = useSearchParams();
+  const deployMode = searchParams.get("deploy") === "1";
 
   const [draft, setDraft] = useState<Character | null>(null);
   const { busy, error, done: saved, run } = useAsyncAction<"save">(describeSave);
@@ -115,14 +110,15 @@ export function CharacterPage() {
     return () => window.clearInterval(timer);
   }, [deployMode]);
   useEffect(() => {
-    if (deployMode && seconds === 0) navigate(DEPLOY_URL);
+    if (deployMode && seconds === 0) navigate(PLAY_DIRECT_URL);
   }, [deployMode, seconds, navigate]);
 
-  // Warm the game chunk while the countdown runs — the same dynamic-import shape
-  // as the /play route, so the split stays intact; this only moves the fetch
-  // forward to where the player is reading their kit instead of a loading bar.
+  // Warm the game chunk while the countdown runs — the same thunk the /play
+  // route's lazy() uses, so the split stays intact and the two cannot point at
+  // different modules; this only moves the fetch forward to where the player is
+  // reading their kit instead of a loading bar.
   useEffect(() => {
-    if (deployMode) void import("../../game/GameApp");
+    if (deployMode) void loadGameApp();
   }, [deployMode]);
 
   if (loading) {
@@ -222,7 +218,7 @@ export function CharacterPage() {
                 onClick={() => setLoadout({ primary: id })}
               >
                 {weaponIconStyle(id) !== undefined && (
-                  <span className="slot-icon" style={weaponIconStyle(id)} aria-hidden="true" />
+                  <span className="slot-icon weapon-silhouette" style={weaponIconStyle(id)} aria-hidden="true" />
                 )}
                 <span className="slot-name">{weaponLabel(id)}</span>
                 <span className="slot-mark" aria-hidden="true">
@@ -245,7 +241,7 @@ export function CharacterPage() {
                 onClick={() => setLoadout({ secondary: id })}
               >
                 {weaponIconStyle(id) !== undefined && (
-                  <span className="slot-icon" style={weaponIconStyle(id)} aria-hidden="true" />
+                  <span className="slot-icon weapon-silhouette" style={weaponIconStyle(id)} aria-hidden="true" />
                 )}
                 <span className="slot-name">{weaponLabel(id)}</span>
                 <span className="slot-mark" aria-hidden="true">
@@ -405,42 +401,39 @@ export function CharacterPage() {
         >
           {status.text}
         </p>
-        {deployMode ? (
-          <div className="bar-actions">
-            {me !== null && (
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                data-dev="character-save"
-                disabled={busy !== null || problems.length > 0}
-                onClick={onSave}
-              >
-                {busy !== null ? "Saving…" : "Save"}
-              </button>
-            )}
-            <span className="deploy-count" data-dev="deploy-count" role="timer">
-              Game starts in {seconds}
-            </span>
+        {(() => {
+          // One save button, two placements: in deploy mode it demotes to a
+          // ghost beside the primary Deploy action (and disappears for a guest,
+          // who has no row to save to).
+          const saveButton = (deployMode ? me !== null : true) && (
             <button
               type="button"
-              className="btn btn-primary"
-              data-dev="deploy-now"
-              onClick={() => navigate(DEPLOY_URL)}
+              className={deployMode ? "btn btn-ghost btn-sm" : "btn btn-primary"}
+              data-dev="character-save"
+              disabled={busy !== null || problems.length > 0}
+              onClick={onSave}
             >
-              Deploy now
+              {busy !== null ? "Saving…" : deployMode ? "Save" : "Save loadout"}
             </button>
-          </div>
-        ) : (
-          <button
-            type="button"
-            className="btn btn-primary"
-            data-dev="character-save"
-            disabled={busy !== null || problems.length > 0}
-            onClick={onSave}
-          >
-            {busy !== null ? "Saving…" : "Save loadout"}
-          </button>
-        )}
+          );
+          if (!deployMode) return saveButton;
+          return (
+            <div className="bar-actions">
+              {saveButton}
+              <span className="deploy-count" data-dev="deploy-count" role="timer">
+                Game starts in {seconds}
+              </span>
+              <button
+                type="button"
+                className="btn btn-primary"
+                data-dev="deploy-now"
+                onClick={() => navigate(PLAY_DIRECT_URL)}
+              >
+                Deploy now
+              </button>
+            </div>
+          );
+        })()}
       </div>
     </div>
   );

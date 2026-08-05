@@ -69,8 +69,10 @@ export function ControlsPanel({ fpsMode }: ControlsPanelProps) {
 
       <span className="eyebrow dev-group">URLs</span>
       <dl className="rows legend">
+        <dt>/play</dt>
+        <dd>full networked game via the loadout stop</dd>
         <dt>?scene=scope&amp;motor=1</dt>
-        <dd>weapon on a collided body</dd>
+        <dd>weapon on a collided body, offline</dd>
         <dt>&amp;net=1</dt>
         <dd>authoritative server (npm run game:server)</dd>
         <dt>?bench=1</dt>
@@ -78,6 +80,7 @@ export function ControlsPanel({ fpsMode }: ControlsPanelProps) {
         <dt>?debug=1</dt>
         <dd>open this console at load</dd>
       </dl>
+      <p className="note">The Launch tab bakes any of these — and the rest.</p>
     </>
   );
 }

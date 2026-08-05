@@ -35,7 +35,12 @@ export function WeaponPanel({ weaponId, name, fireMode, magazine, reserve }: Wea
           the weapon has no render yet — a placeholder shape would be a picture
           of the wrong gun. */}
       {icon !== undefined && (
-        <div className="hud-rifle" style={icon} aria-hidden="true" data-dev="weapon-icon" />
+        <div
+          className="hud-rifle weapon-silhouette"
+          style={icon}
+          aria-hidden="true"
+          data-dev="weapon-icon"
+        />
       )}
 
       <div className="hud-ammo" data-dev="weapon-ammo">

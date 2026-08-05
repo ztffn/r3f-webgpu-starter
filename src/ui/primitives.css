@@ -82,6 +82,24 @@
     );
 }
 
+/* --- weapon silhouette -----------------------------------------------------
+   Paints weaponIcons.ts's --weapon-icon as a MASK, so one greyscale render
+   tints with whatever surface it sits on (background-color is the paint).
+   Pair with a size; override background-color or mask-position per surface.
+   One home for the mask plumbing — the HUD, the loadout editor and the respawn
+   screen all consume it. */
+.weapon-silhouette {
+  background-color: currentColor;
+  -webkit-mask-image: var(--weapon-icon);
+  mask-image: var(--weapon-icon);
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+
 /* --- eyebrow: the small tracked-out label above a heading ----------------- */
 .eyebrow {
   font-family: var(--font-label);

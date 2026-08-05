@@ -8,6 +8,12 @@
 
 import { lazy, Suspense } from "react";
 import { createBrowserRouter, Navigate, useLocation } from "react-router";
+import {
+  loadGameApp,
+  LOADOUT_STOP_URL,
+  ROOT_REDIRECT_PARAMS,
+  shouldStopAtLoadout,
+} from "../ui/launchParams";
 import { SiteLayout } from "./SiteLayout";
 import { Landing } from "./pages/Landing";
 import { Faq } from "./pages/Faq";
@@ -26,27 +32,21 @@ import { Compare } from "./pages/Compare";
 import { NotFound } from "./pages/NotFound";
 import { Booting } from "./Booting";
 
-const GameApp = lazy(() => import("../game/GameApp"));
-
-/**
- * Query parameters that mean "this is a development URL for the game".
- *
- * Kept as a list rather than a catch-all so an ordinary marketing link with a
- * `?utm_source=` on it still lands on the landing page.
- */
-const GAME_PARAMS = ["scene", "motor", "net", "bench", "debug", "weather", "blades"];
+const GameApp = lazy(loadGameApp);
 
 /**
  * The landing page, unless the URL is one of the documented dev URLs.
  *
  * Those all predate the router and are cited throughout docs/ and PLAYING.md, so
  * they keep working: the redirect preserves the search string exactly, and /play
- * is the canonical form going forward.
+ * is the canonical form going forward. The parameter list lives in
+ * launchParams.ts (a list rather than a catch-all, so an ordinary marketing link
+ * with a `?utm_source=` on it still lands on the landing page).
  */
 function LandingOrGame() {
   const location = useLocation();
   const params = new URLSearchParams(location.search);
-  if (GAME_PARAMS.some((key) => params.has(key))) {
+  if (ROOT_REDIRECT_PARAMS.some((key) => params.has(key))) {
     return <Navigate to={{ pathname: "/play", search: location.search }} replace />;
   }
   return <Landing />;
@@ -57,18 +57,13 @@ function LandingOrGame() {
  *
  * A BARE /play is the site funnel, and the funnel stops at the loadout screen
  * first — the one with the soldier — which counts down and comes back here as
- * `/play?loadout=0`. Any other query string is a documented dev URL or a lobby
- * join and goes straight in; `?loadout=1` forces the stop regardless.
+ * `/play?loadout=0`. The handshake's rules live in launchParams.ts beside the
+ * parameter vocabulary they depend on.
  */
 function Play() {
   const location = useLocation();
-  const params = new URLSearchParams(location.search);
-  const hasOtherParams = [...params.keys()].some((key) => key !== "loadout");
-  const stopAtLoadout =
-    params.get("loadout") === "1" ||
-    (!hasOtherParams && params.get("loadout") !== "0");
-  if (stopAtLoadout) {
-    return <Navigate to="/character?deploy=1" replace />;
+  if (shouldStopAtLoadout(new URLSearchParams(location.search))) {
+    return <Navigate to={LOADOUT_STOP_URL} replace />;
   }
   return (
     <Suspense fallback={<Booting />}>

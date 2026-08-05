@@ -50,6 +50,7 @@ export function DevConsole({
   fpsMode,
   panels,
   setPanel,
+  setAllPanels,
   panelAlpha,
   setPanelAlpha,
   ...sceneProps
@@ -123,6 +124,7 @@ export function DevConsole({
           <HudPanel
             panels={panels}
             setPanel={setPanel}
+            setAllPanels={setAllPanels}
             panelAlpha={panelAlpha}
             setPanelAlpha={setPanelAlpha}
           />

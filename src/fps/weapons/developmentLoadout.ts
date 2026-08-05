@@ -19,20 +19,28 @@ export const LOCAL_PLAYER_SEED = 1;
  * weapon's pattern exactly, while two shooters given different seeds never
  * share one, even when they carry the same definitions.
  */
-export function createDevelopmentLoadout(
-  shooterSeed: number = LOCAL_PLAYER_SEED,
+/**
+ * The authored slot table, exported so the deploy screen can SHOW the kit a
+ * player will actually carry instead of restating it. One list, two readers:
+ * a restated copy is how a screen ends up promising a rifle the loadout
+ * no longer contains.
+ */
+export function developmentKit(
   sniperDefinition: WeaponDefinition = SNIPER_DEFINITION
-): LoadoutSystem {
-  const authored: ReadonlyArray<{
-    inputSlot: number;
-    id: WeaponSlotId;
-    definition: WeaponDefinition;
-  }> = [
+): ReadonlyArray<{ inputSlot: number; id: WeaponSlotId; definition: WeaponDefinition }> {
+  return [
     { inputSlot: 1, id: "primary", definition: sniperDefinition },
     { inputSlot: 2, id: "secondary", definition: M4_DEFINITION },
     { inputSlot: 3, id: "sidearm", definition: GLOCK_DEFINITION },
     { inputSlot: 4, id: "support", definition: SAW_DEFINITION },
   ];
+}
+
+export function createDevelopmentLoadout(
+  shooterSeed: number = LOCAL_PLAYER_SEED,
+  sniperDefinition: WeaponDefinition = SNIPER_DEFINITION
+): LoadoutSystem {
+  const authored = developmentKit(sniperDefinition);
   const slots: LoadoutSlot[] = authored.map(({ inputSlot, id, definition }) => ({
     inputSlot,
     id,

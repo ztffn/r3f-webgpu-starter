@@ -18,11 +18,15 @@ const BASE = "/assets/ui/weapons";
  * stand-in: showing a submachine gun beside "Glock" would be a picture of the
  * wrong object, which is worse than a name on its own. `ak`, `smg`, `knife` and
  * `gnade` are drawn and unused, waiting on the weapons that need them.
+ * `pistol_icon` is authored from an SVG profile (2026-08-05), same greyscale
+ * mask treatment as the renders; the aspect differs and that is fine —
+ * `mask-size: contain` normalises every icon to its box anyway.
  */
 const ICONS: Partial<Record<WeaponId, string>> = {
   "prototype-sniper": `${BASE}/m40_icon.webp`,
   m4: `${BASE}/m4_icon.webp`,
   "saw-test": `${BASE}/lmg_icon.webp`,
+  "glock-9mm": `${BASE}/pistol_icon.webp`,
 };
 
 export function weaponIcon(id: WeaponId): string | null {

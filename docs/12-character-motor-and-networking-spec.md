@@ -271,10 +271,13 @@ the feed's joined and left lines are a diff of two rosters, so one packet does t
 three. The first roster a client sees is a baseline, or joining a running match prints the
 whole room walking in at once.
 
-**Respawn rides as tenths of a second** because it is derived from a death clip's own length
-(1.93–3.73 s) plus a pause, and whole seconds would round the two out of step. The server
-schedules and announces from the *same* number, which is what stops the client's countdown
-outliving the corpse.
+**Respawn rides as tenths of a second** so the wire can carry fractional times without
+rounding the countdown and the corpse out of step. The server schedules and announces from
+the *same* number, which is what stops the client's countdown outliving the corpse.
+(2026-08-05: the number is a flat 5 s for every death, no longer the death clip's length
+plus a pause — deriving it from the clip tied the authority to presentation and the timer
+kept drifting in practice. 5 s still clears the longest clip, 3.73 s, so the fall always
+finishes before the body leaves.)
 
 **The welcome grew a 20th byte**, `maxHealth`. It is a room constant, so it belongs on the
 packet sent once per join rather than in the snapshot, which would pay for it per player per

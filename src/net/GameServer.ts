@@ -52,11 +52,7 @@ import {
 } from "../combat/HitscanBallistics.ts";
 import type { Damageable } from "../combat/Damageable.ts";
 import type { Vec3Like } from "../combat/math.ts";
-import {
-  chooseDeathClip,
-  deathDirectionFrom,
-  localizeVelocity,
-} from "../character/characterClips.ts";
+import { deathDirectionFrom, localizeVelocity } from "../character/characterClips.ts";
 import type { WeaponDefinition } from "../combat/WeaponDefinition.ts";
 import {
   WEAPON_DEFINITIONS,
@@ -107,13 +103,11 @@ export interface GameServerOptions {
   /** Hit points a player spawns with. Rides the snapshot as a u8, so 1-255. */
   readonly maxHealth?: number;
   /**
-   * Seconds a dead player stays dead when nothing is known about the death.
-   * 0 disables respawn entirely. A death from a SHOT overrides this with the
-   * length of the clip that plays plus `respawnPauseSeconds`.
+   * Seconds a dead player stays dead, whatever killed them. 0 disables respawn
+   * entirely. The default clears the longest death clip (3.73 s) with margin,
+   * so a body is never teleported away mid-fall.
    */
   readonly respawnSeconds?: number;
-  /** Seconds a body lies still after its death clip ends, before respawning. */
-  readonly respawnPauseSeconds?: number;
   /**
    * SERVER-AUTHORED world targets: destructible range figures every player in
    * the room shares. Positions are world x/z; the feet land on the server's
@@ -233,15 +227,13 @@ interface ServerTarget {
 
 const DEFAULT_PATCH_HZ = 20;
 const DEFAULT_MAX_HEALTH = 100;
-const DEFAULT_RESPAWN_SECONDS = 3;
 /**
- * Seconds a body lies still after its death clip finishes.
- *
- * Long enough that the final pose registers as a death rather than a stutter,
- * short enough that a player is not staring at their own corpse. With the longest
- * clip at 3.73 s this makes the worst case a shade over 5 s.
+ * One flat number for every death. It USED to be the death clip's length plus a
+ * pause, which tied the authority's schedule to presentation and kept drifting
+ * against the client's counter; 5 s clears the longest clip (3.73 s) with enough
+ * margin that the final pose still registers, and every death reads the same.
  */
-const DEFAULT_RESPAWN_PAUSE_SECONDS = 1.5;
+const DEFAULT_RESPAWN_SECONDS = 5;
 /** About 11 degrees: wider than any authored cone, far short of a turn. */
 const DEFAULT_MAX_AIM_DEVIATION_RADIANS = 0.2;
 /** Beyond this a rifle round is not the thing that killed anybody. */
@@ -331,8 +323,6 @@ export class GameServer {
   private roomStateDirty = false;
   private readonly maxHealth: number;
   private readonly respawnTicks: number;
-  /** Seconds a body lies still AFTER its death clip finishes, before respawning. */
-  private readonly respawnPauseSeconds: number;
   private readonly maxAimDeviation: number;
   private readonly spawn: (seat: number) => { x: number; y?: number; z: number };
   /**
@@ -440,10 +430,6 @@ export class GameServer {
     this.maxHealth = Math.max(1, Math.min(255, options.maxHealth ?? DEFAULT_MAX_HEALTH));
     this.respawnTicks = Math.round(
       (options.respawnSeconds ?? DEFAULT_RESPAWN_SECONDS) / tuning.fixedTimestepSeconds
-    );
-    this.respawnPauseSeconds = Math.max(
-      0,
-      options.respawnPauseSeconds ?? DEFAULT_RESPAWN_PAUSE_SECONDS
     );
     this.maxAimDeviation =
       options.maxAimDeviationRadians ?? DEFAULT_MAX_AIM_DEVIATION_RADIANS;
@@ -794,14 +780,12 @@ export class GameServer {
 
       if (!fatal) continue;
 
-      // The clip decides the respawn, not a flat constant: four of the six death
-      // animations run longer than the old three seconds, so the body used to be
-      // teleported away mid-fall. Scheduling and announcing from the same number
-      // is what stops the client's counter and the server's timer disagreeing.
-      const stance = motor?.state.stance ?? "stand";
+      // One flat number, scheduled and announced together so the client's
+      // counter and the server's timer cannot disagree. The clip no longer
+      // decides it — that coupled the authority to presentation and drifted —
+      // but the constant clears the longest clip, so no mid-fall teleport.
       const direction = deathDirectionFrom(travel.x, travel.z, victimYaw);
-      const clip = chooseDeathClip({ direction, headshot: false, stance });
-      const respawnSeconds = clip.seconds + this.respawnPauseSeconds;
+      const respawnSeconds = this.respawnTicks / this.ticksPerSecond;
       this.scheduleRespawn(victim, respawnSeconds);
       const died = encodePlayerDied({
         victimId: victim.connection.id,

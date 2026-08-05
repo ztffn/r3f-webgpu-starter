@@ -105,9 +105,11 @@ player instinctively recognise this?* — applies to features, not to whether a 
   export, a kill feed in the mockup's chat panel, a death overlay with the server's own
   respawn countdown, a coarse directional damage indicator and a hitmarker. **Aliveness is
   health, everywhere**: a dropped death packet costs the right fall, never a corpse that keeps
-  walking. Respawn now waits for the death clip to finish (`docs/12` §8.0), and respawn
-  placement moved off the player's own seat — reappearing where you fell is what made death
-  invisible. Plan: `plans/2026-08-04-death-and-damage-feedback-v1.md`.
+  walking. Respawn is a flat 5 s for every death — it clears the longest death clip
+  (3.73 s); deriving it from the clip's length drifted and was dropped (`docs/12` §8.0
+  amendment) — and respawn placement moved off the player's own seat, because reappearing
+  where you fell is what made death invisible.
+  Plan: `plans/2026-08-04-death-and-damage-feedback-v1.md`.
 - **Next up (combat authority):** server-authoritative damage, weather and world state —
   the worked brief is `docs/plans/2026-08-03-character-animation-session-handoff.md`.
   Also still queued (`01-...md` Phase 1.6): human-test Green Mile, then runtime map switching.

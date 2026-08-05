@@ -754,12 +754,88 @@ to the tooling. (Written the wrong way once more while writing this very paragra
 115.67 kB gzipped and its only static import is the module runtime — no `three`, no
 `@react-three`, no game code reachable from `src/site`, `src/ui`, `src/account` or `src/hud`.
 
+## 5.8 The front-end polish pass (2026-08-05)
+
+Six changes, all owner-directed, touching the funnel, the HUD and the dev console.
+
+**The funnel now stops at the loadout screen.** A bare `/play` — every "Play now" button —
+redirects to `/character?deploy=1`: the existing loadout screen (soldier, kit, editor) gains a
+20-second countdown in its action bar ("Game starts in N") and a Deploy Now button, both
+navigating to `/play?loadout=0`. This deliberately revises §6's "the funnel must never gain a
+step": the step is a staging beat, not a form — a guest is seeded `DEFAULT_CHARACTER` and never
+asked to sign in. While the countdown runs, the page warms the game chunk with the same
+dynamic-import shape the route uses (the boundary was re-checked in `dist/` after: entry chunk
+116.05 kB gzipped, still only the module runtime as a static import). `?loadout=1` forces the
+stop onto any /play URL; `?loadout=0` (what Deploy sends) spends it.
+
+**A parameterless /play runs the full game.** `readLaunchConfig` in `GameApp.tsx` defaults to
+`scene=scope&motor=1&net=1` when none of its explicit parameters are present; every documented
+dev URL keeps its exact meaning, and the terrain spike stays reachable as `?scene=terrain` (any
+unrecognised scene value with no other demo flags). The parse also moved from module scope to
+per-mount state — module constants described whichever URL first evaluated the chunk, which is
+wrong for every client-side navigation after the first. `readServerUrl` no longer hardcodes
+localhost: dev (port 3000 or localhost) targets `:2567` on the page's own host, anywhere else
+targets same origin, which is what the VPS serves.
+
+**The dev console gained two tabs.** "HUD": a visibility switch per HUD panel
+(`src/hud/hudPanels.ts` is the registry; state session-persisted like the console's tab) plus a
+panel-opacity dial — combat feedback deliberately has no switch. "Launch": every URL parameter
+the game reads as form controls that bake a fresh /play URL, with an extras field that carries
+unrecognised parameters through a round trip, and Apply-and-reload — honest UI for parameters
+that are read once at mount by design.
+
+**Panels are more transparent.** The mockup's 0.94/0.83 background alphas read as solid slabs
+over live terrain; they are now 0.60/0.44 (0.85/0.74 on coarse pointers, where there is no blur
+to carry legibility), scaled by the dial's `--hud-panel-alpha`.
+
+**Wind joined the compass bar.** Same top row, 54px, right edge; the compass tape yields
+`440px` of viewport width so ticks never slide under it on narrow desktop windows.
+
+**Death is a reload screen now.** The full-width panel first built as an in-game deploy modal
+was repurposed on review (`src/hud/RespawnScreen.tsx`): killer, the kit you come back with, and
+the server's own respawn countdown, replacing the small `DeathOverlay` panel. The backdrop is a
+vignette, not a blackout — §5.2's "a dead player should still be able to read the ground" is
+kept inside the owner's full-screen ask. It carries the old `data-dev` names
+(`hud-death`, `death-killer`, `death-respawn`), so existing drivers still find it. Not yet
+walked in a real two-client death; the countdown hook and gating are unchanged from the
+overlay it replaced.
+
+**Respawn is a flat 5 s** (same day): deriving it from the death clip's length plus a pause
+tied the authority's schedule to presentation and the timer drifted in practice, so
+`GameServer` now schedules every death from one constant that clears the longest clip
+(3.73 s). `respawnPauseSeconds` is gone; `docs/12` §8 carries the amendment.
+
+**The loadout pattern the UI is aiming at** (owner-directed, front-end leading): slots are
+**primary / secondary / sidearm / support / aux / outfit** — aux is grenades and medic items,
+outfit is ghillie/armor/class. The respawn screen shows all six today: the first four carry
+the real development kit (its slot ids already match), aux and outfit render unwired in the
+vitals panel's dashed convention. The target weapon roster, with exact case-sensitive
+animation segment names per weapon, as handed down 2026-08-05:
+
+```
+carbine / ak / smg / pistol / fiftycal:  shoot, reload_fast, reload_slow,
+                                         weapon_down, weapon_up, idle, melee
+sniper:            shoot, chamber_round, reload, weapon_down, weapon_up, idle, melee
+lmg:               shoot, reload, reload_alt, weapon_down, weapon_up, idle, melee
+grenadelauncher:   shoot, reload, weapon_down, weapon_up, idle, melee
+shotgun:           shoot, pump, reload_single_shell, reload_complete,
+                   weapon_down, weapon_up, idle, melee
+knife:             idle, attack_slice1, attack_slice2, attack_stab1, attack_stab2,
+                   weapon_down, weapon_up   (melee weapon — no shoot/reload/melee)
+```
+
+A `pistol_icon.webp` joined the authored silhouettes (SVG-drawn, same greyscale mask
+treatment), so the Glock finally has a shape in the HUD, the loadout editor and the respawn
+screen.
+
 ## 6. Retention model — what the perks actually are
 
 The brief's shape is "easy to play, better to register". Concretely:
 
 **Free, no account.** One click from the landing page into a live match as `Recruit-####`.
-Nothing is asked for. This is the funnel's whole job and it must never gain a step.
+Nothing is asked for. This is the funnel's whole job and it must never gain a step that asks
+for anything. (Revised 2026-08-05: the funnel now pauses at the loadout screen with a
+countdown — a staging beat, not a form; guests pass through without signing in. §5.8.)
 
 **Free, registered.** `@colyseus/auth` supports upgrading an anonymous session in place —
 `RegisterWithEmailAndPasswordCallback` receives an `upgradingToken`, so the account keeps

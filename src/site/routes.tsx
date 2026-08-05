@@ -52,8 +52,24 @@ function LandingOrGame() {
   return <Landing />;
 }
 
-/** The game route. Outside SiteLayout — no nav or footer over a live scene. */
+/**
+ * The game route. Outside SiteLayout — no nav or footer over a live scene.
+ *
+ * A BARE /play is the site funnel, and the funnel stops at the loadout screen
+ * first — the one with the soldier — which counts down and comes back here as
+ * `/play?loadout=0`. Any other query string is a documented dev URL or a lobby
+ * join and goes straight in; `?loadout=1` forces the stop regardless.
+ */
 function Play() {
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+  const hasOtherParams = [...params.keys()].some((key) => key !== "loadout");
+  const stopAtLoadout =
+    params.get("loadout") === "1" ||
+    (!hasOtherParams && params.get("loadout") !== "0");
+  if (stopAtLoadout) {
+    return <Navigate to="/character?deploy=1" replace />;
+  }
   return (
     <Suspense fallback={<Booting />}>
       <GameApp />

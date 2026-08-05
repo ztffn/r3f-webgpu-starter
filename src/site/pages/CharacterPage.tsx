@@ -10,11 +10,12 @@
 // the simulation fires rather than invented bars.
 
 import { lazy, Suspense, useEffect, useState } from "react";
-import { Link } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 import { accountClient, AccountError } from "../../account/accountClient";
 import { useAuth } from "../../account/AuthProvider";
 import {
   CAMOS,
+  DEFAULT_CHARACTER,
   HEADGEAR,
   INSIGNIA_MAX,
   SELECTABLE_PRIMARY,
@@ -67,9 +68,29 @@ const CAMO_SWATCH: Record<Camo, [string, string, string]> = {
   tiger: ["#6b6033", "#2f2b18", "#8f8347"],
 };
 
+/** Deploy countdown. Long enough to read the kit, short enough to forgive. */
+const DEPLOY_SECONDS = 20;
+
+/**
+ * Where "Deploy now" goes: a bare /play would bounce straight back here, so the
+ * loadout stop is explicitly spent. GameApp still applies the full networked
+ * defaults to this URL — `loadout` is not one of its explicit parameters.
+ */
+const DEPLOY_URL = "/play?loadout=0";
+
 export function CharacterPage() {
   useDocumentTitle("Loadout");
   const { me, loading, refresh, can } = useAuth();
+  const navigate = useNavigate();
+
+  /**
+   * `?deploy=1`: this screen is the stop between "Play now" and the match. Same
+   * page, two extra things — a countdown that deploys on zero, and a guest path
+   * that seeds the default character instead of demanding a sign-in, because the
+   * FAQ promises a match without an account.
+   */
+  const deployMode =
+    new URLSearchParams(useLocation().search).get("deploy") === "1";
 
   const [draft, setDraft] = useState<Character | null>(null);
   const { busy, error, done: saved, run } = useAsyncAction<"save">(describeSave);
@@ -77,8 +98,32 @@ export function CharacterPage() {
   // Seeded from the account once it arrives. Not derived on every render, or
   // typing in the insignia field would be overwritten by the stored value.
   useEffect(() => {
-    if (me !== null && draft === null) setDraft(structuredClone(me.character));
-  }, [me, draft]);
+    if (draft !== null) return;
+    if (me !== null) setDraft(structuredClone(me.character));
+    else if (deployMode && !loading) setDraft(structuredClone(DEFAULT_CHARACTER));
+  }, [me, draft, deployMode, loading]);
+
+  // The deploy clock. One interval; deploying is a navigation, so reaching zero
+  // fires it once and the unmount clears the timer.
+  const [seconds, setSeconds] = useState(DEPLOY_SECONDS);
+  useEffect(() => {
+    if (!deployMode) return;
+    const timer = window.setInterval(
+      () => setSeconds((was) => Math.max(0, was - 1)),
+      1000
+    );
+    return () => window.clearInterval(timer);
+  }, [deployMode]);
+  useEffect(() => {
+    if (deployMode && seconds === 0) navigate(DEPLOY_URL);
+  }, [deployMode, seconds, navigate]);
+
+  // Warm the game chunk while the countdown runs — the same dynamic-import shape
+  // as the /play route, so the split stays intact; this only moves the fetch
+  // forward to where the player is reading their kit instead of a loading bar.
+  useEffect(() => {
+    if (deployMode) void import("../../game/GameApp");
+  }, [deployMode]);
 
   if (loading) {
     return (
@@ -88,7 +133,7 @@ export function CharacterPage() {
     );
   }
 
-  if (me === null) {
+  if (me === null && !deployMode) {
     return (
       <div className="shell notfound">
         <p className="eyebrow">Not signed in</p>
@@ -106,7 +151,7 @@ export function CharacterPage() {
   const canInsignia = can("customInsignia");
   // The same validator the API runs, against the same effective tier — so the
   // Save button is disabled for exactly the reasons the server would refuse.
-  const problems = validateCharacter(draft, me.effectiveTier);
+  const problems = validateCharacter(draft, me?.effectiveTier ?? "guest");
 
   const setAppearance = (patch: Partial<Character["appearance"]>) =>
     setDraft((current) =>
@@ -135,7 +180,9 @@ export function CharacterPage() {
         ? { tone: "bad", text: error }
         : saved
           ? { tone: "good", text: "Loadout saved" }
-          : { tone: "quiet", text: `${me.account.callsign} · ${me.effectiveTier}` };
+          : me === null
+            ? { tone: "quiet", text: "Guest — sign in to keep a custom kit" }
+            : { tone: "quiet", text: `${me.account.callsign} · ${me.effectiveTier}` };
 
   return (
     <div className="skin-hud loadout" data-dev="loadout">
@@ -347,7 +394,7 @@ export function CharacterPage() {
       </div>
 
       <div className="loadout-bar">
-        <Link className="btn btn-ghost btn-sm" to="/profile">
+        <Link className="btn btn-ghost btn-sm" to={deployMode ? "/" : "/profile"}>
           Back
         </Link>
         <p
@@ -358,15 +405,42 @@ export function CharacterPage() {
         >
           {status.text}
         </p>
-        <button
-          type="button"
-          className="btn btn-primary"
-          data-dev="character-save"
-          disabled={busy !== null || problems.length > 0}
-          onClick={onSave}
-        >
-          {busy !== null ? "Saving…" : "Save loadout"}
-        </button>
+        {deployMode ? (
+          <div className="bar-actions">
+            {me !== null && (
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                data-dev="character-save"
+                disabled={busy !== null || problems.length > 0}
+                onClick={onSave}
+              >
+                {busy !== null ? "Saving…" : "Save"}
+              </button>
+            )}
+            <span className="deploy-count" data-dev="deploy-count" role="timer">
+              Game starts in {seconds}
+            </span>
+            <button
+              type="button"
+              className="btn btn-primary"
+              data-dev="deploy-now"
+              onClick={() => navigate(DEPLOY_URL)}
+            >
+              Deploy now
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="btn btn-primary"
+            data-dev="character-save"
+            disabled={busy !== null || problems.length > 0}
+            onClick={onSave}
+          >
+            {busy !== null ? "Saving…" : "Save loadout"}
+          </button>
+        )}
       </div>
     </div>
   );

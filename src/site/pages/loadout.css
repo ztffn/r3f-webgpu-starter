@@ -512,6 +512,21 @@
   color: var(--ink-faint);
 }
 
+/* Deploy mode: countdown and the Deploy button share the bar's right cell. */
+.bar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s4);
+}
+.deploy-count {
+  color: var(--amber);
+  font-family: var(--font-label);
+  font-size: 0.78rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+}
+
 /* --- narrow: one column, and the stage becomes a band -------------------- */
 @media (max-width: 900px) {
   .loadout {

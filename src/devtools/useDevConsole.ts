@@ -8,7 +8,15 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-export const DEV_TABS = ["scene", "telemetry", "grass", "weather", "controls"] as const;
+export const DEV_TABS = [
+  "scene",
+  "hud",
+  "launch",
+  "telemetry",
+  "grass",
+  "weather",
+  "controls",
+] as const;
 export type DevTab = (typeof DEV_TABS)[number];
 
 const TAB_KEY = "df2.devtools.tab";

@@ -11,6 +11,15 @@ import { GameCanvas } from "../components/GameCanvas";
 import { GameHud } from "../hud/GameHud";
 import { DevConsole } from "../devtools/DevConsole";
 import { useDevConsole } from "../devtools/useDevConsole";
+import {
+  allPanelsHidden,
+  loadPanelAlpha,
+  loadPanelVisibility,
+  savePanelAlpha,
+  savePanelVisibility,
+  type HudPanelId,
+  type HudPanelVisibility,
+} from "../hud/hudPanels";
 import { DF2Scene, type SceneHandles } from "../df2/DF2Scene";
 import type { GrassUniforms } from "../df2/GrassMaterial";
 import type { FlyState, Stance } from "../df2/FlyControls";
@@ -21,36 +30,96 @@ import type { LoadedTerrain } from "../df2/loadTerrain";
 import type { PerfSample } from "../df2/PerfMonitor";
 import { BENCH, publish } from "../df2/bench";
 
-const urlParams = new URLSearchParams(window.location.search);
-const requestedScene = urlParams.get("scene");
-const scopeDemo = requestedScene === "scope";
-const weaponDemo = requestedScene === "weapon";
 /**
- * Walk the shared character motor instead of the terrain spike's camera rig.
+ * Parameters that make a /play URL EXPLICIT — a documented dev URL that means
+ * exactly what it says. A bare /play (the site's every "Play now" button) gets
+ * the defaults below instead: the full networked game behind the deploy screen.
+ */
+const EXPLICIT_PARAMS = [
+  "scene",
+  "motor",
+  "net",
+  "bench",
+  "server",
+  "room",
+  "weather",
+  "blades",
+  "debug",
+  "hudpreview",
+] as const;
+
+interface LaunchConfig {
+  scopeDemo: boolean;
+  weaponDemo: boolean;
+  /**
+   * Walk the shared character motor instead of the terrain spike's camera rig.
+   *
+   * Orthogonal to the scene on purpose: `?scene=motor` is movement alone, and
+   * `?scene=scope&motor=1` is the combination that matters — a weapon carried by
+   * a body that actually collides, so stance, speed and being airborne reach
+   * weapon handling instead of being inferred from the camera.
+   */
+  motorDemo: boolean;
+  /**
+   * Networked play: the motor predicts against the authoritative game server and
+   * remote players appear in the world. `?scene=scope&motor=1&net=1`, with an
+   * optional `server=` URL override (default: dev game server, or same origin on
+   * a deploy). Requires the motor — there is nothing to network without it.
+   */
+  netDemo: boolean;
+  /**
+   * Render the HUD panels that have no data source yet — objective and squad chat.
+   *
+   * They exist so the redesign can be compared 1:1 against
+   * `design/df2-hud-1to1-html-v3`, and they are OFF by default because a scripted
+   * objective that nothing will ever update is a lie a player would believe.
+   * This is NOT "the HUD" — hiding that is `?hud=0` below.
+   */
+  hudPreview: boolean;
+  /**
+   * `?hud=0`: start with every HUD panel hidden — compass, crosshair, vitals,
+   * all of it — for clean captures. It seeds the same per-panel visibility the
+   * dev console's HUD tab edits, so panels can still be brought back live, and
+   * combat FEEDBACK still renders for the same reason that tab has no switch
+   * for it.
+   */
+  hud: boolean;
+}
+
+/**
+ * Read once per MOUNT, not at module scope: the router reuses this chunk across
+ * client-side navigations, and module constants would still describe whatever
+ * URL first evaluated the module — a lobby join after a landing-page visit is
+ * exactly that sequence.
  *
- * Orthogonal to the scene on purpose: `?scene=motor` is movement alone, and
- * `?scene=scope&motor=1` is the combination that matters — a weapon carried by
- * a body that actually collides, so stance, speed and being airborne reach
- * weapon handling instead of being inferred from the camera.
+ * An unparameterised /play (in practice `/play?loadout=0`, arriving from the
+ * loadout screen's deploy — routes.tsx bounces a truly bare /play to that screen
+ * first) defaults to `scene=scope&motor=1&net=1`: the full game is the product
+ * now. Any explicit parameter keeps the URL's documented meaning to the letter
+ * (so `?scene=motor` is still offline, `?bench=1` still measures the spike), and
+ * the spike itself stays reachable as `?scene=terrain`.
  */
-const motorDemo = requestedScene === "motor" || urlParams.get("motor") === "1";
-/**
- * Networked play: the motor predicts against the authoritative game server and
- * remote players appear in the world. `?scene=scope&motor=1&net=1`, with an
- * optional `server=` URL override (default ws://localhost:2567). Requires the
- * motor — there is nothing to network without it.
- */
-const netDemo = motorDemo && urlParams.get("net") === "1";
-/**
- * Render the HUD panels that have no data source yet — objective and squad chat.
- *
- * They exist so the redesign can be compared 1:1 against
- * `design/df2-hud-1to1-html-v3`, and they are OFF by default because a scripted
- * objective that nothing will ever update is a lie a player would believe.
- */
-const hudPreview = urlParams.get("hudpreview") === "1";
+function readLaunchConfig(): LaunchConfig {
+  const urlParams = new URLSearchParams(window.location.search);
+  const explicit = EXPLICIT_PARAMS.some((key) => urlParams.has(key));
+  const requestedScene = urlParams.get("scene") ?? (explicit ? null : "scope");
+  const motorDemo =
+    requestedScene === "motor" || urlParams.get("motor") === "1" || !explicit;
+  return {
+    scopeDemo: requestedScene === "scope",
+    weaponDemo: requestedScene === "weapon",
+    motorDemo,
+    netDemo: motorDemo && (urlParams.get("net") === "1" || !explicit),
+    hudPreview: urlParams.get("hudpreview") === "1",
+    hud: urlParams.get("hud") !== "0",
+  };
+}
 
 export default function GameApp() {
+  // useState initializer rather than a plain call, so one mount reads one URL.
+  const [{ scopeDemo, weaponDemo, motorDemo, netDemo, hudPreview, hud }] =
+    useState(readLaunchConfig);
+
   // The game owns the viewport and must never scroll; the site must. Set as a
   // class rather than a global stylesheet rule because this module's CSS is
   // injected on first visit and never removed — a global `overflow: hidden` left
@@ -70,6 +139,26 @@ export default function GameApp() {
 
   // `?debug=1` starts it open; backtick toggles it either way.
   const devConsole = useDevConsole(BENCH.debug === true);
+
+  // HUD panel visibility and the panel-opacity dial, owned here because GameApp
+  // is where the HUD and the dev console meet. Session-persisted so a reload to
+  // rebake a URL parameter does not cost the debugging posture — unless the URL
+  // says `hud=0`, which overrides the stored posture with everything off.
+  const [hudPanels, setHudPanels] = useState<HudPanelVisibility>(() =>
+    hud ? loadPanelVisibility() : allPanelsHidden()
+  );
+  const setHudPanel = useCallback((id: HudPanelId, visible: boolean) => {
+    setHudPanels((was) => {
+      const next = { ...was, [id]: visible };
+      savePanelVisibility(next);
+      return next;
+    });
+  }, []);
+  const [panelAlpha, setPanelAlphaState] = useState<number>(loadPanelAlpha);
+  const setPanelAlpha = useCallback((value: number) => {
+    setPanelAlphaState(value);
+    savePanelAlpha(value);
+  }, []);
 
   const [wireframe, setWireframe] = useState(false);
   const [grass, setGrass] = useState(BENCH.grass ?? true);
@@ -165,6 +254,8 @@ export default function GameApp() {
           joinCode={roomInfo?.joinCode ?? null}
           fpsMode={scopeDemo}
           preview={hudPreview}
+          panels={hudPanels}
+          panelAlpha={panelAlpha}
         />
       )}
 
@@ -189,6 +280,10 @@ export default function GameApp() {
           grassUniforms={grassUniforms}
           scene={sceneHandles}
           fpsMode={scopeDemo}
+          panels={hudPanels}
+          setPanel={setHudPanel}
+          panelAlpha={panelAlpha}
+          setPanelAlpha={setPanelAlpha}
         />
       )}
 

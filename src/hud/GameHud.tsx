@@ -20,8 +20,10 @@ import { RadarRose } from "./RadarRose";
 import { InvitePanel } from "./InvitePanel";
 import { VitalsPanel, type Vital } from "./VitalsPanel";
 import { WeaponPanel } from "./WeaponPanel";
-import { useRespawnCountdown, type CombatFeed, type LocalDeath } from "../fps/useCombatFeed";
+import type { CombatFeed } from "../fps/useCombatFeed";
 import { playDamageCue, playHitCue } from "./combatAudio";
+import { RespawnScreen } from "./RespawnScreen";
+import type { HudPanelVisibility } from "./hudPanels";
 import "./hud.css";
 
 export interface GameHudProps {
@@ -54,6 +56,15 @@ export interface GameHudProps {
   fpsMode: boolean;
   /** `?hudpreview=1`: also render the panels that have no data source yet. */
   preview: boolean;
+  /**
+   * Per-panel visibility, owned by the dev console's HUD tab. A hidden panel is
+   * a debugging aid, so combat FEEDBACK (hitmarker, damage arc, death overlay)
+   * deliberately has no switch here — a tester who hid it two hours ago would
+   * read the silence as the wire being broken again.
+   */
+  panels: HudPanelVisibility;
+  /** Multiplier on the panels' background opacity — the dev console's dial. */
+  panelAlpha: number;
 }
 
 /** Compass bearing of the wind, from its component velocities. */
@@ -65,7 +76,16 @@ function windBearing(x: number, z: number): string {
   return points[Math.round(degrees / 45) % 8]!;
 }
 
-export function GameHud({ fly, health, feed, joinCode, fpsMode, preview }: GameHudProps) {
+export function GameHud({
+  fly,
+  health,
+  feed,
+  joinCode,
+  fpsMode,
+  preview,
+  panels,
+  panelAlpha,
+}: GameHudProps) {
   const combat = useSyncExternalStore(
     combatTelemetry.subscribe,
     combatTelemetry.getSnapshot,
@@ -112,8 +132,13 @@ export function GameHud({ fly, health, feed, joinCode, fpsMode, preview }: GameH
       : Math.hypot(wind.windXMetresPerSecond, wind.windZMetresPerSecond) * 3.6;
 
   return (
-    <div className="hud-root skin-hud" data-dev="hud" data-dev-preview={preview || undefined}>
-      {fpsMode && <HipfireCrosshair />}
+    <div
+      className="hud-root skin-hud"
+      data-dev="hud"
+      data-dev-preview={preview || undefined}
+      style={{ "--hud-panel-alpha": panelAlpha } as CSSProperties}
+    >
+      {fpsMode && panels.crosshair && <HipfireCrosshair />}
       {/* Keyed by the event's own sequence so a repeated hit restarts the CSS
           animation instead of being ignored as an unchanged element. No timers:
           the flash is a one-shot animation that ends on its own. */}
@@ -142,7 +167,7 @@ export function GameHud({ fly, health, feed, joinCode, fpsMode, preview }: GameH
         />
       )}
 
-      <DeathOverlay death={dead ? feed.death : null} />
+      <RespawnScreen death={dead ? feed.death : null} />
 
       {combat.lastImpact && combat.lastImpact.damageApplied > 0 && (
         <div className="hit-marker" key={impactTelemetryKey(combat.lastImpact)}>
@@ -150,14 +175,14 @@ export function GameHud({ fly, health, feed, joinCode, fpsMode, preview }: GameH
         </div>
       )}
 
-      <Compass />
+      {panels.compass && <Compass />}
 
-      <InvitePanel joinCode={joinCode} />
+      {panels.invite && <InvitePanel joinCode={joinCode} />}
 
       {/* Wind — real, from the ballistic environment the solver actually uses.
           The mockup pairs it with a "HOLD" row; nothing computes a hold yet, so
           that row is not invented here. */}
-      {windSpeed !== null && (
+      {panels.wind && windSpeed !== null && (
         <section className="hud-panel hud-wind notched notched-sm" data-dev="hud-wind">
           <div className="hud-row">
             <span className="hud-label">
@@ -176,7 +201,7 @@ export function GameHud({ fly, health, feed, joinCode, fpsMode, preview }: GameH
         </section>
       )}
 
-      {preview && (
+      {preview && panels.objective && (
         <section className="hud-panel hud-objective notched notched-sm" data-dev="hud-objective">
           <div className="hud-objective-title">Objective updated</div>
           <div className="hud-objective-body">Proceed to extraction point</div>
@@ -186,7 +211,7 @@ export function GameHud({ fly, health, feed, joinCode, fpsMode, preview }: GameH
       {/* The mockup's chat block, now carrying real events. It renders whenever
           there is something true to say rather than under the preview flag,
           which is what the panel's own honesty rule asked for all along. */}
-      {feed.lines.length > 0 && (
+      {panels.chat && feed.lines.length > 0 && (
         <section className="hud-panel hud-chat notched notched-sm" data-dev="hud-chat">
           {feed.lines.map((line) => (
             <div key={line.id} data-dev={`feed-${line.kind}`}>
@@ -202,7 +227,7 @@ export function GameHud({ fly, health, feed, joinCode, fpsMode, preview }: GameH
         </section>
       )}
 
-      {fpsMode && (
+      {fpsMode && panels.weapon && (
         <WeaponPanel
           weaponId={(combat.weapon?.weaponId as never) ?? null}
           name={combat.weapon?.displayName ?? null}
@@ -212,58 +237,30 @@ export function GameHud({ fly, health, feed, joinCode, fpsMode, preview }: GameH
         />
       )}
 
-      <VitalsPanel values={vitals} />
+      {panels.vitals && <VitalsPanel values={vitals} />}
 
       {/* Waypoints do not exist yet, so this panel reports what DOES: the range
           to whatever is under the aim point, and your own elevation. Both real. */}
-      <section className="hud-panel hud-nav notched" data-dev="hud-nav">
-        <div className="hud-nav-title">
-          {net === null ? "Local" : `Player ${net.playerId}`}
-        </div>
-        <div className="hud-nav-k">Range</div>
-        <div className="hud-nav-v" data-dev="nav-range">
-          {combat.range ? `${combat.range.metres.toFixed(0)} m` : "—"}
-        </div>
-        <div className="hud-nav-k">Elev</div>
-        <div className="hud-nav-v" data-dev="nav-elev">
-          {fly ? `${fly.position.y.toFixed(0)} m` : "—"}
-        </div>
-        <RadarRose />
-      </section>
+      {panels.nav && (
+        <section className="hud-panel hud-nav notched" data-dev="hud-nav">
+          <div className="hud-nav-title">
+            {net === null ? "Local" : `Player ${net.playerId}`}
+          </div>
+          <div className="hud-nav-k">Range</div>
+          <div className="hud-nav-v" data-dev="nav-range">
+            {combat.range ? `${combat.range.metres.toFixed(0)} m` : "—"}
+          </div>
+          <div className="hud-nav-k">Elev</div>
+          <div className="hud-nav-v" data-dev="nav-elev">
+            {fly ? `${fly.position.y.toFixed(0)} m` : "—"}
+          </div>
+          <RadarRose />
+        </section>
+      )}
 
       {/* There is no touch movement scheme yet (design record §2.5 schedules
           one), so a narrow screen is told rather than left to discover it. */}
       <p className="touch-note">Movement needs a keyboard — drag to look around.</p>
     </div>
-  );
-}
-
-/**
- * Who killed you, and how long until you are back.
- *
- * A panel on the phosphor skin rather than a full-screen takeover: a dead player
- * should still be able to read the ground they are about to respawn into, and
- * blacking that out costs them the one thing worth learning from dying.
- *
- * The countdown is the SERVER's number — the same one it scheduled the respawn
- * from — so the two cannot disagree.
- */
-function DeathOverlay({ death }: { death: LocalDeath | null }) {
-  const seconds = useRespawnCountdown(death);
-  if (death === null || seconds === null) return null;
-  return (
-    <section className="hud-panel hud-death notched" data-dev="hud-death" role="status">
-      <div className="hud-death-title">
-        {death.killerName === null ? "You died" : "You were killed by"}
-      </div>
-      {death.killerName !== null && (
-        <div className="hud-death-killer" data-dev="death-killer">
-          {death.killerName}
-        </div>
-      )}
-      <div className="hud-death-respawn" data-dev="death-respawn">
-        Respawn in {seconds.toFixed(1)}s
-      </div>
-    </section>
   );
 }

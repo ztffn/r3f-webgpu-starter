@@ -13,6 +13,7 @@
 
 import { useEffect, useState } from "react";
 import { GameHud } from "./GameHud";
+import { allPanelsVisible } from "./hudPanels";
 import "./hudlab.css";
 import { EMPTY_COMBAT_FEED } from "../fps/useCombatFeed";
 import type { FlyState } from "../df2/FlyControls";
@@ -112,7 +113,9 @@ export default function HudLab() {
             decoding="async"
           />
         )}
-        {/* A sample code so the invite panel can be judged in the lab too. */}
+        {/* A sample code so the invite panel can be judged in the lab too. The
+            lab always shows every panel at stylesheet opacity — it exists to
+            compare against the mockup, and a hidden panel compares nothing. */}
         <GameHud
           fly={SAMPLE_FLY}
           health={1}
@@ -120,6 +123,8 @@ export default function HudLab() {
           joinCode="QGHRD9"
           fpsMode
           preview
+          panels={allPanelsVisible()}
+          panelAlpha={1}
         />
         {live && <HeadingSweep />}
       </div>

@@ -286,6 +286,38 @@
   border: none;
 }
 
+/* --- text fields and selects (launch tab) --------------------------------- */
+.dev-body input[type="text"],
+.dev-body select {
+  width: 100%;
+  margin-top: 2px;
+  padding: 5px 6px;
+  border: var(--hair) solid var(--line);
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+.dev-body input[type="text"]::placeholder {
+  color: var(--ink-faint);
+}
+.dev-body select option {
+  background: #0a0d0a;
+}
+
+/* The baked URL: monospace and allowed to wrap, because it gets read and copied. */
+.launch-url {
+  margin: 0 0 var(--s2);
+  padding: 5px 6px;
+  border: var(--hair) solid var(--line);
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--olive-bright);
+  font-size: 10px;
+  word-break: break-all;
+  user-select: all;
+}
+
 /* --- notes and the shot log --------------------------------------------- */
 .dev-body .note {
   margin: var(--s3) 0 0;

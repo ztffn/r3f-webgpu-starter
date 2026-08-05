@@ -19,10 +19,26 @@ import type { RoomInfo } from "../net/ColyseusProtocol.ts";
 import { createMotorWorld } from "../motor/MotorWorld.ts";
 import { useRapier } from "./useRapier.ts";
 
-/** `?server=` override, following the diagnostic-URL convention. */
+/**
+ * `?server=` override, following the diagnostic-URL convention.
+ *
+ * The default is no longer a literal localhost: net play is now what a bare
+ * /play runs, so the guess has to be right in every environment. The Vite dev
+ * server (:3000) proxies /auth and /api to the game server but not the game
+ * WebSocket, so dev targets the game server's own port on whatever host the
+ * page came from — which also covers a phone on the LAN. Anywhere else, the
+ * VPS serves client and Colyseus from one origin (design record §5.2/deploy),
+ * so same origin is the answer.
+ */
 function readServerUrl(): string {
   const raw = new URLSearchParams(window.location.search).get("server");
-  return raw !== null && raw.length > 0 ? raw : "ws://localhost:2567";
+  if (raw !== null && raw.length > 0) return raw;
+  const { protocol, hostname, host, port } = window.location;
+  const ws = protocol === "https:" ? "wss:" : "ws:";
+  if (port === "3000" || hostname === "localhost" || hostname === "127.0.0.1") {
+    return `${ws}//${hostname}:2567`;
+  }
+  return `${ws}//${host}`;
 }
 
 /**

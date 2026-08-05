@@ -10,6 +10,8 @@ import { useSyncExternalStore } from "react";
 import { combatTelemetry } from "../fps/ui/CombatTelemetry";
 import { DEV_TABS, type DevConsoleState, type DevTab } from "./useDevConsole";
 import { ScenePanel, type ScenePanelProps } from "./ScenePanel";
+import { HudPanel, type HudPanelProps } from "./HudPanel";
+import { LaunchPanel } from "./LaunchPanel";
 import { TelemetryPanel } from "./TelemetryPanel";
 import { ControlsPanel } from "./ControlsPanel";
 import { GrassPanel } from "./GrassPanel";
@@ -22,13 +24,15 @@ import "./devtools.css";
 
 const TAB_LABELS: Record<DevTab, string> = {
   scene: "Scene",
+  hud: "HUD",
+  launch: "Launch",
   telemetry: "Telemetry",
   grass: "Grass",
   weather: "Weather",
   controls: "Controls",
 };
 
-export interface DevConsoleProps extends ScenePanelProps {
+export interface DevConsoleProps extends ScenePanelProps, HudPanelProps {
   state: DevConsoleState;
   perf: PerfSample | null;
   fly: FlyState | null;
@@ -44,6 +48,10 @@ export function DevConsole({
   grassUniforms,
   scene,
   fpsMode,
+  panels,
+  setPanel,
+  panelAlpha,
+  setPanelAlpha,
   ...sceneProps
 }: DevConsoleProps) {
   const combat = useSyncExternalStore(
@@ -111,6 +119,15 @@ export function DevConsole({
         aria-labelledby={`dev-tab-${state.tab}`}
       >
         {state.tab === "scene" && <ScenePanel {...sceneProps} />}
+        {state.tab === "hud" && (
+          <HudPanel
+            panels={panels}
+            setPanel={setPanel}
+            panelAlpha={panelAlpha}
+            setPanelAlpha={setPanelAlpha}
+          />
+        )}
+        {state.tab === "launch" && <LaunchPanel />}
         {state.tab === "telemetry" && (
           <TelemetryPanel perf={perf} fly={fly} combat={combat} />
         )}

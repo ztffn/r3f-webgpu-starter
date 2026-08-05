@@ -43,9 +43,17 @@
   position: absolute;
   padding: var(--s3) var(--s4);
   contain: layout paint;
+  /* Alphas sit well below the mockup's (0.94/0.83): over live terrain that read
+     as solid slabs, and the reference the panels are calibrated against keeps
+     the ground readable through every panel. `--hud-panel-alpha` is the dev
+     console's dial — a plain multiplier, 1 by default, set on .hud-root. */
   background:
     linear-gradient(180deg, rgba(230, 238, 210, 0.055), transparent 18%),
-    linear-gradient(135deg, rgba(18, 24, 20, 0.94), rgba(8, 12, 10, 0.83));
+    linear-gradient(
+      135deg,
+      rgba(18, 24, 20, calc(0.6 * var(--hud-panel-alpha, 1))),
+      rgba(8, 12, 10, calc(0.44 * var(--hud-panel-alpha, 1)))
+    );
   backdrop-filter: blur(9px) saturate(0.82);
   -webkit-backdrop-filter: blur(9px) saturate(0.82);
   filter: drop-shadow(0 10px 16px rgba(0, 0, 0, 0.5));
@@ -55,9 +63,15 @@
   .hud-panel {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
+    /* No blur to carry legibility here, so the ground stays darker — but still
+       translucent enough that a panel never fully hides an approaching player. */
     background:
       linear-gradient(180deg, rgba(230, 238, 210, 0.05), transparent 18%),
-      linear-gradient(135deg, rgba(16, 21, 18, 0.97), rgba(7, 10, 9, 0.93));
+      linear-gradient(
+        135deg,
+        rgba(16, 21, 18, calc(0.85 * var(--hud-panel-alpha, 1))),
+        rgba(7, 10, 9, calc(0.74 * var(--hud-panel-alpha, 1)))
+      );
   }
 }
 
@@ -92,7 +106,9 @@
   top: var(--inset-t);
   left: 50%;
   transform: translateX(-50%);
-  width: min(590px, calc(100vw - 120px));
+  /* The wind readout shares this bar at the right edge, so the tape yields to
+     it on narrow desktop viewports instead of sliding ticks underneath it. */
+  width: min(590px, calc(100vw - 440px));
   height: 54px;
 }
 .hud-compass-window {
@@ -182,11 +198,20 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* --- wind (top right) ---------------------------------------------------- */
+/* --- wind (top right, ON the compass bar) --------------------------------
+   Same row as the compass strip rather than floating below it: the strip's 54px
+   height is matched and the content centred in it, so the two read as one
+   instrument bar across the top instead of a bar and a stray card. */
 .hud-wind {
-  top: calc(var(--inset-t) + 58px);
+  top: var(--inset-t);
   right: var(--inset-r);
   min-width: 190px;
+  height: 54px;
+  display: flex;
+  align-items: center;
+}
+.hud-wind .hud-row {
+  flex: 1;
 }
 
 /* --- objective and chat (left edge, preview only) ------------------------ */
@@ -507,7 +532,7 @@
     padding-right: var(--s4);
     padding-bottom: var(--s3);
   }
-  /* Wind sits above nav in this arrangement, so nav clears it. */
+  /* Wind keeps the compass bar; the full-width tape fades out underneath it. */
   .hud-wind {
     top: var(--inset-t);
     right: var(--inset-r);
@@ -753,36 +778,7 @@
   to   { opacity: 0; }
 }
 
-/* Death: a panel, not a takeover. A dead player should still be able to read the
-   ground they are about to respawn into. */
-.hud-death {
-  position: absolute;
-  left: 50%;
-  top: 34%;
-  transform: translateX(-50%);
-  min-width: 260px;
-  padding: 16px 22px;
-  text-align: center;
-}
-.hud-death-title {
-  font-size: 13px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--hud-dim, #9aa38c);
-}
-.hud-death-killer {
-  margin-top: 6px;
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--hud-amber, #e8b33a);
-}
-.hud-death-respawn {
-  margin-top: 10px;
-  font-size: 14px;
-  /* Tabular so the tenths do not jitter the panel's width as they count down. */
-  font-variant-numeric: tabular-nums;
-  color: var(--hud-olive-hi, #cfe0a8);
-}
+/* Death is a full reload screen now — see respawn.css. */
 
 @media (prefers-reduced-motion: reduce) {
   /* The flash and the fade are the whole signal, so they still run — but the

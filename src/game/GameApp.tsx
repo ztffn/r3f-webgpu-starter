@@ -5,7 +5,7 @@
 // src/site/ or src/ui/ may import this file or anything it imports; the boundary
 // is invisible until something crosses it and then it costs megabytes.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import "../styles.css";
 import { GameCanvas } from "../components/GameCanvas";
 import { GameHud } from "../hud/GameHud";
@@ -133,17 +133,25 @@ export default function GameApp() {
   const [hudPanels, setHudPanels] = useState<HudPanelVisibility>(() =>
     hud ? loadPanelVisibility() : allPanels(false)
   );
+  // Only CONSOLE edits persist. Without this guard the persistence effect runs
+  // on mount too, and a `?hud=0` visit would write its all-hidden override into
+  // the stored posture — leaving the next ordinary visit with a blank HUD.
+  const hudPanelsTouched = useRef(false);
   const setHudPanel = useCallback((id: HudPanelId, visible: boolean) => {
+    hudPanelsTouched.current = true;
     setHudPanels((was) => ({ ...was, [id]: visible }));
   }, []);
   const setAllHudPanels = useCallback((visible: boolean) => {
+    hudPanelsTouched.current = true;
     setHudPanels(allPanels(visible));
   }, []);
   const [panelAlpha, setPanelAlpha] = useState<number>(loadPanelAlpha);
   // Persisted in effects rather than inside the setters: the updater stays pure
   // (StrictMode double-invokes it), "show all" costs one write instead of nine,
   // and the opacity slider's drag persists once per commit instead of per event.
-  useEffect(() => savePanelVisibility(hudPanels), [hudPanels]);
+  useEffect(() => {
+    if (hudPanelsTouched.current) savePanelVisibility(hudPanels);
+  }, [hudPanels]);
   useEffect(() => {
     const timer = window.setTimeout(() => savePanelAlpha(panelAlpha), 300);
     return () => window.clearTimeout(timer);

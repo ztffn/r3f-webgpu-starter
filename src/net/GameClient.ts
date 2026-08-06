@@ -528,6 +528,13 @@ export class GameClient {
         // be 20 wake-ups a second to report the same number.
         if (player.health !== this.health) {
           this.health = player.health;
+          // Prediction mirrors the server's dead-motor freeze, so the corpse
+          // reconciles cleanly instead of rubber-banding against a body the
+          // authority stopped stepping. Look still passes through — see
+          // CharacterMotor.setDead.
+          if (this.localId !== null) {
+            this.room.get(this.localId)?.setDead(player.health === 0);
+          }
           for (const listener of this.healthListeners) listener();
         }
         this.reconcile(player.state, snapshot.acknowledgedCommandTick);

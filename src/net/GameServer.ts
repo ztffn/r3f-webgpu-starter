@@ -714,7 +714,14 @@ export class GameServer {
     // either, because only `announceContacts` announces. Nothing but a shot can
     // damage a player today; the day something can, the announcement belongs
     // here beside the zero-crossing rather than on the shot path.
-    if (peer.health === 0) this.scheduleRespawn(peer);
+    if (peer.health === 0) {
+      this.scheduleRespawn(peer);
+      // The body freezes where it fell and stops colliding — a corpse can be
+      // neither driven nor used as cover. Look still passes through: the dead
+      // player's camera deliberately stays live for now (docs/12 §8.0 defers a
+      // stricter killscreen).
+      this.room.get(peer.roomId)?.setDead(true);
+    }
     return peer.health;
   }
 
@@ -1216,6 +1223,7 @@ export class GameServer {
       peer.switchCompleteTick = -1;
       peer.reloadCompleteTick = -1;
       if (motor === undefined) continue;
+      motor.setDead(false);
       const at = this.respawnPlacement(peer);
       // The spawn point's OWN elevation, not the corpse's: dying in a hollow
       // must not respawn a player buried inside the spawn ring's hill.

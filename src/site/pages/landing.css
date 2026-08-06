@@ -1,0 +1,196 @@
+/* Landing page: hero, fact strip, pillar grid.
+ *
+ * Mobile-first. On a phone the patch sits above the copy at a size where its
+ * detail still reads; from 900px it moves beside the headline as in the mockup.
+ * The ridgeline treatment behind the hero is drawn with a clip-path on a
+ * pseudo-element rather than an image, so it costs no request and scales freely.
+ */
+
+.hero {
+  position: relative;
+  overflow: hidden;
+  padding-block: var(--s5) var(--s6);
+}
+
+/* Ridgeline silhouette across the bottom of the hero. */
+.hero::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  height: 42%;
+  background:
+    linear-gradient(to top, var(--bg), transparent),
+    repeating-linear-gradient(102deg, transparent 0 34px, rgba(110, 113, 76, 0.08) 35px 36px);
+  clip-path: polygon(
+    0 50%,
+    9% 43%,
+    18% 54%,
+    28% 36%,
+    39% 50%,
+    50% 28%,
+    62% 49%,
+    74% 34%,
+    86% 52%,
+    100% 40%,
+    100% 100%,
+    0 100%
+  );
+  opacity: 0.72;
+  pointer-events: none;
+}
+
+.hero-grid {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--s5);
+  align-items: center;
+  text-align: center;
+}
+
+.hero-patch {
+  display: grid;
+  place-items: center;
+}
+
+/* Sized against viewport HEIGHT as well as width, because the constraint on a
+   phone is vertical: at 64vw the patch pushed "Play now" below the fold on a
+   390×760 screen, and the whole job of this page is that one button being
+   visible without a scroll. `svh` rather than `vh` so the mobile browser's
+   collapsing address bar cannot change the answer mid-scroll. */
+.hero-patch svg {
+  width: min(48vw, 210px);
+  max-height: 30svh;
+  filter: drop-shadow(0 24px 30px rgba(0, 0, 0, 0.48));
+}
+
+.hero h1 span {
+  display: block;
+  color: var(--olive);
+}
+
+.hero-lede {
+  margin: var(--s5) auto 0;
+  max-width: 56ch;
+  color: var(--ink-dim);
+  font-size: clamp(1rem, 1.6vw, 1.18rem);
+  line-height: 1.7;
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s3);
+  justify-content: center;
+  margin-top: var(--s5);
+}
+
+.hero-note {
+  margin: var(--s4) auto 0;
+  max-width: 44ch;
+  color: var(--ink-faint);
+  font-size: 0.86rem;
+  line-height: 1.6;
+}
+
+/* Two columns from 768px, not 900px: iPad portrait is 810–834 CSS px wide, and
+   at that width a single centred column left the patch enormous and the measure
+   far too long. This breakpoint is the one that makes a tablet feel designed
+   for rather than tolerated. */
+@media (min-width: 768px) {
+  .hero {
+    min-height: calc(100svh - 74px);
+    display: grid;
+    place-items: center;
+    padding-block: var(--s7);
+  }
+  .hero-grid {
+    grid-template-columns: minmax(240px, 0.85fr) minmax(0, 1.15fr);
+    gap: var(--s6);
+    text-align: left;
+  }
+  .hero-patch svg {
+    width: min(100%, 430px);
+    max-height: 60svh;
+  }
+  .hero-lede,
+  .hero-note {
+    margin-inline: 0;
+  }
+  .hero-actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (min-width: 1024px) {
+  .hero-grid {
+    gap: var(--s8);
+  }
+}
+
+/* --- fact strip -----------------------------------------------------------
+   1px gaps filled by the parent's background make the hairline grid, so there
+   is no double border where two cells meet. */
+.facts {
+  position: relative;
+  z-index: 2;
+  padding-bottom: var(--s7);
+  border-top: var(--hair) solid var(--line);
+}
+.facts-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--hair);
+  background: var(--line);
+}
+.fact {
+  background: var(--bg);
+  padding: var(--s5);
+}
+.fact h2 {
+  margin: 0 0 var(--s2);
+}
+.fact p {
+  margin: 0;
+  color: var(--ink-muted);
+  line-height: 1.6;
+}
+@media (min-width: 760px) {
+  .facts-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* --- pillars ------------------------------------------------------------- */
+.pillars {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--s3);
+}
+@media (min-width: 620px) {
+  .pillars {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+.pillar {
+  padding: var(--s5);
+  background: rgba(255, 255, 255, 0.018);
+}
+.pillar-n {
+  display: block;
+  margin-bottom: var(--s2);
+  font-family: var(--font-label);
+  font-weight: 700;
+  font-size: 0.68rem;
+  letter-spacing: 0.14em;
+  color: var(--accent);
+}
+.pillar h3 {
+  margin: 0 0 var(--s2);
+}
+.pillar p {
+  margin: 0;
+  color: var(--ink-muted);
+  line-height: 1.6;
+}

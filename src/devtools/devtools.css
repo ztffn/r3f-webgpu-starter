@@ -1,0 +1,378 @@
+/* Dev console: a docked, scrollable, tabbed panel over the live scene.
+ *
+ * Docked to one edge rather than scattered across the viewport, which is the whole
+ * point of the move — the old panels occupied all four corners and the middle, and
+ * the HUD redesign needs those corners. Monospace throughout because the content is
+ * survey and telemetry readouts, with tabular numerals so digits stop jittering.
+ */
+
+.dev-console,
+.dev-reopen {
+  position: fixed;
+  z-index: var(--z-devtools);
+  font-family: var(--font-mono);
+  color: var(--ink);
+}
+
+/* --- reopen tab: the only thing visible when the console is closed --------- */
+.dev-reopen {
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: var(--s3) var(--s1);
+  border: var(--hair) solid var(--line);
+  border-right: 0;
+  background: var(--glass);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: var(--ink-muted);
+  font-family: var(--font-label);
+  font-size: 0.6rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  writing-mode: vertical-rl;
+  cursor: pointer;
+  opacity: 0.45;
+  transition: opacity var(--fast) var(--ease);
+}
+.dev-reopen:hover {
+  opacity: 1;
+  color: var(--olive-bright);
+}
+
+/* --- console -------------------------------------------------------------
+   Right-docked column, full height minus insets. `dvh` so a mobile browser's
+   collapsing toolbar cannot leave the bottom of the panel unreachable. */
+.dev-console {
+  top: var(--s2);
+  right: var(--s2);
+  bottom: var(--s2);
+  width: min(340px, calc(100vw - var(--s4)));
+  max-height: calc(100dvh - var(--s4));
+  display: flex;
+  flex-direction: column;
+  background: rgba(8, 12, 10, 0.9);
+  border: var(--hair) solid var(--line);
+  backdrop-filter: blur(12px) saturate(0.85);
+  -webkit-backdrop-filter: blur(12px) saturate(0.85);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.5);
+}
+
+.dev-head {
+  display: flex;
+  align-items: stretch;
+  border-bottom: var(--hair) solid var(--line);
+}
+
+.dev-tabs {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  /* The tab strip scrolls rather than wrapping: wrapped, adding a sixth tab
+     silently doubles the header height and pushes the body off a short screen. */
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.dev-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.dev-tabs button {
+  flex: none;
+  padding: var(--s3) var(--s3);
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--ink-faint);
+  font-family: var(--font-label);
+  font-weight: 700;
+  font-size: 0.64rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.dev-tabs button:hover {
+  color: var(--ink-muted);
+}
+.dev-tabs button[aria-selected="true"] {
+  color: var(--olive-bright);
+  border-bottom-color: var(--olive-bright);
+}
+
+.dev-close {
+  flex: none;
+  width: 34px;
+  border: 0;
+  border-left: var(--hair) solid var(--line);
+  background: transparent;
+  color: var(--ink-faint);
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+.dev-close:hover {
+  color: var(--bad);
+}
+
+.dev-body {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--s3);
+  display: flex;
+  flex-direction: column;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* --- shared content bits ------------------------------------------------- */
+.dev-group {
+  margin: var(--s4) 0 var(--s2);
+  color: var(--ink-faint);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+}
+/* The first group in a tab sits against the padding, not a doubled gap. */
+.dev-body > .dev-group:first-child {
+  margin-top: 0;
+}
+
+.dev-title {
+  margin: 0 0 2px;
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+.dev-by {
+  margin-bottom: var(--s2);
+  color: var(--amber);
+  font-size: 10px;
+}
+
+.dev-body .rows {
+  gap: 3px var(--s3);
+}
+.dev-body .rows dt {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: none;
+}
+.dev-body .rows dd {
+  color: var(--olive-bright);
+  font-size: 10px;
+}
+.dev-body .rows dd.warn {
+  color: var(--bad);
+}
+.dev-body .rows.legend dt {
+  color: var(--amber);
+}
+.dev-body .rows.legend dd {
+  color: var(--ink-faint);
+}
+
+.dev-body .btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.dev-body .btns button {
+  flex: 1 1 auto;
+  min-width: 52px;
+  /* 26px, well under the 44px touch target from tokens.css, and deliberately:
+     this is a keyboard-and-mouse development tool, and at 44px the weather tab's
+     18 preset buttons alone would fill a laptop screen. The touch HUD is a
+     separate surface — see the design record §2.5. */
+  min-height: 26px;
+  padding: 5px 6px;
+  border: var(--hair) solid var(--line);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--ink-muted);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.dev-body .btns button:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--ink-faint);
+}
+.dev-body .btns button[aria-pressed="true"] {
+  background: var(--amber);
+  border-color: var(--amber);
+  color: #11120f;
+}
+.dev-body .btns button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.perf {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-bottom: var(--s3);
+  border-bottom: var(--hair) solid var(--line);
+  color: var(--ink-faint);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.perf .fps {
+  color: var(--amber);
+  font-size: 15px;
+}
+.perf .warn {
+  color: var(--bad);
+}
+
+/* --- dials --------------------------------------------------------------- */
+.dial {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: var(--s2);
+}
+.dial-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--s2);
+  font-size: 10px;
+}
+.dial-row b {
+  color: var(--amber);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+.dial em {
+  font-style: normal;
+  font-size: 9px;
+  color: var(--ink-faint);
+  line-height: 1.35;
+}
+
+.dev-body input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 3px;
+  margin: 4px 0 2px;
+  background: var(--line);
+  border-radius: 2px;
+  cursor: ew-resize;
+}
+.dev-body input[type="range"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+.dev-body input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--amber);
+  border: none;
+}
+.dev-body input[type="range"]::-moz-range-thumb {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--amber);
+  border: none;
+}
+
+/* --- text fields and selects (launch tab) --------------------------------- */
+.dev-body input[type="text"],
+.dev-body select {
+  width: 100%;
+  margin-top: 2px;
+  padding: 5px 6px;
+  border: var(--hair) solid var(--line);
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+.dev-body input[type="text"]::placeholder {
+  color: var(--ink-faint);
+}
+.dev-body select option {
+  background: #0a0d0a;
+}
+
+/* The baked URL: monospace and allowed to wrap, because it gets read and copied. */
+.launch-url {
+  margin: 0 0 var(--s2);
+  padding: 5px 6px;
+  border: var(--hair) solid var(--line);
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--olive-bright);
+  font-size: 10px;
+  word-break: break-all;
+  user-select: all;
+}
+
+/* --- notes and the shot log --------------------------------------------- */
+.dev-body .note {
+  margin: var(--s3) 0 0;
+  padding-top: var(--s2);
+  border-top: var(--hair) solid var(--line);
+  color: var(--ink-faint);
+  font-size: 9px;
+  line-height: 1.5;
+}
+.dev-body .note code {
+  color: var(--olive);
+}
+
+.shot-log {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.shot-log li {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  gap: 6px;
+  color: var(--ink-faint);
+}
+.shot-log strong,
+.shot-log em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.shot-log strong {
+  color: var(--ink-muted);
+  font-weight: 500;
+}
+.shot-log em {
+  grid-column: 2;
+  font-style: normal;
+}
+.shot-log li.hit em {
+  color: var(--amber);
+}
+.shot-log li.down em {
+  color: var(--bad);
+}
+
+/* Narrow screens: the console takes the full width rather than a 340px column
+   that would leave 40px of scene visible beside it. */
+@media (max-width: 520px) {
+  .dev-console {
+    left: var(--s2);
+    width: auto;
+  }
+}

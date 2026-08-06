@@ -123,10 +123,23 @@ color/density textures) from the asset pipeline:
 
 ## 7. Directory/module layout (proposed)
 
-> **AS BUILT — terrain has not moved, and FPS is now a separate bounded module.** Terrain
+> **AS BUILT — terrain has not moved, and much more exists than this section names.** Terrain
 > engine code remains in the Phase-1 spike directory `src/df2/` (module map: `08-...md`
 > §3), while local combat is under `src/fps/` (module map: `10-...md` §8). The layout below is still
-> the target; migrate toward it as Phase 2+ lands. One rename to carry over when you do:
+> the target; migrate toward it as Phase 2+ lands.
+>
+> **Eleven directories exist that the tree below does not mention**, and a reader using this
+> section as the map will not find the motor, the authority or any of the web product. As of
+> 2026-08-06: `src/motor/` and `src/net/` (the shared character motor and the authoritative
+> server — `12-...md` §2), `src/combat/` (the shared ballistic core — `11-...md`),
+> `src/character/` (clip vocabulary both runtimes need), and the web product's `src/site/`,
+> `src/ui/`, `src/account/`, `src/hud/`, `src/devtools/` and `src/game/`
+> (`plans/2026-08-04-web-platform-and-ui-design.md` §2.3), plus server-only `tools/account/`
+> and `tools/game-server/`. The first four carry a no-Three.js-at-runtime rule; the site and
+> ui pair must never statically import the game. Those constraints are the real layout, and
+> they are enforced by tests rather than by this document.
+>
+> One rename to carry over when you migrate:
 > `relief-slab.ts` should become something like `columnar-march.ts`, since that is what the
 > shader actually is (rendering design doc §4.1, AS BUILT).
 >

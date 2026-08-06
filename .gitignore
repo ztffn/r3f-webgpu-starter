@@ -161,3 +161,8 @@ assets/3d/characters/player1/textures/
 
 # macOS Finder metadata
 .DS_Store
+
+# Local account database (SQLite). Created by `npm run game:server`.
+account.db
+account.db-shm
+account.db-wal

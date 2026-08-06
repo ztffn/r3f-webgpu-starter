@@ -1,0 +1,118 @@
+/* Respawn (reload) screen: the full-width stop between death and redeploying.
+ * Lives inside .hud-root, so it inherits the phosphor skin; the backdrop is a
+ * vignette rather than a blackout because the ground behind it is information
+ * the dead player is owed. Uses the shared .notched cut from primitives.css.
+ * Every selector here has this file as its only home (design record §5.2 trap 1). */
+
+.respawn {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: var(--s4);
+  /* Readable panel over a still-readable field: dark at the centre where the
+     panel sits, thin at the edges where the terrain matters. */
+  background: radial-gradient(
+    ellipse 70% 62% at 50% 46%,
+    rgba(6, 8, 6, 0.62),
+    rgba(6, 8, 6, 0.28) 66%,
+    rgba(6, 8, 6, 0.12)
+  );
+}
+
+.respawn-stage {
+  width: min(420px, 100%);
+  padding: var(--s5) var(--s6);
+  background: linear-gradient(180deg, rgba(16, 20, 16, 0.92), rgba(6, 8, 6, 0.9));
+  border: var(--hair) solid var(--line);
+  text-align: left;
+}
+
+/* --- header --------------------------------------------------------------- */
+/* The shared .eyebrow primitive, muted: "you were killed by" is a label, and
+   the killer's name below it is what deserves the accent. */
+.respawn .eyebrow {
+  display: block;
+  color: var(--ink-muted);
+}
+.respawn-head h1 {
+  margin: var(--s2) 0 0;
+  font-family: var(--font-display);
+  font-size: clamp(1.3rem, 3vw, 1.8rem);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1.05;
+  color: var(--amber);
+}
+
+/* --- kit ------------------------------------------------------------------ */
+.respawn-kit {
+  margin-top: var(--s4);
+  padding-top: var(--s3);
+  border-top: var(--hair) solid var(--line);
+}
+.respawn-slot {
+  display: grid;
+  grid-template-columns: 24px 80px 1fr;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s1) 0;
+}
+.respawn-slot kbd {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: var(--hair) solid var(--line);
+  border-radius: 2px;
+  color: var(--olive-bright);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+/* The masking lives in primitives.css (.weapon-silhouette); the inner <i>
+   exists only when an icon does, so a missing render leaves no shape. */
+.respawn-slot-icon {
+  height: 20px;
+}
+.respawn-slot-icon i {
+  display: block;
+  height: 100%;
+  background-color: #a4b170;
+  -webkit-mask-position: left center;
+  mask-position: left center;
+}
+.respawn-slot-name {
+  font-size: 13px;
+  color: var(--ink);
+}
+.respawn-slot-role {
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+/* A slot no system fills yet: the vitals panel's convention — dimmed, dashed,
+   legible as "nothing here yet" rather than as an empty hand. */
+.respawn-slot.unwired {
+  opacity: 0.45;
+}
+.respawn-slot.unwired kbd {
+  border-style: dashed;
+}
+
+/* --- countdown -------------------------------------------------------------- */
+.respawn-actions {
+  margin-top: var(--s4);
+  padding-top: var(--s3);
+  border-top: var(--hair) solid var(--line);
+}
+.respawn-count {
+  color: var(--olive-bright, #cfe0a8);
+  font-size: 15px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  /* Tabular so the tenths do not jitter the panel's width as they count down. */
+  font-variant-numeric: tabular-nums;
+}

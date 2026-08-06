@@ -15,12 +15,15 @@
 // everyone — a development flag, never a public one.
 
 import { Room, Server, type Client } from "@colyseus/core";
+import { JWT } from "@colyseus/auth";
 import { WebSocketTransport } from "@colyseus/ws-transport";
 import { GameServer } from "../../src/net/GameServer.ts";
 import {
   COMMANDS_UP,
   GAME_ROOM,
   PACKET_DOWN,
+  ROOM_INFO,
+  type RoomInfo,
 } from "../../src/net/ColyseusProtocol.ts";
 import { createMotorWorld, initRapier } from "../../src/motor/MotorWorld.ts";
 import { DEFAULT_MOTOR_TUNING } from "../../src/motor/MotorTypes.ts";
@@ -29,6 +32,14 @@ import { TERRAIN_SLUG } from "../../src/df2/config.ts";
 import { WEATHER_PRESET_IDS, weatherPresetIndex } from "../../src/df2/weather.ts";
 import { clampVisualDial } from "../../src/df2/visualDials.ts";
 import { loadServerTerrain } from "./terrain.ts";
+import { mountAccounts, type MountedAccounts } from "../account/mount.ts";
+import { accountFromToken } from "../account/authSettings.ts";
+import {
+  makeJoinCode,
+  readRoomOptions,
+  type RoomMetadata,
+  type RoomOptions,
+} from "../account/roomMetadata.ts";
 
 const PORT = Number(process.argv[2] ?? 2567);
 const PATCH_HZ = 20;
@@ -87,6 +98,20 @@ function pickWeatherIndex(): number {
     : weatherPresetIndex(WEATHER);
 }
 
+/**
+ * Most seconds one session may credit to a career. Six hours.
+ *
+ * A cap and not a measurement: the session length is wall-clock between join and
+ * leave, with no idle detection, and "Time played" is one of only two leaderboards
+ * that anything writes. Uncapped, a socket parked in a room outranks somebody who
+ * actually plays, and it does so while asleep. Six hours is longer than any real
+ * sitting and short enough that a forgotten tab cannot climb the board overnight.
+ *
+ * The honest fix is to count time the player is actually issuing commands, which
+ * needs a signal the room does not track yet.
+ */
+const MAX_SESSION_SECONDS = 6 * 3600;
+
 const RAPIER = await initRapier();
 const terrain = loadServerTerrain(TERRAIN_SLUG);
 const tickMs = DEFAULT_MOTOR_TUNING.fixedTimestepSeconds * 1000;
@@ -115,12 +140,68 @@ class GameRoom extends Room {
   maxClients = 64;
   patchRate = null;
 
+  /**
+   * How long a room survives with nobody in it, and how long a reserved seat is
+   * held. Colyseus's default is 15 seconds.
+   *
+   * Raised because `POST /api/private-game` creates the room BEFORE the host has
+   * loaded the game: the browser then navigates to /play, which lazy-loads a
+   * ~930 kB GameApp chunk, ~390 kB of three, Rapier and the terrain before it can
+   * call `joinById`. On a cold cache that is comfortably more than 15 seconds, and
+   * the room the host was just handed had already auto-disposed — "no such room"
+   * from a game they created a moment ago.
+   *
+   * Assigned as a subclass FIELD on purpose. Colyseus arms the first auto-dispose
+   * timer inside `__init()`, which runs after the constructor and before
+   * `onCreate`, so a field initialiser is the last point that can still change the
+   * value it reads; setting it in `onCreate` would be too late, and
+   * `resetAutoDisposeTimeout` is private to the base class.
+   *
+   * The cost is that an empty room lingers this long before disposing, and that an
+   * abandoned seat reservation holds its slot for the same time. Both are cheap
+   * next to handing someone a room id that has already stopped existing.
+   */
+  seatReservationTimeout = 45;
+
   private readonly bridge = new RoomBridge();
   private readonly connections = new Map<string, ServerConnection>();
+  /** sessionId -> the account behind it, and when it joined. */
+  private readonly sessions = new Map<
+    string,
+    { accountId: number | null; joinedAtMs: number }
+  >();
+  // Starts at 0 because the allocator in onJoin pre-increments; the wrap-around
+  // it performs is what keeps connection ids out of the world-target id band.
   private nextId = 0;
   private game!: GameServer;
 
-  onCreate(): void {
+  /**
+   * Resolve the caller's token to an account, or let them in as nobody.
+   *
+   * OPTIONAL BY DESIGN. Returning a value for an absent or bad token rather than
+   * rejecting keeps every documented dev URL working — `?scene=scope&motor=1&net=1`
+   * has never carried a token and must not start failing. What identity buys is
+   * career recording, so an anonymous joiner simply is not recorded.
+   *
+   * This is emphatically NOT a trust boundary for gameplay: it says who someone
+   * claims to be for the purpose of writing their own stats. Anti-cheat is
+   * elsewhere and unbuilt.
+   */
+  static async onAuth(token: string): Promise<{ accountId: number | null }> {
+    if (typeof token !== "string" || token === "") return { accountId: null };
+    try {
+      const payload = await JWT.verify(token);
+      const account = await accountFromToken(accounts.repository, payload);
+      return { accountId: account?.id ?? null };
+    } catch {
+      // A stale or forged token joins as nobody rather than being refused. The
+      // player still gets to play; they just do not get credited.
+      return { accountId: null };
+    }
+  }
+
+  onCreate(options: RoomOptions): void {
+    const { isPrivate, inputClass, label } = readRoomOptions(options);
     const weatherIndex = pickWeatherIndex();
     this.game = new GameServer(RAPIER, createMotorWorld(RAPIER), terrain, this.bridge, {
       sharedSurfaceSpanMetres: SURFACE_SPAN_METRES,
@@ -139,7 +220,25 @@ class GameRoom extends Room {
         { x: 3, z: -300 },
       ],
     });
-    console.log(`[${this.roomId}] weather: ${WEATHER_PRESET_IDS[weatherIndex]}`);
+    // A private room is excluded from matchmaking and from the browser by
+    // Colyseus itself; the code is how it is reachable at all. Generated here so
+    // it exists before the first client can ask for it.
+    const joinCode = isPrivate ? makeJoinCode() : undefined;
+    if (isPrivate) this.setPrivate(true);
+    this.metadata = {
+      label: label ?? `${TERRAIN_SLUG} — ${isPrivate ? "private" : "public"}`,
+      map: TERRAIN_SLUG,
+      weather: WEATHER_PRESET_IDS[weatherIndex]!,
+      inputClass,
+      community: false,
+      hostCallsign: null,
+      joinCode,
+    } satisfies RoomMetadata;
+
+    console.log(
+      `[${this.roomId}] weather: ${WEATHER_PRESET_IDS[weatherIndex]}` +
+        `, ${inputClass}${joinCode !== undefined ? `, private code ${joinCode}` : ""}`
+    );
     if (WEATHER_ROTATE) {
       // The room clock, like the telemetry interval below, so a disposed room
       // does not keep changing the weather of a match that no longer exists.
@@ -187,14 +286,81 @@ class GameRoom extends Room {
       close: () => client.leave(),
     };
     this.connections.set(client.sessionId, connection);
+    // `client.auth` is whatever static onAuth returned. Recorded at join so the
+    // session length is measured from here rather than guessed on the way out.
+    const accountId = (client.auth as { accountId?: number | null } | undefined)?.accountId ?? null;
+    this.sessions.set(client.sessionId, { accountId, joinedAtMs: Date.now() });
+    // Presence, for the friends list. Anonymous joiners are not recorded: with
+    // no account there is nobody to be a friend of.
+    if (accountId !== null) enterPresence(accountId, client.sessionId, this.roomId);
     this.bridge.connectionHandler?.(connection);
-    console.log(`[${this.roomId}] player ${id} joined (${this.connections.size} online)`);
+
+    // The kill feed's name, once the account behind the session is known.
+    //
+    // Fire-and-forget after the peer exists, because the lookup is a database read
+    // and `onJoin` is not async: the player is in the room under the numeric
+    // fallback for one round trip and is renamed when the row arrives. An
+    // anonymous joiner keeps the fallback, which is the whole reason optional auth
+    // stays workable — every documented dev URL joins with no token at all.
+    if (accountId !== null) {
+      void accounts.repository
+        .findById(accountId)
+        .then((row) => {
+          if (row !== undefined) this.game.setDisplayName(id, row.callsign);
+        })
+        .catch((error: unknown) => {
+          console.warn(`[${this.roomId}] could not read a callsign for ${accountId}:`, error);
+        });
+    }
+
+    // Tell this client what it needs to invite others. Sent to EVERY member of a
+    // private room, not only its creator: anyone already inside got there with the
+    // code, so they know it — the only person who does not is the host, and
+    // singling them out would mean tracking who created the room for no gain.
+    // A public room sends an empty object, because there is nothing to gate.
+    const meta = this.metadata as RoomMetadata | undefined;
+    const info: RoomInfo = meta?.joinCode !== undefined ? { joinCode: meta.joinCode } : {};
+    client.send(ROOM_INFO, info);
+
+    console.log(
+      `[${this.roomId}] player ${id} joined (${this.connections.size} online)` +
+        (accountId === null ? " [anonymous]" : ` [account ${accountId}]`)
+    );
   }
 
   onLeave(client: Client): void {
     const connection = this.connections.get(client.sessionId);
     if (connection === undefined) return;
     this.connections.delete(client.sessionId);
+
+    // Credit the session. This is what makes the leaderboard real rather than a
+    // table of zeros — and it is fire-and-forget on purpose: a database hiccup
+    // must not stop the room tearing a player down. Only matches and time played
+    // are written; kills need the authority work on feat/server-ballistics, and
+    // taking a client's word for them would be worse than a zero.
+    const session = this.sessions.get(client.sessionId);
+    this.sessions.delete(client.sessionId);
+    // Cleared before anything that can throw. Keyed by session, so a player who
+    // is also connected from somewhere else keeps their presence there.
+    if (session?.accountId != null) leavePresence(session.accountId, client.sessionId);
+    if (session !== undefined && session.accountId !== null) {
+      const seconds = Math.min(MAX_SESSION_SECONDS, (Date.now() - session.joinedAtMs) / 1000);
+      const accountId = session.accountId;
+      void accounts.repository
+        .recordSession(accountId, seconds)
+        // Medals are evaluated AFTER the session is written and from the stored
+        // career, so the match that crosses a threshold is the one that awards
+        // it. Chained rather than fired alongside: run together, the medal check
+        // would read the career from before this session.
+        .then(async () => {
+          const fresh = await accounts.repository.syncMedals(accountId);
+          if (fresh.length > 0) {
+            console.log(`[${this.roomId}] account ${accountId} earned ${fresh.join(", ")}`);
+          }
+        })
+        .catch((error: unknown) => console.warn(`[${this.roomId}] career write failed:`, error));
+    }
+
     this.bridge.disconnectionHandler?.(connection);
     console.log(
       `[${this.roomId}] player ${connection.id} left (${this.connections.size} online)`
@@ -206,8 +372,77 @@ class GameRoom extends Room {
   }
 }
 
-const server = new Server({ transport: new WebSocketTransport() });
-server.define(GAME_ROOM, GameRoom);
+const transport = new WebSocketTransport();
+
+/**
+ * Who is in which room, right now. Account id -> its live sessions -> room id.
+ *
+ * Module scope for the same reason `accounts` below is: the rooms write it and
+ * the HTTP layer reads it, and there is no instance either of them shares. In
+ * memory on purpose — presence is worthless the moment the process restarts, so
+ * persisting it would only create stale rows claiming people are playing.
+ *
+ * Keyed by SESSION and not just by account, because one account genuinely can be
+ * in two rooms at once — `recordSession` says as much where it explains why the
+ * career write is an incrementing UPDATE. A flat `Map<accountId, roomId>` let the
+ * second join overwrite the first, and then the second leave deleted presence
+ * entirely while the player was still in the other room, so a friend who was
+ * playing read as offline.
+ *
+ * Read ONLY through the friends endpoint, which filters it to accepted friends.
+ * Publishing which room a named player is in would be a stalking primitive, and
+ * in a game about not being seen it is also a gameplay leak.
+ */
+const PRESENCE = new Map<number, Map<string, string>>();
+
+/** Record that a session is in a room. */
+function enterPresence(accountId: number, sessionId: string, roomId: string): void {
+  const rooms = PRESENCE.get(accountId);
+  if (rooms === undefined) PRESENCE.set(accountId, new Map([[sessionId, roomId]]));
+  else rooms.set(sessionId, roomId);
+}
+
+/** Forget one session, and the account with it once its last session is gone. */
+function leavePresence(accountId: number, sessionId: string): void {
+  const rooms = PRESENCE.get(accountId);
+  if (rooms === undefined) return;
+  rooms.delete(sessionId);
+  if (rooms.size === 0) PRESENCE.delete(accountId);
+}
+
+/**
+ * Flatten to the shape the friends endpoint wants: one room per account.
+ *
+ * Any of them will do — the endpoint answers "is this friend in a game", and
+ * listing every room a person is in would publish more, not less.
+ */
+function presenceSnapshot(): ReadonlyMap<number, string> {
+  const flat = new Map<number, string>();
+  for (const [accountId, rooms] of PRESENCE) {
+    const first = rooms.values().next();
+    if (first.done !== true) flat.set(accountId, first.value);
+  }
+  return flat;
+}
+
+/**
+ * Held at module scope because `Room.onAuth` is STATIC — Colyseus calls it before
+ * any instance exists, so it cannot reach the repository through `this`.
+ *
+ * Accounts live in this same process and on this same port: the transport already
+ * owns an Express app, so /auth and /api are mounted on it rather than standing up
+ * a second server. Assembly is in tools/account/mount.ts to keep this file the
+ * game's — it refuses to start without JWT_SECRET and AUTH_SALT, deliberately.
+ */
+const accounts: MountedAccounts = await mountAccounts(transport.getExpressApp(), {
+  presence: presenceSnapshot,
+});
+
+const server = new Server({ transport });
+// filterBy on the create option, so joinOrCreate only ever matches a room of the
+// same input class. That is what "no cross-play" means mechanically; the browser's
+// own filter (lobbyApi) is the same rule applied to the listing.
+server.define(GAME_ROOM, GameRoom).filterBy(["inputClass"]);
 await server.listen(PORT);
 console.log(
   `game server on ws://localhost:${PORT} — ${TERRAIN_SLUG}, ` +

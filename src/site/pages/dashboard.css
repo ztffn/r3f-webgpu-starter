@@ -1,0 +1,382 @@
+/* Dashboard pages: the service record, and the grid the other game menus use.
+ *
+ * The brief these are designed against: a player's record in a game about lying
+ * in grass at 800 metres and waiting. The artifacts that world produces are RANGE
+ * CARDS and DOPE books — the data sheet a sniper tapes to a rifle stock, listing
+ * range, elevation and result. A profile is the same artifact, so the page is a
+ * document with ruled data columns, not a stack of equal cards.
+ *
+ * Widths, corrected: `.auth-page` caps at 620px, which is right for a login form
+ * and wrong for everything else. A dashboard uses the whole shell.
+ */
+
+/* --- the hero plate ------------------------------------------------------ */
+/* Real imagery, not a gradient: this is the actual Green Mile colormap the game
+   renders, tinted to the palette and scrimmed so type stays legible. The page is
+   about a place, so the place is on it. */
+.dash-head {
+  position: relative;
+  overflow: hidden;
+  border-bottom: var(--hair) solid var(--line);
+  isolation: isolate;
+}
+.dash-head::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  background-image: url("/assets/terrain/gmile/color.jpg");
+  background-size: cover;
+  background-position: 50% 42%;
+  /* Desaturated to the parchment/olive world rather than left as raw photography,
+     so it reads as a printed map plate instead of a screenshot. */
+  filter: grayscale(0.55) sepia(0.4) contrast(1.25) brightness(0.72);
+  opacity: 0.85;
+}
+/* The scrim. Two stops, angled, so the left edge where the callsign sits is the
+   darkest part of the plate and the right stays readable behind the data block. */
+.dash-head::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background:
+    linear-gradient(100deg, rgba(13, 14, 13, 0.94) 8%, rgba(13, 14, 13, 0.55) 52%, rgba(13, 14, 13, 0.74) 100%),
+    linear-gradient(to bottom, transparent 55%, var(--bg) 100%);
+}
+
+.dash-head-inner {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: var(--s5);
+  padding-block: var(--s8) var(--s5);
+}
+
+.dash-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  font-family: var(--font-label);
+  font-weight: 700;
+  font-size: 0.7rem;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin: 0 0 var(--s2);
+}
+
+/* The one place type is loud. Tight tracking and a heavy weight so a callsign
+   reads as stencilled onto the plate rather than set on it. */
+.dash-name {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: clamp(2.4rem, 6vw, 4.6rem);
+  line-height: 0.92;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.dash-badges {
+  display: flex;
+  gap: var(--s2);
+  flex-wrap: wrap;
+  margin-top: var(--s3);
+}
+
+/* --- the service block: right of the name, ruled like a form ------------- */
+.dash-service {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 0 var(--s4);
+  border: var(--hair) solid var(--line);
+  background: rgba(9, 10, 9, 0.66);
+  padding: var(--s3) var(--s4);
+  backdrop-filter: blur(3px);
+}
+.dash-service dt {
+  font-family: var(--font-label);
+  font-size: 0.64rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  padding: var(--s1) 0;
+}
+.dash-service dd {
+  margin: 0;
+  padding: var(--s1) 0;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-dim);
+}
+
+/* --- the body grid ------------------------------------------------------- */
+.dash-body {
+  display: grid;
+  grid-template-columns: minmax(0, 4fr) minmax(0, 6fr);
+  gap: var(--s5);
+  align-items: start;
+  padding-block: var(--s5) var(--s8);
+}
+.dash-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s5);
+  min-width: 0;
+}
+
+/* A panel is a hairline box with a labelled rule, not a rounded card. The label
+   sits ON the rule the way a field annotation sits on a map. */
+.panel {
+  border: var(--hair) solid var(--line);
+  background: rgba(255, 255, 255, 0.016);
+  padding: var(--s4);
+}
+.panel > h2,
+.panel > h3 {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  margin: 0 0 var(--s4);
+  font-family: var(--font-label);
+  font-weight: 700;
+  font-size: 0.68rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+.panel > h2::after,
+.panel > h3::after {
+  content: "";
+  flex: 1;
+  height: var(--hair);
+  background: var(--line);
+}
+
+/* --- DOPE: the ruled data table ------------------------------------------ */
+.dope {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  margin: 0;
+}
+.dope dt,
+.dope dd {
+  margin: 0;
+  padding: var(--s2) 0;
+  border-bottom: var(--hair) solid rgba(232, 223, 195, 0.09);
+}
+.dope dt {
+  font-family: var(--font-label);
+  font-size: 0.7rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.dope dd {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+/* The headline figure of the whole page: this game is about the long shot. */
+.dope dd.dope-hero {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1.5rem;
+  line-height: 1;
+  color: var(--accent);
+}
+.dope dt:last-of-type,
+.dope dd:last-of-type {
+  border-bottom: 0;
+}
+
+/* --- the 30-day plot ----------------------------------------------------- */
+.plot {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 56px;
+}
+.plot-bar {
+  flex: 1;
+  min-width: 0;
+  background: var(--olive);
+  /* A day with nothing still draws a floor tick, because the gaps are the shape
+     of somebody's week and a missing bar reads as missing data. */
+  min-height: 2px;
+  transition: background var(--fast) var(--ease);
+}
+.plot-bar[data-value="0"] {
+  background: rgba(232, 223, 195, 0.1);
+}
+.plot-bar:hover {
+  background: var(--accent);
+}
+.plot-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: var(--s2);
+  font-family: var(--font-label);
+  font-size: 0.62rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+/* --- the ribbon rack: the signature -------------------------------------- */
+/* Service ribbons, not badges. 3:1 with vertical stripes, mounted in rows the
+   way a rack sits on a dress uniform — the subject's own artifact, and the one
+   piece of real imagery on the page that needs no image file. */
+.rack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ribbon {
+  position: relative;
+  width: 88px;
+  height: 30px;
+  border: 1px solid rgba(0, 0, 0, 0.6);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.09);
+  cursor: default;
+}
+/* The metal frame edge. A ribbon on a rack is held in a mount, and the highlight
+   is what stops 88x30 of flat colour reading as a progress bar. */
+.ribbon::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.16),
+    rgba(255, 255, 255, 0) 42%,
+    rgba(0, 0, 0, 0.22)
+  );
+}
+.rack-empty {
+  color: var(--ink-faint);
+  font-size: 0.86rem;
+  margin: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ribbon {
+    animation: ribbon-in var(--base) var(--ease) backwards;
+  }
+  @keyframes ribbon-in {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+  }
+}
+
+/* --- narrow -------------------------------------------------------------- */
+@media (max-width: 900px) {
+  .dash-head-inner {
+    grid-template-columns: minmax(0, 1fr);
+    padding-block: var(--s6) var(--s4);
+  }
+  .dash-service {
+    justify-self: stretch;
+  }
+  .dash-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* --- the assessment: verdict, headline figures, range histogram ---------- */
+/* The verdict is the answer to the question the page is open for, so it is set
+   at reading size in the display face rather than as another data row. */
+.verdict {
+  margin: 0 0 var(--s4);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.15rem;
+  line-height: 1.3;
+  color: var(--ink);
+}
+
+.headline {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: var(--s3);
+  border-top: var(--hair) solid var(--line);
+  padding-top: var(--s4);
+}
+.headline > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.headline-value {
+  font-family: var(--font-mono);
+  font-size: 1.35rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+  line-height: 1;
+}
+.headline-label {
+  font-family: var(--font-label);
+  font-size: 0.62rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+/* Kills by range. The one chart that separates two players faster than any
+   number: a wall of bars at 200 m and a wall at 900 m are different games. */
+.bands {
+  list-style: none;
+  margin: var(--s2) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+.bands > li {
+  display: grid;
+  grid-template-columns: 5.5em 1fr 2.5em;
+  align-items: center;
+  gap: var(--s3);
+}
+.band-label,
+.band-count {
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-faint);
+}
+.band-count {
+  text-align: right;
+  color: var(--ink-dim);
+}
+.band-track {
+  height: 10px;
+  background: rgba(232, 223, 195, 0.07);
+}
+.band-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  min-width: 0;
+}
+
+/* A section whose source rows do not exist yet. Says which, in the interface's
+   own voice, and never renders as zeroes. */
+.pending {
+  margin: var(--s3) 0 0;
+  padding: var(--s3);
+  border: var(--hair) dashed var(--line);
+  color: var(--ink-faint);
+  font-size: 0.84rem;
+  line-height: 1.5;
+}

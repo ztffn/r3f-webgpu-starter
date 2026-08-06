@@ -14,37 +14,43 @@
   ],
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "npm run typecheck && vite build",
     "prepare:vegetation": "node tools/vegetation/prepare-vegetation.mjs",
     "validate:vegetation": "node tools/vegetation/validate-manifest.mjs",
     "test": "node --experimental-strip-types --experimental-specifier-resolution=node --test tests/*/*.test.ts",
     "preview": "vite preview --host",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json",
     "session:server": "node --experimental-strip-types --experimental-specifier-resolution=node tools/session-test/server.ts",
     "session:client": "vite --config tools/session-test/vite.config.ts",
     "motor:bench": "node --experimental-strip-types --experimental-specifier-resolution=node tools/motor-bench/dense-room.ts",
-    "game:server": "node --experimental-strip-types --experimental-specifier-resolution=node tools/game-server/server.ts"
+    "game:server": "node --env-file-if-exists=.env --experimental-strip-types --experimental-specifier-resolution=node tools/game-server/server.ts"
   },
   "dependencies": {
+    "@colyseus/auth": "^0.17.9",
     "@colyseus/core": "^0.17.46",
     "@colyseus/sdk": "^0.17.43",
     "@colyseus/ws-transport": "^0.17.13",
     "@dimforge/rapier3d-compat": "^0.19.3",
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.6.1",
+    "better-sqlite3": "^13.0.2",
     "express": "^5.2.1",
+    "kysely": "^0.29.4",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "react-router": "^7.18.2",
     "three": "^0.185.1"
   },
   "engines": {
-    "node": ">=22.6"
+    "node": ">=22.9"
   },
   "devDependencies": {
     "@colyseus/uwebsockets-transport": "^0.17.21",
     "@gltf-transform/core": "^4.2.1",
     "@gltf-transform/extensions": "^4.2.1",
     "@gltf-transform/functions": "^4.2.1",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.1.2",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@types/three": "^0.185.1",

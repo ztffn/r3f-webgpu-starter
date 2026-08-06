@@ -32,6 +32,17 @@ weapon, magazine, and cadence. Playtester-level detail is in
 [`docs/guides/combat-handbook.md`](./docs/guides/combat-handbook.md); the wire and
 authority contracts are docs/12 §8.3 and docs/11 §15.3.
 
+**There is a web product around it now** (August 2026), under the name **Distant Front**:
+a landing page, FAQ and supporter pages, accounts (email, optional Discord, and guests that
+upgrade in place keeping their career), a lobby with a live server browser and join-by-code,
+leaderboards and player statistics, profiles, clans and friends — all served by the same
+process that simulates the match, and all behind a route split that keeps the entire
+Three.js tree out of the entry chunk. `/` is the site; **`/play` is the game**, by way of a
+loadout screen that counts down and deploys. The design records are
+[`docs/plans/2026-08-04-web-platform-and-ui-design.md`](./docs/plans/2026-08-04-web-platform-and-ui-design.md)
+and its community and statistics siblings; read those before touching `src/site/`,
+`src/ui/`, `src/hud/` or `src/devtools/`.
+
 A local-first FPS combat slice is also available at `?scene=scope`: pointer-lock
 long-range aiming, authoritative stance/breath sway, scope zero and windage,
 fixed-step gravity/drag/wind ballistics, material penetration, resettable targets,
@@ -103,12 +114,27 @@ src/df2/
   DF2Scene.tsx       scene composition (lights, fog, water, camera)
 src/components/
   GameCanvas.tsx     WebGPU + R3F canvas bootstrap (async WebGPU init)
-  Hud.tsx            instrument-panel HUD
-src/main.tsx         entry
-src/fps/             local player, weapons, ballistics, world queries, combat presentation
+src/main.tsx         entry: the router and the auth provider
+src/fps/             local player, weapons, world queries, combat presentation
 src/motor/           shared character motor over Rapier — no Three.js, no React, runs in Node
 src/net/             transport seam, binary codec, authoritative server, predicting client
+src/combat/          the shared ballistic core — also Node-safe, so the server owns damage
+src/character/       clip vocabulary and death selection, shared by both runtimes
+src/game/            the scene tree, entered ONLY through a lazy import from /play
+src/hud/             the in-game HUD
+src/devtools/        the docked dev console (seven tabs)
+src/site/            router, layout and every public page
+src/ui/              design tokens, primitives, and the /play launch vocabulary
+src/account/         accounts, tiers, characters and the API client (shared with the server)
+tools/account/       server-only: schema, repositories, auth callbacks, routes
+tools/game-server/   the authoritative Colyseus server, which also mounts /auth and /api
 ```
+
+The three boundaries in that list that break silently if crossed: `src/motor/`, `src/net/`,
+`src/combat/` and `src/character/` import no Three.js and no React at runtime (Node tests
+enforce it); `src/site/` and `src/ui/` never statically import the game (that is what keeps
+Three.js out of the entry chunk); and `src/account/` is shared while `tools/account/` is
+server-only — the directory is the boundary.
 
 `src/df2/` is the current Phase-1 spike. The **target** module layout is the one in
 [`docs/05`](./docs/05-engine-architecture-tech-stack.md) §7 (`/tools/df2-extract`,
@@ -119,7 +145,8 @@ line-of-sight query reads.
 
 ## Getting started
 
-Install [Node.js](https://nodejs.org/en/download/) (18+), then:
+Install [Node.js](https://nodejs.org/en/download/) (**22.9+** — the server runs TypeScript
+directly with `--experimental-strip-types` and reads `.env` with `--env-file-if-exists`), then:
 
 ```shell
 npm install
@@ -127,9 +154,12 @@ npm run dev        # Vite dev server at localhost:3000
 npm run build      # typecheck + production build to /dist
 npm run preview    # serve the production build
 npm run typecheck  # tsc --noEmit
-npm test           # deterministic FPS, motor and networking tests
+npm test           # 334 deterministic tests: combat, motor, net, accounts, site, HUD
 
-npm run session:server   # authoritative multiplayer room on :8787
+npm run game:server      # the authoritative game server, accounts and API on :2567
+                         # (needs JWT_SECRET and AUTH_SALT — see .env.example)
+
+npm run session:server   # the older bare motor room on :8787
 npm run session:client   # two-client session harness on :3100
 npm run motor:bench      # dense-room simulation cost
 ```

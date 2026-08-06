@@ -1,0 +1,120 @@
+/* Server browser and leaderboard tables.
+ *
+ * Both are lists of rows with a name, some metadata and a number. On a phone the
+ * metadata wraps under the name rather than being truncated — a server whose map
+ * and weather are cut off is a server you cannot choose between.
+ */
+
+.lobby-page {
+  width: min(100%, 760px);
+  gap: var(--s4);
+}
+
+/* --- server browser ------------------------------------------------------ */
+.server-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+
+.server-list li {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3) 0;
+  border-bottom: var(--hair) solid var(--line);
+}
+.server-list li:last-child {
+  border-bottom: 0;
+}
+
+.server-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.server-main strong {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.server-meta {
+  color: var(--ink-faint);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.server-count {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-muted);
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+/* --- leaderboard --------------------------------------------------------- */
+.board {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+
+.board li {
+  display: grid;
+  /* Rank column sized for three digits, so the names stay aligned from 1 to 100. */
+  grid-template-columns: 2.5ch 1fr auto;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s2) var(--s2);
+  border-bottom: var(--hair) solid var(--line);
+}
+.board li:last-child {
+  border-bottom: 0;
+}
+
+/* Your own row, marked so it is findable without counting down the list. */
+.board-me {
+  background: rgba(184, 163, 115, 0.08);
+  --line-strong: rgba(184, 163, 115, 0.7);
+}
+
+.board-rank {
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.board-name {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  min-width: 0;
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.board-value {
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+@media (max-width: 560px) {
+  /* Name and metadata take the full width; the count and button sit beneath. */
+  .server-list li {
+    grid-template-columns: 1fr auto;
+  }
+  .server-main {
+    grid-column: 1 / -1;
+  }
+}

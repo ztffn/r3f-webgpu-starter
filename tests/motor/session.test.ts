@@ -7,20 +7,34 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { GameClient } from "../../src/net/GameClient.ts";
-import { GameServer, type WorldTargetSpec } from "../../src/net/GameServer.ts";
+import {
+  DEFAULT_RESPAWN_SECONDS,
+  GameServer,
+  type WorldTargetSpec,
+} from "../../src/net/GameServer.ts";
+import { DEATH_CLIPS } from "../../src/character/characterClips.ts";
 import { LoopbackNetwork, type LinkConditions } from "../../src/net/LoopbackTransport.ts";
 import {
   BYTES_PER_PLAYER,
   BYTES_PER_COMMAND,
   PacketType,
   decodeCommands,
+  decodeDamageTaken,
+  decodeHitConfirmed,
+  decodePlayerDied,
   decodeRoomState,
+  decodeRoster,
   decodeSetVisualDial,
   decodeSnapshot,
   decodeWelcome,
+  encodeDamageTaken,
+  encodeHitConfirmed,
+  encodePlayerDied,
+  encodeRoster,
   encodeCommands,
   encodeFire,
   encodeSnapshot,
+  encodeWelcome,
   quantiseCommand,
 } from "../../src/net/SnapshotCodec.ts";
 import {
@@ -159,6 +173,94 @@ test("command and snapshot packets survive a codec round trip", () => {
   assert.equal(back.players[0]!.state.aiming, true);
 });
 
+test("the welcome carries the room's full health, so a client can read a fraction", () => {
+  // Player maxHealth is NOT in the snapshot — it is a room constant, so it rides
+  // the one packet sent once per join. Without it the client has no denominator
+  // and the vitals bar has to invent one, which is wrong on any server not using
+  // the default.
+  const welcome = decodeWelcome(encodeWelcome(7, 42, { x: 1, y: 2, z: 3 }, 150))!;
+  assert.equal(welcome.playerId, 7);
+  assert.equal(welcome.tick, 42);
+  assert.equal(welcome.maxHealth, 150);
+
+  // Clamped into the byte on the way in, and floored at 1 on the way out: a zero
+  // maximum would make every health fraction a division by zero.
+  assert.equal(decodeWelcome(encodeWelcome(1, 0, { x: 0, y: 0, z: 0 }, 0))!.maxHealth, 1);
+  assert.equal(decodeWelcome(encodeWelcome(1, 0, { x: 0, y: 0, z: 0 }, 9999))!.maxHealth, 255);
+  // The DECODE-side floor, reached with a hand-built packet: going through the
+  // encoder cannot test it, because the encoder already clamps to >= 1. A hostile
+  // or buggy server sending a raw zero is the case that needs the guard.
+  const rawZeroMax = encodeWelcome(1, 0, { x: 0, y: 0, z: 0 }, 1);
+  new DataView(rawZeroMax.buffer, rawZeroMax.byteOffset).setUint8(19, 0);
+  assert.equal(
+    decodeWelcome(rawZeroMax)!.maxHealth,
+    1,
+    "a zero maximum on the wire must floor to 1, or every health fraction divides by zero"
+  );
+});
+
+test("the feedback packets survive a codec round trip", () => {
+  const died = decodePlayerDied(
+    encodePlayerDied({
+      victimId: 4,
+      killerId: 9,
+      weaponIndex: 2,
+      direction: "back",
+      headshot: true,
+      respawnSeconds: 5.4,
+    })
+  )!;
+  assert.equal(died.victimId, 4);
+  assert.equal(died.killerId, 9);
+  assert.equal(died.weaponIndex, 2);
+  assert.equal(died.direction, "back");
+  assert.equal(died.headshot, true);
+  // Tenths of a second: the wire must carry fractional respawn times without
+  // rounding to whole seconds, whatever the server chooses to schedule.
+  assert.ok(Math.abs(died.respawnSeconds - 5.4) < 0.05);
+
+  // Zero is the absent id - nobody killed them, or the killer already left.
+  assert.equal(decodePlayerDied(encodePlayerDied({ ...died, killerId: 0 }))!.killerId, 0);
+
+  const hit = decodeHitConfirmed(
+    encodeHitConfirmed({ sequence: 61234, victimId: 3, fatal: true })
+  )!;
+  assert.equal(hit.sequence, 61234, "the sequence must survive past a signed 16-bit range");
+  assert.equal(hit.victimId, 3);
+  assert.equal(hit.fatal, true);
+
+  const damage = decodeDamageTaken(
+    encodeDamageTaken({ attackerId: 8, bearingRadians: -2.2, amount: 34 })
+  )!;
+  assert.equal(damage.attackerId, 8);
+  assert.equal(damage.amount, 34);
+  assert.ok(Math.abs(damage.bearingRadians - -2.2) < 1e-3);
+  // Clamped into the byte rather than wrapping: a wrapped amount would report a
+  // scratch as a kill.
+  assert.equal(decodeDamageTaken(encodeDamageTaken({ ...damage, amount: 9999 }))!.amount, 255);
+});
+
+test("the roster carries names, and survives a hostile length byte", () => {
+  const entries = [
+    { id: 1, name: "Ada" },
+    { id: 2, name: "Recruit-0042" },
+  ];
+  assert.deepEqual(decodeRoster(encodeRoster(entries)), entries);
+  assert.deepEqual(decodeRoster(encodeRoster([])), []);
+
+  // Callsigns are capped at 16 characters by validateCallsign, and the wire caps
+  // them again rather than trusting that.
+  const long = decodeRoster(encodeRoster([{ id: 3, name: "x".repeat(64) }]));
+  assert.equal(long[0]!.name.length, 16);
+
+  // A count claiming more entries than arrived yields what arrived, never a throw
+  // and never an undefined entry - the same rule the command decoder follows.
+  const truncated = new Uint8Array([PacketType.Roster, 9, 0, 1, 3, 65, 66, 67]);
+  assert.deepEqual(decodeRoster(truncated), [{ id: 1, name: "ABC" }]);
+  assert.deepEqual(decodeRoster(new Uint8Array([PacketType.Roster, 200])), []);
+  assert.deepEqual(decodeRoster(new Uint8Array([PacketType.Roster])), []);
+});
+
 test("every input bit survives the wire, including the ones past a byte", () => {
   // Buttons were a u8. Adding aim intent at bit 8 pushed the field past a byte
   // and it would have silently truncated to zero — a movement input that simply
@@ -203,6 +305,10 @@ test("a malformed packet is survived, not thrown on", () => {
     // Every decoder here is hardened against a short buffer, and a new packet
     // type must not be the exception — it is reached from the same handler.
     assert.doesNotThrow(() => decodeRoomState(bytes), `decodeRoomState threw on ${label}`);
+    assert.doesNotThrow(() => decodeRoster(bytes), `decodeRoster threw on ${label}`);
+    assert.doesNotThrow(() => decodePlayerDied(bytes), `decodePlayerDied threw on ${label}`);
+    assert.doesNotThrow(() => decodeHitConfirmed(bytes), `decodeHitConfirmed threw on ${label}`);
+    assert.doesNotThrow(() => decodeDamageTaken(bytes), `decodeDamageTaken threw on ${label}`);
   }
 
   // Clamped to what arrived, not to what was claimed.
@@ -707,9 +813,90 @@ test("a fire claim cannot be replayed, spoofed round, or fired while dead", () =
   );
 });
 
+test("a kill reaches the shooter, the victim and the room, each with what it needs", () => {
+  const session = makeSession(2, {
+    spawn: (seat) => ({ x: seat === 1 ? 0 : 8, z: 0 }),
+    respawnSeconds: 1,
+  });
+  const towardVictim = -Math.PI / 2;
+  const aimed = (index: number) => ({ buttons: 0, yaw: index === 0 ? towardVictim : 0 });
+  drive(session, 4, aimed);
+
+  session.clients[0]!.fire(towardVictim, 0);
+  drive(session, 3, aimed);
+
+  const shooterSaw = session.clients[0]!.getCombatEvents();
+  const victimSaw = session.clients[1]!.getCombatEvents();
+
+  // The SHOOTER is told its round landed and that it was fatal, and is never
+  // told how much health was left.
+  const hit = shooterSaw.find((event) => event.kind === "hit");
+  assert.ok(hit !== undefined, "the shooter was never told its round landed");
+  assert.equal(hit.victimId, 2);
+  assert.equal(hit.fatal, true);
+  assert.ok(!("amount" in hit), "a hit confirmation must not carry the victim's health");
+
+  // The VICTIM is told a bearing and an amount, and nothing about where the
+  // shooter is. Yaw 0 faces -Z, which makes the left axis -X (docs/12 §4), so a
+  // shooter at x=0 against a victim at x=8 is on the victim's LEFT — and left is
+  // the positive direction.
+  const damage = victimSaw.find((event) => event.kind === "damage");
+  assert.ok(damage !== undefined, "the victim was never told it was hit");
+  assert.ok(damage.amount > 0);
+  assert.ok(
+    Math.abs(damage.bearingRadians - Math.PI / 2) < 0.2,
+    `a shot from the victim's left should read near +pi/2, got ${damage.bearingRadians}`
+  );
+  assert.ok(!("point" in damage), "a damage report must not carry a position");
+
+  // The DEATH reaches BOTH, because every client plays the clip on that body.
+  for (const [label, seen] of [["shooter", shooterSaw], ["victim", victimSaw]] as const) {
+    const died = seen.find((event) => event.kind === "died");
+    assert.ok(died !== undefined, `${label} never heard the death`);
+    assert.equal(died.victimId, 2);
+    assert.equal(died.killerId, 1);
+    assert.equal(died.direction, "side", "the clip must face the side the round came from");
+    assert.equal(died.headshot, false, "nothing sets headshot until a head zone exists");
+    // Scheduled and announced from one number — the configured flat respawn —
+    // so the client's counter cannot outlive the corpse or vice versa.
+    assert.ok(Math.abs(died.respawnSeconds - 1) < 0.1, `respawn was ${died.respawnSeconds}s`);
+  }
+
+  // Events are ordered and resumable rather than drained, because three readers
+  // need the same death and the first to drain would starve the other two.
+  assert.ok(victimSaw.every((event, index) => index === 0 || event.seq > victimSaw[index - 1]!.seq));
+  assert.deepEqual(session.clients[1]!.getCombatEvents(), victimSaw, "reading must not consume");
+});
+
+test("the roster names every player, and a leaver disappears from it", () => {
+  const session = makeSession(2, { spawn: (seat) => ({ x: seat * 4, z: 0 }) });
+  drive(session, 3, () => ({ buttons: 0, yaw: 0 }));
+
+  // The numeric fallback, until a room resolves an account and renames them.
+  assert.deepEqual(session.clients[0]!.getRoster(), [
+    { id: 1, name: "Player 1" },
+    { id: 2, name: "Player 2" },
+  ]);
+  const nameOn = (index: number, id: number) =>
+    session.clients[index]!.getRoster().find((entry) => entry.id === id)?.name ?? null;
+  assert.equal(nameOn(1, 1), "Player 1");
+  assert.equal(nameOn(1, 99), null, "an unknown id has no name, not a guess");
+
+  session.server.setDisplayName(2, "Ada");
+  drive(session, 2, () => ({ buttons: 0, yaw: 0 }));
+  assert.equal(nameOn(0, 2), "Ada", "a rename never reached the other client");
+
+  // Leaving rewrites the roster, which is what the feed diffs to print "left".
+  session.transports[1]!.close();
+  drive(session, 2, () => ({ buttons: 0, yaw: 0 }));
+  assert.deepEqual(session.clients[0]!.getRoster(), [{ id: 1, name: "Player 1" }]);
+});
+
 test("a killed player respawns with full health at a spawn point", () => {
   const session = makeSession(2, {
     spawn: (seat) => ({ x: seat === 1 ? 0 : 8, z: 0 }),
+    // One flat window for every death — shot or otherwise. 1 s is 60 ticks here,
+    // long enough for the corpse-check shot below to land inside it.
     respawnSeconds: 1,
   });
   const towardVictim = -Math.PI / 2;
@@ -734,8 +921,9 @@ test("a killed player respawns with full health at a spawn point", () => {
   assert.equal(session.server.shotsResolved, resolvedBefore + 1, "the corpse-check shot was refused");
   assert.equal(session.server.shotsHit, hitsBefore, "a dead player was still shootable");
 
-  // One second at 60 Hz; the run so far is ~33 ticks, so drive past the rest.
-  drive(session, 45, aimed);
+  // Drive well past the one-second window: the flat respawnSeconds governs a
+  // shot death exactly like any other, and the player comes back whole.
+  drive(session, 90, aimed);
   assert.equal(session.server.healthOf(2), 100, "a dead player never respawned");
   assert.equal(session.clients[1]!.health, 100, "the respawn did not reach the client");
 });
@@ -1162,5 +1350,107 @@ test("snapshots go out at the patch rate, not the tick rate", () => {
   assert.ok(
     Math.abs(session.server.snapshotsSent - expected) <= 2,
     `sent ${session.server.snapshotsSent} snapshots, expected about ${expected}`
+  );
+});
+
+test("the default respawn window clears the longest death clip", () => {
+  // The whole reason the flat window is 5 s and not 3: four of the six death
+  // clips run longer than three seconds, so the old default teleported a body
+  // away mid-fall. Nothing pinned the DEFAULT — every other respawn test passes
+  // an explicit override — so trimming the constant, or re-exporting a longer
+  // clip, would reintroduce that with a green suite.
+  const longest = Math.max(...Object.values(DEATH_CLIPS).map((clip) => clip.seconds));
+  assert.ok(
+    DEFAULT_RESPAWN_SECONDS > longest,
+    `the respawn window (${DEFAULT_RESPAWN_SECONDS}s) must exceed the longest death clip (${longest}s)`
+  );
+  // And it has to survive the wire, which carries tenths in one byte.
+  const died = decodePlayerDied(
+    encodePlayerDied({
+      victimId: 1,
+      killerId: 2,
+      weaponIndex: 0,
+      direction: "front",
+      headshot: false,
+      respawnSeconds: DEFAULT_RESPAWN_SECONDS,
+    })
+  )!;
+  assert.equal(died.respawnSeconds, DEFAULT_RESPAWN_SECONDS);
+});
+
+test("a default server announces and schedules the same flat window", () => {
+  const session = makeSession(2, { spawn: (seat) => ({ x: seat === 1 ? 0 : 8, z: 0 }) });
+  const towardVictim = -Math.PI / 2;
+  const aimed = (index: number) => ({ buttons: 0, yaw: index === 0 ? towardVictim : 0 });
+  drive(session, 4, aimed);
+  session.clients[0]!.fire(towardVictim, 0);
+  drive(session, 3, aimed);
+
+  const died = session.clients[1]!.getCombatEvents().find((event) => event.kind === "died");
+  assert.ok(died !== undefined, "the victim never heard the death");
+  assert.equal(died.respawnSeconds, DEFAULT_RESPAWN_SECONDS);
+
+  // Still down a second before the window, up after it — the announced number is
+  // the one the authority actually waits.
+  drive(session, 60 * (DEFAULT_RESPAWN_SECONDS - 1), aimed);
+  assert.equal(session.server.healthOf(2), 0, "respawned before the announced moment");
+  drive(session, 60 * 2, aimed);
+  assert.equal(session.server.healthOf(2), 100, "never respawned");
+});
+
+test("the respawn tenths byte clamps instead of wrapping", () => {
+  // 25.5 s is the ceiling of one byte of tenths. Above it the value must PIN
+  // rather than wrap to a small number, which would end the client's countdown
+  // while the corpse waited out the rest.
+  const high = decodePlayerDied(
+    encodePlayerDied({
+      victimId: 1,
+      killerId: 0,
+      weaponIndex: 0,
+      direction: "front",
+      headshot: false,
+      respawnSeconds: 40,
+    })
+  )!;
+  assert.equal(high.respawnSeconds, 25.5);
+  const low = decodePlayerDied(
+    encodePlayerDied({
+      victimId: 1,
+      killerId: 0,
+      weaponIndex: 0,
+      direction: "front",
+      headshot: false,
+      respawnSeconds: -5,
+    })
+  )!;
+  assert.equal(low.respawnSeconds, 0, "a negative window must read as none, not as 25.5");
+});
+
+test("a dead player cannot be driven, and its collider stops blocking", () => {
+  const session = makeSession(2, {
+    spawn: (seat) => ({ x: seat === 1 ? 0 : 8, z: 0 }),
+    respawnSeconds: 0, // stay dead, so the frozen state can be observed
+  });
+  const towardVictim = -Math.PI / 2;
+  const aimed = (index: number) => ({ buttons: 0, yaw: index === 0 ? towardVictim : 0 });
+  drive(session, 4, aimed);
+  session.clients[0]!.fire(towardVictim, 0);
+  drive(session, 3, aimed);
+  assert.equal(session.server.healthOf(2), 0, "a lethal hit did not kill");
+
+  const corpse = session.server.room.get("2");
+  assert.ok(corpse !== undefined);
+  const restX = corpse.state.position.x;
+  const restZ = corpse.state.position.z;
+
+  // The victim holds full forward for a second. A corpse must not move.
+  drive(session, 60, (index) => ({
+    buttons: index === 1 ? MotorInput.Forward : 0,
+    yaw: index === 0 ? towardVictim : 0,
+  }));
+  assert.ok(
+    Math.abs(corpse.state.position.x - restX) < 0.01 &&
+      Math.abs(corpse.state.position.z - restZ) < 0.01,
+    "the corpse was driven away from where it fell"
   );
 });

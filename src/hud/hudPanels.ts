@@ -1,0 +1,102 @@
+// The HUD's panel registry: one id per toggleable panel, the labels the dev
+// console shows for them, and the sessionStorage persistence for visibility and
+// panel opacity. GameHud consumes the ids to gate rendering; the dev console's
+// HUD tab consumes ids + labels to draw the toggles. One list, both readers —
+// a panel absent here simply cannot be hidden, which is the safe default.
+
+export const HUD_PANELS = [
+  "crosshair",
+  "compass",
+  "wind",
+  "invite",
+  "objective",
+  "chat",
+  "weapon",
+  "vitals",
+  "nav",
+] as const;
+
+export type HudPanelId = (typeof HUD_PANELS)[number];
+
+export const HUD_PANEL_LABELS: Record<HudPanelId, string> = {
+  crosshair: "Crosshair",
+  compass: "Compass",
+  wind: "Wind",
+  invite: "Invite",
+  objective: "Objective",
+  chat: "Feed",
+  weapon: "Weapon",
+  vitals: "Vitals",
+  nav: "Nav / radar",
+};
+
+export type HudPanelVisibility = Record<HudPanelId, boolean>;
+
+const PANELS_KEY = "df2.hud.panels";
+const ALPHA_KEY = "df2.hud.panelAlpha";
+
+/** Every panel set one way: `allPanels(true)` to show, `allPanels(false)` for `?hud=0`. */
+export function allPanels(visible: boolean): HudPanelVisibility {
+  return Object.fromEntries(HUD_PANELS.map((id) => [id, visible])) as HudPanelVisibility;
+}
+
+/**
+ * Session-scoped, like the dev console's remembered tab: hiding a panel is a
+ * debugging posture, and a posture that silently survived into next week's
+ * session would read as a missing panel bug.
+ */
+export function loadPanelVisibility(): HudPanelVisibility {
+  const base = allPanels(true);
+  try {
+    const raw = readSession(PANELS_KEY);
+    if (raw === null) return base;
+    const stored = JSON.parse(raw) as Partial<Record<string, boolean>>;
+    for (const id of HUD_PANELS) {
+      if (typeof stored[id] === "boolean") base[id] = stored[id];
+    }
+  } catch {
+    // Corrupt storage means the defaults, not a crash before the HUD mounts.
+  }
+  return base;
+}
+
+export function savePanelVisibility(value: HudPanelVisibility): void {
+  writeSession(PANELS_KEY, JSON.stringify(value));
+}
+
+/** The dial's range — one home for the bounds the slider and the loader share. */
+export const PANEL_ALPHA_MIN = 0.2;
+export const PANEL_ALPHA_MAX = 1.6;
+
+/** 1 is the stylesheet's own transparency; the dial scales it either way. */
+export function loadPanelAlpha(): number {
+  // Guarded like loadPanelVisibility, and for the same reason: with cookies
+  // blocked, merely TOUCHING window.sessionStorage throws a SecurityError, and
+  // this runs in a useState initializer — so it would crash the render rather
+  // than lose a preference.
+  const raw = Number(readSession(ALPHA_KEY));
+  return Number.isFinite(raw) && raw >= PANEL_ALPHA_MIN && raw <= PANEL_ALPHA_MAX
+    ? raw
+    : 1;
+}
+
+export function savePanelAlpha(value: number): void {
+  writeSession(ALPHA_KEY, String(value));
+}
+
+/** Session storage that cannot throw. Blocked storage is a lost preference. */
+export function readSession(key: string): string | null {
+  try {
+    return sessionStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+export function writeSession(key: string, value: string): void {
+  try {
+    sessionStorage.setItem(key, value);
+  } catch {
+    // Nothing to do and nothing worth saying: the setting simply does not persist.
+  }
+}

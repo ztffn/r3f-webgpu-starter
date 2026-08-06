@@ -10,7 +10,7 @@
 import * as THREE from "three/webgpu";
 import { CharacterAnimator } from "./CharacterAnimator.ts";
 import { CharacterAimRig, type AimRigProfile } from "./CharacterAimRig.ts";
-import { localizeVelocity, type LocomotionSample } from "./characterClips.ts";
+import { localizeVelocity, type LocomotionSample } from "../../character/characterClips.ts";
 import { instantiateSoldier, type SoldierAsset } from "./soldierAssets.ts";
 import type { MotorState, PlayerStance } from "../../motor/MotorTypes.ts";
 
@@ -150,11 +150,35 @@ export class CharacterView {
     this.aimRig = rig;
   }
 
+  /**
+   * Starts, or ends, this character's death.
+   *
+   * Aliveness comes from the caller's authoritative health, never from whether a
+   * death event arrived: a dropped packet would otherwise leave a corpse walking.
+   * The event only chooses which fall plays.
+   */
+  get isDead(): boolean {
+    return this.animator.isDead;
+  }
+
+  setDead(dead: boolean, clipName: string): void {
+    if (dead) this.animator.die(clipName);
+    else this.animator.revive();
+  }
+
   /** The mandatory order: beginFrame, mixer, aim rig (docs/10 §3). Raw render
    * delta on purpose — the rig clamps internally. */
   update(deltaSeconds: number, pose: CharacterPose): void {
     this.group.position.set(pose.positionX, pose.positionY, pose.positionZ);
     this.group.rotation.y = pose.yawRadians;
+
+    // A dead body is still receiving snapshots and still has a pose, but its
+    // aim rig must not keep tracking: a corpse whose spine follows a look angle
+    // is the uncanny half of this that reads worst.
+    if (this.animator.isDead) {
+      this.animator.update(deltaSeconds, this.sample);
+      return;
+    }
 
     localizeVelocity(pose.velocityX, pose.velocityZ, pose.yawRadians, this.sample);
     this.sample.speed = Math.hypot(pose.velocityX, pose.velocityZ);

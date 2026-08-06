@@ -64,6 +64,8 @@ throttled snapshots to the HUD.
 | `Damageable` / world prefabs | health, authored surface/thickness, hit/destruction response | player input |
 | presentation components | GLBs, mixers, scope PiP, particles, sound, debug lines | gameplay truth |
 | `CombatTelemetry` | immutable low-frequency snapshots | raycasting or simulation |
+| `useCombatFeed` | server combat events shaped for the HUD: feed lines, the local death, latest damage | deciding aliveness — health does that |
+| `hud/combatAudio.ts` | the two UI cues (round landed, you were hit) | world audio, which stays positional in RemoteFireEffects |
 | `WeaponAimIndicator` | mutable crosshair presentation values | accepting shots or generating spread |
 
 ```text
@@ -312,7 +314,11 @@ Useful URLs:
 
 | Query | Purpose |
 | --- | --- |
+| `/play` (no query) | the PRODUCT path: the loadout stop, then `scene=scope&motor=1&net=1` |
 | `?scene=scope` | playable sniper/M4/Glock/SAW proxy loadout and target slice |
+| `&hud=0` | start with every HUD panel hidden, for a clean capture (combat feedback stays) |
+| `&loadout=1` / `&loadout=0` | force / spend the loadout staging stop on any /play URL |
+| `&debug=1` | open the dev console at load — its **Launch** tab bakes any of these for you |
 | `&shotdebug=1` | white sightline, yellow bore, wide cyan curved path, material contacts |
 | `&impacttest=1` | cloth/wood/metal/glass/stone/dirt/water cover lanes |
 | `&ammo=9mm\|556\|308\|50bmg` | select diagnostic ballistic profile (`308` default) |
@@ -344,7 +350,7 @@ is the evidence of gravity and wind curvature.
 | `presentation/ImpactEffects.tsx` | bounded particles and positional sound |
 | `presentation/ShotTrajectoryDebugView.tsx` | latest-shot world debug |
 | `presentation/CharacterAimRig.ts` | procedural post-mixer bones |
-| `presentation/characterClips.ts` | pure 8-way/stance/gait clip selection (Node-tested) |
+| `../character/characterClips.ts` (moved: `src/character/`) | pure 8-way/stance/gait clip selection (Node-tested) |
 | `presentation/CharacterAnimator.ts` | mixer driver: crossfades, speed matching, hips pin |
 | `presentation/CharacterView.ts` | animated soldier host: model + animator + mounted aim rig |
 | `presentation/soldierAssets.ts` | cached Draco GLB load + per-instance skeleton clones |
@@ -406,8 +412,17 @@ already permits via `allowImportingTsExtensions` — but it touches every module
 done. Do not tidy this halfway. `src/combat/` was born fully `.ts`-suffixed because the game
 server loads it outside the test runner, where the flag does not apply.
 
-**`engines` now declares Node >= 22.6**, which is what `--experimental-strip-types` needs. Below
+**`engines` now declares Node >= 22.9.** `--experimental-strip-types` needs 22.6; the game
+server's `--env-file-if-exists` needs 22.9, and below it that flag is a startup error. Below
 that the test script fails in a way that does not name the version as the cause.
+
+**Damage direction is coarse ON PURPOSE (2026-08-05).** The wire gives the victim a bearing
+and nothing else — no position, no range — and the HUD draws it as a soft edge arc rather
+than an arrow. This is a concealment decision, not a styling one: precision here hands a
+victim the shooter's position, which is exactly what the grass, the fog and the range spent
+the engagement taking away. Judge any change to it with the `00-...md` pillar test, not with
+a usability argument alone. The blur is also the hook a later post-processing pass replaces
+with a real screen effect.
 
 ## 10. Deliberately deferred work
 

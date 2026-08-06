@@ -77,6 +77,7 @@ export class CharacterMotor {
   private readonly heightSource: MotorHeightSource;
   private stanceBlendRemaining = 0;
   private snapEnabled = true;
+  private dead = false;
 
   constructor(
     rapier: typeof RAPIER,
@@ -163,6 +164,29 @@ export class CharacterMotor {
     if (this.ownsTerrain) this.terrain.dispose();
   }
 
+  /**
+   * Death freezes the body where it fell and stops it being a collider.
+   *
+   * Translation, stance and jumping are ignored while dead — a corpse must
+   * never be drivable — and the Rapier collider is DISABLED, so a body blocks
+   * neither movement nor rounds (the hit rewind already excludes dead capsules
+   * by health; this closes the physical half). Look angles still pass through
+   * `step`: the dead player's camera deliberately stays live for now — a
+   * stricter killscreen is a possible later product decision, recorded in
+   * docs/12 §8.0 — and the same flag runs in client prediction, so the frozen
+   * body reconciles cleanly instead of rubber-banding.
+   */
+  setDead(dead: boolean): void {
+    if (this.dead === dead) return;
+    this.dead = dead;
+    this.collider.setEnabled(!dead);
+    if (dead) {
+      this.state.velocity.x = 0;
+      this.state.velocity.y = 0;
+      this.state.velocity.z = 0;
+    }
+  }
+
   step(command: PlayerCommand): MotorState {
     const dt = this.tuning.fixedTimestepSeconds;
     const state = this.state;
@@ -170,6 +194,16 @@ export class CharacterMotor {
 
     state.yawRadians = command.yawRadians;
     state.pitchRadians = clamp(command.pitchRadians, -PITCH_LIMIT, PITCH_LIMIT);
+
+    // Dead: the look above is all a corpse gets. No movement, no gravity, no
+    // collision compute — the body holds its death pose until the respawn
+    // teleports it (see setDead for why look passes through).
+    if (this.dead) {
+      state.grounded = true;
+      state.tick = command.tick;
+      state.contactFlags = MotorContact.Grounded;
+      return state;
+    }
 
     contacts |= this.resolveStance(command.buttons, dt);
 

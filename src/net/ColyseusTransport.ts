@@ -6,18 +6,76 @@
 // ColyseusProtocol.ts, shared with the server room so the two cannot drift.
 
 import { Client, type Room } from "@colyseus/sdk";
-import { COMMANDS_UP, GAME_ROOM, PACKET_DOWN } from "./ColyseusProtocol.ts";
+import {
+  COMMANDS_UP,
+  GAME_ROOM,
+  PACKET_DOWN,
+  ROOM_INFO,
+  type RoomInfo,
+} from "./ColyseusProtocol.ts";
 import type { ClientTransport, TransportMessageHandler } from "./Transport.ts";
+
+export interface ColyseusJoinOptions {
+  /**
+   * The session token, or null to join as nobody.
+   *
+   * Set on `client.auth.token` before joining, which makes the SDK send it as an
+   * Authorization header — the room's static onAuth resolves it to an account so
+   * the session can be credited to a career. Optional on purpose: every
+   * documented dev URL predates accounts and must keep working.
+   */
+  token?: string | null;
+  /**
+   * Join this exact room instead of matchmaking.
+   *
+   * How a join code is honoured, and how a private game is entered: the server
+   * creates that room and hands back its id, because hosting one is a capability
+   * and a client cannot check its own.
+   */
+  roomId?: string | null;
+  /** Which queue to match in. No cross-play — the server filters on it. */
+  inputClass?: "desktop" | "touch";
+  /** Free-text label for a room this client creates. */
+  label?: string | null;
+}
 
 export class ColyseusClientTransport implements ClientTransport {
   private room: Room | null = null;
   private closed = false;
   private messageHandler: TransportMessageHandler | null = null;
   private closeHandler: (() => void) | null = null;
+  /**
+   * The room's own facts, once it has told us.
+   *
+   * Held here rather than pushed through `ClientTransport`: that interface is
+   * shared with the loopback and ws implementations used by the Node tests, and
+   * neither has a concept of a Colyseus room. A caller that wants this reaches for
+   * the concrete class, which `useGameClient` already constructs.
+   */
+  private info: RoomInfo | null = null;
+  private infoHandler: ((info: RoomInfo) => void) | null = null;
 
-  constructor(url: string) {
-    void new Client(url)
-      .joinOrCreate(GAME_ROOM)
+  constructor(url: string, options: ColyseusJoinOptions = {}) {
+    const client = new Client(url);
+    // Before the join, not after: the SDK reads the token when it builds the
+    // matchmaking request, so setting it afterwards would authenticate nothing.
+    if (options.token !== null && options.token !== undefined) {
+      client.auth.token = options.token;
+    }
+    const joinOptions = {
+      inputClass: options.inputClass ?? "desktop",
+      ...(options.label !== null && options.label !== undefined ? { label: options.label } : {}),
+    };
+    // Two ways in: a room id means one specific room — a resolved join code, or a
+    // private game the server created after checking the caller's tier — and the
+    // default is ordinary matchmaking. Creating a private room is NOT one of them;
+    // it is a capability, so it happens over POST /api/private-game where the
+    // account is known, and this transport only ever joins the result by id.
+    const joining =
+      options.roomId !== null && options.roomId !== undefined && options.roomId !== ""
+        ? client.joinById(options.roomId, joinOptions)
+        : client.joinOrCreate(GAME_ROOM, joinOptions);
+    void joining
       .then((room) => {
         // close() during a pending join: leaving on resolve is what keeps an
         // HMR remount (construct -> close -> construct) from stranding a ghost
@@ -28,6 +86,10 @@ export class ColyseusClientTransport implements ClientTransport {
         }
         this.room = room;
         room.onMessage(PACKET_DOWN, (bytes: Uint8Array) => this.messageHandler?.(bytes));
+        room.onMessage(ROOM_INFO, (info: RoomInfo) => {
+          this.info = info;
+          this.infoHandler?.(info);
+        });
         room.onLeave(() => {
           this.room = null;
           this.closeHandler?.();
@@ -62,5 +124,18 @@ export class ColyseusClientTransport implements ClientTransport {
 
   get connected(): boolean {
     return this.room !== null;
+  }
+
+  /**
+   * Subscribe to the room's facts.
+   *
+   * Replays immediately if the message already arrived — the room sends it during
+   * join, which can easily beat a React effect subscribing after mount, and a
+   * subscription that silently misses the only send it will ever get is the kind
+   * of bug that looks like the server never sent anything.
+   */
+  onRoomInfo(handler: (info: RoomInfo) => void): void {
+    this.infoHandler = handler;
+    if (this.info !== null) handler(this.info);
   }
 }

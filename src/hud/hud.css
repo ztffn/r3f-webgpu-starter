@@ -1,0 +1,800 @@
+/* In-game HUD. Visual treatment follows design/df2-hud-1to1-html-v3, which is
+ * authoritative; the LAYOUT deliberately does not.
+ *
+ * The mockup is a fixed 1448x1086 stage scaled to fit — right for a 1:1 screenshot
+ * comparison, wrong for a product: it letterboxes at phone aspect and scales 1px
+ * hairlines into mush. Panels here anchor to viewport edges inside the safe area,
+ * and the touch layout MOVES panels out of the thumb zones instead of shrinking
+ * the desktop one (design record §2.5).
+ */
+
+.hud-root {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-hud);
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+  font-family: var(--font-label);
+  color: var(--ink);
+  /* Inset every anchored panel by the notch cutout plus the safe area, so a
+     notched corner never sits under a rounded display corner. */
+  --edge: 14px;
+  --inset-l: max(var(--edge), env(safe-area-inset-left));
+  --inset-r: max(var(--edge), env(safe-area-inset-right));
+  --inset-b: max(var(--edge), env(safe-area-inset-bottom));
+  --inset-t: max(4px, env(safe-area-inset-top));
+}
+
+/* THE MOST EXPENSIVE THING IN THE HUD, so it is worth being precise about.
+ *
+ * `backdrop-filter` forces the compositor to sample and blur the scene behind
+ * each panel every frame, and `filter: drop-shadow` on a clip-path'd element
+ * forces a second offscreen pass. Seven panels doing both, over a full-screen 3D
+ * scene, is enough to stall a software renderer outright — it froze the HUD lab
+ * page in a headless browser — and mobile GPUs are a first-class target here
+ * (design record §2.5).
+ *
+ * So: ONE drop-shadow rather than the mockup's two, `contain` to bound the
+ * repaint region, and the blur dropped on touch and reduced-transparency in
+ * favour of a more opaque background. At 9px over terrain the blur is subtle
+ * enough that opacity carries almost the same read for a fraction of the cost. */
+.hud-panel {
+  position: absolute;
+  padding: var(--s3) var(--s4);
+  contain: layout paint;
+  /* Alphas sit well below the mockup's (0.94/0.83): over live terrain that read
+     as solid slabs, and the reference the panels are calibrated against keeps
+     the ground readable through every panel. `--hud-panel-alpha` is the dev
+     console's dial — a plain multiplier, 1 by default, set on .hud-root. */
+  background:
+    linear-gradient(180deg, rgba(230, 238, 210, 0.055), transparent 18%),
+    linear-gradient(
+      135deg,
+      rgba(18, 24, 20, calc(0.6 * var(--hud-panel-alpha, 1))),
+      rgba(8, 12, 10, calc(0.44 * var(--hud-panel-alpha, 1)))
+    );
+  backdrop-filter: blur(9px) saturate(0.82);
+  -webkit-backdrop-filter: blur(9px) saturate(0.82);
+  filter: drop-shadow(0 10px 16px rgba(0, 0, 0, 0.5));
+}
+
+@media (pointer: coarse), (prefers-reduced-transparency: reduce) {
+  .hud-panel {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    /* No blur to carry legibility here, so the ground stays darker — but still
+       translucent enough that a panel never fully hides an approaching player. */
+    background:
+      linear-gradient(180deg, rgba(230, 238, 210, 0.05), transparent 18%),
+      linear-gradient(
+        135deg,
+        rgba(16, 21, 18, calc(0.85 * var(--hud-panel-alpha, 1))),
+        rgba(7, 10, 9, calc(0.74 * var(--hud-panel-alpha, 1)))
+      );
+  }
+}
+
+.hud-label {
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+.hud-value {
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+.hud-amber {
+  color: var(--amber);
+  text-shadow: 0 0 8px rgba(255, 174, 36, 0.16);
+}
+.hud-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+}
+.hud-icon {
+  margin-right: 7px;
+  font-size: 18px;
+}
+
+/* --- compass strip (top centre) ------------------------------------------ */
+.hud-compass {
+  position: absolute;
+  top: var(--inset-t);
+  left: 50%;
+  transform: translateX(-50%);
+  /* The wind readout shares this bar at the right edge, so the tape yields to
+     it on narrow desktop viewports instead of sliding ticks underneath it. */
+  width: min(590px, calc(100vw - 440px));
+  height: 54px;
+}
+.hud-compass-window {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  /* Fades both ends rather than clipping hard, so the tape reads as continuing
+     past the window instead of stopping at a cut edge. */
+  mask-image: linear-gradient(to right, transparent, #000 12%, #000 88%, transparent);
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 12%,
+    #000 88%,
+    transparent
+  );
+  background: linear-gradient(
+    to right,
+    transparent,
+    rgba(4, 7, 6, 0.68) 13%,
+    rgba(4, 7, 6, 0.68) 87%,
+    transparent
+  );
+}
+.hud-compass-tape {
+  position: absolute;
+  top: 0;
+  /* The tape's origin sits at the window centre; the transform slides it. */
+  left: 50%;
+  height: 100%;
+  will-change: transform;
+}
+.hud-tick {
+  position: absolute;
+  top: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transform: translateX(-50%);
+}
+.hud-tick i {
+  width: 1px;
+  height: 6px;
+  background: rgba(225, 232, 218, 0.34);
+}
+.hud-tick.major i {
+  height: 10px;
+  background: rgba(225, 232, 218, 0.55);
+}
+.hud-tick b {
+  margin-top: 3px;
+  font-size: 12px;
+  font-weight: 400;
+  color: #dfe4da;
+  font-variant-numeric: tabular-nums;
+}
+.hud-tick.cardinal b {
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--olive-bright);
+}
+
+.hud-compass-index {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 0;
+  height: 0;
+  transform: translateX(-50%);
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 8px solid var(--olive-bright);
+}
+/* BELOW the strip, not above it. Above, `translateY(-100%)` put it at negative
+   page coordinates on a viewport whose compass is already flush to the top inset,
+   so the numeric bearing was simply off-screen. */
+.hud-compass-readout {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 1px 7px;
+  background: rgba(4, 7, 6, 0.72);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: var(--olive-bright);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- wind (top right, ON the compass bar) --------------------------------
+   Same row as the compass strip rather than floating below it: the strip's 54px
+   height is matched and the content centred in it, so the two read as one
+   instrument bar across the top instead of a bar and a stray card. */
+.hud-wind {
+  top: var(--inset-t);
+  right: var(--inset-r);
+  min-width: 190px;
+  height: 54px;
+  display: flex;
+  align-items: center;
+}
+.hud-wind .hud-row {
+  flex: 1;
+}
+
+/* --- objective and chat (left edge, preview only) ------------------------ */
+.hud-objective {
+  left: var(--inset-l);
+  top: 45%;
+  width: min(240px, 62vw);
+}
+.hud-objective-title {
+  color: var(--olive-bright);
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  text-shadow: 0 0 9px rgba(191, 215, 121, 0.16);
+}
+.hud-objective-title::before {
+  content: "◇";
+  margin-right: 10px;
+}
+.hud-objective-body {
+  margin: 10px 0 0 22px;
+  font-size: 13px;
+  color: #e2e5dd;
+}
+.hud-chat {
+  left: var(--inset-l);
+  top: calc(45% + 92px);
+  width: min(268px, 68vw);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.hud-chat > div + div {
+  border-top: 1px solid rgba(255, 255, 255, 0.035);
+}
+.hud-team {
+  color: #65aed0;
+}
+.hud-lead {
+  color: var(--olive-bright);
+}
+
+/* --- weapon (bottom left) ------------------------------------------------ */
+.hud-weapon {
+  left: var(--inset-l);
+  bottom: var(--inset-b);
+  width: 280px;
+  height: 132px;
+}
+.hud-weapon-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: var(--s2);
+  border-bottom: 1px solid rgba(193, 217, 121, 0.14);
+  font-size: 13px;
+  text-shadow: 0 0 9px rgba(191, 215, 121, 0.16);
+}
+
+/* Weapon silhouette: an authored render used as a MASK, not an image — the
+   masking plumbing lives in primitives.css (.weapon-silhouette); this class
+   only places and colours it. Replaces five divs that approximated a rifle
+   out of clip-paths. */
+.hud-rifle {
+  position: absolute;
+  /* Sits above the ammo figure rather than behind it: the big magazine count
+     was overlapping the rifle's stock, and two things sharing that corner made
+     both harder to read at a glance. */
+  left: 18px;
+  top: 38px;
+  width: 158px;
+  height: 40px;
+  background-color: #a4b170;
+  opacity: 0.92;
+}
+
+.hud-ammo {
+  position: absolute;
+  left: var(--s4);
+  bottom: 8px;
+  font-size: 25px;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+.hud-ammo b {
+  font-size: 40px;
+  font-weight: 500;
+  color: #fff;
+}
+.hud-ammo span {
+  font-size: 24px;
+  margin: 0 2px;
+}
+/* --- vitals (bottom centre) --------------------------------------------- */
+.hud-vitals {
+  left: 50%;
+  bottom: var(--inset-b);
+  transform: translateX(-50%);
+  width: min(470px, calc(100vw - var(--inset-l) - var(--inset-r)));
+  display: grid;
+  grid-template-columns: 1fr;
+  column-gap: var(--s5);
+  row-gap: 7px;
+}
+@media (min-width: 620px) {
+  .hud-vitals {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.hud-metric {
+  display: grid;
+  grid-template-columns: 20px 66px 1fr 36px;
+  align-items: center;
+  gap: var(--s2);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.hud-metric-icon {
+  font-size: 17px;
+  color: var(--olive-bright);
+}
+.hud-metric.tone-blue .hud-metric-icon {
+  color: var(--blue);
+}
+.hud-metric-label {
+  color: var(--ink-muted);
+}
+.hud-metric-pct {
+  text-align: right;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-bar {
+  display: block;
+  height: 7px;
+  background: rgba(255, 255, 255, 0.11);
+  border: 1px solid rgba(204, 220, 153, 0.08);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.38);
+}
+.hud-bar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--olive-bright), #829b40);
+  box-shadow: 0 0 6px rgba(181, 204, 103, 0.16);
+}
+.hud-metric.tone-blue .hud-bar i {
+  background: linear-gradient(90deg, var(--blue), #407d98);
+  box-shadow: 0 0 6px rgba(99, 169, 199, 0.16);
+}
+
+/* An unwired metric: dashed empty track, dimmed label. It must be legible that
+   there is no reading here rather than that the reading is zero. */
+.hud-metric.unwired {
+  opacity: 0.45;
+}
+.hud-metric.unwired .hud-bar {
+  border-style: dashed;
+  box-shadow: none;
+}
+
+/* --- nav + rose (bottom right) ------------------------------------------ */
+.hud-nav {
+  right: var(--inset-r);
+  bottom: var(--inset-b);
+  width: 372px;
+  height: 172px;
+  padding-right: 168px;
+}
+.hud-nav-title {
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(193, 217, 121, 0.14);
+  color: var(--amber);
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-shadow: 0 0 9px rgba(191, 215, 121, 0.16);
+}
+.hud-nav-k {
+  margin-top: var(--s3);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+.hud-nav-v {
+  margin-top: 2px;
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-radar {
+  position: absolute;
+  right: 6px;
+  top: 5px;
+  width: 160px;
+  height: 160px;
+  border-radius: 50%;
+  border: 1px solid rgba(183, 203, 114, 0.42);
+  background:
+    radial-gradient(
+      circle at center,
+      transparent 0 18%,
+      rgba(183, 203, 114, 0.17) 19% 20%,
+      transparent 21% 40%,
+      rgba(183, 203, 114, 0.14) 41% 42%,
+      transparent 43%
+    ),
+    repeating-conic-gradient(from 0deg, rgba(183, 203, 114, 0.14) 0 1deg, transparent 1deg 15deg),
+    radial-gradient(circle, #273126 0, #0a0f0c 72%);
+  box-shadow:
+    inset 0 0 0 5px rgba(8, 12, 10, 0.46),
+    inset 0 0 26px rgba(0, 0, 0, 0.52),
+    0 0 0 1px rgba(183, 203, 114, 0.12);
+}
+.hud-radar-ring {
+  position: absolute;
+  inset: 0;
+  will-change: transform;
+}
+.hud-radar-ring span {
+  position: absolute;
+  font-size: 13px;
+  color: var(--ink-dim);
+}
+.hud-radar-ring .n {
+  left: 50%;
+  top: 6px;
+  transform: translateX(-50%);
+  color: var(--olive-bright);
+}
+.hud-radar-ring .s {
+  left: 50%;
+  bottom: 6px;
+  transform: translateX(-50%);
+}
+.hud-radar-ring .w {
+  left: 7px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+.hud-radar-ring .e {
+  right: 7px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+.hud-radar-self {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -46%);
+  font-size: 17px;
+  color: #fff;
+}
+
+/* --- hit marker --------------------------------------------------------- */
+.hit-marker {
+  position: absolute;
+  top: calc(50% + 22px);
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--amber);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+  animation: hud-hit 520ms ease-out forwards;
+}
+@keyframes hud-hit {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 3px) scale(0.92);
+  }
+  18% {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+  68% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -3px) scale(1);
+  }
+}
+
+/* --- TOUCH LAYOUT -------------------------------------------------------
+   Not the desktop layout shrunk. On a touchscreen the lower-left and lower-right
+   corners are where a movement stick and a fire cluster go, and those are exactly
+   where the weapon and nav panels sit on desktop. So they move: nav goes to the
+   top-right under the wind readout, weapon and vitals move up and inward, and the
+   rose shrinks. Keyed on `pointer: coarse` rather than width — an iPad in
+   landscape is a wide viewport with no cursor. */
+@media (pointer: coarse), (max-width: 760px) {
+  .hud-root {
+    --edge: 10px;
+  }
+  .hud-nav {
+    top: calc(var(--inset-t) + 58px);
+    right: var(--inset-r);
+    bottom: auto;
+    /* Leaves room for the invite panel on its left (165px + gutters). Without
+       that term, nav's 300px covered the join code on any phone narrower than
+       485px — and since .hud-root is click-through, the buried buttons stayed
+       clickable, which is worse than being merely hidden. */
+    width: min(300px, calc(100vw - var(--inset-l) - var(--inset-r) - 175px));
+    height: auto;
+    padding-right: var(--s4);
+    padding-bottom: var(--s3);
+  }
+  /* Wind keeps the compass bar (base rule); it only gives up its min-width. */
+  .hud-wind {
+    min-width: 0;
+  }
+  .hud-nav {
+    top: calc(var(--inset-t) + 54px);
+  }
+  .hud-radar {
+    position: relative;
+    right: auto;
+    top: auto;
+    margin: var(--s3) auto 0;
+    width: 110px;
+    height: 110px;
+  }
+  /* Clear of the bottom edge by a thumb's reach, and STACKED rather than
+     side by side. Both used to sit at the same `bottom` — weapon pinned left at
+     230px, vitals centred at up to 320px — so on any viewport under 800px they
+     overlapped, which on a 390px phone meant 205px of one panel painted over
+     the other. Vitals takes the lower row because it is the one a player reads
+     mid-fight; the weapon block sits above it. */
+  .hud-vitals {
+    bottom: calc(var(--inset-b) + 96px);
+    width: min(320px, calc(100vw - var(--inset-l) - var(--inset-r)));
+    grid-template-columns: 1fr;
+  }
+  .hud-weapon {
+    left: var(--inset-l);
+    bottom: calc(var(--inset-b) + 96px + 132px);
+    width: 230px;
+    height: 118px;
+  }
+  .hud-compass {
+    width: calc(100vw - var(--inset-l) - var(--inset-r));
+  }
+  /* Preview-only panels have nowhere to go on a phone; the real ones win. */
+  .hud-objective,
+  .hud-chat {
+    display: none;
+  }
+}
+
+/* Very short viewports (landscape phone): the vitals grid and the weapon block
+   cannot both sit above the thumb zone, so vitals wins — it is the one a player
+   needs mid-fight. */
+@media (max-height: 460px) {
+  .hud-weapon {
+    display: none;
+  }
+  .hud-vitals {
+    bottom: var(--inset-b);
+  }
+}
+
+.touch-note {
+  display: none;
+}
+/* Keyed the same way the touch LAYOUT is (`pointer: coarse` as well as width):
+   a landscape iPad is a wide viewport with no keyboard, and it was getting the
+   relocated panels with no notice that movement needs one. */
+@media (pointer: coarse), (max-width: 760px) {
+  .touch-note {
+    display: block;
+    position: absolute;
+    left: var(--inset-l);
+    right: var(--inset-r);
+    bottom: var(--inset-b);
+    margin: 0;
+    padding: 8px 10px;
+    background: rgba(10, 14, 12, 0.82);
+    border: 1px solid var(--line);
+    color: var(--ink-muted);
+    font-size: 10px;
+    line-height: 1.5;
+    text-align: center;
+  }
+}
+
+/* --- invite panel (private games) ---------------------------------------
+   Under the compass on the left, out of the way of the objective panel. The ONLY
+   HUD element that accepts pointer events: `.hud-root` is click-through so a
+   look-drag never catches on a panel, so this re-enables them on itself alone. */
+.hud-invite {
+  left: var(--inset-l);
+  top: calc(var(--inset-t) + 58px);
+  width: 190px;
+  pointer-events: auto;
+}
+.hud-invite-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: var(--s2);
+  border-bottom: 1px solid rgba(193, 217, 121, 0.14);
+  color: var(--olive-bright);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.hud-invite-close {
+  border: 0;
+  background: transparent;
+  color: var(--ink-faint);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 2px;
+}
+.hud-invite-close:hover {
+  color: var(--ink);
+}
+
+/* Monospaced and tracked out: this gets read aloud, and the alphabet was chosen
+   so every character is unambiguous — cramming it defeats that. */
+.hud-invite-code {
+  margin: var(--s3) 0 var(--s2);
+  font-family: var(--font-mono);
+  font-size: 25px;
+  letter-spacing: 0.22em;
+  color: #fff;
+  text-align: center;
+  text-shadow: 0 0 10px rgba(255, 174, 36, 0.2);
+}
+
+.hud-invite-actions {
+  display: flex;
+  gap: 4px;
+}
+.hud-invite-actions button {
+  flex: 1;
+  min-height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--ink-muted);
+  font-family: var(--font-label);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.hud-invite-actions button:hover {
+  color: var(--ink);
+  border-color: var(--olive-bright);
+}
+.hud-invite-note {
+  margin: var(--s2) 0 0;
+  color: var(--ink-faint);
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+/* Collapsed: a small tab, because a code panel over the scene for a whole match
+   is intrusive and the code is only needed when inviting someone. */
+.hud-invite-pill {
+  position: absolute;
+  left: var(--inset-l);
+  top: calc(var(--inset-t) + 58px);
+  pointer-events: auto;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  background: rgba(10, 14, 12, 0.72);
+  color: var(--ink-muted);
+  font-family: var(--font-label);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.hud-invite-pill:hover {
+  color: var(--olive-bright);
+  border-color: var(--olive-bright);
+}
+
+/* On touch the nav panel takes the top-right; the invite panel keeps the left,
+   but must clear the objective panel which is hidden there anyway. */
+@media (pointer: coarse), (max-width: 760px) {
+  .hud-invite {
+    width: 165px;
+  }
+}
+
+/* --- combat feedback (2026-08-05) ---------------------------------------- */
+
+/* Hitmarker: centred on the crosshair, because that is where the eye already is
+   and a confirmation read peripherally is one the shooter has to look for.
+   Pure CSS one-shot — React keys it by event sequence so a repeat restarts it. */
+.hud-hitmarker {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+  pointer-events: none;
+  animation: hud-hitmarker-flash 260ms ease-out forwards;
+}
+.hud-hitmarker::before,
+.hud-hitmarker::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 2px solid var(--hud-olive-hi, #cfe0a8);
+}
+.hud-hitmarker::before {
+  clip-path: polygon(0 0, 34% 0, 0 34%, 0 0, 100% 100%, 66% 100%, 100% 66%);
+}
+.hud-hitmarker::after {
+  clip-path: polygon(100% 0, 66% 0, 100% 34%, 100% 0, 0 100%, 34% 100%, 0 66%);
+}
+/* A kill reads AMBER and larger. Intensity without a second glyph to parse —
+   the instinct-over-cognition rule from the damage-indicator analysis. */
+.hud-hitmarker.fatal {
+  width: 30px;
+  height: 30px;
+  margin: -15px 0 0 -15px;
+}
+.hud-hitmarker.fatal::before,
+.hud-hitmarker.fatal::after {
+  border-color: var(--hud-amber, #e8b33a);
+}
+@keyframes hud-hitmarker-flash {
+  from { opacity: 1; transform: scale(0.72); }
+  60%  { opacity: 1; transform: scale(1); }
+  to   { opacity: 0; transform: scale(1.08); }
+}
+
+/* Damage direction: an arc at the screen edge, rotated to the bearing.
+   DELIBERATELY COARSE and soft-edged. A crisp arrow would hand the victim the
+   shooter's position, which is exactly what the grass and the fog spent the
+   engagement taking away — see the design record. The blur is also the hook the
+   post-processing pass will replace with a real screen effect. */
+.hud-damage {
+  position: absolute;
+  /* SQUARE and centred, sized to the longer viewport axis, rather than `inset: 0`.
+     The gradient is anchored to this element's top edge and the element rotates
+     about its centre, so with a 16:9 box the anchor sat h/2 from the middle and a
+     flank hit painted its glow ~400px inboard of the screen edge it is meant to
+     hug. A square whose side is the diagonal-ish max keeps the anchor at the same
+     distance from centre at every angle, which is what "at the edge" requires. */
+  width: max(100vw, 100vh);
+  height: max(100vw, 100vh);
+  left: 50%;
+  top: 50%;
+  margin-left: calc(max(100vw, 100vh) / -2);
+  margin-top: calc(max(100vw, 100vh) / -2);
+  pointer-events: none;
+  /* Rotated about the screen centre; 0rad is straight ahead, matching the wire's
+     bearing convention (positive to the left, so the element negates it). */
+  transform: rotate(var(--bearing, 0rad));
+  background: radial-gradient(
+    120% 62% at 50% 0%,
+    rgba(190, 46, 38, 0.55) 0%,
+    rgba(190, 46, 38, 0.22) 38%,
+    rgba(190, 46, 38, 0) 70%
+  );
+  animation: hud-damage-fade 900ms ease-out forwards;
+}
+@keyframes hud-damage-fade {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+/* Death is a full reload screen now — see respawn.css. */
+
+@media (prefers-reduced-motion: reduce) {
+  /* The flash and the fade are the whole signal, so they still run — but the
+     scaling, which is the part that provokes, does not. */
+  .hud-hitmarker { animation-name: hud-hitmarker-flash-static; }
+  @keyframes hud-hitmarker-flash-static {
+    from { opacity: 1; }
+    to   { opacity: 0; }
+  }
+}

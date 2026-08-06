@@ -22,6 +22,30 @@ import {
   fillCharacterPose,
 } from "./presentation/CharacterView.ts";
 import { loadSoldier, type SoldierAsset } from "./presentation/soldierAssets.ts";
+import { chooseDeathClip, type DeathDirection } from "../character/characterClips.ts";
+import type { PlayerStance } from "../motor/MotorTypes.ts";
+
+/**
+ * The fall used when a body is down but its death packet never arrived.
+ *
+ * Health says who is dead and the packet only says how they fell, so this is the
+ * cost of a dropped packet: a plausible fall facing the wrong way, rather than a
+ * corpse standing upright.
+ */
+const DEFAULT_DEATH_DIRECTION: DeathDirection = "front";
+
+/** What a death packet said about how a body fell. */
+interface DeathFacing {
+  readonly direction: DeathDirection;
+  readonly headshot: boolean;
+}
+
+/** Frame-loop scratch for clip selection; the loop allocates nothing. */
+const deathSample: {
+  direction: DeathDirection;
+  headshot: boolean;
+  stance: PlayerStance;
+} = { direction: "front", headshot: false, stance: "stand" };
 
 const REMOTE_COLOR = 0xb8563f;
 
@@ -80,12 +104,43 @@ export function RemotePlayers({ client, atmosphere }: RemotePlayersProps) {
   );
 
   const pose = useRef(createCharacterPose());
+  /**
+   * How each dead player was shot, by id.
+   *
+   * Held here rather than read from the event log every frame because the log is
+   * bounded: a body that stays down longer than 64 events would lose the record
+   * of how it fell and snap to a different clip. Cleared on respawn.
+   */
+  const deathFacing = useRef(new Map<number, DeathFacing>());
+  /** Last combat event consumed, so the log is read forward and never drained. */
+  const lastEventSeq = useRef(0);
 
   useFrame((_, delta) => {
     const group = groupRef.current;
     if (group === null) return;
     const clamped = Math.min(delta, 0.1);
     client.interpolateRemotes(clamped);
+
+    // Read the event log forward for the clip each death should play. Only the
+    // CHOICE comes from here; whether a body is down comes from its health.
+    // Walked from the TAIL and stopped at the first already-seen event: `seq` is
+    // monotonic, so everything before it has been handled, and a full 64-event
+    // rescan every frame is work that is almost always wasted.
+    const log = client.getCombatEvents();
+    let from = log.length;
+    while (from > 0 && log[from - 1]!.seq > lastEventSeq.current) from -= 1;
+    for (let index = from; index < log.length; index += 1) {
+      const event = log[index]!;
+      lastEventSeq.current = event.seq;
+      if (event.kind !== "died") continue;
+      // The facing, not the resolved clip: the stance belongs to the remote and
+      // is in hand a few lines below, so resolving here would mean looking the
+      // player up twice.
+      deathFacing.current.set(event.victimId, {
+        direction: event.direction,
+        headshot: event.headshot,
+      });
+    }
 
     seen.clear();
     let promotedThisFrame = false;
@@ -108,11 +163,37 @@ export function RemotePlayers({ client, atmosphere }: RemotePlayersProps) {
         group.add(visual.view.group);
       }
 
+      // Health is the ONLY truth for whether a body is down (docs/12 §8: dead is
+      // health zero, not a flag). A dropped death packet costs the right fall,
+      // never a corpse that keeps walking.
+      const dead = remote.health === 0;
+      if (visual.view !== null) {
+        if (dead) {
+          const facing = deathFacing.current.get(remote.id);
+          // Reused scratch: `die` is idempotent per clip name, so this resolves
+          // the same name every frame a body is down and must not allocate.
+          deathSample.direction = facing?.direction ?? DEFAULT_DEATH_DIRECTION;
+          deathSample.headshot = facing?.headshot ?? false;
+          deathSample.stance = remote.state.stance;
+          visual.view.setDead(true, chooseDeathClip(deathSample).name);
+        } else if (visual.view.isDead) {
+          // Only on the frame they actually come back. Calling this for every
+          // living remote every frame resolved a clip name that was thrown away.
+          visual.view.setDead(false, "");
+          deathFacing.current.delete(remote.id);
+        }
+      }
+
       // Prone has no clips in the pack: the character would render a
       // kneel-height crouch over a prone-height collider, betraying exactly
       // the concealment the stance exists for. Until prone clips are baked,
       // a prone remote is the stance-scaled capsule — the honest silhouette.
-      const showCharacter = visual.view !== null && remote.state.stance !== "prone";
+      //
+      // A DEAD prone player is the exception: the fall is the whole point of the
+      // feedback, so a body that dies prone shows the character rather than a
+      // capsule that simply stops.
+      const showCharacter =
+        visual.view !== null && (dead || remote.state.stance !== "prone");
       visual.mesh.visible = !showCharacter;
       if (visual.view !== null) visual.view.setVisible(showCharacter);
       if (showCharacter && visual.view !== null) {

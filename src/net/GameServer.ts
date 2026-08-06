@@ -26,7 +26,11 @@ import {
   decodeReload,
   decodeSelectWeapon,
   decodeSetVisualDial,
+  encodeDamageTaken,
+  encodeHitConfirmed,
+  encodePlayerDied,
   encodeRoomState,
+  encodeRoster,
   encodeShotFired,
   encodeSnapshot,
   encodeWelcome,
@@ -47,6 +51,8 @@ import {
   resolveHitscanShot,
 } from "../combat/HitscanBallistics.ts";
 import type { Damageable } from "../combat/Damageable.ts";
+import type { Vec3Like } from "../combat/math.ts";
+import { deathDirectionFrom, localizeVelocity } from "../character/characterClips.ts";
 import type { WeaponDefinition } from "../combat/WeaponDefinition.ts";
 import {
   WEAPON_DEFINITIONS,
@@ -96,7 +102,11 @@ export interface GameServerOptions {
   readonly allowClientVisualDials?: boolean;
   /** Hit points a player spawns with. Rides the snapshot as a u8, so 1-255. */
   readonly maxHealth?: number;
-  /** Seconds a dead player stays dead. 0 disables respawn entirely. */
+  /**
+   * Seconds a dead player stays dead, whatever killed them. 0 disables respawn
+   * entirely. The default clears the longest death clip (3.73 s) with margin,
+   * so a body is never teleported away mid-fall.
+   */
   readonly respawnSeconds?: number;
   /**
    * SERVER-AUTHORED world targets: destructible range figures every player in
@@ -120,9 +130,33 @@ export interface GameServerOptions {
   readonly maxAimDeviationRadians?: number;
 }
 
+/**
+ * The subset of a resolved contact the feedback packets need.
+ *
+ * Both damage paths satisfy it structurally without adapting: the near hitscan
+ * yields `ImpactEvent` and the far projectile yields `TargetHitReport`, and these
+ * five fields are their overlap. Naming the overlap is what lets one emitter
+ * serve both.
+ */
+interface CombatContact {
+  readonly sourceId: string;
+  readonly shotSequence: number;
+  readonly targetId: string | null;
+  readonly damageApplied: number;
+  readonly healthAfter: number | null;
+}
+
 interface Peer {
   readonly connection: ServerConnection;
   readonly roomId: string;
+  /**
+   * What the feed calls this player.
+   *
+   * Set by the room once it has resolved the account behind the session, so an
+   * anonymous joiner keeps the numeric fallback — authentication is optional by
+   * design and every documented dev URL must keep working without it.
+   */
+  displayName: string;
   /** Server-owned hit points. The client is TOLD this, never asked. */
   health: number;
   /** Tick this peer respawns on, or -1 when alive. */
@@ -193,7 +227,13 @@ interface ServerTarget {
 
 const DEFAULT_PATCH_HZ = 20;
 const DEFAULT_MAX_HEALTH = 100;
-const DEFAULT_RESPAWN_SECONDS = 3;
+/**
+ * One flat number for every death. It USED to be the death clip's length plus a
+ * pause, which tied the authority's schedule to presentation and kept drifting
+ * against the client's counter; 5 s clears the longest clip (3.73 s) with enough
+ * margin that the final pose still registers, and every death reads the same.
+ */
+export const DEFAULT_RESPAWN_SECONDS = 5;
 /** About 11 degrees: wider than any authored cone, far short of a turn. */
 const DEFAULT_MAX_AIM_DEVIATION_RADIANS = 0.2;
 /** Beyond this a rifle round is not the thing that killed anybody. */
@@ -285,6 +325,15 @@ export class GameServer {
   private readonly respawnTicks: number;
   private readonly maxAimDeviation: number;
   private readonly spawn: (seat: number) => { x: number; y?: number; z: number };
+  /**
+   * Seat numbers a respawn may choose between.
+   *
+   * Fixed and small: the spawn function is authored per deployment, so the server
+   * cannot know its shape — but it can ask it for the first handful of seats and
+   * pick whichever has the most room. Eight is more than the default ring repeats
+   * within and cheap to score every death.
+   */
+  private readonly spawnSeats = [1, 2, 3, 4, 5, 6, 7, 8];
   private readonly heights: MotorHeightSource;
   /** Reused, so resolving a shot allocates nothing on a 64-player room's tick. */
   private readonly aimScratch = { x: 0, y: 0, z: 0 };
@@ -322,10 +371,36 @@ export class GameServer {
   /** One damageable lookup for every query this server builds. */
   private readonly damageableFor = (id: number): Damageable | null =>
     this.peers.get(id)?.damageable ?? this.targets.get(id)?.damageable ?? null;
-  /** Prebuilt drain visitor: counts projectile hits without a per-tick closure. */
-  private readonly countProjectileHit = (result: BallisticResult): void => {
-    if (result.reports.some((report) => report.damageApplied > 0)) this.shotsHit += 1;
+  /** Prebuilt drain visitor: announces and counts a landed projectile, without a
+   *  per-tick closure. */
+  private readonly reportProjectileHit = (result: BallisticResult): void => {
+    // The spawn direction, not the direction at impact. Beyond the horizon a
+    // round drops, so the two differ in PITCH — but the death clips and the
+    // damage bearing are chosen from the horizontal bearing alone, which drift
+    // does not touch.
+    const landed = this.announceContacts(
+      result.reports,
+      result.shot.direction,
+      this.weaponIndexOf(result.shot)
+    );
+    if (landed) this.shotsHit += 1;
   };
+  /** Scratch for the damage bearing; the announce path allocates nothing. */
+  private readonly bearingScratch = { forward: 0, left: 0 };
+
+  /**
+   * Which weapon a long-flying round was fired from.
+   *
+   * Read from the shooter's CURRENT loadout, because a spawned projectile does
+   * not carry a weapon index — only its ammunition. A player who switched weapons
+   * during the round's flight therefore gets the wrong name in the kill feed. It
+   * is a feed line and not an outcome, and threading the index through the shared
+   * spawn payload would widen a combat type both runtimes share for presentation
+   * alone; worth revisiting if the feed ever drives anything.
+   */
+  private weaponIndexOf(shot: { readonly sourceId: string }): number {
+    return this.peers.get(Number(shot.sourceId))?.weaponIndex ?? 0;
+  }
   /** Beyond-horizon rounds in flight, on the shared ballistic model. */
   private readonly ballistics: BallisticProjectileSystem;
   private readonly ticksPerSecond: number;
@@ -404,6 +479,7 @@ export class GameServer {
       this.peers.set(connection.id, {
         connection,
         roomId,
+        displayName: `Player ${connection.id}`,
         health: this.maxHealth,
         respawnTick: -1,
         highestFireSequence: -1,
@@ -422,7 +498,9 @@ export class GameServer {
       // The resolved feet position, not the requested spawn: the motor drops
       // the player onto the terrain, so the client must be told where they
       // actually landed or it starts its prediction off the ground.
-      connection.send(encodeWelcome(connection.id, this.room.tick, motor.state.position));
+      connection.send(
+        encodeWelcome(connection.id, this.room.tick, motor.state.position, this.maxHealth)
+      );
       // Right after the welcome, because the client needs the room's sky before
       // its first frame. Fog is concealment in this game, so two players in one
       // match seeing different fog ranges is a fairness bug, not a cosmetic one.
@@ -433,6 +511,11 @@ export class GameServer {
       if (this.targets.size > 0) {
         connection.send(encodeWorldTargets(this.describeWorldTargets()));
       }
+      // To EVERYONE, not just the joiner: this is both the newcomer's copy of who
+      // is here and everyone else's notice that somebody arrived. The joiner
+      // treats their first roster as a baseline so it does not read as the whole
+      // room walking in at once.
+      this.broadcastRoster();
     });
 
     transport.onMessage((connection, bytes) => {
@@ -488,6 +571,9 @@ export class GameServer {
     transport.onDisconnection((connection) => {
       this.peers.delete(connection.id);
       this.room.remove(String(connection.id));
+      // After the delete, so the roster describes who is left rather than who
+      // was here a moment ago. This is what produces the feed's "left" line.
+      this.broadcastRoster();
     });
   }
 
@@ -577,6 +663,39 @@ export class GameServer {
   }
 
   /**
+   * Names a player, and tells everybody.
+   *
+   * Called by the room once it has resolved the account behind a session. Kept as
+   * a method rather than a join option because the account lookup is asynchronous
+   * and the peer must exist before it finishes — a joiner is playing under their
+   * fallback name for a round trip, which is correct rather than a compromise.
+   */
+  setDisplayName(playerId: number, name: string): void {
+    const peer = this.peers.get(playerId);
+    if (peer === undefined) return;
+    const trimmed = name.trim();
+    if (trimmed === "" || trimmed === peer.displayName) return;
+    peer.displayName = trimmed;
+    this.broadcastRoster();
+  }
+
+  /**
+   * Sends the whole roster to everyone.
+   *
+   * Whole, not a delta: a client that misses a delta is wrong about a name until
+   * it reconnects, and the feed's joined and left lines are a diff of two rosters
+   * anyway. Sent on join, leave and rename only — it is not per-tick state.
+   */
+  private broadcastRoster(): void {
+    const entries = [...this.peers.values()].map((peer) => ({
+      id: peer.connection.id,
+      name: peer.displayName,
+    }));
+    const packet = encodeRoster(entries);
+    for (const peer of this.peers.values()) peer.connection.send(packet);
+  }
+
+  /**
    * Applies damage on the server's authority. THE ONLY PLACE health falls — the
    * fire path lands here, and so will a grenade or a fall. Returns the health left,
    * or null for an unknown or already-dead target.
@@ -585,10 +704,115 @@ export class GameServer {
     const peer = this.peers.get(playerId);
     if (peer === undefined || peer.health === 0) return null;
     peer.health = Math.max(0, peer.health - Math.max(0, Math.round(amount)));
-    if (peer.health === 0 && this.respawnTicks > 0) {
-      peer.respawnTick = this.room.tick + this.respawnTicks;
+    // The DEFAULT schedule, in seconds so one scheduler owns the arithmetic. A
+    // death from a shot is rescheduled a moment later by `announceContacts`,
+    // which knows the direction and therefore which clip plays and how long it
+    // runs. This covers a death with no attribution — a fall, or a grenade when
+    // one exists — so every death has a respawn even if nobody is blamed.
+    //
+    // NOTE: such a death currently produces no feed line, overlay or death clip
+    // either, because only `announceContacts` announces. Nothing but a shot can
+    // damage a player today; the day something can, the announcement belongs
+    // here beside the zero-crossing rather than on the shot path.
+    if (peer.health === 0) {
+      this.scheduleRespawn(peer);
+      // The body freezes where it fell and stops colliding — a corpse can be
+      // neither driven nor used as cover. Look still passes through: the dead
+      // player's camera deliberately stays live for now (docs/12 §8.0 defers a
+      // stricter killscreen).
+      this.room.get(peer.roomId)?.setDead(true);
     }
     return peer.health;
+  }
+
+  /**
+   * The ONE place a respawn tick is written.
+   *
+   * Two writers meant the correct moment depended on which ran last, and the
+   * "is respawn enabled" test had to be repeated at every site. No parameter:
+   * every death waits the same flat window since the clip-length scheduling
+   * was dropped.
+   */
+  private scheduleRespawn(peer: Peer): void {
+    if (this.respawnTicks <= 0) return;
+    peer.respawnTick = this.room.tick + this.respawnTicks;
+  }
+
+  /**
+   * Turns resolved contacts into the three feedback packets.
+   *
+   * Called from BOTH damage paths — the near hitscan inside a fire claim and the
+   * far projectile drained on tick — because they produce structurally identical
+   * contact records and a second copy of this logic is how the two start
+   * disagreeing about who killed whom.
+   *
+   * Nothing here changes an outcome. Health has already moved by the time this
+   * runs; these packets only say so. A client that dropped all of them would take
+   * exactly the same damage.
+   */
+  private announceContacts(
+    contacts: readonly CombatContact[],
+    travel: Vec3Like,
+    weaponIndex: number
+  ): boolean {
+    let landed = false;
+    for (const contact of contacts) {
+      if (contact.targetId === null || contact.damageApplied <= 0) continue;
+      landed = true;
+      const victim = this.peers.get(Number(contact.targetId));
+      // World targets are damageables too, and they have no HUD to tell.
+      if (victim === undefined) continue;
+      const attacker = this.peers.get(Number(contact.sourceId));
+      const attackerId = attacker?.connection.id ?? 0;
+      const fatal = contact.healthAfter === 0;
+      const motor = this.room.get(victim.roomId);
+      const victimYaw = motor?.state.yawRadians ?? 0;
+
+      // The shooter learns THAT it landed, never how much health is left.
+      attacker?.connection.send(
+        encodeHitConfirmed({
+          sequence: contact.shotSequence,
+          victimId: victim.connection.id,
+          fatal,
+        })
+      );
+
+      // The victim learns the bearing and nothing else about where the shooter is.
+      localizeVelocity(-travel.x, -travel.z, victimYaw, this.bearingScratch);
+      victim.connection.send(
+        encodeDamageTaken({
+          attackerId,
+          bearingRadians: Math.atan2(this.bearingScratch.left, this.bearingScratch.forward),
+          amount: contact.damageApplied,
+        })
+      );
+
+      if (!fatal) continue;
+
+      // One flat number, scheduled and announced together so the client's
+      // counter and the server's timer cannot disagree. The clip no longer
+      // decides it — that coupled the authority to presentation and drifted —
+      // but the constant clears the longest clip, so no mid-fall teleport.
+      const direction = deathDirectionFrom(travel.x, travel.z, victimYaw);
+      const respawnSeconds = this.respawnTicks / this.ticksPerSecond;
+      this.scheduleRespawn(victim);
+      const died = encodePlayerDied({
+        victimId: victim.connection.id,
+        killerId: attackerId,
+        weaponIndex,
+        direction,
+        // Wired, never set: a headshot needs a head zone on the capsule, and
+        // inventing one from the impact height would be a guess the authority
+        // has no business making.
+        headshot: false,
+        respawnSeconds: this.respawnTicks > 0 ? respawnSeconds : 0,
+      });
+      // Broadcast, including back to the victim and the killer: every client
+      // plays the death clip on that body, and the two of them additionally read
+      // their own overlay and confirmation off it.
+      for (const peer of this.peers.values()) peer.connection.send(died);
+    }
+    return landed;
   }
 
   /**
@@ -724,9 +948,9 @@ export class GameServer {
       excludeObjectId: sourceId,
     });
     this.shotsResolved += 1;
-    if (near.interactions.some((i) => i.targetId !== null && i.damageApplied > 0)) {
-      this.shotsHit += 1;
-    }
+    // Announce and count in one pass: the predicate that decides "did anything
+    // land" is the same one the announcement already applies per contact.
+    if (this.announceContacts(near.interactions, aim, peer.weaponIndex)) this.shotsHit += 1;
 
     // FAR: still flying at the horizon — the rest of the arc belongs to the
     // shared integrator: drop, drift, energy decay, further penetrations.
@@ -935,6 +1159,49 @@ export class GameServer {
     );
   }
 
+  /**
+   * Where a dead player comes back.
+   *
+   * NOT their own seat's point, which is what made death invisible: the seat ring
+   * is where the fighting happens, so a player reappeared roughly where they fell
+   * and the only evidence they had died was a one-frame snap.
+   *
+   * Picks the seat point furthest from the nearest living player. Deterministic —
+   * no randomness, so a test can assert placement — and it degrades sensibly: with
+   * nobody else alive every candidate scores the same and the player's own seat
+   * wins on the tie, which is exactly the old behaviour when alone.
+   */
+  private respawnPlacement(peer: Peer): { x: number; y?: number; z: number } {
+    const living: { x: number; z: number }[] = [];
+    for (const other of this.peers.values()) {
+      if (other === peer || other.health === 0) continue;
+      const motor = this.room.get(other.roomId);
+      if (motor !== undefined) {
+        living.push({ x: motor.state.position.x, z: motor.state.position.z });
+      }
+    }
+
+    // Their own seat only when nobody else is alive — once the loop runs it
+    // overwrites this unconditionally, so computing it up front was a wasted call
+    // and the tie-break it claimed never happened.
+    if (living.length === 0) return this.spawn(peer.connection.id);
+    let best = this.spawn(this.spawnSeats[0]!);
+    let bestClearance = -1;
+    // The same seats every player could have spawned on, scored for elbow room.
+    for (const seat of this.spawnSeats) {
+      const at = this.spawn(seat);
+      let nearest = Number.POSITIVE_INFINITY;
+      for (const other of living) {
+        nearest = Math.min(nearest, (at.x - other.x) ** 2 + (at.z - other.z) ** 2);
+      }
+      if (nearest > bestClearance) {
+        bestClearance = nearest;
+        best = at;
+      }
+    }
+    return best;
+  }
+
   /** Puts dead players back, at a fresh spawn, with full health and full kit. */
   private respawnDue(): void {
     for (const target of this.targets.values()) {
@@ -956,7 +1223,8 @@ export class GameServer {
       peer.switchCompleteTick = -1;
       peer.reloadCompleteTick = -1;
       if (motor === undefined) continue;
-      const at = this.spawn(peer.connection.id);
+      motor.setDead(false);
+      const at = this.respawnPlacement(peer);
       // The spawn point's OWN elevation, not the corpse's: dying in a hollow
       // must not respawn a player buried inside the spawn ring's hill.
       motor.teleport({ x: at.x, y: at.y ?? this.heights.sample(at.x, at.z), z: at.z });
@@ -998,7 +1266,7 @@ export class GameServer {
     // moves health. The 1/120 s inner step runs twice per 60 Hz room tick.
     this.refillLiveCapsules();
     this.ballistics.update(this.room.tuning.fixedTimestepSeconds);
-    this.ballistics.drainResults(this.countProjectileHit);
+    this.ballistics.drainResults(this.reportProjectileHit);
     this.respawnDue();
     // Refilled AFTER respawn placement, so the ring holds exactly what this
     // tick's snapshot will show — viewTick rewinds must land on rendered truth.

@@ -28,6 +28,9 @@ player instinctively recognise this?* — applies to features, not to whether a 
 | `10-fps-combat-implementation-spec.md` | **As-built FPS ownership, frame order, controls, performance, and deferred work** |
 | `11-weapon-ballistics-and-modifier-system-spec.md` | **Trigger-to-impact contracts, formulas, budgets, and attachment/perk extension rules** |
 | `12-character-motor-and-networking-spec.md` | **As-built shared character motor, room, transport and session test — and the traps that cost this subsystem the most time** |
+| `plans/2026-08-04-web-platform-and-ui-design.md` | **The web product: brand, site/HUD design system, accounts stack, tiers, phasing, hosting — the four traps phases 1–4 hit (§5.2) and the 21 findings the pre-merge review found (§5.7).** Read before touching `src/site/`, `src/ui/`, `src/hud/` or `src/devtools/` |
+| `plans/2026-08-04-community-layer-design.md` | **Profiles, tagwall, friends, presence, clans: the privacy model, the rate limits, and why `pair_key` is the only thing that can enforce one friendship per pair.** Read before touching `tools/account/community*` |
+| `plans/2026-08-04-player-statistics-design.md` | **The dfhub metric vocabulary, the three telemetry tables, and which of them nothing writes yet.** Read before adding any figure to a stats page |
 
 ## Current state (August 2026)
 
@@ -73,14 +76,42 @@ player instinctively recognise this?* — applies to features, not to whether a 
 - **Character (Aug 2026):** animated soldier for remote players and the V third-person
   view (`src/fps/presentation/Character*`), aim rig driven by wire pitch, 49-clip
   Draco GLB in `public/assets/characters/`. Prone deliberately renders as the capsule
-  (no prone clips baked yet). Combat/damage is still client-local — authority work is
-  briefed in `docs/plans/2026-08-03-character-animation-session-handoff.md`.
+  (no prone clips baked yet) — except a DEAD prone player, who shows the character,
+  because the fall is the whole feedback. Combat/damage is server-authoritative and its
+  feedback layer landed Aug 2026; the six death clips are wired (`docs/12` §8.0).
+- **Web product, brand and UI (Aug 2026):** the project has a public name — **Distant
+  Front** — and a router. `/` is a landing page, `/faq` and `/supporter` are real pages, and
+  **the whole Three.js tree lazy-loads behind `/play`** (entry chunk ~116 KB gzipped, and its
+  only static import is the module runtime — re-measure, do not quote; a static
+  import anywhere in `src/site/` or `src/ui/` silently undoes that). The nine debug panels
+  that used to fill the game screen are seven tabs in **one docked dev console** — backtick or
+  `?debug=1`, every control carrying `data-dev` so browser automation can drive it. The HUD
+  is rebuilt from `design/df2-hud-1to1-html-v3` and is **anchor-based, not the mockup's
+  scaled stage**, with a distinct touch layout that keeps the thumb corners clear.
+  `/hudlab` (dev only) renders the real HUD over a still with the reference overlayable
+  50/50. Design system: `src/ui/tokens.css`, two skins — `.skin-site` parchment,
+  `.skin-hud` phosphor. Read `plans/2026-08-04-...md` before touching any of it; its §5.2
+  lists four traps that each looked like something else.
 - **Test build:** free-fly / on-foot camera with stances, instrument HUD, `netlify.toml`.
   Deploy with `npx netlify deploy --prod --dir=dist` from a machine that has prepared assets —
   or via a Git-connected build — prepared assets are committed, so both render the real map.
 - **Open:** skirt artifact at eye height (`07-...md` §9), floating grass along ridgelines
   (same §), and scale calibration — calibrate scale BEFORE placing any authored asset, or
   every placement has to be redone.
+- **Death and damage feedback (Aug 2026):** server-authoritative damage was measured working
+  (17 hits / 23 resolved claims) and entirely invisible, which is what made it look broken.
+  Four presentation-only down packets now carry it out — roster, `PlayerDied`, `HitConfirmed`,
+  `DamageTaken` — driving the six death clips that had shipped unused since the character
+  export, a kill feed in the mockup's chat panel, a death overlay with the server's own
+  respawn countdown, a coarse directional damage indicator and a hitmarker. **Aliveness is
+  health, everywhere**: a dropped death packet costs the right fall, never a corpse that keeps
+  walking. A dead player is FROZEN and their collider disabled (`docs/12` §8.0) — but the
+  dead camera is deliberately still live; a stricter killscreen is an unmade decision.
+  Respawn is a flat 5 s for every death — it clears the longest death clip
+  (3.73 s); deriving it from the clip's length drifted and was dropped (`docs/12` §8.0
+  amendment) — and respawn placement moved off the player's own seat, because reappearing
+  where you fell is what made death invisible.
+  Plan: `plans/2026-08-04-death-and-damage-feedback-v1.md`.
 - **Next up (combat authority):** server-authoritative damage, weather and world state —
   the worked brief is `docs/plans/2026-08-03-character-animation-session-handoff.md`.
   Also still queued (`01-...md` Phase 1.6): human-test Green Mile, then runtime map switching.
@@ -88,6 +119,83 @@ player instinctively recognise this?* — applies to features, not to whether a 
   it renders a stand-in canopy, but egypt / R66 / blizzard / vul001 ship their own strips and
   load as `grassSource: "real"` (`06-...md` §7). Preparing one of those is the cheapest way to
   exercise it.
+- **Accounts (Aug 2026):** `@colyseus/auth` + **Kysely** (not `@colyseus/database`, which is
+  rejected — see the design record §2.2), running **inside the game server process** on the
+  Express app the Colyseus transport already owns. `mountAccounts()` is the whole seam.
+  Email/password, Discord OAuth (env-gated), and **guests that upgrade in place** — registering
+  keeps the same row, so career, medals and character survive; verified end to end.
+  `src/account/` is shared, `tools/account/` is server-only, and the boundary is the
+  directory. **The server refuses to start without `JWT_SECRET` and `AUTH_SALT`** — nor without
+  `SESSION_SECRET` once a Discord provider is configured — — the
+  package's default password salt is a public literal, and its salt is process-wide rather
+  than per-user (design record §5.3 has the limitation and the proper fix).
+  `npm run typecheck` now also checks `tools/` via `tsconfig.server.json`.
+- **Lobby, servers and leaderboards (Aug 2026):** `/lobby` is quick match plus a live
+  server browser, join-by-code and host-private; `/leaderboard` is the dfhub-shape standings board and `/records` keeps the four career boards.
+  `Room.onAuth` is **static** — it runs before any instance exists, so the repository is
+  reached through a module-scope handle in `server.ts`, not `this`. It resolves the token to
+  an account and `onLeave` writes matches and time played, which is what makes the boards
+  real. **Auth is optional on join by design:** no token joins as nobody, so every
+  documented dev URL keeps working; it buys career recording and is not a gameplay trust
+  boundary. No cross-play is enforced twice — `filterBy(["inputClass"])` on matchmaking AND
+  the listing filter. Private rooms use Colyseus's own `private` flag; the join code lives in
+  room metadata and is stripped before any response, which is why the listing is built
+  server-side. Design record §5.4 has the verification and what is still open.
+- **Entitlements and medals (Aug 2026, phase 7 done):** `src/account/medals.ts` is the
+  catalogue and the only award rule; every combat medal carries `earnable: false`
+  because nothing writes kills yet, and `earnedMedals` checks that flag **before** the
+  medal's own test. Medals are awarded on `onLeave` from the STORED career, never
+  granted. Tiers are written only by `repository.setTier`, reachable through the
+  dev-only `POST /api/me/tier` that exists solely when `DF2_ADMIN=1` (404 otherwise).
+  **Hosting a private game is now gated**: `POST /api/private-game` checks
+  `hostPrivateGame` and creates the room server-side, and `?private=1` is gone — it
+  used to let anyone host one. `/character` can load a lazy 3D soldier turntable that
+  deliberately does **not** reflect camo/headgear/insignia, because nothing renders
+  them yet and the page says so. Read `plans/2026-08-04-...md` §5.6 first.
+- **Player statistics (Aug 2026):** the metric vocabulary is dfhub.net's. Three telemetry
+  tables, a pure derived-metrics module (`src/account/playerStats.ts` — nothing stores a
+  ratio), and five pages. **`match_participation` has three readers and NO writer**, and
+  unlike `engagements` it is not blocked on ballistics, it is unbuilt — so wins, losses,
+  stance times and shot counts are absent, not zero. Do **not** write a partial row to light
+  a section up: a row with zeroed counters makes `available.objectives` true and every figure
+  above it a false claim. The population aggregates in `tools/account/statsRepository.ts`
+  count in SQL and read only `fatal = 1` rows for medians — they are public endpoints, so
+  anything O(players × rows) there is a denial of service waiting for a population
+  (`plans/...-player-statistics-design.md` §6).
+- **Reviewed twice before merge (Aug 2026):** 21 findings across phases 5–7 (suite 271 → 287),
+  then a five-slice review of the whole PR (suite 297 → 334; design record §5.9). The second
+  round's lesson worth repeating: a correct server fix can still be invisible or wrong one
+  layer up — the flat respawn window shipped verified and the client's countdown still never
+  reached zero — and three of its four categories were RECURRENCES of the first round's. The four categories worth carrying forward, because they will recur:
+  **(1)** unknown rendered as a plausible number — `patienceScore` answered a confident
+  *40/100* for every player because absent stance telemetry reads as "never moved";
+  **(2)** a comment asserting an invariant the code lacked — `friendships`' unique index
+  claimed pair normalisation it never did, and `(A,B)`/`(B,A)` are different keys to it
+  (now a `pair_key` column; community record §4);
+  **(3)** costs invisible while the tables are empty — every population query was unbounded
+  or quadratic on a public route;
+  **(4)** a join that changed the answer, not just the cost — `/stats/maps` weighted each
+  match's kill ranges by its player count, reporting a median of 200 where 550 was correct.
+  Design record §5.7 has all of it. **Verify claims like these by measuring, not reasoning:**
+  the 40, the 200-vs-550 and Colyseus's 15-second auto-dispose were each confirmed by running
+  the old code, and one of them contradicted what the review first wrote down.
+- **Deploying is a VPS** (decided Aug 2026): one box, the Colyseus server serving the built
+  client plus `/auth` and `/api` from the same origin — which is what `vite.config.ts`'s dev
+  proxy has always mimicked. **The proxy must not let the SPA fallback swallow `/api` and
+  `/auth`**: a catch-all returning `index.html` with status 200 for an API call is a live
+  crash, not a soft failure. `accountClient.request` now rejects a 200 that is not JSON so it
+  surfaces as an error message rather than a blank page, but that is a net, not the fix.
+  `netlify.toml` is for static previews only.
+- **Next up (web product):** community-hosted servers (§6b), then a real checkout
+  (`/supporter/checkout` is an honest stub today). Clans landed. Known gaps: kills/deaths are still unwritten pending
+  feat/server-ballistics — `recordLongestShot` exists and is tested but has no caller, and
+  `consistency()` is the same shape (the board sends `null` explicitly rather than computing
+  it from an empty array) — and four supporter capabilities
+  (`hostCommunityServer`, `reservedSlot`, `earlyAccessMaps`, `supporterMarker`) are advertised
+  by the tier table but enforced nowhere — `foundClan`, `hostPrivateGame`, `joinPrivateGame`,
+  `persistentName`, `friends` and `customInsignia` are all gated now (design record §5.9). `match_participation` needs a writer before any
+  objective, stance or win-rate figure means anything. Touch INPUT does not exist either:
+  mobile and iPad are first-class targets for the UI, and the game still needs a keyboard.
 - **Direction:** custom assets → player-created terrain → map/terrain editor tooling
   (`01-...md` Phase 6). Real assets are the dial-in instrument, not the deliverable.
 

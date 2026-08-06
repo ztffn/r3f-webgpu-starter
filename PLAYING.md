@@ -16,24 +16,40 @@ npm install
 npm run dev
 ```
 
-Then open **http://localhost:3000**. A WebGPU browser is best; it falls back to WebGL2 on
-its own. The panel on the right tells you which one actually started — worth a glance before
-you judge the frame rate next to it.
+Then open **http://localhost:3000** — that is the site's front door; **Play now** takes you
+into the game. A WebGPU browser is best; it falls back to WebGL2 on its own. The dev
+console's Telemetry tab (backtick to open it) says which one actually started — worth a
+glance before you judge the frame rate next to it.
+
+The networked URLs below also need the authoritative server, in a second terminal:
+
+```shell
+npm run game:server
+```
 
 The first load decodes a real 1024×1024 map and takes a few seconds on a cold cache.
 
-## Four things to open
+## Five things to open
 
 Each is a different question the project is trying to answer.
 
+`/` is the site's landing page now, not the game — the game lives at `/play`, and the dev
+URLs below still work exactly as written because a `?scene=` on the root redirects to it
+with the query string intact.
+
 | Open this | What it is for |
 | --- | --- |
-| `/` | **Look at the world.** Free flight over real DF-era terrain. |
-| `/?scene=motor` | **Walk it.** A physically simulated body — gravity, slopes, stances. |
-| `/?scene=scope&motor=1` | **Play it.** The above, carrying a rifle. |
+| `/play` | **The product.** Stops at the loadout screen, counts down, then drops you into the full networked game (`scene=scope&motor=1&net=1`). |
+| `/?scene=terrain` | **Look at the world.** Free flight over real DF-era terrain — what a bare `/` used to do. |
+| `/?scene=motor` | **Walk it.** A physically simulated body — gravity, slopes, stances. Offline. |
+| `/?scene=scope&motor=1` | **Play it offline.** The above, carrying a rifle, no server. |
 | `/?scene=scope` | The weapon slice on the old camera rig, for comparison. |
 
-### Look at the world — `/`
+Two more worth knowing: **`` ` ``** (backtick) or `?debug=1` opens the dev console, whose
+**Launch** tab bakes any of these URLs for you rather than making you remember them, and
+`?hud=0` starts with every HUD panel hidden for a clean capture.
+
+### Look at the world — `/?scene=terrain`
 
 You are flying. Drag to look, `W`/`A`/`S`/`D` to move, `Q` and `E` for down and up, and the
 mouse wheel changes how fast you fly. `G` puts you on the ground; `X`, `C` and `Z` switch
@@ -75,7 +91,7 @@ You can retune the feel from the address bar without rebuilding:
 `climb` is the slope limit in degrees, `walk` and `jump` are speeds in metres per second,
 `step` is how high a ledge you can step onto.
 
-### Play it — `/?scene=scope&motor=1`
+### Play it offline — `/?scene=scope&motor=1`
 
 The rifle, carried by the body. Click the canvas once to capture the mouse — **that first
 click does not fire**. `Escape` releases it.
@@ -129,7 +145,10 @@ network fault and a rendering fault look identical.
 npm run game:server
 ```
 
-Run that in a second terminal (it simulates the real map on an authoritative server), then
+Run that in a second terminal (it simulates the real map on an authoritative server). It
+refuses to start without `JWT_SECRET` and `AUTH_SALT` — copy `.env.example` to `.env` and
+fill both, because the auth package's default password salt is published in its own source.
+Then
 open the URL above in **two separate windows** — windows, not tabs, because a hidden tab
 gets zero animation frames and its player freezes. Each window is a player in the same
 match: the other appears as an animated soldier that walks, runs, strafes, crouches, jumps
@@ -144,8 +163,11 @@ Same setup as above — and yes, the rounds are real now. What hits, how hard, a
 falls is decided **on the server**, with the same ballistics you see locally: bullets
 take time to fly, drop with distance, drift in the wind, lose energy, and will go
 through one body into the one behind it if the round is heavy enough. Your health is
-the number the server says; when it reaches zero you stop being shootable and respawn
-a few seconds later with full kit.
+the number the server says; when it reaches zero you fall — one of six death animations,
+chosen by the direction the round came from — and the body freezes where it landed, stops
+colliding, and stops being shootable. A reload screen names who killed you, lists the kit
+you come back with, and counts down the server's own five seconds. You keep your camera
+while you wait, which is deliberate and temporary.
 
 **Worth doing:** go prone in deep grass, let your friend hunt you, and put one .308
 round through them when they walk past — that ambush is the whole thesis of this
@@ -197,16 +219,21 @@ are ignored online so both players fight under the same physics.
 
 Being clear about this is more useful than a feature list.
 
-- **Nobody dies on screen.** Health falls, the kill is real, the victim respawns — but
-  there is no death animation, no kill feed, no score. The death clips exist and wait
-  on presentation work.
+- **There is no score.** Deaths are on screen now — the fall, a kill feed, a hitmarker, a
+  coarse direction for incoming fire, and a reload screen with the respawn countdown — but
+  nothing keeps score, and kills and deaths are not written to your career yet. That waits
+  on `feat/server-ballistics`, so the stats pages say so rather than showing zeroes.
+- **A dead player can still look around.** The body is frozen but the camera is live, so a
+  corpse can watch the field for five seconds. Free scouting in a game about concealment,
+  and knowingly left in until there is a decision about what a killscreen should be.
 - **There are no opponents.** No AI, no bots, nothing that shoots back on its own.
 - **Grass concealment is not a mechanic yet.** Grass genuinely hides you from a human
   looking at a screen — a prone player measures zero visible pixels even through a scope at
   300 m — but nothing in the game *knows* that, so nothing can act on it. (Against another
   human online, it already works the honest way: they simply cannot see you.)
 - **Every weapon uses the same placeholder model,** clearly labelled as a proxy.
-- **Prone has no animation** (capsule stand-in).
+- **Prone has no animation** (capsule stand-in) — except a dead prone player, who shows the
+  soldier, because the fall is the whole feedback.
 - **No objectives, match flow, menu or settings screen.**
 
 ## If something looks wrong

@@ -99,7 +99,7 @@ than solving separately — a target is just a damageable the server owns.
 ## Standing constraints (unchanged)
 
 Ask before ANY git command. Atomic typed commits, no trailers. TSL only, never raw
-WGSL/GLSL. Visual terrain/grass are never collision. Node >= 22.6 with
+WGSL/GLSL. Visual terrain/grass are never collision. Node >= 22.9 with
 `--experimental-strip-types`; no TS parameter properties. Keybinds by keycap, not
 event.code position (Norwegian keyboard). Read docs/08 before touching render code,
 docs/12 before motor/netcode, docs/10+11 before weapon code. The catch-up spiral

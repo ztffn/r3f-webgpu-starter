@@ -33,7 +33,10 @@ import { loadTerrain, type LoadedTerrain } from "./loadTerrain";
 import { WeaponPrototype } from "../fps/WeaponPrototype";
 import { MotorControls } from "../fps/MotorControls";
 import { useGameClient } from "../fps/useGameClient";
+import type { GameClient } from "../net/GameClient.ts";
+import type { RoomInfo } from "../net/ColyseusProtocol.ts";
 import { useRoomVisuals, type RoomVisuals } from "../fps/useRoomVisuals";
+import { usePlayerVitals } from "../fps/usePlayerVitals";
 import { applyVisualDials, type VisualDialTargets } from "./visualDials";
 import { RemotePlayers } from "../fps/RemotePlayers";
 import { CompositeWorldQuery } from "../fps/core/WorldQuery";
@@ -259,6 +262,26 @@ export interface DF2SceneProps {
   stance?: Stance;
   onPerf?: (s: PerfSample) => void;
   onFly?: (s: FlyState) => void;
+  /** The room's join code, once a private room has sent it. */
+  onRoomInfo?: (info: RoomInfo | null) => void;
+  /**
+   * The local player's health, 0–1, or null with no authority reporting it.
+   *
+   * Reported upward like room info rather than folded into `SceneHandles`: no
+   * scene material reads it, and widening that memo would republish every scene
+   * handle each time somebody took a bullet.
+   */
+  onHealth?: (health: number | null) => void;
+  /**
+   * The networked client itself, or null offline.
+   *
+   * The CLIENT, not anything derived from it. Deriving the combat feed in here
+   * meant every death in the room re-rendered the whole scene subtree — terrain,
+   * grass, water, precipitation, remotes — twice, once for the hook and once for
+   * the state it fed back down. Handing the instance up lets the HUD subscribe
+   * outside the canvas, where a re-render costs a few DOM nodes.
+   */
+  onClient?: (client: GameClient | null) => void;
   onToggleGround?: () => void;
   onStance?: (s: Stance) => void;
   onStatus?: (status: { loading: boolean; terrain: LoadedTerrain | null }) => void;
@@ -323,6 +346,9 @@ export function DF2Scene({
   onStatus,
   onPerf,
   onFly,
+  onRoomInfo,
+  onHealth,
+  onClient,
   onToggleGround,
   onStance,
   onGrassReady,
@@ -412,7 +438,23 @@ export function DF2Scene({
   // client is what guarantees a leaked join cannot outlive its component.
   // DECLARED BEFORE THE WEATHER BLOCK, because weather is now downstream of it:
   // when networked, the room's preset is authoritative and the URL's is not.
-  const gameClient = useGameClient(motorDemo && netDemo, heightfield);
+  const { client: gameClient, roomInfo } = useGameClient(motorDemo && netDemo, heightfield);
+  // Reported upward like fly state and perf samples rather than folded into
+  // SceneHandles: the room sends it once, well after the handles object is first
+  // published, and widening that memo to re-run on it would republish every scene
+  // handle for a fact no scene material reads.
+  useEffect(() => {
+    onRoomInfo?.(roomInfo);
+  }, [onRoomInfo, roomInfo]);
+  // Health takes the same route for the same reason. The hook is what subscribes;
+  // this effect only forwards, so a change wakes the HUD and nothing in the scene.
+  const health = usePlayerVitals(gameClient);
+  useEffect(() => {
+    onHealth?.(health);
+  }, [onHealth, health]);
+  useEffect(() => {
+    onClient?.(gameClient);
+  }, [onClient, gameClient]);
   /**
    * The room's visuals, or null when playing alone.
    *

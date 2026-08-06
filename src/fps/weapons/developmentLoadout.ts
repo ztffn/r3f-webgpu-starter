@@ -12,6 +12,23 @@ import {
 export const LOCAL_PLAYER_SEED = 1;
 
 /**
+ * The authored slot table, exported so the respawn screen can SHOW the kit a
+ * player will actually carry instead of restating it. One list, two readers:
+ * a restated copy is how a screen ends up promising a rifle the loadout
+ * no longer contains.
+ */
+export function developmentKit(
+  sniperDefinition: WeaponDefinition = SNIPER_DEFINITION
+): ReadonlyArray<{ inputSlot: number; id: WeaponSlotId; definition: WeaponDefinition }> {
+  return [
+    { inputSlot: 1, id: "primary", definition: sniperDefinition },
+    { inputSlot: 2, id: "secondary", definition: M4_DEFINITION },
+    { inputSlot: 3, id: "sidearm", definition: GLOCK_DEFINITION },
+    { inputSlot: 4, id: "support", definition: SAW_DEFINITION },
+  ];
+}
+
+/**
  * Keyboard-accessible development loadout. Keeping this mapping on the
  * gameplay side prevents the proxy GLTF from becoming equipment truth.
  *
@@ -23,16 +40,7 @@ export function createDevelopmentLoadout(
   shooterSeed: number = LOCAL_PLAYER_SEED,
   sniperDefinition: WeaponDefinition = SNIPER_DEFINITION
 ): LoadoutSystem {
-  const authored: ReadonlyArray<{
-    inputSlot: number;
-    id: WeaponSlotId;
-    definition: WeaponDefinition;
-  }> = [
-    { inputSlot: 1, id: "primary", definition: sniperDefinition },
-    { inputSlot: 2, id: "secondary", definition: M4_DEFINITION },
-    { inputSlot: 3, id: "sidearm", definition: GLOCK_DEFINITION },
-    { inputSlot: 4, id: "support", definition: SAW_DEFINITION },
-  ];
+  const authored = developmentKit(sniperDefinition);
   const slots: LoadoutSlot[] = authored.map(({ inputSlot, id, definition }) => ({
     inputSlot,
     id,

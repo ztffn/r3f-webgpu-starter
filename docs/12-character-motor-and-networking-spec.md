@@ -17,7 +17,8 @@ implementation behind it, and a two-client session harness.
 
 - Playable in the game with `?scene=motor`.
 - Two browser clients share one authoritative room over real sockets.
-- 45 headless tests under `tests/motor/`, running in bare Node with no browser globals.
+- 83 headless tests under `tests/motor/`, running in bare Node with no browser globals
+  (334 across the whole suite as of 2026-08-06; `npm test`).
 
 Weapon handling reads the motor: `?scene=scope&motor=1` carries the weapon on a collided
 body, and `WeaponHandlingContext` gets stance, planar speed and real grounded state from
@@ -26,8 +27,19 @@ than the camera, aim intent and reloading slow the player, and sprinting refuses
 differentiation cannot tell you the player is airborne, so before this `grounded` was
 whatever the app's fly/on-foot toggle said and `airborneDispersionRadians` never applied.
 
-What does **not** exist: matchmaking, reconnection, persistence, anti-cheat, vehicles, and
-animation. On the weapon side, recoil does not push the body.
+What does **not** exist: reconnection, anti-cheat, and vehicles. On the weapon side, recoil
+does not push the body.
+
+Matchmaking, persistence and animation have since landed and are owned elsewhere:
+matchmaking and accounts by `plans/2026-08-04-web-platform-and-ui-design.md` (a lobby, a
+server browser, `filterBy(["inputClass"])`, and an account resolved in a **static**
+`Room.onAuth`), and the character by
+`plans/2026-08-03-character-animation-session-handoff.md`. What that adds to *this*
+document's scope is small and listed where it belongs: `onLeave` credits the session to a
+career (capped — see the web record §5.7), presence is a session-keyed module-scope registry
+read only by the friends endpoint, and §5 invariant 10 covers room disposal. **Auth on join is
+optional by design and is not a gameplay trust boundary** — no token joins as nobody, so every
+dev URL in this document keeps working unchanged.
 
 ## 2. Module map
 
@@ -41,7 +53,9 @@ animation. On the weapon side, recoil does not push the body.
 | `net/Transport.ts` | the four-method transport seam | framing semantics, packet meaning |
 | `net/SnapshotCodec.ts` | hand-packed binary and angle quantisation | when to send |
 | `net/GameServer.ts` | authority: command intake, tick, broadcast, room-scope state | which socket library is in use |
-| `net/GameClient.ts` | prediction, reconciliation, remote interpolation, the room-state snapshot | rendering, input devices |
+| `net/GameClient.ts` | prediction, reconciliation, remote interpolation, the room-state snapshot, the bounded combat-event log | rendering, input devices |
+| `character/characterClips.ts` | the clip vocabulary BOTH runtimes need: 8-way gait selection, and the death clips with their durations | Three.js, playback, the mixer |
+| `fps/usePlayerVitals.ts`, `fps/useCombatFeed.ts` | adapting the client's stores into React values | deciding anything |
 | `net/LoopbackTransport.ts` | an in-process link with simulated latency and loss | production use |
 | `net/ColyseusProtocol.ts` | the room name and message envelopes, SDK-free | any Colyseus import |
 | `net/ColyseusTransport.ts` | the ClientTransport over `@colyseus/sdk` | packet meaning |
@@ -130,6 +144,21 @@ aim regardless of how many packets were lost.
    nothing gameplay-side may read it as ADS state.
 9. **Parameter properties are forbidden.** `--experimental-strip-types` runs in strip-only
    mode and rejects them outright. Already documented in `10-...md` §9.1; it bit again here.
+10. **A room created with nobody in it disposes after `seatReservationTimeout`, default 15
+    seconds** (2026-08-04). Colyseus arms an auto-dispose timer inside `Room.__init()` and
+    fires it if no client and no *reserved seat* exists by then. This is invisible until
+    something creates a room ahead of the client that will join it, which is exactly what
+    `POST /api/private-game` does: it creates the room, hands back an id, and only then does
+    the browser navigate to `/play` and lazy-load ~930 kB of `GameApp`, ~390 kB of `three`,
+    Rapier and the terrain before calling `joinById`. On a cold cache the host arrived at a
+    room that no longer existed. `GameRoom` sets `seatReservationTimeout = 45`.
+
+    **It has to be a subclass FIELD.** `__init()` runs after the constructor and before
+    `onCreate`, so a field initialiser is the last point that can change the value it reads;
+    assigning in `onCreate` is too late, and `resetAutoDisposeTimeout` is private to the base
+    class. Verified by instrumenting a bare subclass — base default 15, field 45, `__init()`
+    arms with 45 — rather than inferred from field-initialiser ordering. The cost is that an
+    empty room lingers 45 s and an unconsumed seat reservation holds its slot that long.
 
 ## 6. Traps already paid for
 
@@ -211,6 +240,68 @@ a remote had an aim direction.
 input, and a u8 there does not fail — it silently drops the bit, so the server simply never
 sees that input. `tests/motor/session.test.ts` round-trips the whole bitfield rather than a
 sample, so the next bit added cannot repeat it.
+
+### 8.0 Feedback packets — death, hits, damage and the roster (2026-08-05)
+
+Four DOWN packets that carry no gameplay outcome. Damage still arrives as health in a
+snapshot and nowhere else, and a client that dropped all four would take exactly the same
+damage — they say what happened so a screen can show it. Player ids start at 1, so **zero is
+the absent id**: no killer, or an attacker who has since left.
+
+| Packet | Audience | Payload | Drives |
+| --- | --- | --- | --- |
+| `Roster` (11) | everyone, on change | `count u8 + (id u16 + len u8 + UTF-8) * n` | names in the feed; joined/left lines |
+| `PlayerDied` (12) | everyone | `victim u16 + killer u16 + weapon u8 + flags u8 + respawn tenths u8` | the death clip, the kill feed, the victim's overlay |
+| `HitConfirmed` (13) | **shooter only** | `sequence u16 + victim u16 + flags u8` | hitmarker |
+| `DamageTaken` (14) | **victim only** | `attacker u16 + bearing i16 + amount u8` | damage indicator, damage audio |
+
+**Two packets, not one with an audience flag.** They carry different facts to different
+people, and a single shape is how a shooter ends up holding something only the victim
+should know. The shooter learns *that* it landed and never how much health is left; the
+victim learns a bearing and never a position.
+
+**The bearing is the only spatial fact on the wire, and that is a concealment decision.**
+Telling a victim exactly where a shooter is hands back what the grass and the fog spent the
+engagement taking away (`00-...md` pillars). The wire carries a direction relative to the
+victim's own facing; the HUD decides how coarsely to draw it, and draws it coarsely.
+
+**The roster is whole on every change, not a delta.** A client that misses a delta is wrong
+about a name until it reconnects, whereas a missed roster is corrected by the next one — and
+the feed's joined and left lines are a diff of two rosters, so one packet does the work of
+three. The first roster a client sees is a baseline, or joining a running match prints the
+whole room walking in at once.
+
+**A dead player is frozen, not merely un-rendered (2026-08-06).** `CharacterMotor.setDead`
+ignores movement and disables the Rapier collider; the server calls it when health reaches
+zero and clears it on respawn, and `GameClient` mirrors it in prediction so the corpse
+reconciles instead of rubber-banding. Before this, a killed player holding W drove their own
+falling body across every other client's screen, and the corpse still blocked movement and
+rounds. Pinned by a session test that holds forward for a second and asserts the body has
+not moved.
+
+**The dead player's CAMERA is deliberately still live** — look angles pass straight through
+`setDead`, so a corpse can look around for the respawn window. That is free scouting in a
+game whose premise is concealment, and it is knowingly left in: a stricter killscreen (a
+locked camera, a killcam, or a spectate-the-killer view) is a product decision nobody has
+made yet, and shipping a half-made one would be worse. When it is made, `setDead` is the
+seam — the flag already exists on both sides of the wire.
+
+**Respawn rides as tenths of a second** so the wire can carry fractional times without
+rounding the countdown and the corpse out of step. The server schedules and announces from
+the *same* number, which is what stops the client's countdown outliving the corpse.
+(2026-08-05: the number is a flat 5 s for every death, no longer the death clip's length
+plus a pause — deriving it from the clip tied the authority to presentation and the timer
+kept drifting in practice. 5 s still clears the longest clip, 3.73 s, so the fall always
+finishes before the body leaves.)
+
+**The welcome grew a 20th byte**, `maxHealth`. It is a room constant, so it belongs on the
+packet sent once per join rather than in the snapshot, which would pay for it per player per
+tick to say nothing changed; world targets already carry their own maximum. Without it the
+client has no denominator for the health u8 and the vitals bar has to invent one.
+
+**Headshots are wired and never set.** The flag exists on `PlayerDied` and selects the
+headshot death clips, but nothing sets it until a head zone exists on the capsule — and
+inventing one from impact height would be a guess the authority has no business making.
 
 ### 8.1 Room state — the low-frequency packet (2026-08-03)
 

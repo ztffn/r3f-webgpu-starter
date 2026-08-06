@@ -21,7 +21,11 @@ import {
 } from "../motor/MotorTypes.ts";
 import {
   PacketType,
+  decodeDamageTaken,
+  decodeHitConfirmed,
+  decodePlayerDied,
   decodeRoomState,
+  decodeRoster,
   decodeShotFired,
   decodeSnapshot,
   decodeWelcome,
@@ -34,12 +38,39 @@ import {
   packetTypeOf,
   quantiseCommand,
   wrapPi,
+  type DamageTakenEvent,
+  type HitConfirmedEvent,
+  type PlayerDiedEvent,
   type RoomState,
+  type RosterEntry,
   type ShotFiredEvent,
   type WorldTargetState,
 } from "./SnapshotCodec.ts";
 import type { ClientTransport } from "./Transport.ts";
 import { clamp, lerp } from "../combat/math.ts";
+
+/**
+ * One thing that happened, for presentation.
+ *
+ * A tagged union rather than three parallel logs: readers overwhelmingly want
+ * them interleaved in the order they arrived — the feed prints deaths in
+ * sequence, and a hitmarker that fired before a kill confirmation should stay
+ * before it. `seq` is monotonic per client so a reader can resume from what it
+ * last handled rather than draining and starving the other readers.
+ */
+export type CombatEvent =
+  | ({ readonly kind: "died"; readonly seq: number } & PlayerDiedEvent)
+  | ({ readonly kind: "hit"; readonly seq: number } & HitConfirmedEvent)
+  | ({ readonly kind: "damage"; readonly seq: number } & DamageTakenEvent);
+
+/**
+ * How many combat events a client holds before dropping the oldest.
+ *
+ * Sized for what an unread client can afford rather than what a reader needs: a
+ * hidden tab still receives every death in a 64-player room, and the feed only
+ * ever shows a handful.
+ */
+const MAX_COMBAT_EVENTS = 64;
 
 export interface RemotePlayer {
   readonly id: number;
@@ -129,7 +160,15 @@ export class GameClient {
    * them, and a mispredicted death is the worst correction in a shooter. This lags
    * by up to one patch and is always the truth.
    */
-  health = 0;
+  health: number | null = null;
+  /**
+   * Full health for this room, from the welcome packet.
+   *
+   * The denominator the HUD reads `health` against. Sent once per join rather
+   * than per tick because it is a room constant; 100 until the welcome lands, so
+   * a fraction computed in the gap is merely stale rather than infinite.
+   */
+  maxHealth = 100;
   /** Own shot counter, echoed in each claim so a resend cannot fire twice. */
   private fireSequence = 0;
   /** Own weapon-claim counter, shared by select and reload for the same reason. */
@@ -176,6 +215,34 @@ export class GameClient {
    */
   private worldTargetsValue: readonly WorldTargetState[] | null = null;
   private readonly worldTargetListeners = new Set<() => void>();
+  private readonly healthListeners = new Set<() => void>();
+
+  /**
+   * Who is in the room and what they are called. Empty until the first roster.
+   *
+   * Replaced wholesale, never mutated, for the same `useSyncExternalStore` reason
+   * room state is: identity changes exactly when the content does.
+   */
+  private rosterValue: readonly RosterEntry[] = [];
+  private readonly rosterListeners = new Set<() => void>();
+
+  /**
+   * Deaths, hits and damage, newest last, BOUNDED.
+   *
+   * A log rather than a drain, because these have more than one reader and a
+   * drain gives the whole batch to whoever asks first: a death has to reach the
+   * character animator, the kill feed and the death overlay, and the first of
+   * those to drain would starve the other two. Each reader remembers the last
+   * `seq` it handled instead.
+   *
+   * Replaced wholesale on change so `useSyncExternalStore` sees a new identity.
+   * Events are rare — nobody dies sixty times a second — so the allocation is
+   * cheaper than the bookkeeping that would avoid it.
+   */
+  private combatEventsValue: readonly CombatEvent[] = [];
+  private readonly combatEventListeners = new Set<() => void>();
+  /** Monotonic, so a reader can resume from what it last saw. Never reset. */
+  private nextCombatEventSeq = 1;
 
   /**
    * Subscribe / getSnapshot rather than a single callback field, following
@@ -197,13 +264,72 @@ export class GameClient {
     return () => this.worldTargetListeners.delete(listener);
   };
 
+  /**
+   * The local player's hit points, for a React reader.
+   *
+   * The same subscribe / getSnapshot shape as room state and world targets, and
+   * for the same reason: more than one surface wants this — the vitals bar today,
+   * a damage indicator and a death overlay next — and a single assignable callback
+   * would let the second reader silently unsubscribe the first.
+   *
+   * A NUMBER rather than an object, deliberately. `useSyncExternalStore` compares
+   * what getSnapshot returns; a fresh object every call is an infinite render loop,
+   * and a primitive cannot be one. Listeners fire only when the value actually
+   * changed, so a 20 Hz snapshot stream does not wake React 20 times a second to
+   * report the same hit points.
+   */
+  readonly subscribeHealth = (listener: () => void): (() => void) => {
+    this.healthListeners.add(listener);
+    return () => this.healthListeners.delete(listener);
+  };
+
+  readonly getHealth = (): number | null => this.health;
+
   readonly getWorldTargets = (): readonly WorldTargetState[] | null =>
     this.worldTargetsValue;
+
+  readonly subscribeRoster = (listener: () => void): (() => void) => {
+    this.rosterListeners.add(listener);
+    return () => this.rosterListeners.delete(listener);
+  };
+
+  readonly getRoster = (): readonly RosterEntry[] => this.rosterValue;
+
+  readonly subscribeCombatEvents = (listener: () => void): (() => void) => {
+    this.combatEventListeners.add(listener);
+    return () => this.combatEventListeners.delete(listener);
+  };
+
+  readonly getCombatEvents = (): readonly CombatEvent[] => this.combatEventsValue;
 
   /** Hands each queued remote shot to presentation, exactly once. */
   drainRemoteShots(visitor: (shot: ShotFiredEvent) => void): void {
     for (const shot of this.remoteShotQueue) visitor(shot);
     this.remoteShotQueue.length = 0;
+  }
+
+  /**
+   * Appends a combat event, stamps it, and drops the oldest past the bound.
+   *
+   * The bound is what a client that never reads can afford to hold, not what a
+   * reader is expected to keep up with: a hidden tab still receives every death
+   * in the room and must not accumulate a match's worth of them.
+   */
+  private pushCombatEvent<K extends CombatEvent["kind"]>(
+    kind: K,
+    payload: Omit<Extract<CombatEvent, { kind: K }>, "kind" | "seq">
+  ): void {
+    // Keyed off the union rather than `Omit<CombatEvent, "seq">`: `keyof` a union
+    // is the INTERSECTION of its members' keys, so that spelling collapsed to
+    // `{ kind }` and let a mismatched decoder and variant compile clean.
+    const stamped = { ...payload, kind, seq: this.nextCombatEventSeq } as unknown as CombatEvent;
+    this.nextCombatEventSeq += 1;
+    const next =
+      this.combatEventsValue.length >= MAX_COMBAT_EVENTS
+        ? [...this.combatEventsValue.slice(1 - MAX_COMBAT_EVENTS), stamped]
+        : [...this.combatEventsValue, stamped];
+    this.combatEventsValue = next;
+    for (const listener of this.combatEventListeners) listener();
   }
 
   /** Public so a UI host can adopt the client's tuning instead of its own —
@@ -345,6 +471,7 @@ export class GameClient {
       if (welcome === null) return;
       this.playerId = welcome.playerId;
       this.localId = String(welcome.playerId);
+      this.maxHealth = welcome.maxHealth;
       this.room.add(this.localId, welcome.spawn);
       return;
     }
@@ -353,6 +480,26 @@ export class GameClient {
       if (state === null) return;
       this.roomStateValue = state;
       for (const listener of this.roomStateListeners) listener();
+      return;
+    }
+    if (type === PacketType.Roster) {
+      this.rosterValue = decodeRoster(bytes);
+      for (const listener of this.rosterListeners) listener();
+      return;
+    }
+    if (type === PacketType.PlayerDied) {
+      const died = decodePlayerDied(bytes);
+      if (died !== null) this.pushCombatEvent("died", died);
+      return;
+    }
+    if (type === PacketType.HitConfirmed) {
+      const hit = decodeHitConfirmed(bytes);
+      if (hit !== null) this.pushCombatEvent("hit", hit);
+      return;
+    }
+    if (type === PacketType.DamageTaken) {
+      const damage = decodeDamageTaken(bytes);
+      if (damage !== null) this.pushCombatEvent("damage", damage);
       return;
     }
     if (type === PacketType.ShotFired) {
@@ -376,7 +523,20 @@ export class GameClient {
     this.lastSnapshotTick = snapshot.tick;
     for (const player of snapshot.players) {
       if (player.id === this.playerId) {
-        this.health = player.health;
+        // Notified only on a CHANGE. Health arrives in every snapshot and changes
+        // in almost none of them, so waking every reader at the patch rate would
+        // be 20 wake-ups a second to report the same number.
+        if (player.health !== this.health) {
+          this.health = player.health;
+          // Prediction mirrors the server's dead-motor freeze, so the corpse
+          // reconciles cleanly instead of rubber-banding against a body the
+          // authority stopped stepping. Look still passes through — see
+          // CharacterMotor.setDead.
+          if (this.localId !== null) {
+            this.room.get(this.localId)?.setDead(player.health === 0);
+          }
+          for (const listener of this.healthListeners) listener();
+        }
         this.reconcile(player.state, snapshot.acknowledgedCommandTick);
         continue;
       }

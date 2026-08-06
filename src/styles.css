@@ -1,319 +1,51 @@
-/* Delta Force 2 — instrument-panel HUD over a live scene.
+/* Game-chunk styles that are not the HUD: the viewport lock, the canvas cursor
+ * and the terrain-decode boot screen.
  *
- * One deliberate dark theme. The HUD sits on top of terrain and sky, so a
- * light-ground variant would wash out; this commits to the tactical-display
- * world rather than shipping a weak second theme. No webfont: the panels are
- * monospace telemetry, and a CDN font would be one more thing to fail on a cold
- * deploy for no gain. */
+ * Loaded with the lazily-imported game chunk, so nothing here reaches a visitor
+ * who never opens /play. The HUD's own styles live in src/hud/hud.css and the
+ * debug panels' in src/devtools/devtools.css — this file deliberately declares
+ * none of `.hud-root`, `.hit-marker` or `.touch-note`, because two stylesheets
+ * defining the same selector makes the cascade depend on import order.
+ */
 
 :root {
   --ground: #0b1013;
-  --panel: rgba(11, 17, 21, 0.82);
-  --line: rgba(154, 184, 194, 0.18);
-  --line-strong: rgba(154, 184, 194, 0.34);
   --ink: #d9e3e6;
   --ink-dim: #8798a0;
-  --ink-faint: #5d6d75;
   --accent: #e8a33d;
-  --olive: #9db06f;
-  --warn: #e0714a;
-  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --line-strong: rgba(154, 184, 194, 0.34);
 }
 
-* {
-  box-sizing: border-box;
-}
-
-html,
-body,
-#root {
-  width: 100%;
-  height: 100%;
-  margin: 0;
-  padding: 0;
-  overflow: hidden;
+/* The document reset, box-sizing and `canvas { display: block }` live in
+   src/ui/tokens.css. They cannot live here: this stylesheet is injected on the
+   first visit to /play and never removed, so a global `overflow: hidden` stayed
+   applied to every site page navigated to afterwards. The viewport lock is
+   `body.mode-game`, set by the play route and cleared when it unmounts. */
+body.mode-game {
   background: var(--ground);
   color: var(--ink);
-  font-family: var(--mono);
-  -webkit-font-smoothing: antialiased;
+  font-family: var(--font-mono);
 }
 
 canvas {
-  display: block;
-  touch-action: none;
   cursor: grab;
 }
 canvas:active {
   cursor: grabbing;
 }
 
-/* HUD is click-through except on the panels themselves. */
-.hud-root {
-  position: fixed;
-  inset: 0;
-  z-index: 10;
-  pointer-events: none;
-  /* A look-drag that starts on a panel would otherwise select its text and
-     leave the HUD highlighted; nothing here is worth copying. */
-  user-select: none;
-  -webkit-user-select: none;
-}
-
-.hit-marker {
-  position: fixed;
-  top: calc(50% + 22px);
-  left: 50%;
-  transform: translateX(-50%);
-  color: var(--accent);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.18em;
-  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
-  animation: hit-marker 520ms ease-out forwards;
-}
-
-@keyframes hit-marker {
-  0% { opacity: 0; transform: translate(-50%, 3px) scale(0.92); }
-  18% { opacity: 1; transform: translate(-50%, 0) scale(1); }
-  68% { opacity: 1; }
-  100% { opacity: 0; transform: translate(-50%, -3px) scale(1); }
-}
-
-.panel {
-  position: fixed;
-  display: flex;
-  flex-direction: column;
-  pointer-events: auto;
-  background: var(--panel);
-  backdrop-filter: blur(14px) saturate(120%);
-  -webkit-backdrop-filter: blur(14px) saturate(120%);
-  border: 1px solid var(--line);
-  border-radius: 3px;
-  padding: 13px 15px;
-  font-size: 11px;
-  line-height: 1.5;
-}
-
-.eyebrow {
-  font-size: 9px;
-  text-transform: uppercase;
-  letter-spacing: 0.18em;
-  color: var(--ink-faint);
-  margin-bottom: 7px;
-}
-
-.rows {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 3px 14px;
-  margin: 0;
-}
-.rows dt {
-  color: var(--ink-faint);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-}
-.rows dd {
-  margin: 0;
-  color: var(--ink-dim);
-  font-variant-numeric: tabular-nums;
-}
-.rows dd.warn {
-  color: var(--warn);
-}
-
-/* --- identity (top left) --- */
-#ident {
-  top: 14px;
-  left: 14px;
-  max-width: 290px;
-}
-#ident h1 {
-  margin: 0 0 2px;
-  font-size: 17px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  text-wrap: balance;
-}
-#ident .by {
-  color: var(--accent);
-  font-size: 11px;
-  margin-bottom: 10px;
-}
-
-/* --- telemetry (top right) --- */
-#telem {
-  top: 14px;
-  right: 14px;
-  min-width: 176px;
-}
-#telem .rows dd {
-  color: var(--olive);
-}
-.perf {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  margin-top: 10px;
-  padding-top: 9px;
-  border-top: 1px solid var(--line);
-  color: var(--ink-faint);
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-}
-.perf .fps {
-  color: var(--accent);
-  font-size: 13px;
-}
-
-/* --- structured shot reports (bottom centre) --- */
-#combat-log {
-  left: 50%;
-  bottom: 14px;
-  width: min(430px, calc(100vw - 580px));
-  min-width: 330px;
-  transform: translateX(-50%);
-  pointer-events: none;
-}
-.shot-log {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  font-variant-numeric: tabular-nums;
-}
-.shot-log li {
-  display: grid;
-  grid-template-columns: 30px minmax(92px, 1fr) auto;
-  gap: 8px;
-  color: var(--ink-faint);
-}
-.shot-log strong,
-.shot-log em {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.shot-log strong {
-  color: var(--ink-dim);
-  font-weight: 500;
-}
-.shot-log em {
-  font-style: normal;
-  text-align: right;
-}
-.shot-log li.hit em {
-  color: var(--accent);
-}
-.shot-log li.down em {
-  color: var(--warn);
-}
-
-/* --- controls (bottom left) --- */
-#ctl {
-  bottom: 14px;
-  left: 14px;
-  width: 258px;
-}
-.btns {
-  display: flex;
-  gap: 6px;
-}
-button {
-  flex: 1;
-  font-family: var(--mono);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.09em;
-  color: var(--ink-dim);
-  background: transparent;
-  border: 1px solid var(--line-strong);
-  border-radius: 2px;
-  padding: 7px 5px;
-  cursor: pointer;
-  transition:
-    color 120ms,
-    border-color 120ms,
-    background 120ms;
-}
-button:hover:not(:disabled) {
-  color: var(--ink);
-  border-color: var(--ink-faint);
-}
-button:focus-visible {
-  outline: 1px solid var(--accent);
-  outline-offset: 2px;
-}
-button[aria-pressed="true"] {
-  color: var(--ground);
-  background: var(--accent);
-  border-color: var(--accent);
-}
-button:disabled {
-  opacity: 0.35;
-  cursor: default;
-}
-.note {
-  margin: 11px 0 0;
-  padding-top: 9px;
-  border-top: 1px solid var(--line);
-  color: var(--ink-faint);
-  font-size: 10px;
-  line-height: 1.5;
-}
-
-/* --- legend (bottom right) --- */
-#legend {
-  bottom: 14px;
-  right: 14px;
-}
-.panel .panel-toggle {
-  background: none;
-  border: 0;
-  padding: 0;
-  font: inherit;
-  /* The font shorthand resets size to the panel's 11px and this selector
-     outranks .eyebrow, so the eyebrow size is restated explicitly. */
-  font-size: 9px;
-  text-align: left;
-  cursor: pointer;
-}
-.panel .panel-toggle:hover {
-  color: var(--accent);
-}
-/* Collapsed, the toggle is the panel's only child; drop the eyebrow's
-   bottom margin so the pill sits balanced. */
-.panel .panel-toggle:last-child {
-  margin-bottom: 0;
-}
-#legend .rows {
-  gap: 3px 12px;
-}
-#legend dt {
-  color: var(--accent);
-  font-size: 10px;
-  letter-spacing: 0.05em;
-  text-transform: none;
-}
-#legend dd {
-  color: var(--ink-faint);
-  font-size: 10px;
-}
-
-/* --- boot --- */
+/* --- boot --------------------------------------------------------------- */
 .boot {
   position: fixed;
   inset: 0;
-  z-index: 40;
+  z-index: var(--z-boot);
   display: grid;
   place-content: center;
   justify-items: center;
   gap: 10px;
   background: var(--ground);
   color: var(--ink-dim);
+  font-family: var(--font-label);
   font-size: 11px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -344,121 +76,4 @@ button:disabled {
     animation: none;
     width: 100%;
   }
-}
-
-.touch-note {
-  display: none;
-}
-
-/* Small screens: keep the scene readable, drop the non-essential panels. */
-@media (max-width: 760px) {
-  .touch-note {
-    display: block;
-  }
-  #telem,
-  #legend,
-  #combat-log {
-    display: none;
-  }
-  #ident {
-    top: 10px;
-    left: 10px;
-    right: 10px;
-    max-width: none;
-  }
-  #ctl {
-    left: 10px;
-    right: 10px;
-    bottom: 10px;
-    width: auto;
-  }
-}
-
-/* --- live grass debug panel (?debug=1) ------------------------------------ */
-/* Right-hand column under the telemetry readout, scrollable because the dial
-   list is longer than a short viewport. */
-#grassdebug,
-#weatherdebug {
-  /* Rendered outside .hud-root, so it needs its own z-index or the canvas paints
-     over it. Above the HUD's 10. */
-  z-index: 20;
-  /* Clear of #telem, so the frame-time readout stays visible while sliding. */
-  top: 218px;
-  width: 218px;
-  max-height: calc(100vh - 238px);
-  overflow-y: auto;
-  gap: 2px;
-}
-#grassdebug {
-  right: 14px;
-}
-/* Its own column rather than stacked below: both panels are taller than the viewport
-   already, so sharing a column would put one of them permanently off-screen. */
-#weatherdebug {
-  right: 246px;
-}
-
-.dial {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-top: 9px;
-}
-.dial-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 8px;
-}
-.dial-row b {
-  color: var(--accent);
-  font-weight: 400;
-  font-variant-numeric: tabular-nums;
-}
-.dial em {
-  font-style: normal;
-  font-size: 9px;
-  color: var(--ink-faint);
-  line-height: 1.35;
-}
-
-/* Flat slider, sized so it is grabbable without dominating the panel. */
-#grassdebug input[type="range"],
-#weatherdebug input[type="range"] {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 100%;
-  height: 3px;
-  margin: 4px 0 2px;
-  background: var(--line);
-  border-radius: 2px;
-  cursor: ew-resize;
-}
-#grassdebug input[type="range"]::-webkit-slider-thumb,
-#weatherdebug input[type="range"]::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 11px;
-  height: 11px;
-  border-radius: 50%;
-  background: var(--accent);
-  border: none;
-}
-#grassdebug input[type="range"]::-moz-range-thumb,
-#weatherdebug input[type="range"]::-moz-range-thumb {
-  width: 11px;
-  height: 11px;
-  border-radius: 50%;
-  background: var(--accent);
-  border: none;
-}
-
-#grassdebug .btns,
-#weatherdebug .btns {
-  flex-wrap: wrap;
-}
-#grassdebug code,
-#weatherdebug code {
-  color: var(--olive);
-  font-size: 9px;
 }

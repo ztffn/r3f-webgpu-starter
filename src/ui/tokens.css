@@ -1,0 +1,264 @@
+/* Distant Front — design tokens, self-hosted faces and the document reset.
+ *
+ * Two skins from one system: `.skin-site` is the parchment/khaki of an embroidered
+ * patch (design/distant-front-landing-modern-army), `.skin-hud` is the olive/amber
+ * of a phosphor tactical display (design/df2-hud-1to1-html-v3). Geometry, type
+ * scale and motion are shared at :root; only palette differs between them.
+ * Rationale and the palette table: docs/plans/2026-08-04-web-platform-and-ui-design.md §3.
+ */
+
+/* Self-hosted, not a CDN: a third-party webfont is one more thing that fails on a
+   cold deploy, and src/styles.css already committed to that rule. Both faces are
+   OFL. 40 KB for all four files, so the identity is cheap.
+
+   Body prose deliberately uses a system stack instead of a third webfont — the two
+   distinctive faces carry the identity, and body copy is where a system font is
+   least noticeable and most performant. */
+@font-face {
+  font-family: "Oxanium";
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url("/fonts/oxanium-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Oxanium";
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url("/fonts/oxanium-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF,
+    U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020,
+    U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "Quantico";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/quantico-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Quantico";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/quantico-700.woff2") format("woff2");
+}
+
+:root {
+  /* --- type roles ------------------------------------------------------------
+     display: angular military headings and large numerals
+     label:   navigation, buttons, tactical labels, HUD readouts
+     body:    prose. System stack by choice, see the note above.
+     mono:    telemetry in the dev console, where column alignment is the point */
+  --font-display: "Oxanium", "Arial Narrow", system-ui, sans-serif;
+  --font-label: "Quantico", "Arial Narrow", ui-sans-serif, system-ui, sans-serif;
+  --font-body: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  /* --- spacing: a 4px base, named so layout reads as intent not arithmetic --- */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  --s6: 32px;
+  --s7: 48px;
+  --s8: 72px;
+  --s9: 112px;
+
+  /* --- geometry -------------------------------------------------------------
+     The notch is the shape that ties the site back to the game: HUD panels are
+     cut octagons, and the supporter and server-browser cards borrow it. */
+  --notch: 12px;
+  --notch-sm: 8px;
+  --radius: 2px;
+  --hair: 1px;
+
+  /* --- motion. Every transition respects prefers-reduced-motion below. ------ */
+  --fast: 120ms;
+  --base: 180ms;
+  --slow: 320ms;
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+
+  /* --- layers. One place, so nothing is guessed against a neighbour. -------- */
+  --z-hud: 10;
+  --z-hud-modal: 20;
+  --z-site-nav: 30;
+  --z-devtools: 40;
+  --z-boot: 50;
+  --z-dialog: 60;
+
+  /* --- reading measure ----------------------------------------------------- */
+  --measure: 68ch;
+  --shell: 1180px;
+
+  /* --- touch ---------------------------------------------------------------
+     44px is the smallest reliable finger target. Applied to every interactive
+     element on a coarse pointer, not only on narrow screens — an iPad in
+     landscape is a wide viewport with no cursor. */
+  --tap: 44px;
+}
+
+/* --- Site skin: embroidered patch, printed brief ------------------------- */
+.skin-site {
+  --bg: #0d0e0d;
+  --bg-raised: #141612;
+  --bg-sunken: #090a09;
+  --ink: #e8dfc3;
+  --ink-dim: #c5bea5;
+  --ink-muted: #aaa487;
+  --ink-faint: #77745f;
+  --accent: #b8a373;
+  --accent-ink: #11120f;
+  --olive: #626348;
+  --olive-bright: #8d8f66;
+  --line: rgba(232, 223, 195, 0.16);
+  --line-strong: rgba(232, 223, 195, 0.34);
+  --good: #9db06f;
+  --warn: #d9a13f;
+  --bad: #c8613f;
+}
+
+/* --- HUD skin: phosphor tactical display --------------------------------
+   Palette lifted from design/df2-hud-1to1-html-v3, which is authoritative for
+   the in-game look. Blue is reserved for non-vital metrics so a glance can tell
+   "how alive am I" (olive) from "how supplied am I" (blue). */
+.skin-hud {
+  --olive: #a9bd61;
+  --olive-bright: #c1d979;
+  --amber: #ffae24;
+  --ink: #e7e9df;
+  --ink-dim: #c6cbbb;
+  --ink-muted: #a9afa5;
+  --ink-faint: #7f857f;
+  --blue: #63a9c7;
+  --glass: rgba(10, 14, 12, 0.72);
+  --line: rgba(167, 187, 103, 0.34);
+  --line-strong: rgba(193, 217, 121, 0.62);
+  --bad: #e0714a;
+
+  /* Grounds. The in-game HUD needs none of these — it floats over the scene and
+     never reads --bg — but a FULL-SCREEN surface in this skin does, and the
+     loadout screen is one. Additive on purpose: nothing in src/hud/ consumes
+     these names, so completing the skin cannot change what the HUD looks like.
+     Near-black with a green cast rather than neutral, so the phosphor palette
+     sits on a ground of the same temperature instead of on grey. */
+  --bg: #0a0d0a;
+  --bg-raised: #101410;
+  --bg-sunken: #060806;
+
+  /* ONE accent, and it is the amber the HUD already uses for alerts. A second
+     accent on a screen this dense would stop meaning anything. */
+  --accent: #ffae24;
+  --accent-ink: #14100a;
+  --good: #a9bd61;
+  --warn: #ffae24;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  /* Anchors on the FAQ jump to a heading; without this they teleport. */
+  scroll-behavior: smooth;
+  /* iOS Safari inflates text in landscape unless told not to, which silently
+     breaks every carefully sized label. */
+  -webkit-text-size-adjust: 100%;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+}
+
+body {
+  background: var(--bg, #0d0e0d);
+  color: var(--ink, #e8dfc3);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* The game owns the viewport and must never scroll; the site must. Applied by
+   the /play route rather than globally, because a single `overflow: hidden` on
+   body was what made every site page unscrollable.
+ *
+ * `html` IS IN THIS LIST, and leaving it out broke /play completely. A percentage
+ * height resolves against the containing block's `height`, and `min-height: 100%`
+ * above does NOT make html's height definite — so `body { height: 100% }` computed
+ * to auto, #root collapsed to its content, and the R3F canvas fell back to a
+ * `<canvas>` element's intrinsic 150px. The result was a 150px sliver of terrain
+ * under a full-screen HUD, because the HUD is position:fixed and so looked correct
+ * throughout. Every link in the chain needs a definite height; the class is set on
+ * documentElement as well as body (src/game/GameApp.tsx) so `html` can be one. */
+html.mode-game,
+body.mode-game,
+body.mode-game #root {
+  height: 100%;
+  overflow: hidden;
+}
+
+canvas {
+  display: block;
+  touch-action: none;
+}
+
+img,
+svg {
+  max-width: 100%;
+  height: auto;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* Focus is never removed, only restyled: this is the only way a keyboard user
+   knows where they are, and the site has real forms. */
+:focus-visible {
+  outline: 2px solid var(--accent, #b8a373);
+  outline-offset: 2px;
+}
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Screen-reader-only text. Used for the skip link and for icon-only controls,
+   both of which exist on the HUD. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}

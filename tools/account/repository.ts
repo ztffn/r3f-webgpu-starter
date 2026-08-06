@@ -132,6 +132,16 @@ export const LEADERBOARD_COLUMNS: Record<string, LeaderboardDefinition> = {
 const nowIso = (): string => new Date().toISOString();
 
 /**
+ * Below this, a session is not a match played.
+ *
+ * The counter feeds the "Matches played" board and three of the five earnable
+ * medals, so an unfloored increment made all four inflatable by a connect/
+ * disconnect loop — measured. 30 seconds is far under any real match and far
+ * over any loop worth running.
+ */
+const MIN_COUNTED_SESSION_SECONDS = 30;
+
+/**
  * Row to client shape. The ONLY place this conversion happens.
  *
  * Note what is absent: `password`, `anonymous_id` and `discord_id` never cross
@@ -326,12 +336,23 @@ export class AccountRepository {
     return toAccount(row);
   }
 
-  /** Create or update the account behind a Discord identity. */
+  /**
+   * Create or update the account behind a Discord identity.
+   *
+   * Matching is by `discord_id` first, then by EMAIL. The email fallback is not
+   * a convenience: `users.email` is unique, so without it a user whose Discord
+   * address already exists as a password account hit a UNIQUE violation on every
+   * single sign-in attempt, forever, with no handler anywhere in the OAuth
+   * callback. Linking is the right outcome — the provider verified the same
+   * address — and the alternative (inserting with a null email) silently forks
+   * one person into two accounts.
+   */
   async upsertDiscord(profile: {
     id: string;
     username: string;
     email?: string | null;
   }): Promise<Account> {
+    const email = profile.email?.trim().toLowerCase() ?? null;
     const existing = await this.db
       .selectFrom("users")
       .selectAll()
@@ -346,12 +367,32 @@ export class AccountRepository {
         .executeTakeFirstOrThrow();
       return toAccount(row);
     }
+    if (email !== null) {
+      const byEmail = await this.db
+        .selectFrom("users")
+        .selectAll()
+        .where(sql`lower(email)`, "=", email)
+        .executeTakeFirst();
+      if (byEmail !== undefined) {
+        // Link the provider to the account that already owns this address.
+        // Nothing else is touched: the callsign, tier, career and character are
+        // the user's and a sign-in must not rewrite them.
+        const row = await this.db
+          .updateTable("users")
+          .set({ discord_id: profile.id, last_seen_at: nowIso() })
+          .where("id", "=", byEmail.id)
+          .returningAll()
+          .executeTakeFirstOrThrow();
+        await this.ensureRelated(row.id);
+        return toAccount(row);
+      }
+    }
     const created = nowIso();
     const row = await this.db
       .insertInto("users")
       .values({
         callsign: await this.uniqueCallsign(profile.username),
-        email: profile.email?.trim().toLowerCase() ?? null,
+        email,
         password: null,
         anonymous: 0,
         anonymous_id: null,
@@ -367,10 +408,20 @@ export class AccountRepository {
     return toAccount(row);
   }
 
+  /**
+   * Set a new password AND end every session issued under the old one.
+   *
+   * The version bump rides the same statement deliberately: a reset that leaves
+   * the attacker's existing token valid for the remaining 30 days is not a
+   * remedy, and two statements could be interrupted between them.
+   */
   async setPasswordByEmail(email: string, passwordHash: string): Promise<void> {
     await this.db
       .updateTable("users")
-      .set({ password: passwordHash })
+      .set((eb) => ({
+        password: passwordHash,
+        token_version: eb("token_version", "+", 1),
+      }))
       .where(sql`lower(email)`, "=", email.trim().toLowerCase())
       .execute();
   }
@@ -538,14 +589,30 @@ export class AccountRepository {
       .insertInto("sessions")
       .values({ user_id: userId, ended_at: nowIso(), seconds })
       .execute();
+    // A join/leave loop is NOT a match. Measured before this floor existed: 60
+    // zero-second sessions credited 60 matches and awarded three of the five
+    // earnable medals, from a script that only had to connect and disconnect.
+    // Time played is still credited in full — it is already a truthful sum, and
+    // the cap above it bounds the parked-socket case.
+    const counted = seconds >= MIN_COUNTED_SESSION_SECONDS ? 1 : 0;
     await this.db
       .updateTable("career")
       .set((eb) => ({
-        matches: eb("matches", "+", 1),
+        matches: eb("matches", "+", counted),
         time_played_seconds: eb("time_played_seconds", "+", seconds),
       }))
       .where("user_id", "=", userId)
       .execute();
+  }
+
+  /** The current token version, for signing. */
+  async tokenVersionOf(userId: number): Promise<number> {
+    const row = await this.db
+      .selectFrom("users")
+      .select("token_version")
+      .where("id", "=", userId)
+      .executeTakeFirst();
+    return row?.token_version ?? 0;
   }
 
   /**

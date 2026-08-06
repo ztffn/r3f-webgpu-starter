@@ -419,8 +419,20 @@ export const accountClient = {
     await request(`/api/clans/${encodeURIComponent(tag)}/join`, { method: "POST" });
   },
 
+  /**
+   * Leave. A LEADER leaving hands the clan to its longest-standing member, and
+   * the last one out disbands it — so there is no state a leader cannot exit.
+   */
   async leaveClan(): Promise<void> {
     await request("/api/clan/leave", { method: "POST" });
+  },
+
+  /** Hand leadership to another member while staying in the clan. */
+  async promoteClanMember(memberId: number): Promise<void> {
+    await request("/api/clan/promote", {
+      method: "POST",
+      body: JSON.stringify({ memberId }),
+    });
   },
 
   // --- population statistics ---------------------------------------------

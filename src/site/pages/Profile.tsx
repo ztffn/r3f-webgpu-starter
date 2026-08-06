@@ -241,8 +241,20 @@ export function Profile() {
           </section>
         )}
 
+        {/* A guest's callsign is generated and stays generated: `persistentName`
+            is what registering buys, and the API refuses the rename either way
+            (it used to not, which let an unregistered visitor claim any name
+            permanently). Disabled with the reason beside it rather than hidden,
+            so the perk is legible. */}
         <section className="auth-card notched notched-sm">
           <h2 className="display display-sm">Callsign</h2>
+          {account.anonymous ? (
+            <p className="prose">
+              You are playing as <strong>{account.callsign}</strong>.{" "}
+              <Link to="/register">Register</Link> to choose your own — free, and you
+              keep the career and medals you have already earned.
+            </p>
+          ) : (
           <form className="stack" onSubmit={onRename}>
             <div className="field">
               <label htmlFor="newCallsign">New callsign</label>
@@ -275,6 +287,7 @@ export function Profile() {
               {busy !== null ? "Saving…" : "Rename"}
             </button>
           </form>
+          )}
         </section>
 
         <section className="auth-card notched notched-sm">

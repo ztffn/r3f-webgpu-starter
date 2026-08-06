@@ -43,6 +43,33 @@ export interface UserRow {
   tier_expires_at: string | null;
   created_at: string;
   last_seen_at: string;
+  /**
+   * Bumped on every password reset; a token carries the version it was minted
+   * under and `accountFromToken` refuses anything older.
+   *
+   * This is what makes "reset your password" actually end the other sessions —
+   * without it a 30-day token stays valid through the one remedy a compromised
+   * account has.
+   */
+  token_version: Generated<number>;
+}
+
+/**
+ * An append-only record of rate-limited actions.
+ *
+ * Append-only is the entire point: the community limits used to count LIVE rows
+ * (`profile_posts`, pending `friendships`), so deleting your own post reset the
+ * per-wall limit that exists to stop harassment, and withdrawing a request reset
+ * the spam bound. A log cannot be reset by removing the thing it recorded.
+ */
+export interface ActionLogRow {
+  id: Generated<number>;
+  user_id: number;
+  /** `post` or `friend_request`. */
+  action: string;
+  /** Whose wall, for a per-target limit. Null when the action has no target. */
+  target_id: number | null;
+  at: string;
 }
 
 export interface CareerRow {
@@ -257,6 +284,7 @@ export interface AccountDatabase {
   match_participation: MatchParticipationRow;
   engagements: EngagementRow;
   objective_events: ObjectiveEventRow;
+  action_log: ActionLogRow;
   schema_version: SchemaVersionRow;
 }
 
@@ -648,6 +676,106 @@ const MIGRATIONS: ((db: AccountDb) => Promise<void>)[] = [
       .on("friendships")
       .column("pair_key")
       .unique()
+      .execute();
+  },
+
+  // Three things the pre-merge review asked the SCHEMA to guarantee.
+  //
+  // 1. `users.token_version` — a password reset has to invalidate the sessions
+  //    issued before it, and a 30-day token cannot be revoked without a counter
+  //    to compare against.
+  // 2. `action_log` — the community rate limits counted live rows, so deleting
+  //    your own posts reset the limit that exists to stop harassment, and
+  //    withdrawing a friend request reset the one that bounds spam. An append-only
+  //    log cannot be reset by removing the thing it recorded.
+  // 3. `friendships.pair_key` NOT NULL — the column exists BECAUSE a comment
+  //    claimed an invariant the schema lacked, and a nullable unique column
+  //    accepts unlimited NULL duplicates in both SQLite and Postgres. SQLite
+  //    cannot add NOT NULL to an existing column, so the table is rebuilt.
+  async (db) => {
+    await db.schema
+      .alterTable("users")
+      .addColumn("token_version", "integer", (c) => c.notNull().defaultTo(0))
+      .execute();
+
+    await db.schema
+      .createTable("action_log")
+      .addColumn("id", "integer", (c) => c.primaryKey().autoIncrement())
+      .addColumn("user_id", "integer", (c) => c.notNull().references("users.id").onDelete("cascade"))
+      // What was done ("post", "friend_request"), and what it was done to — a
+      // profile id for a wall post, so a per-wall limit can be counted.
+      .addColumn("action", "text", (c) => c.notNull())
+      .addColumn("target_id", "integer")
+      .addColumn("at", "text", (c) => c.notNull())
+      .execute();
+    await db.schema
+      .createIndex("action_log_actor")
+      .on("action_log")
+      .columns(["user_id", "action", "at"])
+      .execute();
+
+    // Rebuild `friendships` with the column NOT NULL. Copy, drop, rename — the
+    // portable spelling. Every column and index of the original is reproduced,
+    // including `responded_at` and the two direction indexes; a rebuild that
+    // quietly drops a column is a data-loss migration wearing a constraint fix.
+    await db.schema
+      .createTable("friendships_rebuild")
+      .addColumn("id", "integer", (c) => c.primaryKey().autoIncrement())
+      .addColumn("requester_id", "integer", (c) =>
+        c.notNull().references("users.id").onDelete("cascade")
+      )
+      .addColumn("addressee_id", "integer", (c) =>
+        c.notNull().references("users.id").onDelete("cascade")
+      )
+      .addColumn("state", "text", (c) => c.notNull())
+      .addColumn("created_at", "text", (c) => c.notNull())
+      .addColumn("responded_at", "text")
+      .addColumn("pair_key", "text", (c) => c.notNull())
+      .execute();
+    const rows = await db
+      .selectFrom("friendships")
+      .select([
+        "requester_id",
+        "addressee_id",
+        "state",
+        "created_at",
+        "responded_at",
+        "pair_key",
+      ])
+      .execute();
+    for (const row of rows) {
+      await db
+        .insertInto("friendships_rebuild" as "friendships")
+        .values({
+          requester_id: row.requester_id,
+          addressee_id: row.addressee_id,
+          state: row.state,
+          created_at: row.created_at,
+          responded_at: row.responded_at,
+          // A row predating the previous migration cannot exist (it backfilled
+          // every row before adding its index), but deriving rather than
+          // asserting costs nothing and cannot insert a NULL.
+          pair_key: row.pair_key ?? pairKey(row.requester_id, row.addressee_id),
+        })
+        .execute();
+    }
+    await db.schema.dropTable("friendships").execute();
+    await db.schema.alterTable("friendships_rebuild").renameTo("friendships").execute();
+    await db.schema
+      .createIndex("friendships_pair_key")
+      .on("friendships")
+      .column("pair_key")
+      .unique()
+      .execute();
+    await db.schema
+      .createIndex("friendships_addressee")
+      .on("friendships")
+      .columns(["addressee_id", "state"])
+      .execute();
+    await db.schema
+      .createIndex("friendships_requester")
+      .on("friendships")
+      .columns(["requester_id", "state"])
       .execute();
   },
 ];

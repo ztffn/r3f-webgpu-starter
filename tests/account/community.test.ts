@@ -240,12 +240,36 @@ describe("clans", () => {
     await assert.rejects(() => community.createClan(carol, "3RD", "Impostors"), /tag_taken/);
   });
 
-  it("will not let the last leader orphan a tag", async () => {
-    await assert.rejects(() => community.leaveClan(alice), /promote_first/);
-    await community.leaveClan(bob);
-    // Alone now, so leaving disbands rather than stranding the clan.
+  it("hands leadership on when the leader leaves, and disbands when nobody is left", async () => {
+    // The leader leaving used to be REFUSED (`promote_first`) with no promote
+    // endpoint in existence, so any stranger joining trapped the founder and
+    // their tag forever. Succession is automatic and goes to the
+    // longest-standing member.
     await community.leaveClan(alice);
+    assert.equal(await community.clanOf(alice), null, "the leader did not leave");
+    const clan = await community.clanByTag("3RD");
+    assert.equal(clan?.memberCount, 1, "the clan should survive its founder");
+    assert.equal(
+      clan?.members[0]?.role,
+      "leader",
+      "the remaining member must be promoted, or the clan has no leader"
+    );
+
+    // Alone now, so leaving disbands rather than stranding the clan.
+    await community.leaveClan(bob);
     assert.equal(await community.clanByTag("3RD"), null);
+  });
+
+  it("lets a leader choose their successor without leaving", async () => {
+    await community.createClan(alice, "4th", "Fourth");
+    await community.joinClan(bob, "4th");
+    await assert.rejects(() => community.promoteClanMember(bob, alice), /not_leader/);
+    await assert.rejects(() => community.promoteClanMember(alice, carol), /not_a_member/);
+    await community.promoteClanMember(alice, bob);
+    const clan = await community.clanByTag("4TH");
+    const roleOf = (id: number) => clan?.members.find((m) => m.id === id)?.role;
+    assert.equal(roleOf(bob), "leader");
+    assert.equal(roleOf(alice), "member", "there must never be two leaders");
   });
 });
 

@@ -51,13 +51,22 @@ export function requireSecrets(): void {
   const missing: string[] = [];
   if (!process.env.JWT_SECRET) missing.push("JWT_SECRET");
   if (!process.env.AUTH_SALT) missing.push("AUTH_SALT");
+  // Conditional on Discord being configured, because the OAuth router is the
+  // only thing that reads it — but it is not optional there: @colyseus/auth
+  // builds an express-session with `secret: process.env.SESSION_SECRET`, and
+  // express-session errors on EVERY request when that is undefined, so the whole
+  // Discord dance 500s with nothing pointing at the cause.
+  const oauthConfigured = configuredProviders().length > 0;
+  if (oauthConfigured && !process.env.SESSION_SECRET) missing.push("SESSION_SECRET");
   if (missing.length > 0) {
     throw new Error(
       `Refusing to start: ${missing.join(" and ")} must be set.\n` +
         `  JWT_SECRET signs session tokens; unset, anyone can forge one.\n` +
         `  AUTH_SALT salts password hashes; unset, @colyseus/auth uses a salt\n` +
         `  that is published in the package source.\n` +
-        `Generate both with: node -e "console.log(crypto.randomUUID())"`
+        `  SESSION_SECRET signs the OAuth state cookie; required whenever a\n` +
+        `  provider is configured, or every provider request fails.\n` +
+        `Generate each with: node -e "console.log(crypto.randomUUID())"`
     );
   }
   if ((process.env.JWT_SECRET ?? "").length < 24) {
@@ -97,7 +106,10 @@ export function configureAuth({ repository, sendEmail }: AuthDeps): void {
   auth.settings.onGenerateToken = async (userdata: unknown) => {
     const id = (userdata as { id?: number }).id;
     if (typeof id !== "number") throw new Error("cannot sign a token without an account id");
-    return await JWT.sign({ id }, { expiresIn: TOKEN_TTL });
+    // The token version rides along so a password reset can invalidate every
+    // token issued before it — see accountFromToken.
+    const version = await repository.tokenVersionOf(id);
+    return await JWT.sign({ id, v: version }, { expiresIn: TOKEN_TTL });
   };
 
   auth.settings.onParseToken = async (payload: unknown) => {
@@ -149,6 +161,9 @@ export function configureAuth({ repository, sendEmail }: AuthDeps): void {
   };
 
   auth.settings.onResetPassword = async (email: string, passwordHash: string) => {
+    // Bumps the token version in the same statement, so every session issued
+    // before the reset stops working. Without it the standard remedy for a
+    // compromised account leaves the attacker's 30-day token valid.
     await repository.setPasswordByEmail(email, passwordHash);
   };
 
@@ -186,9 +201,16 @@ export async function accountFromToken(
   repository: AccountRepository,
   payload: unknown
 ): Promise<Account | null> {
-  const id = (payload as { id?: unknown } | null)?.id;
+  const claims = payload as { id?: unknown; v?: unknown } | null;
+  const id = claims?.id;
   if (typeof id !== "number") return null;
   const row = await repository.findById(id);
   if (row === undefined) return null;
+  // A token minted before a password reset carries the older version and is
+  // refused. Tokens signed before this column existed carry no `v` at all;
+  // those are accepted against version 0, so nobody is logged out by the
+  // migration itself.
+  const version = typeof claims?.v === "number" ? claims.v : 0;
+  if (version !== row.token_version) return null;
   return toAccount(row);
 }

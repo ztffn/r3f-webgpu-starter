@@ -107,7 +107,11 @@ describe("an empty database", () => {
     // cheapest check that the new aggregates are valid statements at all.
     assert.deepEqual(await stats.weapons(), []);
     assert.deepEqual(await stats.maps(), []);
-    assert.deepEqual((await stats.leaderboard()).length, 2);
+    // An account that has never played is not RANKED. It used to be listed with
+    // zero points, which both padded the board with people who had not earned a
+    // place and made the query O(population) on a public route; the page has its
+    // own "nobody ranked yet" state for this.
+    assert.deepEqual(await stats.leaderboard(), []);
   });
 });
 

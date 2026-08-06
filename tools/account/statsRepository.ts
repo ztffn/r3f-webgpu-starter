@@ -27,6 +27,15 @@ import {
 import type { TierId } from "../../src/account/tiers.ts";
 import type { AccountDb } from "./database.ts";
 
+/**
+ * How many accounts the board is willing to SCORE in one request.
+ *
+ * The bound exists because scoring is TypeScript and the route is public; the
+ * pool is ordered by an upper bound on points, so the real leaders are always
+ * inside it. Ten times the largest board anyone asks for.
+ */
+const CANDIDATE_POOL = 500;
+
 export interface LeaderboardEntry {
   rank: number;
   id: number;
@@ -87,6 +96,22 @@ export class StatsRepository {
    * disposable, and ranking them rewards clearing your storage. The exclusion is
    * in the aggregate joins too, so their rows are never even summed.
    */
+  /**
+   * The scored board.
+   *
+   * `rankPoints` is TypeScript, so the SCORING cannot move into SQL — but the
+   * candidate set can be bounded, and on a public unauthenticated route it has
+   * to be: reading every non-guest account to score it in JavaScript is
+   * O(population) per request (design record §5.7 category 3).
+   *
+   * Two bounds, both safe. An account with no career and no participation scores
+   * exactly zero — every term of `rankPoints` is non-negative and derived from
+   * kills, wins or hours — so filtering those out cannot remove anybody who
+   * would have placed. And the rest are ordered by an SQL UPPER BOUND on their
+   * points (`wins <= matches`, `hours * 2 = seconds / 1800`, `reach <= 2`) and
+   * capped, so the pool always contains the real leaders. Truncation is logged
+   * rather than silent.
+   */
   async leaderboard(limit = 50): Promise<LeaderboardEntry[]> {
     const players = await this.db
       .selectFrom("users")
@@ -105,8 +130,35 @@ export class StatsRepository {
         "career.longest_shot_metres",
       ])
       .where("users.anonymous", "=", 0)
+      .where((eb) =>
+        eb.or([
+          eb("career.kills", ">", 0),
+          eb("career.matches", ">", 0),
+          eb("career.time_played_seconds", ">", 0),
+          // Participation is its own activity source — `wins` come from here and
+          // not from `career` — so a player with match rows and an untouched
+          // career still belongs on the board.
+          eb.exists(
+            eb
+              .selectFrom("match_participation")
+              .select("match_participation.user_id")
+              .whereRef("match_participation.user_id", "=", "users.id")
+          ),
+        ])
+      )
+      .orderBy(
+        sql`coalesce(career.kills, 0) * 2 + coalesce(career.matches, 0) * 10 + coalesce(career.time_played_seconds, 0) / 1800.0`,
+        "desc"
+      )
+      .limit(CANDIDATE_POOL)
       .execute();
     if (players.length === 0) return [];
+    if (players.length === CANDIDATE_POOL) {
+      console.warn(
+        `[stats] leaderboard candidate pool hit its cap of ${CANDIDATE_POOL}; ` +
+          `players outside the top ${CANDIDATE_POOL} by potential points were not scored.`
+      );
+    }
 
     const [participation, fatalRanges] = await Promise.all([
       this.db
@@ -302,67 +354,82 @@ export class StatsRepository {
    * 16-player match counted sixteen times as much as a duel, and the reported
    * "median range" was not the median of anything.
    */
+  /**
+   * Per-map figures, COUNTED IN SQL.
+   *
+   * This is a public unauthenticated route, so the cost has to be bounded by the
+   * number of maps rather than by the number of rows: reading every
+   * `match_participation` row into JavaScript to group it is a denial of service
+   * waiting for a population (design record §5.7 category 3, and the previous
+   * shape of this method contradicted the claim the stats record makes about it).
+   *
+   * The medians are the one thing left in JS, and deliberately: a median needs
+   * the values, and the read is narrowed to `fatal = 1` engagement ranges joined
+   * to their map — the same rows the weapons page already reads.
+   */
   async maps(): Promise<MapRow[]> {
-    const [participation, fatal] = await Promise.all([
+    const [grouped, fatal] = await Promise.all([
       this.db
         .selectFrom("match_participation")
-        .select([
+        .select((eb) => [
           "map",
-          "match_id",
-          "user_id",
-          "joined_at",
-          "left_at",
-          "prone_ms",
-          "moving_ms",
+          eb.fn.count<number>("match_id").distinct().as("matches"),
+          eb.fn.count<number>("user_id").distinct().as("players"),
+          eb.fn.sum<number>("prone_ms").as("prone_ms"),
+          eb.fn.sum<number>("moving_ms").as("moving_ms"),
+          // Average match length in minutes. `julianday` is SQLite's date
+          // arithmetic; the day-to-minute factor is the 1440 below.
+          sql<number | null>`avg((julianday(left_at) - julianday(joined_at)) * 1440)`.as(
+            "average_minutes"
+          ),
         ])
+        .groupBy("map")
+        .orderBy("matches", "desc")
         .execute(),
+      // Only the fatal rows, and each one ONCE — the map comes from a scalar
+      // subquery rather than a join, because joining `match_participation`
+      // repeats every engagement once per player in that match. That is the
+      // 200-vs-550 median bug the review found: a join that changed the answer,
+      // not just the cost (design record §5.7 category 4), and the tests below
+      // pin it. `distinctOn` would also fix it and is Postgres-only.
       this.db
         .selectFrom("engagements")
-        .select(["match_id", "range_metres"])
-        .where("fatal", "=", 1)
+        .select((eb) => [
+          "engagements.range_metres as range_metres",
+          eb
+            .selectFrom("match_participation")
+            .select("match_participation.map")
+            .whereRef("match_participation.match_id", "=", "engagements.match_id")
+            .limit(1)
+            .as("map"),
+        ])
+        .where("engagements.fatal", "=", 1)
         .execute(),
     ]);
-    if (participation.length === 0) return [];
-
-    // One entry per match, so an engagement is attributed once.
-    const mapOfMatch = new Map<string, string>();
-    const byMap = new Map<string, typeof participation>();
-    for (const row of participation) {
-      mapOfMatch.set(row.match_id, row.map);
-      const bucket = byMap.get(row.map);
-      if (bucket === undefined) byMap.set(row.map, [row]);
-      else bucket.push(row);
-    }
+    if (grouped.length === 0) return [];
 
     const rangesByMap = new Map<string, number[]>();
     for (const row of fatal) {
-      const map = mapOfMatch.get(row.match_id);
-      if (map === undefined) continue;
-      const bucket = rangesByMap.get(map);
-      if (bucket === undefined) rangesByMap.set(map, [row.range_metres]);
+      // An engagement whose match has no participation row has no map to belong
+      // to; counting it against every map would be worse than dropping it.
+      if (row.map === null) continue;
+      const bucket = rangesByMap.get(row.map);
+      if (bucket === undefined) rangesByMap.set(row.map, [row.range_metres]);
       else bucket.push(row.range_metres);
     }
 
-    return [...byMap.entries()]
-      .map(([map, rows]) => {
-        const durations = rows.map(
-          (row) => (Date.parse(row.left_at) - Date.parse(row.joined_at)) / 60000
-        );
-        const prone = rows.reduce((total, row) => total + row.prone_ms, 0);
-        const moving = rows.reduce((total, row) => total + row.moving_ms, 0);
-        return {
-          map,
-          matches: new Set(rows.map((row) => row.match_id)).size,
-          players: new Set(rows.map((row) => row.user_id)).size,
-          averageMatchMinutes:
-            durations.length === 0
-              ? null
-              : durations.reduce((a, b) => a + b, 0) / durations.length,
-          medianRangeMetres: median(rangesByMap.get(map) ?? []),
-          proneShare: prone + moving === 0 ? null : prone / (prone + moving),
-        };
-      })
-      .sort((a, b) => b.matches - a.matches);
+    return grouped.map((row) => {
+      const prone = Number(row.prone_ms ?? 0);
+      const moving = Number(row.moving_ms ?? 0);
+      return {
+        map: row.map,
+        matches: Number(row.matches),
+        players: Number(row.players),
+        averageMatchMinutes: row.average_minutes === null ? null : Number(row.average_minutes),
+        medianRangeMetres: median(rangesByMap.get(row.map) ?? []),
+        proneShare: prone + moving === 0 ? null : prone / (prone + moving),
+      };
+    });
   }
 }
 

@@ -40,10 +40,37 @@ export interface CommunityApiDeps {
   presence: () => ReadonlyMap<number, string>;
 }
 
+/**
+ * Refusals whose reason may be told to the caller.
+ *
+ * Everything else answers with its status and NO reason. The distinction is a
+ * privacy one: `blocked` tells an author they were blocked, which is the fact
+ * `friendState` deliberately hides by reporting "none" to a blocked viewer —
+ * two halves of one product decision that disagreed. Rate-limit and validation
+ * reasons are safe and useful, so those stay.
+ */
+const TELLABLE = new Set([
+  "too_many",
+  "too_many_here",
+  "too_many_requests",
+  "no_such_player",
+  "no_such_post",
+  "no_such_clan",
+  "not_a_member",
+  "not_in_clan",
+  "already_in_clan",
+  "already_leader",
+  "tag_taken",
+  "cannot_block_self",
+  "cannot_friend_self",
+  "clan_full",
+]);
+
 /** Map a repository refusal to a status, leaving anything else to Express. */
 function fail(res: Response, error: unknown): void {
   if (error instanceof CommunityError) {
-    res.status(error.status).json({ error: error.message });
+    const reason = TELLABLE.has(error.message) ? error.message : "refused";
+    res.status(error.status).json({ error: reason });
     return;
   }
   throw error;
@@ -164,8 +191,14 @@ export function createCommunityRouter({
   router.post("/players/:id/friend/accept", authed, async (req: Request, res: Response) => {
     const id = idOf(req);
     if (id === null) return void res.status(400).json({ error: "bad_id" });
+    const account = accountOf(req);
+    // Gated like the request side. Without this a guest could not SEND a request
+    // but could accept one, and `GET /friends` then handed them the friends-only
+    // presence that `friends` is the capability for.
+    const tier = effectiveTier(account.tier, account.tierExpiresAt, new Date());
+    if (!can(tier, "friends")) return void res.status(403).json({ error: "needs_account" });
     try {
-      await community.acceptFriend(accountOf(req).id, id);
+      await community.acceptFriend(account.id, id);
       res.json({ state: "friends" });
     } catch (error) {
       fail(res, error);
@@ -207,6 +240,11 @@ export function createCommunityRouter({
    */
   router.get("/friends", authed, async (req: Request, res: Response) => {
     const account = accountOf(req);
+    // Same gate as request and accept: presence is what `friends` buys, so the
+    // read has to check it too or the capability is enforced on two of three
+    // routes and the third is the one that returns the data.
+    const tier = effectiveTier(account.tier, account.tierExpiresAt, new Date());
+    if (!can(tier, "friends")) return void res.status(403).json({ error: "needs_account" });
     const [friends, incoming] = await Promise.all([
       community.friends(account.id),
       community.incomingRequests(account.id),
@@ -253,6 +291,25 @@ export function createCommunityRouter({
   router.post("/clans/:tag/join", authed, async (req: Request, res: Response) => {
     try {
       await community.joinClan(accountOf(req).id, String(req.params.tag));
+      res.json({ ok: true });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /**
+   * Hand the clan to another member.
+   *
+   * The counterpart to leaving: leaving auto-promotes the longest-standing
+   * member, this is how a leader CHOOSES their successor while staying in.
+   */
+  router.post("/clan/promote", authed, async (req: Request, res: Response) => {
+    const memberId = Number((req.body as { memberId?: unknown }).memberId);
+    if (!Number.isInteger(memberId) || memberId <= 0) {
+      return void res.status(400).json({ error: "bad_id" });
+    }
+    try {
+      await community.promoteClanMember(accountOf(req).id, memberId);
       res.json({ ok: true });
     } catch (error) {
       fail(res, error);

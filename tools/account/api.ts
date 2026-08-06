@@ -11,9 +11,9 @@
 
 import express, { type Request, type Response, type Router } from "express";
 import { auth } from "@colyseus/auth";
-import { effectiveTier } from "../../src/account/accountTypes.ts";
+import { effectiveTier, validateCallsign } from "../../src/account/accountTypes.ts";
 import { validateCharacter, coerceCharacter } from "../../src/account/characters.ts";
-import { TIERS, type TierId } from "../../src/account/tiers.ts";
+import { can, TIERS, type TierId } from "../../src/account/tiers.ts";
 import { accountOf, requireAccount } from "./authMiddleware.ts";
 import type { AccountRepository } from "./repository.ts";
 
@@ -107,12 +107,28 @@ export function createApiRouter({
     if (typeof callsign !== "string") {
       return void res.status(400).json({ error: "callsign_required" });
     }
+    // A NAME IS A CAPABILITY. `persistentName` is what the tier table sells and
+    // nothing checked it: `POST /auth/anonymous` then this endpoint let an
+    // unregistered visitor claim any callsign against a UNIQUE column, with no
+    // release path — permanent squatting, and it also erased the `recruit-`
+    // prefix that is how a guest is identifiable as one.
+    const tier = effectiveTier(account.tier, account.tierExpiresAt, new Date());
+    if (!can(tier, "persistentName")) {
+      return void res.status(403).json({ error: "register_to_choose_a_callsign" });
+    }
+    // Validated HERE, so the only thing left for the catch below is an
+    // unexpected failure — and an unexpected failure must not hand the client
+    // driver text, which spells out the table and column on a lost unique race.
+    const problem = validateCallsign(callsign);
+    if (problem !== null) return void res.status(400).json({ error: problem.message });
     try {
       await repository.setCallsign(account.id, callsign);
     } catch (error) {
-      // Validation and uniqueness both surface as a 400 with the reason, because
-      // the form needs to say which it was.
-      return void res.status(400).json({ error: (error as Error).message });
+      const taken = error instanceof Error && error.message === "callsign_taken";
+      if (!taken) console.error("[accounts] setCallsign failed:", error);
+      return void res
+        .status(taken ? 400 : 500)
+        .json({ error: taken ? "callsign_taken" : "server_error" });
     }
     const updated = await repository.findById(account.id);
     res.json({ callsign: updated?.callsign ?? callsign });
@@ -196,3 +212,4 @@ export function createApiRouter({
 
   return router;
 }
+

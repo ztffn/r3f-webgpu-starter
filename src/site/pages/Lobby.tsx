@@ -30,6 +30,14 @@ const POLL_MS = 5000;
 const describeJoin = (failure: unknown) => {
   if (failure instanceof AccountError && failure.status === 404) return "No game with that code.";
   if (failure instanceof AccountError && failure.status === 409) return "That game is full.";
+  // Joining by code is an ENLISTED capability, so the endpoint refuses a guest —
+  // and the endpoint is the gate, not this message.
+  if (failure instanceof AccountError && failure.status === 403) {
+    return "Register a free account to join by invite code.";
+  }
+  if (failure instanceof AccountError && failure.status === 401) {
+    return "Sign in to join by invite code.";
+  }
   return "Could not join.";
 };
 

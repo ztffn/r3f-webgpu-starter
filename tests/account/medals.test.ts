@@ -111,10 +111,38 @@ describe("syncMedals", () => {
     });
     // One match, then eight more: the tenth is what earns Ten Deep, and the
     // already-held first-deployment must not be reported as fresh again.
-    await repo.recordSession(account.id, 10);
+    // Sessions are 60 s because a session under 30 s is not a match — see below.
+    await repo.recordSession(account.id, 60);
     assert.deepEqual(await repo.syncMedals(account.id), ["first-deployment"]);
-    for (let i = 0; i < 9; i += 1) await repo.recordSession(account.id, 10);
+    for (let i = 0; i < 9; i += 1) await repo.recordSession(account.id, 60);
     assert.deepEqual(await repo.syncMedals(account.id), ["veteran-10"]);
+  });
+
+  it("cannot be farmed by a join/leave loop", async () => {
+    const account = await repo.registerWithEmailAndPassword({
+      email: "loop@example.com",
+      passwordHash: "x".repeat(128),
+      callsign: "LoopTest",
+    });
+    // MEASURED before the floor existed: 60 zero-length sessions credited 60
+    // matches and awarded first-deployment, veteran-10 and veteran-50 — three of
+    // the five earnable medals, and the top of the only board anything writes,
+    // from a script that just connected and disconnected.
+    for (let i = 0; i < 60; i += 1) await repo.recordSession(account.id, 0);
+    const career = await repo.career(account.id);
+    assert.equal(career.matches, 0, "a zero-length session is not a match played");
+    assert.deepEqual(await repo.syncMedals(account.id), []);
+
+    // Time played is still credited in full: it is a truthful sum either way, and
+    // the cap in the game server bounds the parked-socket case.
+    await repo.recordSession(account.id, 20);
+    assert.equal((await repo.career(account.id)).timePlayedSeconds, 20);
+    assert.equal((await repo.career(account.id)).matches, 0);
+
+    // And a real match still counts.
+    await repo.recordSession(account.id, 30);
+    assert.equal((await repo.career(account.id)).matches, 1);
+    assert.deepEqual(await repo.syncMedals(account.id), ["first-deployment"]);
   });
 });
 

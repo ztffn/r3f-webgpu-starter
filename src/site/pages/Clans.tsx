@@ -159,7 +159,7 @@ export function ClanPage() {
   const { me, refresh } = useAuth();
   const [clan, setClan] = useState<ClanRecord | null>(null);
   const [missing, setMissing] = useState(false);
-  const action = useAsyncAction<"join" | "leave">(describe);
+  const action = useAsyncAction<"join" | "leave" | "promote">(describe);
   useDocumentTitle(clan === null ? "Clan" : `[${clan.tag}] ${clan.name}`);
 
   const load = useCallback(async () => {
@@ -194,6 +194,9 @@ export function ClanPage() {
   }
 
   const mine = me !== null && clan.members.some((member) => member.id === me.account.id);
+  const isLeader =
+    me !== null &&
+    clan.members.some((member) => member.id === me.account.id && member.role === "leader");
 
   return (
     <>
@@ -218,6 +221,25 @@ export function ClanPage() {
               <li key={member.id}>
                 <Link to={`/players/${member.id}`}>{member.callsign}</Link>
                 <span className="clan-role">{member.role}</span>
+                {/* Only a leader sees this, and only against someone else:
+                    handing the clan on is how a leader stays in it and stops
+                    being the one who cannot leave. */}
+                {isLeader && member.id !== me?.account.id && (
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    data-dev={`clan-promote-${member.id}`}
+                    disabled={action.busy !== null}
+                    onClick={() =>
+                      void action.run("promote", async () => {
+                        await accountClient.promoteClanMember(member.id);
+                        await load();
+                      })
+                    }
+                  >
+                    {action.busy === "promote" ? "Promoting…" : "Make leader"}
+                  </button>
+                )}
               </li>
             ))}
           </ul>

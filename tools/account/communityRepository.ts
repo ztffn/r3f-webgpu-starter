@@ -14,6 +14,7 @@ import {
   POSTS_PER_HOUR,
   POSTS_PER_WALL_PER_HOUR,
   OUTGOING_REQUESTS_MAX,
+  REQUESTS_PER_HOUR,
   normaliseClanName,
   normaliseClanTag,
   normalisePost,
@@ -117,12 +118,12 @@ export class CommunityRepository {
 
     const since = hourAgoIso();
     if (authorId !== profileId) {
-      const onThisWall = await this.countPosts(authorId, since, profileId);
+      const onThisWall = await this.countActions(authorId, "post", since, profileId);
       if (onThisWall >= POSTS_PER_WALL_PER_HOUR) {
         throw new CommunityError("too_many_here", 429);
       }
     }
-    const total = await this.countPosts(authorId, since, null);
+    const total = await this.countActions(authorId, "post", since, null);
     if (total >= POSTS_PER_HOUR) throw new CommunityError("too_many", 429);
 
     const created = nowIso();
@@ -136,6 +137,9 @@ export class CommunityRepository {
       })
       .returningAll()
       .executeTakeFirstOrThrow();
+    // Logged AFTER the insert so a failed post costs no quota, and logged at all
+    // because the limits above must not be resettable — see logAction.
+    await this.logAction(authorId, "post", profileId);
     const author = await this.db
       .selectFrom("users")
       .select(["callsign", "tier"])
@@ -172,17 +176,39 @@ export class CommunityRepository {
     await this.db.deleteFrom("profile_posts").where("id", "=", postId).execute();
   }
 
-  private async countPosts(
-    authorId: number,
+  /**
+   * Record a rate-limited action. Append-only, and that is the whole point.
+   *
+   * The limits used to count LIVE rows — `profile_posts` for the wall limits,
+   * pending `friendships` for the request limit — so both were resettable by the
+   * actor: deleting your own posts cleared the per-wall limit that exists to stop
+   * harassment, and withdrawing a request cleared the spam bound. Counting a log
+   * nobody can delete is the fix.
+   */
+  private async logAction(
+    userId: number,
+    action: "post" | "friend_request",
+    targetId: number | null
+  ): Promise<void> {
+    await this.db
+      .insertInto("action_log")
+      .values({ user_id: userId, action, target_id: targetId, at: nowIso() })
+      .execute();
+  }
+
+  private async countActions(
+    userId: number,
+    action: "post" | "friend_request",
     since: string,
-    profileId: number | null
+    targetId: number | null
   ): Promise<number> {
     let query = this.db
-      .selectFrom("profile_posts")
+      .selectFrom("action_log")
       .select((eb) => eb.fn.countAll<number>().as("count"))
-      .where("author_id", "=", authorId)
-      .where("created_at", ">=", since);
-    if (profileId !== null) query = query.where("profile_id", "=", profileId);
+      .where("user_id", "=", userId)
+      .where("action", "=", action)
+      .where("at", ">=", since);
+    if (targetId !== null) query = query.where("target_id", "=", targetId);
     const row = await query.executeTakeFirst();
     return Number(row?.count ?? 0);
   }
@@ -259,6 +285,11 @@ export class CommunityRepository {
       return "pending_out";
     }
 
+    // TWO bounds, because they answer different questions and the first one
+    // alone was resettable. Concurrency: how many requests may be outstanding at
+    // once. Rate: how many may be SENT in an hour — counted from the append-only
+    // log, because request-then-withdraw-then-request cleared the pending count
+    // and let one account notify a stranger without limit.
     const outgoing = await this.db
       .selectFrom("friendships")
       .select((eb) => eb.fn.countAll<number>().as("count"))
@@ -266,6 +297,15 @@ export class CommunityRepository {
       .where("state", "=", "pending")
       .executeTakeFirst();
     if (Number(outgoing?.count ?? 0) >= OUTGOING_REQUESTS_MAX) {
+      throw new CommunityError("too_many_requests", 429);
+    }
+    const sentThisHour = await this.countActions(
+      requesterId,
+      "friend_request",
+      hourAgoIso(),
+      null
+    );
+    if (sentThisHour >= REQUESTS_PER_HOUR) {
       throw new CommunityError("too_many_requests", 429);
     }
 
@@ -290,6 +330,8 @@ export class CommunityRepository {
       if (!isUniqueViolation(error)) throw error;
       return await this.friendState(requesterId, addresseeId);
     }
+    // After the insert, so a refused request costs no quota.
+    await this.logAction(requesterId, "friend_request", addresseeId);
     return "pending_out";
   }
 
@@ -401,16 +443,61 @@ export class CommunityRepository {
     if (taken !== undefined) throw new CommunityError("tag_taken");
 
     const created = nowIso();
-    const clan = await this.db
-      .insertInto("clans")
-      .values({ tag: cleanTag, name: cleanName, founder_id: founderId, created_at: created })
-      .returningAll()
-      .executeTakeFirstOrThrow();
-    await this.db
-      .insertInto("clan_members")
-      .values({ clan_id: clan.id, user_id: founderId, role: "leader", joined_at: created })
-      .execute();
+    // ONE transaction. Two statements meant a lost race on `clan_members`'
+    // unique(user_id) — the same account creating two clans at once — left the
+    // clans row behind with no members: a tag permanently taken and unreachable
+    // by leaveClan, which starts from a membership row.
+    await this.db.transaction().execute(async (tx) => {
+      const clan = await tx
+        .insertInto("clans")
+        .values({ tag: cleanTag, name: cleanName, founder_id: founderId, created_at: created })
+        .returningAll()
+        .executeTakeFirstOrThrow();
+      await tx
+        .insertInto("clan_members")
+        .values({ clan_id: clan.id, user_id: founderId, role: "leader", joined_at: created })
+        .execute();
+    });
     return (await this.clanByTag(cleanTag))!;
+  }
+
+  /**
+   * Hand leadership to another member.
+   *
+   * Exists because `leaveClan` refuses a leader with members and there was no
+   * way to satisfy it: no promote, no kick, and joining is open to anyone — so a
+   * stranger joining permanently trapped the founder, and their tag with them.
+   */
+  async promoteClanMember(leaderId: number, memberId: number): Promise<void> {
+    const leader = await this.db
+      .selectFrom("clan_members")
+      .selectAll()
+      .where("user_id", "=", leaderId)
+      .executeTakeFirst();
+    if (leader === undefined) throw new CommunityError("not_in_clan");
+    if (leader.role !== "leader") throw new CommunityError("not_leader", 403);
+    if (memberId === leaderId) throw new CommunityError("already_leader");
+    const member = await this.db
+      .selectFrom("clan_members")
+      .selectAll()
+      .where("user_id", "=", memberId)
+      .where("clan_id", "=", leader.clan_id)
+      .executeTakeFirst();
+    if (member === undefined) throw new CommunityError("not_a_member", 404);
+    // Both rows in one transaction: a clan with two leaders and a clan with none
+    // are both states nothing else in this file knows how to resolve.
+    await this.db.transaction().execute(async (tx) => {
+      await tx
+        .updateTable("clan_members")
+        .set({ role: "leader" })
+        .where("user_id", "=", memberId)
+        .execute();
+      await tx
+        .updateTable("clan_members")
+        .set({ role: "member" })
+        .where("user_id", "=", leaderId)
+        .execute();
+    });
   }
 
   async clanByTag(tag: string): Promise<Clan | null> {
@@ -489,15 +576,36 @@ export class CommunityRepository {
       .executeTakeFirst();
     if (membership === undefined) throw new CommunityError("not_in_clan");
     if (membership.role === "leader") {
-      const others = await this.db
+      // A leader leaving hands the clan to its longest-standing other member
+      // rather than refusing. It used to throw `promote_first` with no promote
+      // endpoint in existence, so any stranger joining trapped the founder
+      // forever — they could not leave, disband, or found another, and the tag
+      // could never be released. Automatic succession keeps the clan alive and
+      // needs no second call; `promoteClanMember` is for choosing WHO.
+      const heir = await this.db
         .selectFrom("clan_members")
-        .select((eb) => eb.fn.countAll<number>().as("count"))
+        .selectAll()
         .where("clan_id", "=", membership.clan_id)
         .where("user_id", "!=", userId)
+        .orderBy("joined_at", "asc")
         .executeTakeFirst();
-      if (Number(others?.count ?? 0) > 0) throw new CommunityError("promote_first");
-      // Last member out disbands it, so a tag is never orphaned.
-      await this.db.deleteFrom("clans").where("id", "=", membership.clan_id).execute();
+      if (heir === undefined) {
+        // Last member out disbands it, so a tag is never orphaned.
+        await this.db.deleteFrom("clans").where("id", "=", membership.clan_id).execute();
+        return;
+      }
+      await this.db.transaction().execute(async (tx) => {
+        await tx
+          .updateTable("clan_members")
+          .set({ role: "leader" })
+          .where("user_id", "=", heir.user_id)
+          .execute();
+        await tx
+          .deleteFrom("clan_members")
+          .where("clan_id", "=", membership.clan_id)
+          .where("user_id", "=", userId)
+          .execute();
+      });
       return;
     }
     await this.db

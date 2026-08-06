@@ -21,7 +21,13 @@ export const CLAN_NAME_MAX = 32;
 /** Rate limits, enforced server-side. The client never sees these fire. */
 export const POSTS_PER_HOUR = 10;
 export const POSTS_PER_WALL_PER_HOUR = 3;
+/**
+ * How many requests may be OUTSTANDING at once — a concurrency bound, not a rate.
+ * Both are needed: this one alone was resettable by withdrawing a request.
+ */
 export const OUTGOING_REQUESTS_MAX = 50;
+/** How many requests may be SENT per hour, counted from the append-only log. */
+export const REQUESTS_PER_HOUR = 30;
 
 /** One note on someone's wall, as the client sees it. */
 export interface ProfilePost {

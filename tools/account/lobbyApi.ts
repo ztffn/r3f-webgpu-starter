@@ -70,7 +70,7 @@ export function createLobbyRouter({ repository }: LobbyApiDeps): Router {
     } catch (error) {
       // The matchmaker being unavailable is not the account API's problem, and a
       // 503 with a reason beats an empty list that looks like "no servers".
-      res.status(503).json({ error: "matchmaker_unavailable", detail: String(error) });
+      fail(res, error);
     }
   });
 
@@ -81,26 +81,39 @@ export function createLobbyRouter({ repository }: LobbyApiDeps): Router {
    * from memory. A wrong code returns 404 with nothing else — no hint about
    * whether a room exists, since the code IS the access control.
    */
-  router.post("/join-code", async (req: Request, res: Response) => {
-    const raw = (req.body as { code?: unknown }).code;
-    if (typeof raw !== "string" || raw.trim() === "") {
-      return void res.status(400).json({ error: "code_required" });
-    }
-    const code = normaliseJoinCode(raw);
-    try {
-      const rooms = await matchMaker.query({ name: GAME_ROOM });
-      const match = rooms.find(
-        (room) => ((room.metadata ?? {}) as Partial<RoomMetadata>).joinCode === code
-      );
-      if (match === undefined) return void res.status(404).json({ error: "no_such_game" });
-      if (match.clients >= match.maxClients) {
-        return void res.status(409).json({ error: "game_full" });
+  router.post(
+    "/join-code",
+    // AUTHENTICATED, because `joinPrivateGame` is an enlisted capability that
+    // nothing checked — the endpoint was open, so an advertised perk was
+    // enforced nowhere. It is also what makes a code-guessing sweep attributable
+    // to an account rather than to nobody.
+    [auth.middleware(), requireAccount(repository)],
+    async (req: Request, res: Response) => {
+      const account = accountOf(req);
+      const tier = effectiveTier(account.tier, account.tierExpiresAt, new Date());
+      if (!can(tier, "joinPrivateGame")) {
+        return void res.status(403).json({ error: "register_to_join_private_games" });
       }
-      res.json({ roomId: match.roomId });
-    } catch (error) {
-      res.status(503).json({ error: "matchmaker_unavailable", detail: String(error) });
+      const raw = (req.body as { code?: unknown }).code;
+      if (typeof raw !== "string" || raw.trim() === "") {
+        return void res.status(400).json({ error: "code_required" });
+      }
+      const code = normaliseJoinCode(raw);
+      try {
+        const rooms = await matchMaker.query({ name: GAME_ROOM });
+        const match = rooms.find(
+          (room) => ((room.metadata ?? {}) as Partial<RoomMetadata>).joinCode === code
+        );
+        if (match === undefined) return void res.status(404).json({ error: "no_such_game" });
+        if (match.clients >= match.maxClients) {
+          return void res.status(409).json({ error: "game_full" });
+        }
+        res.json({ roomId: match.roomId });
+      } catch (error) {
+        fail(res, error);
+      }
     }
-  });
+  );
 
   /**
    * Host a private game.
@@ -144,7 +157,7 @@ export function createLobbyRouter({ repository }: LobbyApiDeps): Router {
         // for it and it never lands in a fetch response someone might log.
         res.json({ roomId: room.roomId });
       } catch (error) {
-        res.status(503).json({ error: "matchmaker_unavailable", detail: String(error) });
+        fail(res, error);
       }
     }
   );
@@ -193,4 +206,17 @@ export function createLobbyRouter({ repository }: LobbyApiDeps): Router {
   });
 
   return router;
+}
+
+/**
+ * The matchmaker is unavailable, and the client learns only that.
+ *
+ * A 503 with a reason beats an empty list that reads as "no servers" — but the
+ * reason is a CATEGORY, never `String(error)`: that text is the matchmaker's own
+ * message and on some failures carries a stack. The operator still gets all of
+ * it, in the log.
+ */
+function fail(res: Response, error: unknown): void {
+  console.error("[accounts] matchmaker request failed:", error);
+  res.status(503).json({ error: "matchmaker_unavailable" });
 }

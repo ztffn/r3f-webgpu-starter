@@ -9,7 +9,7 @@
 // Modelled on the MapMakers Heaven member page: a profile is a place with an
 // owner that other people leave things on, not a readout of someone's stats.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
 import { accountClient, AccountError, type PlayerPage } from "../../account/accountClient";
 import { POST_MAX, validatePost } from "../../account/community";
@@ -78,11 +78,20 @@ export function PlayerProfile() {
 
   useDocumentTitle(page?.profile.callsign ?? "Player");
 
+  // Which id the newest request was for. A fast navigation between two profiles
+  // left the superseded promise free to write player A's record under player B's
+  // URL, because the effect below resets state but cannot cancel a fetch.
+  const wanted = useRef(playerId);
+
   const load = useCallback(async () => {
+    wanted.current = playerId;
     try {
-      setPage(await accountClient.player(playerId));
+      const result = await accountClient.player(playerId);
+      if (wanted.current !== playerId) return;
+      setPage(result);
       setFailure(null);
     } catch (problem) {
+      if (wanted.current !== playerId) return;
       setFailure(
         problem instanceof AccountError && problem.status === 404 ? "missing" : "unreachable"
       );

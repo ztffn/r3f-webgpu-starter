@@ -85,15 +85,47 @@ export function setLaunchFlag(
  * URL; any other parameter is a dev URL or a lobby join and goes straight in.
  */
 
-/** Where the funnel stops: the loadout screen in deploy mode. */
-export const LOADOUT_STOP_URL = "/character?deploy=1";
-/** Where the loadout screen's deploy goes: /play with the stop spent. */
-export const PLAY_DIRECT_URL = "/play?loadout=0";
+/** The loadout screen in deploy mode, carrying whatever /play asked for. */
+export function loadoutStopUrl(search: string): string {
+  const params = new URLSearchParams(search);
+  // The stop is spent on the way out, so `loadout` never survives the round trip
+  // and cannot bounce the player back here.
+  params.delete("loadout");
+  params.set("deploy", "1");
+  return `/character?${params.toString()}`;
+}
 
+/**
+ * /play with the stop spent, carrying the parameters the stop was reached with.
+ *
+ * Constants would have been simpler and were wrong: a dev URL that forced the
+ * stop (`?scene=weapon&loadout=1`) came back as a bare `/play?loadout=0` and
+ * silently launched the networked scope demo instead of the weapon scene.
+ */
+export function playDirectUrl(search: string): string {
+  const params = new URLSearchParams(search);
+  params.delete("deploy");
+  params.set("loadout", "0");
+  return `/play?${params.toString()}`;
+}
+
+/**
+ * Does this /play URL stop at the loadout screen first?
+ *
+ * `?loadout=1` forces the stop and `?loadout=0` spends it. Otherwise the stop
+ * happens for a URL that asks for nothing SPECIFIC — and "specific" means a
+ * parameter this app actually reads, not any parameter at all. Checking for any
+ * key let `?utm_source=discord` skip the funnel entirely, which is the same trap
+ * the root redirect already avoided by matching a list instead of a catch-all:
+ * ad platforms append those without asking.
+ */
 export function shouldStopAtLoadout(params: URLSearchParams): boolean {
   if (params.get("loadout") === "1") return true;
-  const hasOtherParams = [...params.keys()].some((key) => key !== "loadout");
-  return !hasOtherParams && params.get("loadout") !== "0";
+  if (params.get("loadout") === "0") return false;
+  for (const key of params.keys()) {
+    if (key !== "loadout" && KNOWN_LAUNCH_PARAMS.has(key)) return false;
+  }
+  return true;
 }
 
 /**

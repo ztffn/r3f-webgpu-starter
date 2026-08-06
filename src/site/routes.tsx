@@ -10,7 +10,7 @@ import { lazy, Suspense } from "react";
 import { createBrowserRouter, Navigate, useLocation } from "react-router";
 import {
   loadGameApp,
-  LOADOUT_STOP_URL,
+  loadoutStopUrl,
   ROOT_REDIRECT_PARAMS,
   shouldStopAtLoadout,
 } from "../ui/launchParams";
@@ -18,6 +18,7 @@ import { SiteLayout } from "./SiteLayout";
 import { Landing } from "./pages/Landing";
 import { Faq } from "./pages/Faq";
 import { Supporter } from "./pages/Supporter";
+import { Checkout } from "./pages/Checkout";
 import { Lobby } from "./pages/Lobby";
 import { Leaderboard } from "./pages/Leaderboard";
 import { SignIn } from "./pages/SignIn";
@@ -63,7 +64,8 @@ function LandingOrGame() {
 function Play() {
   const location = useLocation();
   if (shouldStopAtLoadout(new URLSearchParams(location.search))) {
-    return <Navigate to={LOADOUT_STOP_URL} replace />;
+    // The URL rides along, so a forced stop returns to the scene it asked for.
+    return <Navigate to={loadoutStopUrl(location.search)} replace />;
   }
   return (
     <Suspense fallback={<Booting />}>
@@ -107,6 +109,12 @@ export const router = createBrowserRouter([
       { index: true, element: <LandingOrGame /> },
       { path: "faq", element: <Faq /> },
       { path: "supporter", element: <Supporter /> },
+      // The checkout the supporter page links to once the server reports a
+      // provider is wired. It is a STUB and says so — but it has to exist, or
+      // the day `checkoutEnabled` flips the page's primary call to action lands
+      // on the 404 page, and the flag that reveals it is server-side so nothing
+      // in the client would have caught that.
+      { path: "supporter/checkout", element: <Checkout /> },
       { path: "lobby", element: <Lobby /> },
       // The board is the stats one now; the old single-stat boards live on at
       // /records so the honest empty states they carry are not lost.

@@ -48,10 +48,22 @@ export function Leaderboard() {
 
   useEffect(() => {
     setBoard(null);
+    // `stale` guards against out-of-order responses: clicking Kills then Matches
+    // and having the kills response resolve last rendered the kills board under
+    // a selected Matches tab. The cleanup runs before the next effect, so only
+    // the newest request may write.
+    let stale = false;
     accountClient
       .leaderboard(active)
-      .then(setBoard)
-      .catch(() => setError("Could not load that board."));
+      .then((rows) => {
+        if (!stale) setBoard(rows);
+      })
+      .catch(() => {
+        if (!stale) setError("Could not load that board.");
+      });
+    return () => {
+      stale = true;
+    };
   }, [active]);
 
   return (
@@ -74,15 +86,19 @@ export function Leaderboard() {
           </p>
         )}
 
-        <div className="btns row" role="tablist" aria-label="Leaderboards">
+        {/* Toggle buttons, NOT the ARIA tabs pattern. They used to claim
+            role="tab" without any of its contract — no tabpanel, no
+            aria-controls, no arrow-key navigation — so a screen reader announced
+            "tab 1 of 4" and then the arrow keys did nothing, and each button
+            carried aria-selected AND aria-pressed, reading as both a tab and a
+            toggle. Standings solves the same UI honestly with aria-pressed. */}
+        <div className="btns row" role="group" aria-label="Leaderboards">
           {(boards ?? []).map((entry) => (
             <button
               key={entry.id}
               type="button"
-              role="tab"
               className="btn btn-sm"
               data-dev={`board-${entry.id}`}
-              aria-selected={active === entry.id}
               aria-pressed={active === entry.id}
               onClick={() => setActive(entry.id)}
             >

@@ -34,6 +34,9 @@ export function Clans() {
   useDocumentTitle("Clans");
   const { me, can } = useAuth();
   const [clans, setClans] = useState<ClanSummary[] | null>(null);
+  // "Could not load" is not "none exist". Swallowing the failure into an empty
+  // array told a visitor no clans had been founded whenever the server was down.
+  const [failed, setFailed] = useState(false);
   const [tag, setTag] = useState("");
   const [name, setName] = useState("");
   const action = useAsyncAction<"found">(describe);
@@ -41,8 +44,9 @@ export function Clans() {
   const load = useCallback(async () => {
     try {
       setClans(await accountClient.clans());
+      setFailed(false);
     } catch {
-      setClans([]);
+      setFailed(true);
     }
   }, []);
 
@@ -65,7 +69,11 @@ export function Clans() {
       <div className="shell page-body auth-page">
         <section className="auth-card notched notched-sm">
           <h2 className="display display-sm">Clans</h2>
-          {clans === null ? (
+          {failed ? (
+            <p className="auth-note" data-dev="clans-failed" role="alert">
+              The clan list could not be loaded. Is the game server running?
+            </p>
+          ) : clans === null ? (
             <p className="auth-note">Loading…</p>
           ) : clans.length === 0 ? (
             <p className="auth-note" data-dev="clans-empty">
@@ -158,15 +166,27 @@ export function ClanPage() {
   const { tag } = useParams();
   const { me, refresh } = useAuth();
   const [clan, setClan] = useState<ClanRecord | null>(null);
-  const [missing, setMissing] = useState(false);
+  /**
+   * Three outcomes, like PlayerProfile: loading, gone, or unreachable.
+   *
+   * One `missing` flag conflated the last two — a network hiccup reported "no
+   * such clan" for a clan that exists — and it was never RESET, so navigating
+   * back to a good tag kept showing the not-found page until a full reload,
+   * because ClanPage is reused across `/clans/:tag` changes.
+   */
+  const [status, setStatus] = useState<"loading" | "ok" | "missing" | "failed">("loading");
   const action = useAsyncAction<"join" | "leave" | "promote">(describe);
   useDocumentTitle(clan === null ? "Clan" : `[${clan.tag}] ${clan.name}`);
 
   const load = useCallback(async () => {
+    setStatus("loading");
+    setClan(null);
     try {
       setClan(await accountClient.clan(String(tag)));
-    } catch {
-      setMissing(true);
+      setStatus("ok");
+    } catch (failure) {
+      // 404 is "no such clan"; anything else is "could not ask".
+      setStatus(failure instanceof AccountError && failure.status === 404 ? "missing" : "failed");
     }
   }, [tag]);
 
@@ -174,7 +194,7 @@ export function ClanPage() {
     void load();
   }, [load]);
 
-  if (missing) {
+  if (status === "missing") {
     return (
       <div className="shell notfound">
         <p className="eyebrow">Not found</p>
@@ -182,6 +202,18 @@ export function ClanPage() {
         <Link className="btn btn-ghost" to="/clans">
           All clans
         </Link>
+      </div>
+    );
+  }
+  if (status === "failed") {
+    return (
+      <div className="shell notfound">
+        <p className="eyebrow">Unavailable</p>
+        <h1 className="display display-lg">Could not load that clan.</h1>
+        <p className="prose">Is the game server running?</p>
+        <button className="btn btn-ghost" type="button" onClick={() => void load()}>
+          Try again
+        </button>
       </div>
     );
   }

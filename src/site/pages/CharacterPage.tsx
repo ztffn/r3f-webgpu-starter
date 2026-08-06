@@ -10,8 +10,8 @@
 // the simulation fires rather than invented bars.
 
 import { lazy, Suspense, useEffect, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router";
-import { loadGameApp, PLAY_DIRECT_URL } from "../../ui/launchParams";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
+import { loadGameApp, playDirectUrl } from "../../ui/launchParams";
 import { accountClient, AccountError } from "../../account/accountClient";
 import { useAuth } from "../../account/AuthProvider";
 import {
@@ -86,6 +86,10 @@ export function CharacterPage() {
    */
   const [searchParams] = useSearchParams();
   const deployMode = searchParams.get("deploy") === "1";
+  // Where deploying goes: /play with the stop spent and every other parameter
+  // the stop was reached with, so a dev URL that forced the stop resumes the
+  // scene it asked for rather than the default networked one.
+  const deployUrl = playDirectUrl(useLocation().search);
 
   const [draft, setDraft] = useState<Character | null>(null);
   const { busy, error, done: saved, run } = useAsyncAction<"save">(describeSave);
@@ -100,18 +104,25 @@ export function CharacterPage() {
 
   // The deploy clock. One interval; deploying is a navigation, so reaching zero
   // fires it once and the unmount clears the timer.
+  //
+  // It starts only once the account has RESOLVED. Running it during `loading`
+  // counted down behind a "Loading your loadout…" paragraph, so a slow /api/me
+  // silently ate the reading time this screen exists to give — and on a very
+  // slow one, deployed a player who never saw their kit at all.
   const [seconds, setSeconds] = useState(DEPLOY_SECONDS);
   useEffect(() => {
-    if (!deployMode) return;
+    if (!deployMode || loading) return;
     const timer = window.setInterval(
       () => setSeconds((was) => Math.max(0, was - 1)),
       1000
     );
     return () => window.clearInterval(timer);
-  }, [deployMode]);
+  }, [deployMode, loading]);
   useEffect(() => {
-    if (deployMode && seconds === 0) navigate(PLAY_DIRECT_URL);
-  }, [deployMode, seconds, navigate]);
+    // `replace`, so the auto-deploying stop does not stay in history: pressing
+    // Back to leave a match used to land here and quietly redeploy after 20 s.
+    if (deployMode && !loading && seconds === 0) navigate(deployUrl, { replace: true });
+  }, [deployMode, loading, seconds, navigate, deployUrl]);
 
   // Warm the game chunk while the countdown runs — the same thunk the /play
   // route's lazy() uses, so the split stays intact and the two cannot point at
@@ -144,6 +155,11 @@ export function CharacterPage() {
   if (draft === null) return null;
 
   const canSaveLoadout = can("savedLoadouts");
+  // A signed-out visitor at the deploy stop has no row to save to, so the
+  // appearance tiles would take input and drop it. The header's own rule is
+  // that an unusable control is disabled with the reason beside it — the weapon
+  // slots already follow it; these did not.
+  const canSaveAppearance = me !== null;
   const canInsignia = can("customInsignia");
   // The same validator the API runs, against the same effective tier — so the
   // Save button is disabled for exactly the reasons the server would refuse.
@@ -190,6 +206,7 @@ export function CharacterPage() {
               key={faction}
               type="button"
               data-dev={`faction-${faction}`}
+              disabled={!canSaveAppearance}
               aria-pressed={draft.appearance.faction === faction}
               onClick={() => setAppearance({ faction })}
             >
@@ -305,6 +322,7 @@ export function CharacterPage() {
                     type="button"
                     className="tile"
                     data-dev={`camo-${camo}`}
+                    disabled={!canSaveAppearance}
                     aria-pressed={draft.appearance.camo === camo}
                     onClick={() => setAppearance({ camo })}
                   >
@@ -335,6 +353,7 @@ export function CharacterPage() {
                   type="button"
                   className="tile tile-plain"
                   data-dev={`headgear-${item}`}
+                  disabled={!canSaveAppearance}
                   aria-pressed={draft.appearance.headgear === item}
                   onClick={() => setAppearance({ headgear: item })}
                 >
@@ -427,7 +446,7 @@ export function CharacterPage() {
                 type="button"
                 className="btn btn-primary"
                 data-dev="deploy-now"
-                onClick={() => navigate(PLAY_DIRECT_URL)}
+                onClick={() => navigate(deployUrl, { replace: true })}
               >
                 Deploy now
               </button>

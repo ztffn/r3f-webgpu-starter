@@ -25,6 +25,15 @@ export interface AsyncAction<K extends string> {
   /** Which action is in flight, or null. Compare to disable one button and test another. */
   busy: K | null;
   error: string | null;
+  /**
+   * Which action produced `error`, or null.
+   *
+   * Exists because a page with several actions and one error rendered that error
+   * wherever the markup happened to put it — a failed guest sign-in appeared
+   * under the unrelated email/password fields. Compare this to place a message
+   * beside the control that failed.
+   */
+  failed: K | null;
   /** True after a run succeeds, cleared when the next one starts. Drives "Saved." */
   done: boolean;
   /**
@@ -41,18 +50,21 @@ export function useAsyncAction<K extends string>(
 ): AsyncAction<K> {
   const [busy, setBusy] = useState<K | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [failed, setFailed] = useState<K | null>(null);
   const [done, setDone] = useState(false);
 
   const run = useCallback(
     async (kind: K, action: () => Promise<void>) => {
       setBusy(kind);
       setError(null);
+      setFailed(null);
       setDone(false);
       try {
         await action();
         setDone(true);
       } catch (failure) {
         setError(describe(failure));
+        setFailed(kind);
       } finally {
         setBusy(null);
       }
@@ -60,5 +72,5 @@ export function useAsyncAction<K extends string>(
     [describe]
   );
 
-  return { busy, error, done, run };
+  return { busy, error, failed, done, run };
 }

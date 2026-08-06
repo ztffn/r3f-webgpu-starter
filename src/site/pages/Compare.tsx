@@ -76,10 +76,21 @@ export function Compare() {
       return;
     }
     setError(null);
+    // Guarded against out-of-order responses, like the boards: a superseded
+    // comparison resolving last would render the previous pair under the new
+    // selection.
+    let stale = false;
     accountClient
       .compare(Number(a), Number(b))
-      .then(setPair)
-      .catch(() => setError("Could not load that comparison."));
+      .then((result) => {
+        if (!stale) setPair(result);
+      })
+      .catch(() => {
+        if (!stale) setError("Could not load that comparison.");
+      });
+    return () => {
+      stale = true;
+    };
   }, [a, b]);
 
   const pick = (side: "a" | "b", value: string) => {

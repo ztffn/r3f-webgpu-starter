@@ -37,16 +37,20 @@ export function Profile() {
   const { me, loading, refresh, signOut } = useAuth();
 
   const [callsign, setCallsign] = useState("");
-  const { busy, error, done: saved, run } = useAsyncAction<"rename">(describeRename);
+  const { busy, error, done: saved, run } = useAsyncAction<"rename" | "accept">(describeRename);
   const [social, setSocial] = useState<{ friends: Friend[]; incoming: Friend[] } | null>(null);
+
+  // Loaded only for a registered account (see the effect), so a failure here is a
+  // real failure rather than the guest case — reporting it as an empty roster
+  // told the player nobody had added them when the request had not arrived.
+  const [socialFailed, setSocialFailed] = useState(false);
 
   const loadFriends = useCallback(async () => {
     try {
       setSocial(await accountClient.friends());
+      setSocialFailed(false);
     } catch {
-      // A guest has no friends endpoint to speak of; an empty list is the honest
-      // render and this section simply does not appear.
-      setSocial({ friends: [], incoming: [] });
+      setSocialFailed(true);
     }
   }, []);
 
@@ -185,6 +189,15 @@ export function Profile() {
           </ul>
         </section>
 
+        {socialFailed && !account.anonymous && (
+          <section className="auth-card notched notched-sm">
+            <h2 className="display display-sm">Friends</h2>
+            <p className="auth-note" role="alert" data-dev="friends-failed">
+              Your friends list could not be loaded. Is the game server running?
+            </p>
+          </section>
+        )}
+
         {social !== null && !account.anonymous && (
           <section className="auth-card notched notched-sm">
             <h2 className="display display-sm">Friends</h2>
@@ -202,7 +215,10 @@ export function Profile() {
                         style={{ marginLeft: "auto" }}
                         data-dev={`accept-${friend.id}`}
                         onClick={() => {
-                          void accountClient.acceptFriend(friend.id).then(loadFriends);
+                          void run("accept", async () => {
+                              await accountClient.acceptFriend(friend.id);
+                              await loadFriends();
+                            });
                         }}
                       >
                         Accept

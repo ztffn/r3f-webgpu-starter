@@ -40,13 +40,18 @@ export function Standings() {
   useDocumentTitle("Standings");
   const { me } = useAuth();
   const [entries, setEntries] = useState<LeaderboardEntry[] | null>(null);
+  // Three states, not two. Catching a failure into an empty array told the
+  // visitor the game has no ranked players when the truth was that the server
+  // could not be reached — the same "unknown rendered as a confident claim" the
+  // pre-merge review called out, arriving through the error path.
+  const [failed, setFailed] = useState(false);
   const [sort, setSort] = useState<SortKey>("points");
 
   useEffect(() => {
     accountClient
       .statsLeaderboard()
       .then(setEntries)
-      .catch(() => setEntries([]));
+      .catch(() => setFailed(true));
   }, []);
 
   // Sorted in the browser, not by another request: the board is at most a couple
@@ -84,7 +89,11 @@ export function Standings() {
           meant to be argued with.
         </p>
 
-        {entries === null ? (
+        {failed ? (
+          <p className="auth-note" data-dev="board-failed" role="alert">
+            The board could not be loaded. Is the game server running?
+          </p>
+        ) : entries === null ? (
           <p className="auth-note">Loading…</p>
         ) : entries.length === 0 ? (
           <p className="auth-note" data-dev="board-empty">

@@ -20,7 +20,7 @@ export function SignIn() {
   const { config } = useAuth();
   const navigate = useNavigate();
 
-  const { busy, error, run } = useAsyncAction<"guest" | "email" | "reset">();
+  const { busy, error, failed, run } = useAsyncAction<"guest" | "email" | "reset">();
   const [resetSent, setResetSent] = useState(false);
 
   const onGuest = () =>
@@ -75,6 +75,11 @@ export function SignIn() {
           >
             {busy === "guest" ? "Deploying…" : "Play as a guest"}
           </button>
+          {error !== null && failed === "guest" && (
+            <p className="field-error" role="alert">
+              {error}
+            </p>
+          )}
         </section>
 
         <section className="auth-card notched notched-sm">
@@ -94,7 +99,10 @@ export function SignIn() {
                 required
               />
             </div>
-            {error !== null && (
+            {/* Scoped to THIS action: one shared error rendered only here put a
+                failed guest sign-in or reset request under the unrelated
+                email/password fields. */}
+            {error !== null && failed === "email" && (
               <p className="field-error" role="alert">
                 {error}
               </p>
@@ -153,6 +161,11 @@ export function SignIn() {
               >
                 {busy === "reset" ? "Sending…" : "Send a reset link"}
               </button>
+              {error !== null && failed === "reset" && (
+                <p className="field-error" role="alert">
+                  {error}
+                </p>
+              )}
             </form>
           )}
         </section>

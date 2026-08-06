@@ -29,12 +29,16 @@ function Pending({ what }: { what: string }) {
 export function Arsenal() {
   useDocumentTitle("Weapons");
   const [weapons, setWeapons] = useState<WeaponRow[] | null>(null);
+  // A failed fetch is NOT "nothing records this yet": the Pending block makes a
+  // claim about which systems exist, and rendering it for an unreachable server
+  // would make that claim false the day telemetry lands.
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     accountClient
       .statsWeapons()
       .then(setWeapons)
-      .catch(() => setWeapons([]));
+      .catch(() => setFailed(true));
   }, []);
 
   const topKills = Math.max(...(weapons ?? []).map((row) => row.kills), 0);
@@ -55,7 +59,11 @@ export function Arsenal() {
       </header>
 
       <div className="shell page-body">
-        {weapons === null ? (
+        {failed ? (
+          <p className="auth-note" role="alert" data-dev="weapons-failed">
+            Weapon statistics could not be loaded. Is the game server running?
+          </p>
+        ) : weapons === null ? (
           <p className="auth-note">Loading…</p>
         ) : weapons.length === 0 ? (
           <Pending what="which weapon fired a shot" />
@@ -115,12 +123,14 @@ export function Arsenal() {
 export function Maps() {
   useDocumentTitle("Maps");
   const [maps, setMaps] = useState<MapRow[] | null>(null);
+  // Same reason as the weapons page: unreachable is not empty.
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     accountClient
       .statsMaps()
       .then(setMaps)
-      .catch(() => setMaps([]));
+      .catch(() => setFailed(true));
   }, []);
 
   return (
@@ -139,7 +149,11 @@ export function Maps() {
       </header>
 
       <div className="shell page-body">
-        {maps === null ? (
+        {failed ? (
+          <p className="auth-note" role="alert" data-dev="maps-failed">
+            Map statistics could not be loaded. Is the game server running?
+          </p>
+        ) : maps === null ? (
           <p className="auth-note">Loading…</p>
         ) : maps.length === 0 ? (
           <Pending what="which map a match was played on" />

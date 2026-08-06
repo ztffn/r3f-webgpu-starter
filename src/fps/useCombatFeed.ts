@@ -37,8 +37,12 @@ export interface FeedLine {
 export interface LocalDeath {
   /** Who did it, already resolved to a name. Null for a death nobody caused. */
   readonly killerName: string | null;
-  /** Wall-clock milliseconds at which the server said the respawn lands. */
-  readonly respawnAtMs: number;
+  /**
+   * Wall-clock milliseconds at which the server said the respawn lands, or
+   * null when the room has respawn disabled — a countdown to a moment that
+   * will never come must not render as one.
+   */
+  readonly respawnAtMs: number | null;
 }
 
 export interface CombatFeed {
@@ -84,15 +88,17 @@ export function useCombatFeed(client: GameClient | null): CombatFeed {
   // the work of three. The first roster is a baseline, or joining a running match
   // would print the whole room walking in at once.
   const [membership, setMembership] = useState<{
-    known: ReadonlySet<number>;
+    known: ReadonlyMap<number, string>;
     lines: readonly FeedLine[];
     seeded: boolean;
-  }>({ known: new Set(), lines: [], seeded: false });
+  }>({ known: new Map(), lines: [], seeded: false });
 
   useEffect(() => {
     if (roster === null) return;
     setMembership((previous) => {
-      const now = new Set(roster.map((entry) => entry.id));
+      // A MAP rather than a set of ids: the leaver is by definition absent from
+      // the new roster, so their name has to come from the one they left.
+      const now = new Map(roster.map((entry) => [entry.id, entry.name]));
       if (!previous.seeded) return { known: now, lines: [], seeded: true };
       const lines: FeedLine[] = [];
       for (const entry of roster) {
@@ -100,8 +106,8 @@ export function useCombatFeed(client: GameClient | null): CombatFeed {
           lines.push({ id: -entry.id * 2, kind: "join", text: `${entry.name} joined` });
         }
       }
-      for (const id of previous.known) {
-        if (!now.has(id)) lines.push({ id: -id * 2 - 1, kind: "leave", text: `Player ${id} left` });
+      for (const [id, name] of previous.known) {
+        if (!now.has(id)) lines.push({ id: -id * 2 - 1, kind: "leave", text: `${name} left` });
       }
       if (lines.length === 0) return { ...previous, known: now };
       return {
@@ -121,13 +127,24 @@ export function useCombatFeed(client: GameClient | null): CombatFeed {
   const [expiryTick, setExpiryTick] = useState(0);
   const onExpiryTick = useCallback(() => setExpiryTick((n) => n + 1), []);
 
+  // The local death, anchored ONCE per death event. It must live outside the
+  // memo below for two reasons that both bit in practice: the memo re-runs on
+  // every expiry tick, and stamping `Date.now()` inside it re-anchored the
+  // respawn countdown every second — the overlay oscillated in the 4–5 s band
+  // and never reached zero. And the event ring is bounded (MAX_COMBAT_EVENTS),
+  // so a busy room can evict the died event mid-death; the cache keeps the
+  // overlay's data alive until health returns, which is the only thing that
+  // clears the overlay anyway (GameHud gates on health, never on this).
+  const deathAnchor = useRef<{ clientId: number; seq: number; death: LocalDeath } | null>(
+    null
+  );
+
   const localId = client?.playerId ?? 0;
 
   const shaped = useMemo(() => {
     if (client === null || events === null) return EMPTY_COMBAT_FEED;
 
     const kills: FeedLine[] = [];
-    let death: LocalDeath | null = null;
     let damage: CombatFeed["damage"] = null;
     let hit: CombatFeed["hit"] = null;
 
@@ -143,13 +160,25 @@ export function useCombatFeed(client: GameClient | null): CombatFeed {
               : `${nameOf(event.killerId)} killed ${nameOf(event.victimId)}` +
                 (weapon === null ? "" : ` — ${weapon.displayName}`),
         });
-        if (event.victimId === localId) {
-          death = {
-            killerName: event.killerId === 0 ? null : nameOf(event.killerId),
-            // Anchored when the packet is read rather than to a server tick: the
-            // countdown only has to look right, and the authority still owns the
-            // actual respawn.
-            respawnAtMs: Date.now() + event.respawnSeconds * 1000,
+        if (
+          event.victimId === localId &&
+          (deathAnchor.current === null ||
+            deathAnchor.current.clientId !== localId ||
+            deathAnchor.current.seq !== event.seq)
+        ) {
+          deathAnchor.current = {
+            clientId: localId,
+            seq: event.seq,
+            death: {
+              killerName: event.killerId === 0 ? null : nameOf(event.killerId),
+              // Anchored when the packet is FIRST read rather than to a server
+              // tick: the countdown only has to look right, and the authority
+              // still owns the actual respawn. Zero means respawn is disabled.
+              respawnAtMs:
+                event.respawnSeconds > 0
+                  ? Date.now() + event.respawnSeconds * 1000
+                  : null,
+            },
           };
         }
       } else if (event.kind === "damage") {
@@ -159,9 +188,16 @@ export function useCombatFeed(client: GameClient | null): CombatFeed {
       }
     }
 
+    const death =
+      deathAnchor.current !== null && deathAnchor.current.clientId === localId
+        ? deathAnchor.current.death
+        : null;
+
     const now = Date.now();
     const fresh: FeedLine[] = [];
+    const candidates = new Set<number>();
     for (const line of [...membership.lines, ...kills]) {
+      candidates.add(line.id);
       let seen = firstSeen.current.get(line.id);
       if (seen === undefined) {
         seen = now;
@@ -169,11 +205,20 @@ export function useCombatFeed(client: GameClient | null): CombatFeed {
       }
       if (now - seen < FEED_LINE_SECONDS * 1000) fresh.push(line);
     }
+    // Stamps whose line has left the ring and the membership log are dropped, or
+    // a long session grows one map entry per line ever seen. Only DEPARTED ids —
+    // a stamp still in candidates must survive, or an expired line still sitting
+    // in the bounded ring would be re-stamped fresh and resurrect. Ids never
+    // recur (event seqs and connection ids both only increase), so departed
+    // means gone for good.
+    for (const id of firstSeen.current.keys()) {
+      if (!candidates.has(id)) firstSeen.current.delete(id);
+    }
 
     return {
       lines: fresh.slice(-FEED_LINES),
-      // Cleared the moment health returns, which the caller decides — a stale
-      // overlay outliving a respawn is worse than none.
+      // The overlay is cleared the moment health returns, which the CALLER
+      // decides — this value carries only who and when, never aliveness.
       death,
       damage,
       hit,
@@ -209,10 +254,12 @@ function useFeedExpiry(hasLines: boolean, tick: () => void): void {
 export function useRespawnCountdown(death: LocalDeath | null): number | null {
   const [, setNow] = useState(0);
   useEffect(() => {
-    if (death === null) return;
+    // No timer when there is nothing to count to — a respawn-disabled room's
+    // death carries no deadline.
+    if (death === null || death.respawnAtMs === null) return;
     const timer = setInterval(() => setNow((tick) => tick + 1), 200);
     return () => clearInterval(timer);
   }, [death]);
-  if (death === null) return null;
+  if (death === null || death.respawnAtMs === null) return null;
   return Math.max(0, (death.respawnAtMs - Date.now()) / 1000);
 }

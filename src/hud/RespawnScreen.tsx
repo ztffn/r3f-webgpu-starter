@@ -45,9 +45,10 @@ export interface RespawnScreenProps {
 
 export function RespawnScreen({ death }: RespawnScreenProps) {
   // The SERVER's number — the same one it scheduled the respawn from — so the
-  // clock and the respawn cannot disagree.
+  // clock and the respawn cannot disagree. Null when the room has respawn
+  // disabled: the screen still says who killed you, it just promises nothing.
   const seconds = useRespawnCountdown(death);
-  if (death === null || seconds === null) return null;
+  if (death === null) return null;
 
   return (
     <div className="respawn" data-dev="hud-death" role="status">
@@ -89,11 +90,13 @@ export function RespawnScreen({ death }: RespawnScreenProps) {
           })}
         </section>
 
-        <footer className="respawn-actions">
-          <div className="respawn-count" data-dev="death-respawn" role="timer">
-            Respawn in {seconds.toFixed(1)}s
-          </div>
-        </footer>
+        {seconds !== null && (
+          <footer className="respawn-actions">
+            <div className="respawn-count" data-dev="death-respawn" role="timer">
+              Respawn in {seconds.toFixed(1)}s
+            </div>
+          </footer>
+        )}
       </div>
     </div>
   );

@@ -1063,11 +1063,13 @@ Bundle is ~1.77 MB (490 kB gzip), dominated by Three. Not yet code-split.
   parallax offset for actual silhouette at close range. Both are a couple of texture
   samples inside the existing detail pass. Decide after the relief-vs-canopy bake split
   (`06` §11) so vegetation and hard relief stop sharing one field.
-- **Canopy bake reads relief as grass** — 56.7% of DFG5 is dirt/rock/mud and 93.6% of
-  those texels carry small nonzero stretch (relief, not vegetation), which today bakes
-  into `grassHeightField` as centimetre "grass". Gate the canopy bake by char_data
-  material family (`Gs*` = vegetation) the way hard surfaces already gate by param 40.
-  This is a concealment-correctness question, not only a visual one (`06` §11).
+- **Canopy bake reads relief as grass** — **CLOSED (2026-08-06, same day).** The bake now
+  sources canopy from vegetation families only (`Gs*`/`Grs*` per the `.cal`; `Sw*` still
+  excluded pending the retail check), with the no-`.cal` community sets keeping the old
+  full-stretch behaviour under a `vegetationGated: false` provenance flag in
+  `terrain.json`. DFG5 re-baked: 95 vegetation tiles feed the canopy, map mean 16.8 → 13.3.
+  What remains open here is only the render side: relief (rails, ruts) has no modern
+  representation yet — the normal/parallax phases of the roadmap plan.
 - **Concealment's consumer** — `04` §7: Pillars 5 and 10 suggest concealment should have no
   player-facing readout at all, which turns "boolean vs. percentage" into a question about AI
   input fidelity rather than UI. Decide the consumer first.

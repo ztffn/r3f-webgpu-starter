@@ -28,7 +28,12 @@ export interface TerrainMeta {
     color?: { file: string };
     detail?: { file: string; width: number; height: number; distinctIndices: number };
     detailColor?: { file: string; tileSize: number; tiles: number; grid: number; atlasSize: number };
-    charData?: { entries: number; materials: string[]; hardTiles: number[] };
+    charData?: {
+      entries: number;
+      materials: string[];
+      vegetationTiles: number;
+      hardTiles: number[];
+    };
     grass?: {
       file: string;
       width: number;
@@ -38,6 +43,8 @@ export interface TerrainMeta {
       rawMean: number;
       /** True when baked from a SUBSTITUTED detail_elev strip (docs/06 §7). */
       substituted?: boolean;
+      /** True when a .cal restricted the canopy to vegetation families (docs/06 §11.1). */
+      vegetationGated?: boolean;
     };
     detailElev?: { substituted?: boolean; referencedName?: string };
   };

@@ -133,29 +133,40 @@ if (cmPath) {
 }
 
 // --- char_data: per-tile ground character (.cal) ------------------------------
-// Plaintext, one "<material>,<param>" line per detail index (docs/02 §5). A
-// non-zero param marks HARD ground — railroad (rd1) and concrete (ct1) tiles —
-// and hard ground grows no grass: the strip's residual heights on those tiles
-// otherwise bake canopy stubble onto the rails (docs/06 §11).
+// Plaintext, one "<material>,<param>" line per detail index (docs/02 §5). The
+// material family is what separates VEGETATION from RELIEF: detail_elev is a
+// general extrusion map (docs/06 §11.1 — rails carry 40, dirt ruts 4-14, grass
+// 22-46), so only vegetation families may bake into the canopy field, or every
+// stone and rut becomes centimetre "grass" — and grass is concealment, so this
+// is a gameplay rule, not a cosmetic one. Vegetation = Gs*/Grs* across all 18
+// retail sets; Sw* (swamp) is UNCONFIRMED and deliberately excluded until the
+// retail game settles it (plan 2026-08-06 §5). A non-zero param independently
+// marks HARD ground (railroad, concrete).
+const VEGETATION = /^(gs|grs)/i;
 const calPath = find(trn.char_data, [".cal"]);
-let hardTiles = null;
+let vegTiles = null;
 if (calPath) {
   const lines = readFileSync(calPath, "latin1")
     .split(/\r?\n/)
     .filter((l) => l.trim().length);
-  hardTiles = new Set();
+  vegTiles = new Set();
+  const hardTiles = [];
   const materials = lines.map((l, i) => {
     const [name, param] = l.split(",");
-    if (Number(param) > 0) hardTiles.add(i);
-    return name.trim();
+    const mat = name.trim();
+    if (VEGETATION.test(mat)) vegTiles.add(i);
+    if (Number(param) > 0) hardTiles.push(i);
+    return mat;
   });
   meta.assets.charData = {
     entries: lines.length,
     materials: [...new Set(materials)],
-    hardTiles: [...hardTiles],
+    vegetationTiles: vegTiles.size,
+    hardTiles,
   };
   console.log(
-    `  char_data   ${lines.length} entries, hard (no-grass) tiles: ${[...hardTiles].join(",") || "none"}`
+    `  char_data   ${lines.length} entries, ${vegTiles.size} vegetation tiles ` +
+      `(canopy source), hard tiles: ${hardTiles.join(",") || "none"}`
   );
 }
 
@@ -208,10 +219,13 @@ if (dmPath) {
         // makes a substituted canopy meaningless (docs/06 §7).
         if (idx >= tileCount) outOfRange++;
         const tile = idx % tileCount;
-        // Hard ground (char_data param > 0: railroad, concrete) takes no canopy.
-        grass[z * d.width + x] = hardTiles?.has(idx)
-          ? 0
-          : dm.pixels[(tile * tileW + tz) * tileW + (x % tileW)];
+        // Canopy comes from VEGETATION tiles only (see the char_data note above);
+        // relief on dirt/rock/rails stays out of the concealment field. Without a
+        // .cal (the community sets ship none) every tile contributes, as before.
+        grass[z * d.width + x] =
+          vegTiles && !vegTiles.has(idx)
+            ? 0
+            : dm.pixels[(tile * tileW + tz) * tileW + (x % tileW)];
       }
     }
     if (outOfRange) {
@@ -237,6 +251,8 @@ if (dmPath) {
       rawMean: +(gSum / grass.length).toFixed(1),
       detailIndicesUsed: usedIdx.size,
       substituted,
+      /** True when a .cal restricted the canopy to vegetation families. */
+      vegetationGated: !!vegTiles,
     };
     console.log(
       `  grass.png   ${d.width}x${d.height}  stretch ${gMin}..${gMax} (mean ${(gSum / grass.length).toFixed(1)})`

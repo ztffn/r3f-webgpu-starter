@@ -355,6 +355,7 @@ Averaging every strip tile's mean stretch by its char_data family, DFG5:
 The consequence for the bake: 56.7% of DFG5's texels are non-grass materials and **93.6% of
 them carry nonzero stretch** — relief, not vegetation — which `prepare-terrain` currently
 converts into centimetre-scale entries in `grassHeightField`. Vegetation and hard relief
-share one field today; splitting them (canopy from `Gs*` only) is queued in `08` §14, and
+share one field today; the split landed the same day (canopy from `Gs*`/`Grs*` only,
+no-`.cal` sets unchanged and flagged — `08` §14 has the closure), and
 it matters to concealment as much as to rendering: a 3 cm dirt rut should not count as
 grass to hide in.

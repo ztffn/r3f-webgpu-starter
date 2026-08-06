@@ -35,7 +35,10 @@ export function parsePff(buf) {
   const sig =
     signature === SIG_PFF3 ? "PFF3" : signature === SIG_PFF2 ? "PFF2" : null;
   if (!sig) throw new Error(`Not a PFF archive (sig 0x${signature.toString(16)})`);
-  if (headerSize !== 20 || recordSize !== 32)
+  // recordSize 36 is the later PFF3 revision: the same 32-byte record plus a
+  // trailing 4-byte checksum (verified against MED.PFF: offsets stay contiguous
+  // and the name field is still 16 bytes).
+  if (headerSize !== 20 || (recordSize !== 32 && recordSize !== 36))
     throw new Error(`Unexpected headerSize=${headerSize} recordSize=${recordSize}`);
 
   const entries = [];

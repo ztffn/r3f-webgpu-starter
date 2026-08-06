@@ -26,7 +26,9 @@ export interface TerrainMeta {
   assets: {
     height?: { file: string; width: number; height: number; rawMin: number; rawMax: number };
     color?: { file: string };
-    detail?: { file: string; distinctIndices: number };
+    detail?: { file: string; width: number; height: number; distinctIndices: number };
+    detailColor?: { file: string; tileSize: number; tiles: number; grid: number; atlasSize: number };
+    charData?: { entries: number; materials: string[]; hardTiles: number[] };
     grass?: {
       file: string;
       width: number;
@@ -53,6 +55,19 @@ export interface LoadedTerrain {
   heights: Uint8Array;
   size: number;
   colorMap: THREE.Texture | null;
+  /**
+   * Per-texel detail-tile INDEX (0-255), NEAREST-filtered — indices must never
+   * interpolate. Present only alongside detailColorAtlas.
+   */
+  detailIndexMap: THREE.DataTexture | null;
+  /**
+   * The detail_color strip repacked as a square tile atlas (prepare-terrain.mjs).
+   * This is the original's close-range ground color — the colormap never carried
+   * it (docs/06 §11).
+   */
+  detailColorAtlas: THREE.Texture | null;
+  /** Atlas geometry: tiles per row/column. */
+  detailGrid: number;
   /** Per-texel grass canopy height, 0-255. LINEAR-filtered — it is the envelope. */
   grassMap: THREE.DataTexture | null;
   grassSource: GrassSource;
@@ -177,6 +192,19 @@ function colorTextureFromRgba({ rgba, width, height }: Rgba): THREE.DataTexture 
   return tex;
 }
 
+function makeDetailIndexTexture(data: Uint8Array, size: number): THREE.DataTexture {
+  const tex = new THREE.DataTexture(data, size, size, THREE.RedFormat, THREE.UnsignedByteType);
+  // NEAREST is load-bearing: these are tile INDICES. Interpolating between
+  // index 244 and index 17 yields a tile that exists but has nothing to do
+  // with either neighbour.
+  tex.magFilter = THREE.NearestFilter;
+  tex.minFilter = THREE.NearestFilter;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.needsUpdate = true;
+  return tex;
+}
+
 export async function loadTerrain(slug: string): Promise<LoadedTerrain | null> {
   const base = `/assets/terrain/${slug}`;
   let meta: TerrainMeta;
@@ -215,6 +243,31 @@ export async function loadTerrain(slug: string): Promise<LoadedTerrain | null> {
     let colorMap: THREE.Texture | null = null;
     let grassMap: THREE.DataTexture | null = null;
     let grassSource: GrassSource = "none";
+
+    // --- close-range detail color (index map + tile atlas) ----------------
+    // Both or neither: an index map without tiles has nothing to point at.
+    let detailIndexMap: THREE.DataTexture | null = null;
+    let detailColorAtlas: THREE.Texture | null = null;
+    let detailGrid = 0;
+    if (meta.assets.detail && meta.assets.detailColor) {
+      const d = await loadSquare(`${base}/${meta.assets.detail.file}`);
+      detailIndexMap = makeDetailIndexTexture(d.data, d.size);
+      const atlas = await new THREE.TextureLoader().loadAsync(
+        `${base}/${meta.assets.detailColor.file}`
+      );
+      atlas.flipY = false;
+      atlas.colorSpace = THREE.SRGBColorSpace;
+      // No mipmaps: minification would average across tile boundaries in the
+      // atlas, bleeding one ground type into another. The material fades the
+      // detail layer out well before aliasing gets objectionable.
+      atlas.generateMipmaps = false;
+      atlas.magFilter = THREE.LinearFilter;
+      atlas.minFilter = THREE.LinearFilter;
+      atlas.wrapS = THREE.ClampToEdgeWrapping;
+      atlas.wrapT = THREE.ClampToEdgeWrapping;
+      detailColorAtlas = atlas;
+      detailGrid = meta.assets.detailColor.grid;
+    }
 
     if (useRealStrip) {
       if (meta.assets.color) {
@@ -264,6 +317,9 @@ export async function loadTerrain(slug: string): Promise<LoadedTerrain | null> {
       heights: data,
       size,
       colorMap,
+      detailIndexMap,
+      detailColorAtlas,
+      detailGrid,
       grassMap,
       grassSource,
       waterHeight: meta.trn.water_height ?? 0,

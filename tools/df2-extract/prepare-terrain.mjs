@@ -5,10 +5,13 @@
 //   e.g. node prepare-terrain.mjs assets/exp2b gmile public/assets/terrain/gmile
 //
 // Reads the .trn manifest, then emits:
-//   height.png    greyscale 8-bit elevation (from <elev_map>.pcx)
-//   color.jpg     colormap, copied through (already web-native JPEG)
-//   detail.png    greyscale detail-map INDICES (from <detail_map>.pcx), if present
-//   terrain.json  parsed .trn + dimensions + which referenced assets were missing
+//   height.png       greyscale 8-bit elevation (from <elev_map>.pcx)
+//   color.jpg        colormap, copied through (already web-native JPEG)
+//   detail.png       greyscale detail-map INDICES (from <detail_map>.pcx), if present
+//   detail_color.png the <detail_color>.tga strip repacked as a square RGB atlas
+//                    (16x16 grid of 64px tiles), if present — WebGPU caps texture
+//                    dimensions well below the strip's native 16384
+//   terrain.json     parsed .trn + dimensions + which referenced assets were missing
 //
 // Output goes to public/assets/terrain/<slug>/ and IS committed, alongside the raw
 // inputs in /assets/ — see README § Asset policy and docs/01 §3. What stays out is
@@ -17,7 +20,7 @@
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, copyFileSync } from "node:fs";
 import { join, extname } from "node:path";
 import { parseTrn } from "./df2extract.mjs";
-import { decodePcx, encodePng } from "./imageio.mjs";
+import { decodePcx, decodeTga, encodePng } from "./imageio.mjs";
 
 const [extractedDir, trnName, outDir] = process.argv.slice(2);
 if (!extractedDir || !trnName || !outDir) {
@@ -95,6 +98,67 @@ if (detail) {
   meta.missing.push(trn.detail_map);
 }
 
+// --- detail color strip -> square atlas --------------------------------------
+// The close-range ground color in the original comes from this strip, NOT the
+// colormap (docs/06 §11: DFG5's railroad exists only here). The 64×16384 strip
+// exceeds WebGPU's default texture cap, so repack the 256 tiles into a 16×16
+// grid; the material reconstructs tile (i%16, i/16) from the detail index.
+const cmPath = find(trn.detail_color, [".tga"]);
+if (cmPath) {
+  const cm = decodeTga(readFileSync(cmPath));
+  const tileW = cm.width;
+  const tiles = Math.floor(cm.height / tileW);
+  const grid = Math.ceil(Math.sqrt(tiles));
+  const atlasSize = grid * tileW;
+  const atlas = new Uint8Array(atlasSize * atlasSize * 3);
+  for (let t = 0; t < tiles; t++) {
+    const gx = (t % grid) * tileW;
+    const gy = Math.floor(t / grid) * tileW;
+    for (let y = 0; y < tileW; y++) {
+      for (let x = 0; x < tileW; x++) {
+        const s = ((t * tileW + y) * tileW + x) * cm.channels;
+        const d = ((gy + y) * atlasSize + gx + x) * 3;
+        atlas[d] = cm.pixels[s];
+        atlas[d + 1] = cm.pixels[s + 1];
+        atlas[d + 2] = cm.pixels[s + 2];
+      }
+    }
+  }
+  writeFileSync(join(outDir, "detail_color.png"), encodePng(atlasSize, atlasSize, atlas, 3));
+  meta.assets.detailColor = { file: "detail_color.png", tileSize: tileW, tiles, grid, atlasSize };
+  console.log(`  detail_color.png ${atlasSize}x${atlasSize} atlas (${tiles} tiles of ${tileW}px, ${grid}x${grid})`);
+} else {
+  meta.missing.push(trn.detail_color);
+  console.log(`  ! detail_color "${trn.detail_color}" not present — close-range ground detail unavailable`);
+}
+
+// --- char_data: per-tile ground character (.cal) ------------------------------
+// Plaintext, one "<material>,<param>" line per detail index (docs/02 §5). A
+// non-zero param marks HARD ground — railroad (rd1) and concrete (ct1) tiles —
+// and hard ground grows no grass: the strip's residual heights on those tiles
+// otherwise bake canopy stubble onto the rails (docs/06 §11).
+const calPath = find(trn.char_data, [".cal"]);
+let hardTiles = null;
+if (calPath) {
+  const lines = readFileSync(calPath, "latin1")
+    .split(/\r?\n/)
+    .filter((l) => l.trim().length);
+  hardTiles = new Set();
+  const materials = lines.map((l, i) => {
+    const [name, param] = l.split(",");
+    if (Number(param) > 0) hardTiles.add(i);
+    return name.trim();
+  });
+  meta.assets.charData = {
+    entries: lines.length,
+    materials: [...new Set(materials)],
+    hardTiles: [...hardTiles],
+  };
+  console.log(
+    `  char_data   ${lines.length} entries, hard (no-grass) tiles: ${[...hardTiles].join(",") || "none"}`
+  );
+}
+
 // --- detail elevation strip (grass stretch heights) -------------------------
 // Often a shared base-game asset that isn't bundled with a terrain pack; pass
 // --detail-elev <file.pcx> to substitute a strip we do have (docs/06 §7).
@@ -144,7 +208,10 @@ if (dmPath) {
         // makes a substituted canopy meaningless (docs/06 §7).
         if (idx >= tileCount) outOfRange++;
         const tile = idx % tileCount;
-        grass[z * d.width + x] = dm.pixels[(tile * tileW + tz) * tileW + (x % tileW)];
+        // Hard ground (char_data param > 0: railroad, concrete) takes no canopy.
+        grass[z * d.width + x] = hardTiles?.has(idx)
+          ? 0
+          : dm.pixels[(tile * tileW + tz) * tileW + (x % tileW)];
       }
     }
     if (outOfRange) {

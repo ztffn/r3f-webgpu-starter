@@ -283,6 +283,26 @@ Dark blotches in a render are usually the data, not the shader — verified at I
 without grass (`07` §9). Do not "fix" them without deciding you want to fight the baked
 lighting, which is an art decision, not a bug fix.
 
+**Close-range detail pass (Aug 2026).** When the prepared assets carry
+`detail.png` (per-texel tile index, NEAREST — indices must never interpolate) and
+`detail_color.png` (the `_cm` strip repacked as a 16×16 atlas, since the native 64×16384
+exceeds WebGPU's default texture cap), each 1 m texel renders its own full 64×64 tile —
+tile-per-texel, the mapping DFG5's railroad proves (`06` §11) — blended over the colormap
+and faded out by ~160 m. The blend is a **lit lerp, deliberately NOT the era's modulate**:
+the tile shows its authored colour times a lighting term (colormap luminance over its own
+level-6 mip's luminance — isolates the baked shading without polluting the tile's hue),
+lerped in by strength. Both modulate variants failed structurally in linear light —
+multiplying two sub-white colours darkens and SQUARES saturation; the gamma-equivalent
+gain (2^2.2) fixed the mean but kept the saturation blowout. Three more traps paid for:
+**(1)** the atlas must not mipmap (tiles bleed into neighbours) and tile UVs are inset
+half a texel so bilinear never crosses an atlas seam; **(2)** indices can't be mipmapped
+either, so the dithered type boundaries — which follow slope/height contours — alias into
+contour-hugging stripes at grazing angles; a `fwidth`-based texels-per-pixel fade kills
+this where the distance fade can't reach; **(3)** the grass bake zeroes canopy on tiles
+whose `.cal` char_data param is non-zero (hard ground: railroad, concrete) or the rails
+grow stubble. Gain and both fade distances are live dials (`visualDials.ts`, rendered on
+the Scene tab — ground detail is not weather).
+
 ### 6.4 `GrassMaterial` — the columnar march
 
 The most intricate part of the codebase. Read `07` §1 and §6 before changing it.
@@ -1035,6 +1055,19 @@ Bundle is ~1.77 MB (490 kB gzip), dominated by Three. Not yet code-split.
   legitimate path, provided it stays labelled (§5.3).
 - **Stretch-height → world-units scale** — what raw 0–255 canopy actually meant (`06` §8).
 - **Near-field grass detail vs coverage** trade-off is unresolved.
+- **Detail relief, modern path** — `detail_elev` is a general sub-texel extrusion map
+  (`06` §11: rails 40, ties 20, dirt ruts ~6), which the original rendered as stretched
+  voxel columns. Reproducing that through the march is the authentic-but-expensive route;
+  the modern candidates are prepare-time products of the SAME strip: a per-tile normal
+  atlas (Sobel over each 64×64 tile) shading the detail layer, and a distance-gated
+  parallax offset for actual silhouette at close range. Both are a couple of texture
+  samples inside the existing detail pass. Decide after the relief-vs-canopy bake split
+  (`06` §11) so vegetation and hard relief stop sharing one field.
+- **Canopy bake reads relief as grass** — 56.7% of DFG5 is dirt/rock/mud and 93.6% of
+  those texels carry small nonzero stretch (relief, not vegetation), which today bakes
+  into `grassHeightField` as centimetre "grass". Gate the canopy bake by char_data
+  material family (`Gs*` = vegetation) the way hard surfaces already gate by param 40.
+  This is a concealment-correctness question, not only a visual one (`06` §11).
 - **Concealment's consumer** — `04` §7: Pillars 5 and 10 suggest concealment should have no
   player-facing readout at all, which turns "boolean vs. percentage" into a question about AI
   input fidelity rather than UI. Decide the consumer first.

@@ -303,8 +303,20 @@ detail texture" is exactly right, and the mechanism is sharper than remembered:
   quirk, verified.)
 - **The colormap does not paint the track at all** — inspected at the exact columns. At
   colormap-only distances the railroad was invisible; it existed purely in the detail pass.
-  Our renderer takes ground colour from the colormap only, so today it would drop the
-  railroad entirely. Reproducing it needs the detail_color pass.
+  **The detail_color pass is now built** (same day): `prepare-terrain` repacks the strip
+  into a 16×16 atlas, `TerrainMaterial` renders tile-per-texel modulated over the colormap,
+  and the railroad is back on screen — as-built notes and the two traps in `08-...md` §6.3.
+
+**The track had HEIGHT in the original — detail_elev is a general extrusion map, not a
+grass map.** The strip's tiles 244–247 carry stretch values exactly where the colour tiles
+paint hardware: **40 along the rail columns, 20 on the tie planks, ~0 on the ballast**
+(and unused tile 243 is a uniform 255 — a full-height block). The voxel renderer stretched
+*every* ground column by its detail_elev texel and coloured it from the detail_color texel;
+grass is just the vegetation case of that one mechanism, and the railroad was the same
+columns extruded into ~knee-high rails. Our detail-colour pass renders the track as flat
+paint today; the authentic reproduction is the columnar march generalised to hard ground —
+colour from the detail tile rather than the colormap. (The concealment bake's char_data
+zeroing stays correct either way: rails conceal nothing.)
 
 **Detail-texture ground scale.** The composite is the evidence: four *different* tiles in
 four *adjacent* texels only assemble into one continuous railroad if **each detail-map texel
@@ -324,3 +336,25 @@ retail 1024² heightmap **downsampled 2× exactly** (FFT correlation 1.000 at ze
 of wrap-tiling (`polytrn_wrapx/y 1` is declared in its `.trn`). Its `detail_map d3_m` /
 `detail_texture d3_det` references are **dangling** in this install (DF1-era resources);
 the med `dfg5_c.jpg` is a different render of the colormap, not a copy.
+
+### 11.1 The strip's per-material stretch profile — relief vs. vegetation (measured)
+
+Averaging every strip tile's mean stretch by its char_data family, DFG5:
+
+| family | tiles | avg tile mean | max texel | reading |
+|---|---|---|---|---|
+| `Gs3` tall grass | 18 | **46.1** | 221 | real canopy |
+| `Gs2` grass | 77 | **21.9** | 179 | real canopy |
+| `Rk2` rock | 31 | 14.2 | 95 | boulder relief |
+| `Dt2` dirt | 65 | 6.3 | 122 | stones/ruts |
+| `Md3` mud | 21 | 4.0 | 122 | ruts |
+| `rd1` railroad | 4 | 72.2 | 255 | rails 40 / ties 20 / one uniform-255 block tile |
+| `ct1` concrete | 9 | 37.1 | 40 | curb-height slabs |
+| `null` | 31 | 246.8 | 255 | full-height blocks; never referenced by this map |
+
+The consequence for the bake: 56.7% of DFG5's texels are non-grass materials and **93.6% of
+them carry nonzero stretch** — relief, not vegetation — which `prepare-terrain` currently
+converts into centimetre-scale entries in `grassHeightField`. Vegetation and hard relief
+share one field today; splitting them (canopy from `Gs*` only) is queued in `08` §14, and
+it matters to concealment as much as to rendering: a 3 cm dirt rut should not count as
+grass to hide in.

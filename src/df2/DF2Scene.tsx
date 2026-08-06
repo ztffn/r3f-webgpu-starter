@@ -14,7 +14,7 @@ import { Terrain } from "./Terrain";
 import { PerfMonitor, type PerfSample } from "./PerfMonitor";
 import { FlyControls, type FlyState, type Stance } from "./FlyControls";
 import { Heightfield } from "./Heightfield";
-import { createTerrainMaterial } from "./TerrainMaterial";
+import { createTerrainMaterial, type TerrainDetailUniforms } from "./TerrainMaterial";
 import { createGrassMaterial, type GrassUniforms } from "./GrassMaterial";
 import { createBladeMaterial, createBladeMesh, type BladeUniforms } from "./BladeMaterial";
 import { createColorGrade } from "./colorGrade";
@@ -69,10 +69,13 @@ const ImpactEffects = lazy(() =>
   import("../fps/presentation/ImpactEffects").then((m) => ({ default: m.ImpactEffects }))
 );
 import { BENCH } from "./bench";
+import { DevPlacedObject } from "./DevPlacedObject";
+import type { TerrainScale } from "./config";
 import {
+  readMapSlug,
   TERRAIN_SLUG,
+  CALIBRATED_TERRAIN_SCALE,
   HEIGHT_SCALE,
-  METERS_PER_TEXEL,
   lodSchedule,
   GRASS_SCALE,
   GRASS_STEPS,
@@ -253,6 +256,7 @@ export interface SceneHandles {
   fog: ReturnType<typeof createFog>;
   precipitation: ReturnType<typeof createPrecipitation>;
   blades: BladeUniforms | null;
+  terrainDetail: TerrainDetailUniforms | null;
 }
 
 export interface DF2SceneProps {
@@ -260,6 +264,13 @@ export interface DF2SceneProps {
   grass?: boolean;
   grounded?: boolean;
   stance?: Stance;
+  /**
+   * Live terrain-scale override (dev console Scene tab). Changing it rebuilds
+   * the whole world — heightfield, chunks, grass, motor terrain — so the owner
+   * commits it on slider release, not per input tick. Real maps only; the
+   * synthetic fallback keeps its own scale.
+   */
+  terrainScale?: TerrainScale;
   onPerf?: (s: PerfSample) => void;
   onFly?: (s: FlyState) => void;
   /** The room's join code, once a private room has sent it. */
@@ -343,6 +354,7 @@ export function DF2Scene({
   grass = true,
   grounded = false,
   stance = "stand",
+  terrainScale,
   onStatus,
   onPerf,
   onFly,
@@ -380,13 +392,24 @@ export function DF2Scene({
 
   useEffect(() => {
     let alive = true;
-    loadTerrain(TERRAIN_SLUG).then((t) => {
+    const slug = readMapSlug(typeof window === "undefined" ? "" : window.location.search);
+    // ?map= has no room-authority plumbing yet (the room's metadata carries its
+    // map, but nothing here reads it) — networked with a mismatched server the
+    // client's collision heights disagree with the authority and reconciliation
+    // fights every step. Loud, because it is otherwise undiagnosable.
+    if (netDemo && slug !== TERRAIN_SLUG) {
+      console.warn(
+        `[DF2Scene] networked with ?map=${slug} — the server must be running the same ` +
+          `map (DF2_MAP=${slug}) or movement will desync. Room-owned map is not wired yet.`
+      );
+    }
+    loadTerrain(slug).then((t) => {
       if (alive) setLoaded(t);
     });
     return () => {
       alive = false;
     };
-  }, []);
+  }, [netDemo]);
 
   useEffect(() => {
     onStatus?.({ loading: loaded === undefined, terrain: loaded ?? null });
@@ -397,11 +420,13 @@ export function DF2Scene({
     if (loaded === undefined) return null; // don't build anything while loading
 
     if (loaded) {
+      // GameApp owns the dial state (URL seeds included); a DF2Scene mounted
+      // without the prop builds at the shipped calibration. TerrainScale's
+      // fields deliberately match HeightmapSource, so it spreads.
       const heightfield = Heightfield.fromHeightmap({
         data: loaded.heights,
         size: loaded.size,
-        metersPerTexel: METERS_PER_TEXEL,
-        heightScale: HEIGHT_SCALE,
+        ...(terrainScale ?? CALIBRATED_TERRAIN_SCALE),
       });
       return {
         heightfield,
@@ -409,6 +434,9 @@ export function DF2Scene({
         heightSize: loaded.size,
         size: loaded.size,
         colorMap: loaded.colorMap,
+        detailIndexMap: loaded.detailIndexMap,
+        detailColorAtlas: loaded.detailColorAtlas,
+        detailGrid: loaded.detailGrid,
         grassMap: loaded.grassMap,
         filter: loaded.filter,
         waterHeight: loaded.waterHeight,
@@ -426,11 +454,14 @@ export function DF2Scene({
       heightSize: bytes.size,
       size,
       colorMap,
+      detailIndexMap: null,
+      detailColorAtlas: null,
+      detailGrid: 0,
       grassMap,
       filter: undefined,
       waterHeight: 0,
     };
-  }, [loaded]);
+  }, [loaded, terrainScale]);
 
   const heightfield = world?.heightfield ?? null;
   // The networked client's lifetime belongs to this scene, not to
@@ -587,13 +618,21 @@ export function DF2Scene({
     scene.background = fog.applySky(cubeTexture(skyBox), normalWorldGeometry);
   }, [fog, scene, skyBox, weather]);
 
-  const material = useMemo(
+  const terrainKit = useMemo(
     () =>
       world?.colorMap
-        ? createTerrainMaterial({ colorMap: world.colorMap, atmosphere })
+        ? createTerrainMaterial({
+            colorMap: world.colorMap,
+            atmosphere,
+            detailIndexMap: world.detailIndexMap,
+            detailColorAtlas: world.detailColorAtlas,
+            detailGrid: world.detailGrid,
+            metersPerTexel: world.heightfield.cellSize,
+          })
         : null,
     [atmosphere, world]
   );
+  const material = terrainKit?.material ?? null;
   useEffect(() => () => material?.dispose(), [material]);
 
   // --- columnar grass (docs/07) ---------------------------------------------
@@ -735,8 +774,9 @@ export function DF2Scene({
       fog,
       precipitation,
       blades: bladeKit?.uniforms ?? null,
+      terrainDetail: terrainKit?.detail ?? null,
     }),
-    [bladeKit, fog, grade, precipitation, weather]
+    [bladeKit, fog, grade, precipitation, terrainKit, weather]
   );
 
   /**
@@ -794,8 +834,9 @@ export function DF2Scene({
       fog,
       precipitation,
       blades: bladeKit?.uniforms ?? null,
+      terrainDetail: terrainKit?.detail ?? null,
     });
-  }, [bladeKit, fog, grade, onSceneReady, precipitation, room, setPreset, weather]);
+  }, [bladeKit, fog, grade, onSceneReady, precipitation, room, setPreset, terrainKit, weather]);
 
   // Stable identity so Terrain's slot memo does not rebuild; reads the uniform at
   // call time so the canopy slider takes effect without a React render.
@@ -821,7 +862,11 @@ export function DF2Scene({
   // `?water=` forces a level, because no map in this pack has one — every .trn ships
   // water_height 0, which is below the terrain's own minimum, so the plane never draws
   // and the submerged path has never been exercised.
-  const waterLevel = BENCH.water ?? (world?.waterHeight ?? 0) * HEIGHT_SCALE;
+  // The heightfield's OWN scale, not the config constant — the terrain is built
+  // at the live dial value, and water that reads a different scale parts company
+  // with the ground the moment the height slider moves.
+  const waterLevel =
+    BENCH.water ?? (world?.waterHeight ?? 0) * (heightfield?.heightScale ?? HEIGHT_SCALE);
   const showWater = !!heightfield && waterLevel > heightfield.minHeight;
   // Follows the camera, so it only has to out-reach the fog, not the world — and the
   // preset's fog, since a weather preset can pull the far distance in.
@@ -899,6 +944,8 @@ export function DF2Scene({
       )}
 
       {showWater && <Water level={waterLevel} span={waterSpan} material={waterMaterial} />}
+
+      {heightfield && <DevPlacedObject heightfield={heightfield} />}
 
       {scopeDemo && FPS_DEBUG.shotTrajectory && (
         <Suspense fallback={null}>

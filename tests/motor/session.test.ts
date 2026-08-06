@@ -7,7 +7,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { GameClient } from "../../src/net/GameClient.ts";
-import { GameServer, type WorldTargetSpec } from "../../src/net/GameServer.ts";
+import {
+  DEFAULT_RESPAWN_SECONDS,
+  GameServer,
+  type WorldTargetSpec,
+} from "../../src/net/GameServer.ts";
+import { DEATH_CLIPS } from "../../src/character/characterClips.ts";
 import { LoopbackNetwork, type LinkConditions } from "../../src/net/LoopbackTransport.ts";
 import {
   BYTES_PER_PLAYER,
@@ -182,6 +187,16 @@ test("the welcome carries the room's full health, so a client can read a fractio
   // maximum would make every health fraction a division by zero.
   assert.equal(decodeWelcome(encodeWelcome(1, 0, { x: 0, y: 0, z: 0 }, 0))!.maxHealth, 1);
   assert.equal(decodeWelcome(encodeWelcome(1, 0, { x: 0, y: 0, z: 0 }, 9999))!.maxHealth, 255);
+  // The DECODE-side floor, reached with a hand-built packet: going through the
+  // encoder cannot test it, because the encoder already clamps to >= 1. A hostile
+  // or buggy server sending a raw zero is the case that needs the guard.
+  const rawZeroMax = encodeWelcome(1, 0, { x: 0, y: 0, z: 0 }, 1);
+  new DataView(rawZeroMax.buffer, rawZeroMax.byteOffset).setUint8(19, 0);
+  assert.equal(
+    decodeWelcome(rawZeroMax)!.maxHealth,
+    1,
+    "a zero maximum on the wire must floor to 1, or every health fraction divides by zero"
+  );
 });
 
 test("the feedback packets survive a codec round trip", () => {
@@ -1335,5 +1350,107 @@ test("snapshots go out at the patch rate, not the tick rate", () => {
   assert.ok(
     Math.abs(session.server.snapshotsSent - expected) <= 2,
     `sent ${session.server.snapshotsSent} snapshots, expected about ${expected}`
+  );
+});
+
+test("the default respawn window clears the longest death clip", () => {
+  // The whole reason the flat window is 5 s and not 3: four of the six death
+  // clips run longer than three seconds, so the old default teleported a body
+  // away mid-fall. Nothing pinned the DEFAULT — every other respawn test passes
+  // an explicit override — so trimming the constant, or re-exporting a longer
+  // clip, would reintroduce that with a green suite.
+  const longest = Math.max(...Object.values(DEATH_CLIPS).map((clip) => clip.seconds));
+  assert.ok(
+    DEFAULT_RESPAWN_SECONDS > longest,
+    `the respawn window (${DEFAULT_RESPAWN_SECONDS}s) must exceed the longest death clip (${longest}s)`
+  );
+  // And it has to survive the wire, which carries tenths in one byte.
+  const died = decodePlayerDied(
+    encodePlayerDied({
+      victimId: 1,
+      killerId: 2,
+      weaponIndex: 0,
+      direction: "front",
+      headshot: false,
+      respawnSeconds: DEFAULT_RESPAWN_SECONDS,
+    })
+  )!;
+  assert.equal(died.respawnSeconds, DEFAULT_RESPAWN_SECONDS);
+});
+
+test("a default server announces and schedules the same flat window", () => {
+  const session = makeSession(2, { spawn: (seat) => ({ x: seat === 1 ? 0 : 8, z: 0 }) });
+  const towardVictim = -Math.PI / 2;
+  const aimed = (index: number) => ({ buttons: 0, yaw: index === 0 ? towardVictim : 0 });
+  drive(session, 4, aimed);
+  session.clients[0]!.fire(towardVictim, 0);
+  drive(session, 3, aimed);
+
+  const died = session.clients[1]!.getCombatEvents().find((event) => event.kind === "died");
+  assert.ok(died !== undefined, "the victim never heard the death");
+  assert.equal(died.respawnSeconds, DEFAULT_RESPAWN_SECONDS);
+
+  // Still down a second before the window, up after it — the announced number is
+  // the one the authority actually waits.
+  drive(session, 60 * (DEFAULT_RESPAWN_SECONDS - 1), aimed);
+  assert.equal(session.server.healthOf(2), 0, "respawned before the announced moment");
+  drive(session, 60 * 2, aimed);
+  assert.equal(session.server.healthOf(2), 100, "never respawned");
+});
+
+test("the respawn tenths byte clamps instead of wrapping", () => {
+  // 25.5 s is the ceiling of one byte of tenths. Above it the value must PIN
+  // rather than wrap to a small number, which would end the client's countdown
+  // while the corpse waited out the rest.
+  const high = decodePlayerDied(
+    encodePlayerDied({
+      victimId: 1,
+      killerId: 0,
+      weaponIndex: 0,
+      direction: "front",
+      headshot: false,
+      respawnSeconds: 40,
+    })
+  )!;
+  assert.equal(high.respawnSeconds, 25.5);
+  const low = decodePlayerDied(
+    encodePlayerDied({
+      victimId: 1,
+      killerId: 0,
+      weaponIndex: 0,
+      direction: "front",
+      headshot: false,
+      respawnSeconds: -5,
+    })
+  )!;
+  assert.equal(low.respawnSeconds, 0, "a negative window must read as none, not as 25.5");
+});
+
+test("a dead player cannot be driven, and its collider stops blocking", () => {
+  const session = makeSession(2, {
+    spawn: (seat) => ({ x: seat === 1 ? 0 : 8, z: 0 }),
+    respawnSeconds: 0, // stay dead, so the frozen state can be observed
+  });
+  const towardVictim = -Math.PI / 2;
+  const aimed = (index: number) => ({ buttons: 0, yaw: index === 0 ? towardVictim : 0 });
+  drive(session, 4, aimed);
+  session.clients[0]!.fire(towardVictim, 0);
+  drive(session, 3, aimed);
+  assert.equal(session.server.healthOf(2), 0, "a lethal hit did not kill");
+
+  const corpse = session.server.room.get("2");
+  assert.ok(corpse !== undefined);
+  const restX = corpse.state.position.x;
+  const restZ = corpse.state.position.z;
+
+  // The victim holds full forward for a second. A corpse must not move.
+  drive(session, 60, (index) => ({
+    buttons: index === 1 ? MotorInput.Forward : 0,
+    yaw: index === 0 ? towardVictim : 0,
+  }));
+  assert.ok(
+    Math.abs(corpse.state.position.x - restX) < 0.01 &&
+      Math.abs(corpse.state.position.z - restZ) < 0.01,
+    "the corpse was driven away from where it fell"
   );
 });

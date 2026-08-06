@@ -233,7 +233,7 @@ const DEFAULT_MAX_HEALTH = 100;
  * against the client's counter; 5 s clears the longest clip (3.73 s) with enough
  * margin that the final pose still registers, and every death reads the same.
  */
-const DEFAULT_RESPAWN_SECONDS = 5;
+export const DEFAULT_RESPAWN_SECONDS = 5;
 /** About 11 degrees: wider than any authored cone, far short of a turn. */
 const DEFAULT_MAX_AIM_DEVIATION_RADIANS = 0.2;
 /** Beyond this a rifle round is not the thing that killed anybody. */

@@ -15,6 +15,7 @@ import {
   CommunityError,
 } from "../../tools/account/communityRepository.ts";
 import {
+  POSTS_PER_HOUR,
   POSTS_PER_WALL_PER_HOUR,
   normalisePost,
   validateClanName,
@@ -286,5 +287,64 @@ describe("the activity feed", () => {
     // Newest first, and no stored table to fall out of step with the source.
     const times = feed.map((entry) => entry.at);
     assert.deepEqual(times, [...times].sort((a, b) => b.localeCompare(a)));
+  });
+});
+
+describe("the limits that are not resettable", () => {
+  it("bites globally as well as per wall, and exempts your own wall", async () => {
+    // The per-wall limit and its precedence were tested; the GLOBAL one never
+    // fired in any test, so an inverted window comparison would have passed.
+    const spammer = (await accounts.createGuest("limit-spammer")).id;
+    const walls: number[] = [];
+    for (let i = 0; i < 5; i += 1) {
+      walls.push((await accounts.createGuest(`limit-wall-${i}`)).id);
+    }
+    let posted = 0;
+    outer: for (const wall of walls) {
+      for (let i = 0; i < POSTS_PER_WALL_PER_HOUR; i += 1) {
+        try {
+          await community.post(wall, spammer, `note ${posted}`);
+          posted += 1;
+        } catch (error) {
+          assert.ok(error instanceof CommunityError);
+          assert.equal(error.message, "too_many", "the global limit is what should stop this");
+          break outer;
+        }
+      }
+    }
+    assert.equal(posted, POSTS_PER_HOUR, "the global limit must cap the total, not the per-wall");
+
+    // Your OWN wall skips the per-wall limit (it is a harassment bound, and you
+    // cannot harass yourself) but still counts against the global one.
+    await assert.rejects(() => community.post(spammer, spammer, "mine"), /too_many/);
+  });
+
+  it("cannot be reset by deleting the posts it counted", async () => {
+    const author = (await accounts.createGuest("limit-deleter")).id;
+    const wall = (await accounts.createGuest("limit-target")).id;
+    const ids: number[] = [];
+    for (let i = 0; i < POSTS_PER_WALL_PER_HOUR; i += 1) {
+      ids.push((await community.post(wall, author, `note ${i}`)).id);
+    }
+    await assert.rejects(() => community.post(wall, author, "one more"), /too_many_here/);
+
+    // The old limit counted LIVE rows, so this cleared it — and the limit exists
+    // to stop harassment, which makes "delete and continue" the whole attack.
+    for (const id of ids) await community.deletePost(id, author);
+    await assert.rejects(
+      () => community.post(wall, author, "after deleting"),
+      /too_many_here/,
+      "deleting your own posts must not restore the quota"
+    );
+  });
+
+  it("cannot be reset by withdrawing a friend request", async () => {
+    const asker = (await accounts.createGuest("limit-asker")).id;
+    const target = (await accounts.createGuest("limit-asked")).id;
+    await community.requestFriend(asker, target);
+    await community.removeFriendship(asker, target);
+    // The concurrency bound is clear again, but the RATE bound counted the send.
+    const sent = await community.sentRequestsThisHour(asker);
+    assert.equal(sent, 1, "a withdrawn request must still count as sent");
   });
 });

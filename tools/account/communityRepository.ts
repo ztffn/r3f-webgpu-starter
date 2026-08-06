@@ -196,6 +196,17 @@ export class CommunityRepository {
       .execute();
   }
 
+  /**
+   * How many friend requests this account has SENT in the last hour.
+   *
+   * Exposed so the rate bound is observable: the concurrency bound can be read
+   * from `friendships`, but the rate bound lives in the log precisely because
+   * withdrawing a request must not clear it, and a claim like that needs a test.
+   */
+  async sentRequestsThisHour(userId: number): Promise<number> {
+    return await this.countActions(userId, "friend_request", hourAgoIso(), null);
+  }
+
   private async countActions(
     userId: number,
     action: "post" | "friend_request",

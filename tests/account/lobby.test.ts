@@ -94,13 +94,59 @@ describe("leaderboards", () => {
     await db.destroy();
   });
 
-  it("maps every board id to a real career column", async () => {
+  it("maps every board id to a real career column and RANKS by it", async () => {
     // The board id comes from the URL and the column is interpolated into the
-    // query, so this table is the only thing standing between the two.
+    // query, so this table is the only thing standing between the two. Asserting
+    // `Array.isArray` could not fail once the query succeeded, which let two ids
+    // point at the same column, or a column return the wrong figures, unnoticed.
+    //
+    // Its OWN database: the accounts below would otherwise appear in the sibling
+    // tests' boards, which share one connection per describe block.
+    const ownDb = openDatabase(":memory:");
+    await migrate(ownDb);
+    const repo = new AccountRepository(ownDb);
+    const first = await repo.registerWithEmailAndPassword({
+      email: "board-first@example.com",
+      passwordHash: "x".repeat(128),
+      callsign: "BoardFirst",
+    });
+    const second = await repo.registerWithEmailAndPassword({
+      email: "board-second@example.com",
+      passwordHash: "x".repeat(128),
+      callsign: "BoardSecond",
+    });
+    // `second` leads every board: more matches, more time, a longer shot.
+    for (let i = 0; i < 3; i += 1) await repo.recordSession(second.id, 600);
+    await repo.recordSession(first.id, 60);
+    await repo.recordLongestShot(second.id, 900);
+    await repo.recordLongestShot(first.id, 100);
+
+    const columns = new Set<string>();
     for (const [id, entry] of Object.entries(LEADERBOARD_COLUMNS)) {
+      columns.add(entry.column);
       const rows = await repo.leaderboard(entry.column, 5);
-      assert.ok(Array.isArray(rows), `${id} did not resolve to a queryable column`);
+      // Kills and deaths have no writer yet, so those boards are legitimately
+      // empty — the ones fed by `recordSession` and `recordLongestShot` are the
+      // ones whose ordering can be checked.
+      if (rows.length === 0) continue;
+      assert.equal(
+        rows[0]?.callsign,
+        "BoardSecond",
+        `${id} did not rank by ${entry.column} — the leader is wrong`
+      );
+      const values = rows.map((row) => row.value);
+      assert.deepEqual(
+        values,
+        [...values].sort((a, b) => b - a),
+        `${id} came back unsorted`
+      );
     }
+    assert.equal(
+      columns.size,
+      Object.keys(LEADERBOARD_COLUMNS).length,
+      "two board ids point at the same column, so one of them is mislabelled"
+    );
+    await ownDb.destroy();
   });
 
   it("does not resolve inherited object properties to a board", () => {

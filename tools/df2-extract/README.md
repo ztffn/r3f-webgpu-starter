@@ -52,6 +52,14 @@ unzip installer.exe -d out               # WinZip SFX wrapper
 - **`.cal` char_data** — plaintext, one `<material>,<param>` line per detail index
   (line *N* = index *N−1*): `Gs*` grass, `Dt*` dirt, `Rk*` rock, `Md*` mud, `rd1` railroad,
   `ct1` concrete, `null`; `param` 40 marks the hard surfaces. `docs/02` §5.
+- **`detail_elev` is a general EXTRUSION map, not a grass map** — the original's voxel
+  renderer stretched *every* ground column by its detail_elev texel and coloured it from
+  the detail_color texel; grass is just the vegetation case. Measured on DFG5: rail
+  columns carry stretch 40 and tie planks 20 above ~0 ballast (a physically raised
+  railroad), rock/dirt/mud tiles carry 4–14 (stones and ruts), grass families 22–46, and
+  the unused `null` tiles are ~255 full-height blocks. Converters deriving a vegetation
+  or concealment field from the strip must therefore FILTER BY char_data family (`Gs*`),
+  or every dirt rut becomes centimetre grass. `docs/06` §11/§11.1.
 - **Detail-texture mapping** — each detail-map texel (1 m) renders its own full 64×64 tile
   (~1.6 cm/px ground resolution). Proven by DFG5's railroad: four *different* tiles in four
   *adjacent* columns compose one continuous track, and the colormap does not paint it at

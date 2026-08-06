@@ -434,9 +434,7 @@ export function DF2Scene({
         heightSize: loaded.size,
         size: loaded.size,
         colorMap: loaded.colorMap,
-        detailIndexMap: loaded.detailIndexMap,
-        detailColorAtlas: loaded.detailColorAtlas,
-        detailGrid: loaded.detailGrid,
+        detail: loaded.detail,
         grassMap: loaded.grassMap,
         filter: loaded.filter,
         waterHeight: loaded.waterHeight,
@@ -454,9 +452,7 @@ export function DF2Scene({
       heightSize: bytes.size,
       size,
       colorMap,
-      detailIndexMap: null,
-      detailColorAtlas: null,
-      detailGrid: 0,
+      detail: null,
       grassMap,
       filter: undefined,
       waterHeight: 0,
@@ -624,9 +620,7 @@ export function DF2Scene({
         ? createTerrainMaterial({
             colorMap: world.colorMap,
             atmosphere,
-            detailIndexMap: world.detailIndexMap,
-            detailColorAtlas: world.detailColorAtlas,
-            detailGrid: world.detailGrid,
+            detail: world.detail,
             metersPerTexel: world.heightfield.cellSize,
           })
         : null,
@@ -825,18 +819,16 @@ export function DF2Scene({
   );
 
   useEffect(() => {
+    // Spread of dialTargets, not a second field list: SceneHandles structurally
+    // extends VisualDialTargets, and two hand-kept copies of the same fields is
+    // exactly the drift the dialTargets comment above warns about.
     onSceneReady?.({
+      ...dialTargets,
       preset: weather,
-      rain: BENCH.rain ?? weather.rain,
       setPreset,
       roomDials: room,
-      grade,
-      fog,
-      precipitation,
-      blades: bladeKit?.uniforms ?? null,
-      terrainDetail: terrainKit?.detail ?? null,
     });
-  }, [bladeKit, fog, grade, onSceneReady, precipitation, room, setPreset, terrainKit, weather]);
+  }, [dialTargets, onSceneReady, room, setPreset, weather]);
 
   // Stable identity so Terrain's slot memo does not rebuild; reads the uniform at
   // call time so the canopy slider takes effect without a React render.

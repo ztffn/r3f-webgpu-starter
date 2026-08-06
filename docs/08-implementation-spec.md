@@ -293,15 +293,25 @@ the tile shows its authored colour times a lighting term (colormap luminance ove
 level-6 mip's luminance — isolates the baked shading without polluting the tile's hue),
 lerped in by strength. Both modulate variants failed structurally in linear light —
 multiplying two sub-white colours darkens and SQUARES saturation; the gamma-equivalent
-gain (2^2.2) fixed the mean but kept the saturation blowout. Three more traps paid for:
+gain (2^2.2) fixed the mean but kept the saturation blowout. Four traps paid for:
 **(1)** the atlas must not mipmap (tiles bleed into neighbours) and tile UVs are inset
 half a texel so bilinear never crosses an atlas seam; **(2)** indices can't be mipmapped
 either, so the dithered type boundaries — which follow slope/height contours — alias into
 contour-hugging stripes at grazing angles; a `fwidth`-based texels-per-pixel fade kills
 this where the distance fade can't reach; **(3)** the grass bake zeroes canopy on tiles
 whose `.cal` char_data param is non-zero (hard ground: railroad, concrete) or the rails
-grow stubble. Gain and both fade distances are live dials (`visualDials.ts`, rendered on
-the Scene tab — ground detail is not weather).
+grow stubble; **(4)** the lighting ratio's NUMERATOR must be smoothed to ~8 m (a metre
+constant converted to a mip level per texel size, so the `?texel=` dial rescales it),
+never the full-res colormap — at full resolution it stamps the colormap's per-texel
+luminance noise (which is albedo the tiles already express, not lighting; ±2.5× between
+adjacent texels, measured) onto every tile, and the ground reads as hard tone-plates on
+the 1 m grid. That was the reported "terracing", first misattributed to the grass march; the
+march was exonerated by its own hitFrac debug view (plates on ground with no hits) and
+the ratio convicted by simulating the exact shader arithmetic against the real map
+offline. Verify a shading claim by rendering its math, not by reasoning about it.
+Gain, power (master layer opacity — the taste lever for "tiles read darker and more
+saturated than the colormap", which they authentically are) and both fade distances are
+live dials (`visualDials.ts`, rendered on the Scene tab — ground detail is not weather).
 
 ### 6.4 `GrassMaterial` — the columnar march
 

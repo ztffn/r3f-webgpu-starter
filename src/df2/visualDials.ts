@@ -1,4 +1,5 @@
-// The live visual dials (28 today), as one table: wire contract and accessors together.
+// The live visual dials, as one table: wire contract and accessors together.
+// (The count is pinned by tests/motor/session.test.ts, not by this comment.)
 //
 // Extracted from WeatherDebug so the debug panel and the authoritative server can
 // agree on what a dial IS — its identity on the wire, its legal range, and how to
@@ -346,6 +347,16 @@ export const VISUAL_DIALS: readonly VisualDial[] = [
     get: (t) => Number(t.terrainDetail?.far.value ?? 0),
     set: (t, v) => t.terrainDetail && (t.terrainDetail.far.value = v),
     hint: "metres at which only the colormap remains — the original's railroad vanished at range too. Clamped in-shader to stay above the start",
+  },
+  {
+    label: "Detail power",
+    group: "terrain",
+    min: 0,
+    max: 1,
+    step: 0.01,
+    get: (t) => Number(t.terrainDetail?.power.value ?? 0),
+    set: (t, v) => t.terrainDetail && (t.terrainDetail.power.value = v),
+    hint: "master opacity of the layer — lowering it blends back toward the plain colormap, which is the lever if the tiles read too dark or saturated",
   },
 ];
 

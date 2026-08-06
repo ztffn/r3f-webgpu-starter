@@ -50,10 +50,12 @@ dependencies required.
 
 ## 2. TGA loader
 
-> **⬜ Not implemented.** Nothing on the terrain/grass path needs it — the colormap is JPEG,
-> and the heightmap, detail map and `detail_elev` strip are all PCX. TGA is only the
-> `detail_color` (`_cm`) strip, which the columnar shader does not use (it takes colour from
-> the colormap — rendering design doc §4.1, AS BUILT). Implement when `.3DI` textures land.
+> **✅ Implemented** as `decodeTga()` in `tools/df2-extract/imageio.mjs` (Aug 2026), validated
+> against `DFG5_CM.TGA` (64×16384, 32-bit detail-color strip) and `SKYGRD01.TGA` (16×257,
+> 24-bit sky gradient). Uncompressed truecolor only, as specified below; the columnar shader
+> still takes ground colour from the colormap (rendering design doc §4.1, AS BUILT) — the
+> renderer does not consume `detail_color` yet, and DFG5's railroad shows what that costs
+> (`06-...md` §11).
 
 Handles NovaLogic's TGA usage specifically: uncompressed truecolor images at 24-bit or
 32-bit pixel depth (`ImageType == UNCOMP_TRUECOLOR`). Does not need to handle
@@ -90,12 +92,28 @@ against real data** — for the terrain heightmap, detail map and `detail_elev` 
 
 ## 4. `.3DI` model format (character/vehicle/object geometry)
 
-> **⬜ Not implemented.** Structurally reverse-engineered and specified below, but no decoder
-> exists. Off the terrain/grass critical path — the range/concealment tests use a capsule
-> stand-in for a player, not a real model (`07-...md` §8).
+> **✅ Implemented and corpus-validated (2026-08-06).** `tools/df2-extract/file3di.mjs`
+> parses V8 and exports GLB (`df2extract.mjs 3di <f> [out.glb]`); 642 of the 644 retail
+> models parse with exact end-of-buffer alignment (the 2 failures are V7-signature LAMP
+> variants). Corrections found against the reference tool are folded into the tables
+> below, plus the facts it left open:
+>
+> - **`HeaderLodInfo` is 36 bytes, not 20** — the C# declared `Size=20` but lays out
+>   9×u32; 36 makes the 128-byte header exact and puts `TextureCount` at offset 124.
+> - **`ModelSubObject` is 112 bytes** (the C# trailing `int[48]` is really `byte[48]`) —
+>   confirmed by EOF alignment across the corpus.
+> - **Embedded texture body**: after the 52-byte header come `_bmSize` bytes of indexed
+>   pixels (stride `_bmSize/(w*h)`: 1 = opaque, 2 = index+alpha), then a 256×4 **BGRA**
+>   palette.
+> - **UVs are texel coordinates in 24.8 fixed point** (`u = tu/256/width`); values tile
+>   outside [0,1) and need wrap sampling.
+> - **Units: 256 model units = 1 m.** Standing character models measure 467–470 units
+>   (1.83 m); LOD-header bounds are the int16 vertex bounds ×256 (i.e. meters in 16.16).
+>   This plus the egypt pyramid footprint calibrated `METERS_PER_TEXEL` (see `06` §9).
 
 Confirmed structure for `FileVersion.V8` (only version this project needs to support,
-per the reference tool — other versions throw `NotSupportedException`).
+per the reference tool — other versions throw `NotSupportedException`). Signature
+`0x08494433` ("3DI\x08"); the two V7 files (`0x07494433`) are not parsed.
 
 ### 4.1 Top-level file layout
 
@@ -218,7 +236,11 @@ detail-elevation strip, `_cm` detail-color strip.
 | `detail_map` | `<t>_m.pcx` | **PCX, 1024×1024, 8-bit palettized** — per-texel detail index (high-frequency; e.g. 62 distinct indices on Green Mile) |
 | `detail_color` | `<set>_cm.tga` | **64×16384 RGBA strip = 256 tiles of 64×64** — ground textures per detail index |
 | `detail_elev` | `<set>_dm.pcx` | **64×16384 greyscale strip = 256 tiles of 64×64** — per-index grass **stretch height** |
-| env params | (in `.trn`) | `sky_height`, `horizon`, `water_map`, `water_height`, `filter` RGB, `gamma`, `saturation`, `sun_slope` — plain scalars |
+| `char_data` | `<set>_cm.cal` | **Plaintext, 256 lines `<material>,<param>`** — ground character per detail index (line *N* = index *N−1*). Vocabulary seen: `Gs2`/`Gs3` grass, `Dt2` dirt, `Rk2` rock, `Md3` mud, `rd1` railroad, `ct1` concrete, `null`. `param` is 40 on the hard surfaces (`rd1`/`ct1`), 0 otherwise |
+| `sky_map` | `clouds<NN>.pcx` | **PCX, 512×512 palettized** cloud layer (the shipped set skips `clouds09`) |
+| `sky_palette` | `skygrd<NN>.tga` | **TGA, 16×257, 24-bit** sky gradient LUT |
+| `water_map` | `ripple1.pcx` | **PCX, 256×256 palettized** water ripple tile |
+| env params | (in `.trn`) | `sky_height`, `horizon`, `water_height`, `filter` RGB, `gamma`, `saturation`, `sun_slope` — plain scalars |
 
 **Corrections to the original guess:** colormap is **JPEG** (not TGA); the heightmap is the
 `_d.pcx` (`_d` = elevation — the `_m.pcx` is the *detail* map, not the heightmap); the

@@ -1,9 +1,10 @@
 // Minimal image codecs for the DF2 asset pipeline — Node built-ins only.
 //
 //   decodePcx()  8-bit RLE PCX (the format NovaLogic heightmaps/detail maps use)
+//   decodeTga()  uncompressed truecolor TGA (the detail_color strip / sky palettes)
 //   encodePng()  greyscale / RGB PNG via node:zlib
 //
-// See docs/02-asset-format-specification.md §3/§5.
+// See docs/02-asset-format-specification.md §2/§3/§5.
 
 import zlib from "node:zlib";
 
@@ -63,6 +64,49 @@ export function decodePcx(buf) {
   if (pi > 0 && buf[pi] === 0x0c) palette = Uint8Array.from(buf.subarray(pi + 1, pi + 769));
 
   return { width, height, pixels, palette };
+}
+
+// --- TGA ---------------------------------------------------------------------
+
+/**
+ * Decode NovaLogic's TGA usage: uncompressed truecolor (type 2) at 24 or 32 bpp
+ * (docs/02 §2). The detail_color `_cm` strip is 32-bit, the `skygrd` palettes are
+ * 24-bit. Color-mapped, RLE and greyscale variants don't occur in the corpus and
+ * are rejected. Any TGA 2.0 footer past the pixel data is simply never read.
+ * @returns {{width:number,height:number,channels:number,pixels:Uint8Array}}
+ *          `pixels` is RGB or RGBA, rows top-to-bottom regardless of file origin.
+ */
+export function decodeTga(buf) {
+  const idLength = buf[0];
+  const colorMapType = buf[1];
+  const imageType = buf[2];
+  if (imageType !== 2 || colorMapType !== 0)
+    throw new Error(`Unsupported TGA: imageType=${imageType} colorMapType=${colorMapType}`);
+  const width = buf.readUInt16LE(12);
+  const height = buf.readUInt16LE(14);
+  const depth = buf[16];
+  const descriptor = buf[17];
+  if (depth !== 24 && depth !== 32) throw new Error(`Unsupported TGA depth: ${depth}`);
+
+  const channels = depth / 8;
+  const topToBottom = (descriptor & 0x20) !== 0;
+  const start = 18 + idLength;
+  const pixels = new Uint8Array(width * height * channels);
+  for (let y = 0; y < height; y++) {
+    const srcRow = topToBottom ? y : height - 1 - y;
+    let s = start + srcRow * width * channels;
+    let d = y * width * channels;
+    for (let x = 0; x < width; x++) {
+      // TGA stores BGR(A); emit RGB(A).
+      pixels[d] = buf[s + 2];
+      pixels[d + 1] = buf[s + 1];
+      pixels[d + 2] = buf[s];
+      if (channels === 4) pixels[d + 3] = buf[s + 3];
+      s += channels;
+      d += channels;
+    }
+  }
+  return { width, height, channels, pixels };
 }
 
 // --- PNG ---------------------------------------------------------------------

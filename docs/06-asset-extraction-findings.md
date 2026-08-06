@@ -214,9 +214,19 @@ either modding installer).
 - **Stretch-height → world-units scale.** The `detail_elev` greyscale (0–255) maps to some
   world height; the multiplier (and whether it's modulated by `sun_slope`/terrain scale) is
   not yet pinned. Tune visually against the real map, then confirm if base-game data clarifies.
-- **Heightmap → world-height scale & meters-per-texel.** 1024² grid confirmed; the vertical
-  scale and horizontal spacing (map world size) are still `HEIGHT_SCALE` / `METERS_PER_TEXEL`
-  constants to calibrate.
+- **Heightmap → world-height scale.** 1024² grid confirmed; the vertical scale
+  (`HEIGHT_SCALE`) is still a placeholder. `METERS_PER_TEXEL` is no longer open — see the
+  calibration below.
+
+> **CONFIRMED (2026-08-06): 1 texel = 1 m, maps are 1.024 km square; 256 .3DI units = 1 m.**
+> Two independent anchors agree: (1) five standing character models (BGUY01, THUG01,
+> PILOT1, LABTECH, FCIV1) measure 467–470 model units tall = 1.83 m at 256 units/m;
+> (2) the EXP2 egypt map bakes two pyramid footprints into its colormap at ~170 texels a
+> side (measured 172/168/…, y-axis clean of the cast shadow), and KHUFU.3DI's base is
+> 44430 units = 173.6 m → 1.021 m/texel, unity within paint/JPEG tolerance. Verified
+> end-to-end by placing the converted KHUFU GLB at the painted footprint in the renderer
+> (probe commands: `docs/plans/2026-08-06-retail-df2-reverse-engineering-runbook.md` W1,
+> session log). `src/df2/config.ts` now ships `METERS_PER_TEXEL = 1.0`.
 - **detail_map palette semantics.** Whether the palette RGB carries meaning or the index is
   purely a strip key (current assumption: index is the key). Per-terrain authored, not fixed.
 - **`dfdg1_dm` contents** — the actual grass stretch profile of the classic DF2 grass.
@@ -231,11 +241,14 @@ either modding installer).
 - ✅ PCX 8-bit RLE decode, PNG encode via `node:zlib`, JPEG passthrough (`imageio.mjs`)
 - ✅ `grassHeightField` bake, with provenance tagging so a substituted strip is refused at
   load time (`prepare-terrain.mjs`, `--detail-elev` override)
-- ⬜ TGA decode — not needed by the terrain path yet (`detail_color` strips only)
-- ⬜ `.3DI` → glTF — not started
+- ✅ TGA decode (`decodeTga` in `imageio.mjs`) — uncompressed truecolor 24/32-bit, validated
+  against the DFG5 detail-color strip and the `skygrd` sky gradients (§11)
+- ✅ `.3DI` V8 → GLB (`file3di.mjs`, `df2extract.mjs 3di`) — 642/644 retail models parse
+  with exact EOF alignment; embedded palettized textures export as PNG; `02-...md` §4 has
+  the corrected layout. The 2 failures are V7-signature files (LAMP3/LAMPX).
 
-**Phase 0's core is done.** Remaining Phase 0 work is model conversion only, which is off
-the terrain/grass critical path — see `01-...md` roadmap.
+**Phase 0 is done** — container, terrain and model conversion all validated against real
+archives. See `01-...md` roadmap.
 
 ---
 
@@ -263,3 +276,51 @@ indefinitely and terrain kept coming.
 
 Any future gameplay system (concealment line-of-sight in particular) must wrap the same
 way, or sightlines will break at an invisible boundary.
+
+---
+
+## 11. DFG5 "Green One" full-file audit — the railroad is detail-texture-only (Aug 2026)
+
+Every file the retail `DFG5.TRN` references was decoded with our own codecs and understood;
+none is a mystery. Confirmed inventory: `dfg5_c.jpg` 1024² colormap, `dfg5_d.pcx` 1024²
+heightmap, `dfg5_m.pcx` 1024² detail map (216 distinct indices, every one materialized in
+the `.cal`), `dfg5_cm.tga` 64×16384 32-bit detail-color strip, `dfg5_dm.pcx` 64×16384
+detail-elev strip, `dfg5_cm.cal` char_data (format in `02-...md` §5), `clouds01.pcx`
+512² sky, `skygrd01.tga` 16×257 gradient, `ripple1.pcx` 256² water. `df2main`'s `DFG5.JPG`
+is the 256² map-select preview. `prepare-terrain` runs end-to-end on it with **no
+substitution** — a real-strip terrain (grass stretch 0..221, mean 16.9).
+
+**The train track.** The veteran memory that Green One's railroad was "made out of the
+detail texture" is exactly right, and the mechanism is sharper than remembered:
+
+- The `.cal` names two hard-surface families: `rd1` = detail indices 243–246 (railroad),
+  `ct1` = 247–255 (concrete), the only entries with `param` 40.
+- The detail map paints indices **244, 245, 246, 247 in adjacent columns x = 530–533,
+  every row z = 0–1023** — a 4-texel-wide, unbroken, full-length north–south line.
+- Those four 64×64 tiles are **column roles, not variants**: 244 = tie ends, 245 = west
+  rail, 246 = tie centres, 247 = east rail. Laid side by side they compose ONE railroad
+  4 m wide. (247 sits in the `ct1` range — char_data charges the east rail as concrete;
+  quirk, verified.)
+- **The colormap does not paint the track at all** — inspected at the exact columns. At
+  colormap-only distances the railroad was invisible; it existed purely in the detail pass.
+  Our renderer takes ground colour from the colormap only, so today it would drop the
+  railroad entirely. Reproducing it needs the detail_color pass.
+
+**Detail-texture ground scale.** The composite is the evidence: four *different* tiles in
+four *adjacent* texels only assemble into one continuous railroad if **each detail-map texel
+shows its own full 64×64 tile** — one tile per 1 m texel, i.e. ground resolution 64 px/m
+(~1.6 cm/px). Open question this raises for the grass bake (`prepare-terrain.mjs`): the bake
+samples the detail_elev tile at `(x mod 64, z mod 64)`, treating the tile as spanning 64 m;
+under tile-per-texel the whole elevation tile lives *inside* one texel and the per-texel
+canopy height should arguably be an aggregate of the tile. The bake's output was tuned
+against measured reference (07-...md), so do not change it without re-measuring — but the
+mapping evidence is here.
+
+**Cross-validation from the editor bundle.** `CustomTools/df2c4med/MED.PFF` (extracted via
+the 36-byte PFF3 record variant) ships a DF1-style polytrn preview of the same terrain:
+`dfg5_d.raw` is a 512×512 sector tiled 2×2 into a 1024 buffer, and that sector equals the
+retail 1024² heightmap **downsampled 2× exactly** (FFT correlation 1.000 at zero shift,
+100% of texels within ±3) — an independent byte-level confirmation of our PCX decode and
+of wrap-tiling (`polytrn_wrapx/y 1` is declared in its `.trn`). Its `detail_map d3_m` /
+`detail_texture d3_det` references are **dangling** in this install (DF1-era resources);
+the med `dfg5_c.jpg` is a different render of the colormap, not a copy.

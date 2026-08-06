@@ -48,7 +48,7 @@ export function allPanels(visible: boolean): HudPanelVisibility {
 export function loadPanelVisibility(): HudPanelVisibility {
   const base = allPanels(true);
   try {
-    const raw = sessionStorage.getItem(PANELS_KEY);
+    const raw = readSession(PANELS_KEY);
     if (raw === null) return base;
     const stored = JSON.parse(raw) as Partial<Record<string, boolean>>;
     for (const id of HUD_PANELS) {
@@ -61,7 +61,7 @@ export function loadPanelVisibility(): HudPanelVisibility {
 }
 
 export function savePanelVisibility(value: HudPanelVisibility): void {
-  sessionStorage.setItem(PANELS_KEY, JSON.stringify(value));
+  writeSession(PANELS_KEY, JSON.stringify(value));
 }
 
 /** The dial's range — one home for the bounds the slider and the loader share. */
@@ -70,12 +70,33 @@ export const PANEL_ALPHA_MAX = 1.6;
 
 /** 1 is the stylesheet's own transparency; the dial scales it either way. */
 export function loadPanelAlpha(): number {
-  const raw = Number(sessionStorage.getItem(ALPHA_KEY));
+  // Guarded like loadPanelVisibility, and for the same reason: with cookies
+  // blocked, merely TOUCHING window.sessionStorage throws a SecurityError, and
+  // this runs in a useState initializer — so it would crash the render rather
+  // than lose a preference.
+  const raw = Number(readSession(ALPHA_KEY));
   return Number.isFinite(raw) && raw >= PANEL_ALPHA_MIN && raw <= PANEL_ALPHA_MAX
     ? raw
     : 1;
 }
 
 export function savePanelAlpha(value: number): void {
-  sessionStorage.setItem(ALPHA_KEY, String(value));
+  writeSession(ALPHA_KEY, String(value));
+}
+
+/** Session storage that cannot throw. Blocked storage is a lost preference. */
+export function readSession(key: string): string | null {
+  try {
+    return sessionStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+export function writeSession(key: string, value: string): void {
+  try {
+    sessionStorage.setItem(key, value);
+  } catch {
+    // Nothing to do and nothing worth saying: the setting simply does not persist.
+  }
 }

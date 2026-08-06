@@ -50,10 +50,14 @@ export function RespawnScreen({ death }: RespawnScreenProps) {
   const seconds = useRespawnCountdown(death);
   if (death === null) return null;
 
+  // The wrapper is NOT a live region. `role="status"` on it is polite AND atomic,
+  // so the 200 ms countdown inside re-announced the whole overlay five times a
+  // second for the entire death. The one-shot announcement lives on the header;
+  // `role="timer"` is silent by itself, which is what a ticking number wants.
   return (
-    <div className="respawn" data-dev="hud-death" role="status">
+    <div className="respawn" data-dev="hud-death">
       <div className="respawn-stage notched">
-        <header className="respawn-head">
+        <header className="respawn-head" role="status">
           <span className="eyebrow">
             {death.killerName === null ? "You died" : "You were killed by"}
           </span>

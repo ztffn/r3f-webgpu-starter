@@ -7,10 +7,14 @@
 // caller references is asserted against the loaded GLB at startup.
 //
 // SHARED, not presentation. It moved out of src/fps for the same reason the
-// ballistic core did (docs/12 §3): the authority needs it. The server schedules a
-// respawn from a death clip's own length, so both sides must agree on which clip
-// plays and how long it runs, and a second copy of that table is a body that pops
-// away mid-fall on one machine and not the other.
+// ballistic core did (docs/12 §3): the authority picks the clip, so both sides
+// must agree on WHICH clip a death plays, and a second copy of that table is a
+// body falling one way on one machine and another way elsewhere.
+//
+// The server no longer schedules the respawn from a clip's LENGTH — that coupled
+// authority to presentation and drifted, so it is a flat window now (docs/12 §8.0
+// amendment). The durations below still matter: the flat window has to clear the
+// longest of them, and a test asserts exactly that.
 
 import type { PlayerStance } from "../motor/MotorTypes.ts";
 
@@ -135,10 +139,12 @@ export type DeathDirection = "front" | "back" | "side";
 /**
  * Death clips with their own durations, in seconds, from the 30 fps export.
  *
- * The durations are here because the SERVER needs them and cannot open a GLB: it
- * schedules a respawn from the clip's length so a body is not teleported away
- * mid-fall. The client should trust the loaded clip over this table and
- * `assertDeathClipDurations` is what reports a drift between the two.
+ * The durations are here because nothing on the server can open a GLB, and the
+ * respawn window has to CLEAR the longest of them or a body is teleported away
+ * mid-fall. The server no longer reads a clip's own length (it schedules a flat
+ * window — docs/12 §8.0); a test asserts the window still exceeds this maximum,
+ * which is what the numbers are for now. The client should trust the loaded clip
+ * over this table, and `deathClipDurationDrift` reports a disagreement.
  *
  * There is no left-side clip in the pack. Per the project's decision one clip
  * serves both sides rather than mirroring at runtime, so `side` is the right-side
@@ -217,10 +223,11 @@ export function allDeathClips(): string[] {
 /**
  * Reports death clips whose real duration disagrees with the table above.
  *
- * The table is the server's only copy and it cannot be checked against the GLB
- * there, so the browser — which has both — is where a re-export that changed a
- * clip's length gets caught. A drift means the server respawns at the wrong
- * moment, which looks like a body vanishing mid-fall rather than like stale data.
+ * The table is the only copy the server side can read and it cannot be checked
+ * against the GLB there, so the browser — which has both — is where a re-export
+ * that changed a clip's length gets caught. What a drift now threatens is the
+ * flat respawn window's margin: a clip that grew past it means a body leaves
+ * before it finishes falling.
  */
 export function deathClipDurationDrift(
   actualSeconds: (name: string) => number | undefined,

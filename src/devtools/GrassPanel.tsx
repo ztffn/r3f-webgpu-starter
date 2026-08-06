@@ -12,7 +12,7 @@
 // address a dial by name and assert what it set rather than screenshot and guess
 // (docs/plans/2026-08-04-web-platform-and-ui-design.md §4).
 
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import type { GrassUniforms } from "../df2/GrassMaterial";
 import { GRASS_STEPS } from "../df2/config";
 import { BENCH } from "../df2/bench";
@@ -123,7 +123,12 @@ const DEBUG_MODES = [
   "Fog colour",
 ];
 
-export function GrassPanel({ uniforms }: GrassPanelProps) {
+/**
+ * Memoised like its three sibling tabs: the console re-renders at GameApp's
+ * telemetry rate (~13 Hz), and with this tab open that reconciled eleven range
+ * inputs per tick. `uniforms` is identity-stable, so memo bails immediately.
+ */
+export const GrassPanel = memo(function GrassPanel({ uniforms }: GrassPanelProps) {
   // Mirror of uniform values, so the sliders have positions to show. Seeded once
   // from the material rather than from config, so it always reflects what is live.
   const [vals, setVals] = useState<Record<string, number>>({});
@@ -224,4 +229,4 @@ export function GrassPanel({ uniforms }: GrassPanelProps) {
       </p>
     </>
   );
-}
+});

@@ -45,19 +45,19 @@ export function loadSoldier(): Promise<SoldierAsset> {
           `soldier GLB is missing ${missing.length} expected clip(s): ${missing.join(", ")}`
         );
       }
-      // The death-clip table is the SERVER's only copy of these durations and it
-      // cannot open a GLB to check them. This is the one place that has both, so
-      // a re-export that changed a clip's length is caught here — where it reads
-      // as stale data — rather than in the field, where it reads as a body
-      // vanishing mid-fall. A warning, not a throw: the wrong respawn moment is
-      // survivable and refusing to load the character is not.
+      // The death-clip table is the only copy the server side can read, and it
+      // cannot open a GLB to check it. This is the one place that has both, so a
+      // re-export that changed a clip's length is caught here — where it reads as
+      // stale data — rather than in the field, where it reads as a body vanishing
+      // mid-fall. A warning, not a throw: refusing to load the character over it
+      // would be worse than the artefact.
       const drift = deathClipDurationDrift((name) =>
         gltf.animations.find((clip) => clip.name === name)?.duration
       );
       if (drift.length > 0) {
         console.warn(
-          `[soldier] death clip durations disagree with the shared table; the server will ` +
-            `respawn at the wrong moment: ${drift.join("; ")}`
+          `[soldier] death clip durations disagree with the shared table; if one now ` +
+            `exceeds the flat respawn window the body will leave mid-fall: ${drift.join("; ")}`
         );
       }
 

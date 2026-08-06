@@ -7,6 +7,7 @@
 // cost two clicks each time.
 
 import { useCallback, useEffect, useState } from "react";
+import { readSession, writeSession } from "../hud/hudPanels";
 
 export const DEV_TABS = [
   "scene",
@@ -22,7 +23,9 @@ export type DevTab = (typeof DEV_TABS)[number];
 const TAB_KEY = "df2.devtools.tab";
 
 function initialTab(): DevTab {
-  const stored = sessionStorage.getItem(TAB_KEY);
+  // Through the guarded readers: with cookies blocked, touching sessionStorage
+  // throws, and this runs in a useState initializer.
+  const stored = readSession(TAB_KEY);
   return DEV_TABS.includes(stored as DevTab) ? (stored as DevTab) : "scene";
 }
 
@@ -40,7 +43,7 @@ export function useDevConsole(startOpen: boolean): DevConsoleState {
 
   const setTab = useCallback((next: DevTab) => {
     setTabState(next);
-    sessionStorage.setItem(TAB_KEY, next);
+    writeSession(TAB_KEY, next);
   }, []);
 
   const toggle = useCallback(() => setOpen((was) => !was), []);

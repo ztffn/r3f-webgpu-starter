@@ -86,15 +86,18 @@ export function DevConsole({
       aria-label="Developer console"
     >
       <header className="dev-head">
-        <div className="dev-tabs" role="tablist" aria-label="Developer console sections">
+        {/* Toggle buttons, not the ARIA tabs pattern: `role="tab"` promises
+            arrow-key navigation and a roving tabindex, and announced "tab 1 of
+            7" while the keys did nothing. `aria-pressed` describes what these
+            actually are. The panel below keeps its labelled region. */}
+        <div className="dev-tabs" role="group" aria-label="Developer console sections">
           {DEV_TABS.map((tab) => (
             <button
               key={tab}
               type="button"
-              role="tab"
               id={`dev-tab-${tab}`}
               data-dev={`tab-${tab}`}
-              aria-selected={state.tab === tab}
+              aria-pressed={state.tab === tab}
               aria-controls={`dev-panel-${tab}`}
               onClick={() => state.setTab(tab)}
             >
@@ -102,11 +105,19 @@ export function DevConsole({
             </button>
           ))}
         </div>
+        {/* Closing removes the focused element, so focus is handed to the
+            reopen tab — which is kept mounted for this reason — rather than
+            falling to <body> and losing a keyboard user's place. */}
         <button
           type="button"
           className="dev-close"
           data-dev="console-close"
-          onClick={state.close}
+          onClick={() => {
+            state.close();
+            requestAnimationFrame(() => {
+              document.querySelector<HTMLElement>('[data-dev="console-open"]')?.focus();
+            });
+          }}
         >
           <span className="sr-only">Close developer console</span>
           <span aria-hidden="true">✕</span>
@@ -115,7 +126,7 @@ export function DevConsole({
 
       <div
         className="dev-body"
-        role="tabpanel"
+        role="region"
         id={`dev-panel-${state.tab}`}
         aria-labelledby={`dev-tab-${state.tab}`}
       >

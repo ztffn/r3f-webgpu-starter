@@ -274,13 +274,19 @@ export const LaunchPanel = memo(function LaunchPanel() {
         >
           Apply &amp; reload
         </button>
-        <button
-          type="button"
-          data-dev="launch-copy"
-          onClick={() => void navigator.clipboard.writeText(`${window.location.origin}${url}`)}
-        >
-          Copy URL
-        </button>
+        {/* Guarded, like InvitePanel's copy: `navigator.clipboard` is undefined
+            on an insecure origin, which is exactly how a LAN IP is reached when
+            testing touch on a real device — an unguarded call threw and the
+            button silently did nothing. */}
+        {typeof navigator !== "undefined" && navigator.clipboard !== undefined && (
+          <button
+            type="button"
+            data-dev="launch-copy"
+            onClick={() => void navigator.clipboard.writeText(`${window.location.origin}${url}`)}
+          >
+            Copy URL
+          </button>
+        )}
       </div>
     </>
   );

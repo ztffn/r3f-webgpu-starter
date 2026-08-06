@@ -43,14 +43,22 @@ export function VitalsPanel({ values }: VitalsPanelProps) {
               {row.icon}
             </span>
             <span className="hud-metric-label">{row.label}</span>
+            {/* A meter REQUIRES aria-valuenow, and an unwired row has no value
+                to give it — `aria-valuetext` alone does not satisfy the role, so
+                the row was a non-conforming meter. Without the role it is what it
+                actually is: a dash, with the empty dashed track beside it. */}
             <span
               className="hud-bar"
-              role="meter"
-              aria-label={row.label}
-              aria-valuenow={wired ? pct : undefined}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuetext={wired ? `${pct}%` : "not available"}
+              {...(wired
+                ? {
+                    role: "meter" as const,
+                    "aria-label": row.label,
+                    "aria-valuenow": pct,
+                    "aria-valuemin": 0,
+                    "aria-valuemax": 100,
+                    "aria-valuetext": `${pct}%`,
+                  }
+                : { "aria-hidden": true })}
             >
               <i style={{ width: `${pct}%` }} />
             </span>

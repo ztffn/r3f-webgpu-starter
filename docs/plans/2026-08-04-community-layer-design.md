@@ -142,7 +142,7 @@ friendships
   state          'pending' | 'accepted'
   created_at     text
   responded_at   text null
-  pair_key       text unique     -- min(a,b):max(a,b). See below; added in a later migration
+  pair_key       text not null unique     -- min(a,b):max(a,b). See below; added in a later migration
   unique (requester_id, addressee_id)
   index (addressee_id, state)     -- "my incoming requests"
   index (requester_id, state)
@@ -175,7 +175,21 @@ clan_members
   joined_at      text
   primary key (clan_id, user_id)
   unique (user_id)                      -- one clan per player, for now
+
+action_log                              -- added 2026-08-06; see the note below
+  id             integer pk
+  user_id        -> users.id  cascade
+  action         'post' | 'friend_request'
+  target_id      integer null           -- whose wall, for a per-target limit
+  at             text
+  index (user_id, action, at)
 ```
+
+**`action_log` is append-only, and that is the whole point.** The per-hour limits used to
+count LIVE rows — `profile_posts` for the walls, pending `friendships` for requests — so both
+were resettable by the actor: deleting your own posts cleared the per-wall limit that exists
+to stop harassment, and withdrawing a request cleared the spam bound. A log nobody can delete
+is the only counter that holds. Web design record §5.9.
 
 **`unique (user_id)` on `clan_members` is a real decision**, not a shortcut: multi-clan
 membership makes "which tag appears beside this name" ambiguous, and the tag beside the name
@@ -242,7 +256,9 @@ Each step leaves the tree working and is independently useful.
 4. **Friends**: request / accept / remove / block, a list on the owner's profile.
 5. **Presence**: module-scope registry in `server.ts`, `GET /api/friends/presence`, surfaced
    in the lobby as "friends playing now".
-6. **Clans**: found, join, leave, roster, `/clans/:tag`, tag beside the name everywhere.
+6. **Clans**: found (in one transaction), join, leave WITH automatic leader succession,
+   promote, roster, `/clans/:tag`, tag beside the name everywhere. §5.9 of the web record has
+   why succession exists: refusing a leader's exit with no promote endpoint trapped them.
 7. **Activity feed** derived over the tables, on the public profile.
 
 ## 7. Rejected, and why

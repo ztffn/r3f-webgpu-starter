@@ -432,8 +432,11 @@ tests/account/lobby.test.ts     13 test cases today
 the repository through `this` — hence the module-scope `accounts` handle in
 server.ts. It resolves the token to an account id, `onJoin` stamps the join time,
 and `onLeave` writes matches and seconds played. Verified end to end against a live
-server: two joins produced `matches: 2, timePlayedSeconds: 6` and the account
-appeared on the matches board at rank 1.
+server WHEN THIS LANDED: two joins produced `matches: 2, timePlayedSeconds: 6` and
+the account appeared on the matches board at rank 1. **That run no longer reproduces**
+— §5.9 added a 30-second floor, because an unfloored counter made the board and three
+medals farmable by a join/leave loop, so two short joins now credit time played and
+`matches: 0`.
 
 **Room auth is deliberately optional.** An absent or bad token joins as nobody
 rather than being refused, because every documented dev URL predates accounts and
@@ -547,7 +550,7 @@ tools/account/lobbyApi.ts       + POST /api/private-game (capability gated)
 src/site/pages/Profile.tsx      the whole catalogue, earned / locked / unearnable
 src/site/pages/Supporter.tsx    the dev grant, shown only when the server allows it
 src/game/CharacterPreview.tsx   turntable soldier, lazy island off /character
-tests/account/medals.test.ts    8 test cases today
+tests/account/medals.test.ts    9 test cases today
 ```
 
 **A supporter perk was enforced by nothing.** `hostPrivateGame` was checked only by
@@ -618,7 +621,8 @@ offset the model by its own bounds centre in X and Z before rotating the pivot.
 - **Combat medals are defined and unearnable**, pending feat/server-ballistics.
 - **`customInsignia`, `foundClan`, `hostCommunityServer`, `reservedSlot`,
   `earlyAccessMaps` and `supporterMarker`** are granted by the tier table but only
-  `customInsignia` is enforced anywhere. The rest are phase 6b or later — the
+  `customInsignia` and `foundClan` are enforced anywhere (§5.9 added `persistentName`,
+  `joinPrivateGame` and `friends` to the gated set). The rest are phase 6b or later — the
   supporter page advertises them, which is the drift `tiers.ts` exists to prevent,
   so they are named here rather than left to be discovered.
 
@@ -879,6 +883,26 @@ four pages rendering "nothing exists" for "could not load"; stale-response races
 pages; touch-layout panels overlapping each other on a phone; and a `role="status"` wrapper
 re-announcing the respawn overlay five times a second.
 
+**What the review pass added to the module map** (the §5.3 and §5.8 listings do not cover it):
+
+```
+src/ui/launchParams.ts        the ONE /play parameter vocabulary + the funnel handshake
+                              + loadGameApp(); imported by routes.tsx, GameApp, LaunchPanel
+src/site/pages/Checkout.tsx   the /supporter/checkout stub, so the CTA has a route
+tools/account/rateLimit.ts    in-process fixed-window limiter; per-process, stated as such
+users.token_version           column: password reset invalidates prior tokens
+action_log                    table: append-only, what the community rate limits count
+tests/site/launch-params.test.ts     the funnel and flag polarity
+tests/account/routes.test.ts         HTTP over the real routers with real signed tokens
+tests/account/auth-settings.test.ts  requireSecrets + accountFromToken
+tests/account/account-client.test.ts the non-JSON-200 guard and the 401 token clear
+```
+
+Earlier in the same phase (§5.8): `src/hud/hudPanels.ts`, `src/hud/RespawnScreen.tsx` and
+`respawn.css`, `src/devtools/HudPanel.tsx` and `LaunchPanel.tsx`, and the
+`.weapon-silhouette` primitive in `src/ui/primitives.css` that replaced three copies of the
+mask recipe.
+
 **Deliberately not fixed:** a dead player's camera stays live. See `docs/12` §8.0 — the corpse
 is frozen and its collider disabled, but look still passes through, which is free scouting in a
 concealment game. A stricter killscreen is an unmade product decision and `setDead` is the seam
@@ -935,7 +959,7 @@ things*, players get to *have done things*.
   §2.5 is a *matchmaking* filter and a client claim — it is not a trust boundary.
 - **`react-router` is pinned to 7.18.2 with one open advisory.** GHSA for RSC-mode CSRF
   covers `>=7.12.0 <8.3.0`, and 8.3.0 is the only clean version but requires Node
-  `>=22.22.0` against this machine's 22.21.1 and the project's declared `>=22.6`. The
+  `>=22.22.0` against this machine's 22.21.1 and the project's declared `>=22.9`. The
   advisory needs React Router's RSC mode — server components and server actions — and this
   is a client-only SPA on `createBrowserRouter` with neither, so it is not reachable.
   Going *below* the range is worse, not better: 7.11.0 is exposed to a dozen advisories

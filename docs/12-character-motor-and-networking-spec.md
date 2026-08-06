@@ -17,8 +17,8 @@ implementation behind it, and a two-client session harness.
 
 - Playable in the game with `?scene=motor`.
 - Two browser clients share one authoritative room over real sockets.
-- 74 headless tests under `tests/motor/`, running in bare Node with no browser globals
-  (287 across the whole suite as of 2026-08-04; `npm test`).
+- 83 headless tests under `tests/motor/`, running in bare Node with no browser globals
+  (334 across the whole suite as of 2026-08-06; `npm test`).
 
 Weapon handling reads the motor: `?scene=scope&motor=1` carries the weapon on a collided
 body, and `WeaponHandlingContext` gets stance, planar speed and real grounded state from

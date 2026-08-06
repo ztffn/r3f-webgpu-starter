@@ -81,10 +81,10 @@ player instinctively recognise this?* — applies to features, not to whether a 
   feedback layer landed Aug 2026; the six death clips are wired (`docs/12` §8.0).
 - **Web product, brand and UI (Aug 2026):** the project has a public name — **Distant
   Front** — and a router. `/` is a landing page, `/faq` and `/supporter` are real pages, and
-  **the whole Three.js tree lazy-loads behind `/play`** (entry chunk 115.67 KB gzipped, and its
+  **the whole Three.js tree lazy-loads behind `/play`** (entry chunk ~116 KB gzipped, and its
   only static import is the module runtime — re-measure, do not quote; a static
   import anywhere in `src/site/` or `src/ui/` silently undoes that). The nine debug panels
-  that used to fill the game screen are five tabs in **one docked dev console** — backtick or
+  that used to fill the game screen are seven tabs in **one docked dev console** — backtick or
   `?debug=1`, every control carrying `data-dev` so browser automation can drive it. The HUD
   is rebuilt from `design/df2-hud-1to1-html-v3` and is **anchor-based, not the mockup's
   scaled stage**, with a distinct touch layout that keeps the thumb corners clear.
@@ -125,12 +125,13 @@ player instinctively recognise this?* — applies to features, not to whether a 
   Email/password, Discord OAuth (env-gated), and **guests that upgrade in place** — registering
   keeps the same row, so career, medals and character survive; verified end to end.
   `src/account/` is shared, `tools/account/` is server-only, and the boundary is the
-  directory. **The server refuses to start without `JWT_SECRET` and `AUTH_SALT`** — the
+  directory. **The server refuses to start without `JWT_SECRET` and `AUTH_SALT`** — nor without
+  `SESSION_SECRET` once a Discord provider is configured — — the
   package's default password salt is a public literal, and its salt is process-wide rather
   than per-user (design record §5.3 has the limitation and the proper fix).
   `npm run typecheck` now also checks `tools/` via `tsconfig.server.json`.
 - **Lobby, servers and leaderboards (Aug 2026):** `/lobby` is quick match plus a live
-  server browser, join-by-code and host-private; `/leaderboard` has four boards.
+  server browser, join-by-code and host-private; `/leaderboard` is the dfhub-shape standings board and `/records` keeps the four career boards.
   `Room.onAuth` is **static** — it runs before any instance exists, so the repository is
   reached through a module-scope handle in `server.ts`, not `this`. It resolves the token to
   an account and `onLeave` writes matches and time played, which is what makes the boards
@@ -185,13 +186,14 @@ player instinctively recognise this?* — applies to features, not to whether a 
   crash, not a soft failure. `accountClient.request` now rejects a 200 that is not JSON so it
   surfaces as an error message rather than a blank page, but that is a net, not the fix.
   `netlify.toml` is for static previews only.
-- **Next up (web product):** clans and community-hosted servers (§6b), then a real
-  checkout. Known gaps: kills/deaths are still unwritten pending
+- **Next up (web product):** community-hosted servers (§6b), then a real checkout
+  (`/supporter/checkout` is an honest stub today). Clans landed. Known gaps: kills/deaths are still unwritten pending
   feat/server-ballistics — `recordLongestShot` exists and is tested but has no caller, and
   `consistency()` is the same shape (the board sends `null` explicitly rather than computing
-  it from an empty array) — and most supporter capabilities (`foundClan`,
-  `hostCommunityServer`, `reservedSlot`, `earlyAccessMaps`, `supporterMarker`) are advertised
-  by the tier table but enforced nowhere. `match_participation` needs a writer before any
+  it from an empty array) — and four supporter capabilities
+  (`hostCommunityServer`, `reservedSlot`, `earlyAccessMaps`, `supporterMarker`) are advertised
+  by the tier table but enforced nowhere — `foundClan`, `hostPrivateGame`, `joinPrivateGame`,
+  `persistentName`, `friends` and `customInsignia` are all gated now (design record §5.9). `match_participation` needs a writer before any
   objective, stance or win-rate figure means anything. Touch INPUT does not exist either:
   mobile and iPad are first-class targets for the UI, and the game still needs a keyboard.
 - **Direction:** custom assets → player-created terrain → map/terrain editor tooling

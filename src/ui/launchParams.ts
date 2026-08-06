@@ -1,8 +1,16 @@
-// The /play launch vocabulary — the ONE list of URL parameters the game reads,
-// with each parameter's role, plus the site<->game funnel handshake and the one
-// dynamic-import thunk for the game chunk. Three-free and React-free so the
-// site entry chunk can carry it: routes.tsx, GameApp and the dev console's
-// Launch tab all derive their lists from here instead of hand-maintaining three.
+// The /play launch vocabulary — the parameters that decide WHICH PRODUCT MODE a URL
+// asks for, plus the site<->game funnel handshake and the one dynamic-import thunk
+// for the game chunk. Three-free and React-free so the site entry chunk can carry
+// it: routes.tsx, GameApp and the dev console's Launch tab all derive their lists
+// from here instead of hand-maintaining three.
+//
+// NOT every parameter the game reads. The tuning dials live with their readers —
+// `?dpr=`, `?steps=`, `?grass=` in df2/bench.ts, `?ammo=` and `?windx=` in the
+// weapon host, `?mousesens=` in the look controller — because they configure a mode
+// rather than choose one. The consequence is deliberate and worth knowing:
+// `shouldStopAtLoadout` only recognises the names below, so `/play?ammo=308` still
+// detours through the loadout stop and arrives with the parameter intact. Adding a
+// dial here would change that, which is the only reason to.
 
 export interface LaunchParamSpec {
   readonly name: string;
@@ -30,6 +38,7 @@ export const LAUNCH_PARAMS: readonly LaunchParamSpec[] = [
   { name: "bench", flag: "default-off", explicit: true, redirectsFromRoot: true },
   { name: "debug", flag: "default-off", explicit: true, redirectsFromRoot: true },
   { name: "weather", explicit: true, redirectsFromRoot: true },
+  { name: "map", explicit: true, redirectsFromRoot: true },
   { name: "blades", flag: "default-on", explicit: true, redirectsFromRoot: true },
   { name: "hudpreview", flag: "default-off", explicit: true, redirectsFromRoot: false },
   { name: "server", explicit: false, redirectsFromRoot: false },

@@ -156,7 +156,9 @@ leaderboards already use for an unpopulated board, and the same reason.
 
 ### 4.2 `/leaderboard`
 
-dfhub's shape, which is right: one row per player, ranked by composite points, with K/D,
+dfhub's shape, which is right: one row per player WITH ACTIVITY on the ranked axis — the query
+excludes anonymous and zero-valued accounts and bounds the scored pool, because it is a public
+route (§5.9) — ranked by composite points, with K/D,
 win %, rating, objective, consistency and time as columns so the eye can re-rank without
 another request. Rank insignia at the left, callsign as the link, numerics right-aligned in
 mono. Add a **range column** — median engagement range — because it is this game's axis and

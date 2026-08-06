@@ -23,7 +23,10 @@ point six metres from the origin, so death is invisible even when it happens. An
 intended for kill and join messages renders hardcoded mockup text behind a preview flag.
 
 Decisions already taken with the user and treated as settled: respawn delay derives from the
-death clip's own length plus a configured pause; one clip serves both left and right deaths;
+death clip's own length plus a configured pause (**REVERSED 2026-08-05: it is a flat
+`DEFAULT_RESPAWN_SECONDS = 5`, which clears the longest clip. Deriving it coupled the
+authority to presentation and drifted against the client's countdown — `docs/12` §8.0**);
+one clip serves both left and right deaths;
 callsigns go on the game wire so the feed reads properly; the damage indicator is directional
 and tunable later, with audio treated as a first-class channel. Muzzle flash origin is
 explicitly deferred until weapon models carry a muzzle bone.
@@ -94,7 +97,11 @@ explicitly deferred until weapon models carry a muzzle bone.
   headshot flag wired but always false until a head zone exists on the capsule; do not invent
   one here.
 
-- [x] 9. Derive the respawn delay from the death clip rather than a flat constant, per the
+- [x] 9. ~~Derive the respawn delay from the death clip rather than a flat constant.~~
+  **Done, then UNDONE 2026-08-05** — a flat 5 s clears the longest clip and cannot drift;
+  `respawnPauseSeconds` is deleted. Also worth recording against the acceptance criterion
+  "the respawn counter and the actual respawn agree": that shipped FAILING, because the
+  client re-anchored the countdown every second. Fixed 2026-08-06. Original item, per the
   user's decision. `src/net/GameServer.ts:589` currently schedules respawn a fixed three seconds
   after death, while four of the six death clips run longer than that, so a body would pop away
   mid-fall. Look the duration up from the shared table added earlier, add a configured pause,

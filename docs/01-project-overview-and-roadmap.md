@@ -314,6 +314,14 @@ dialled in, because an editor that authors the wrong feel is worse than no edito
   Community freeware terrain is a different case — that is what this repo already carries.
 
 ### Not a numbered phase, but shipped
+- ✅ **The web product** (August 2026) — the largest thing here with no phase number, because
+  it grew around the game rather than inside the terrain roadmap: the **Distant Front** brand,
+  a landing page and FAQ, accounts with guests that upgrade in place, a lobby and server
+  browser, leaderboards and player statistics, profiles, friends and clans, entitlements and
+  medals, a rebuilt HUD, and a docked dev console — all served by the same process that
+  simulates the match. Design records: `plans/2026-08-04-web-platform-and-ui-design.md` and
+  its community and player-statistics siblings. The gameplay non-goals in §2 are unchanged by
+  it; what it changes is that `/` is now a site and `/play` is the game.
 - ✅ **Test build** — free-fly / on-foot camera with stances, instrument HUD showing position,
   AGL, frame time and active backend, plus `netlify.toml`. Deploy notes in the README; the
   CLI path carries prepared assets, a Git-connected build falls back to synthetic fBm.

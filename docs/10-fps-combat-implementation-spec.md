@@ -314,7 +314,11 @@ Useful URLs:
 
 | Query | Purpose |
 | --- | --- |
+| `/play` (no query) | the PRODUCT path: the loadout stop, then `scene=scope&motor=1&net=1` |
 | `?scene=scope` | playable sniper/M4/Glock/SAW proxy loadout and target slice |
+| `&hud=0` | start with every HUD panel hidden, for a clean capture (combat feedback stays) |
+| `&loadout=1` / `&loadout=0` | force / spend the loadout staging stop on any /play URL |
+| `&debug=1` | open the dev console at load — its **Launch** tab bakes any of these for you |
 | `&shotdebug=1` | white sightline, yellow bore, wide cyan curved path, material contacts |
 | `&impacttest=1` | cloth/wood/metal/glass/stone/dirt/water cover lanes |
 | `&ammo=9mm\|556\|308\|50bmg` | select diagnostic ballistic profile (`308` default) |
@@ -346,7 +350,7 @@ is the evidence of gravity and wind curvature.
 | `presentation/ImpactEffects.tsx` | bounded particles and positional sound |
 | `presentation/ShotTrajectoryDebugView.tsx` | latest-shot world debug |
 | `presentation/CharacterAimRig.ts` | procedural post-mixer bones |
-| `presentation/characterClips.ts` | pure 8-way/stance/gait clip selection (Node-tested) |
+| `../character/characterClips.ts` (moved: `src/character/`) | pure 8-way/stance/gait clip selection (Node-tested) |
 | `presentation/CharacterAnimator.ts` | mixer driver: crossfades, speed matching, hips pin |
 | `presentation/CharacterView.ts` | animated soldier host: model + animator + mounted aim rig |
 | `presentation/soldierAssets.ts` | cached Draco GLB load + per-instance skeleton clones |
@@ -408,7 +412,8 @@ already permits via `allowImportingTsExtensions` — but it touches every module
 done. Do not tidy this halfway. `src/combat/` was born fully `.ts`-suffixed because the game
 server loads it outside the test runner, where the flag does not apply.
 
-**`engines` now declares Node >= 22.6**, which is what `--experimental-strip-types` needs. Below
+**`engines` now declares Node >= 22.9.** `--experimental-strip-types` needs 22.6; the game
+server's `--env-file-if-exists` needs 22.9, and below it that flag is a startup error. Below
 that the test script fails in a way that does not name the version as the cause.
 
 **Damage direction is coarse ON PURPOSE (2026-08-05).** The wire gives the victim a bearing

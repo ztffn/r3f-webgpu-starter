@@ -17,11 +17,22 @@
 //   node df2extract.mjs trn     <file.trn>
 
 import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
-import { basename, join, resolve, sep } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const SIG_PFF3 = 0x33464650; // 'PFF3'
 const SIG_PFF2 = 0x32464650; // 'PFF2'
+
+/** Read a NUL-terminated string from a fixed-length field. */
+export function cstr(buf, off, len) {
+  let s = "";
+  for (let i = 0; i < len; i++) {
+    const c = buf[off + i];
+    if (c === 0) break;
+    s += String.fromCharCode(c);
+  }
+  return s;
+}
 
 /** Parse a PFF3/PFF2 archive buffer into { sig, entries[] }. */
 export function parsePff(buf) {
@@ -50,12 +61,7 @@ export function parsePff(buf) {
     const fileModified = dv.getUint32(o + 12, true);
     // The name field is the remaining 16 bytes of the 32-byte record, NUL-padded.
     // Reading only 15 truncated any name that filled the field.
-    let name = "";
-    for (let k = 0; k < 16; k++) {
-      const c = buf[o + 16 + k];
-      if (c === 0) break;
-      name += String.fromCharCode(c);
-    }
+    const name = cstr(buf, o + 16, 16);
     entries.push({ deleted: !!deleted, fileOffset, fileSize, fileModified, name });
   }
   return { sig, headerSize, recordCount, recordSize, recordOffset, entries };
@@ -98,18 +104,34 @@ async function main() {
   }
 
   if (cmd === "3di") {
-    const { parse3di, toGlb, describe3di } = await import("./file3di.mjs");
+    const { parse3di, toGlb, describe3di, UNITS_PER_METER } = await import("./file3di.mjs");
+    // Positional destructuring can't tell "out.glb" from "--lod": walk the
+    // arguments, consuming flag values, so `3di f.3di --lod 2` describes LOD 2
+    // instead of writing a GLB literally named "--lod".
+    let out = null;
+    let lod = 0;
+    let scale = null;
+    const rest = process.argv.slice(4);
+    for (let i = 0; i < rest.length; i++) {
+      const a = rest[i];
+      if (a === "--lod") lod = Number(rest[++i]);
+      else if (a === "--scale") scale = Number(rest[++i]);
+      else if (!a.startsWith("--") && out === null) out = a;
+      else throw new Error(`unexpected argument: ${a}`);
+    }
+    if (!Number.isInteger(lod) || lod < 0) throw new Error(`--lod needs a whole number, got ${lod}`);
+    if (scale !== null && !(Number.isFinite(scale) && scale > 0))
+      throw new Error(`--scale needs a positive number, got ${scale}`);
+
     const model = parse3di(readFileSync(file));
     console.log(describe3di(model));
-    if (outdir) {
-      const lodArg = process.argv.indexOf("--lod");
-      const scaleArg = process.argv.indexOf("--scale");
-      const lod = lodArg >= 0 ? Number(process.argv[lodArg + 1]) : 0;
-      // Default 1/256: model units are 1/256 m (verified against the soldier
-      // models and the egypt pyramid footprint), so the GLB comes out in meters.
-      const scale = scaleArg >= 0 ? Number(process.argv[scaleArg + 1]) : 1 / 256;
-      writeFileSync(outdir, toGlb(model, { lod, scale }));
-      console.log(`wrote ${outdir} (lod ${lod}, scale ${scale})`);
+    if (out) {
+      // Default: model units are 1/256 m (UNITS_PER_METER — the calibrated
+      // measurement lives in file3di.mjs), so the GLB comes out in meters.
+      const s = scale ?? 1 / UNITS_PER_METER;
+      mkdirSync(dirname(resolve(out)), { recursive: true });
+      writeFileSync(out, toGlb(model, { lod, scale: s }));
+      console.log(`wrote ${out} (lod ${lod}, scale ${s})`);
     }
     return;
   }
@@ -166,4 +188,10 @@ async function main() {
 // Run as CLI only when invoked directly. pathToFileURL, not string concatenation:
 // import.meta.url percent-encodes, so a path containing a space or any non-ASCII
 // character never matched and the tool exited 0 having done nothing at all.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();
+// main() is async (the 3di command lazy-imports its module), so failures must be
+// caught here or they surface as unhandled rejections instead of a clean message.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
+  main().catch((err) => {
+    console.error(err.message);
+    process.exit(1);
+  });

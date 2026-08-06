@@ -130,7 +130,7 @@ export function DevConsole({
         id={`dev-panel-${state.tab}`}
         aria-labelledby={`dev-tab-${state.tab}`}
       >
-        {state.tab === "scene" && <ScenePanel {...sceneProps} />}
+        {state.tab === "scene" && <ScenePanel {...sceneProps} scene={scene} />}
         {state.tab === "hud" && (
           <HudPanel
             panels={panels}

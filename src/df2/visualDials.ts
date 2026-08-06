@@ -1,4 +1,4 @@
-// The 25 live visual dials, as one table: wire contract and accessors together.
+// The live visual dials (28 today), as one table: wire contract and accessors together.
 //
 // Extracted from WeatherDebug so the debug panel and the authoritative server can
 // agree on what a dial IS — its identity on the wire, its legal range, and how to
@@ -14,6 +14,7 @@ import type { BladeUniforms } from "./BladeMaterial";
 import type { createColorGrade } from "./colorGrade";
 import type { createFog } from "./fog";
 import type { createPrecipitation } from "./Precipitation";
+import type { TerrainDetailUniforms } from "./TerrainMaterial";
 
 /**
  * What a dial needs to read and write. `SceneHandles` satisfies this structurally
@@ -27,9 +28,11 @@ export interface VisualDialTargets {
   readonly fog: ReturnType<typeof createFog>;
   readonly precipitation: ReturnType<typeof createPrecipitation>;
   readonly blades: BladeUniforms | null;
+  /** Null when the map ships no detail_color assets (loadTerrain.ts). */
+  readonly terrainDetail: TerrainDetailUniforms | null;
 }
 
-export type VisualDialGroup = "atmosphere" | "precipitation" | "blades";
+export type VisualDialGroup = "atmosphere" | "precipitation" | "blades" | "terrain";
 
 export interface VisualDial {
   readonly label: string;
@@ -310,6 +313,39 @@ export const VISUAL_DIALS: readonly VisualDial[] = [
     step: 0.05,
     get: (t) => Number(t.blades?.twist.value ?? 0),
     set: (t, v) => t.blades && (t.blades.twist.value = v),
+  },
+
+  // --- terrain detail ----------------------------------------------------------
+  // The close-range detail_color pass (08 §6.3). APPENDED — see the wire rule above.
+  {
+    label: "Detail gain",
+    group: "terrain",
+    min: 0.2,
+    max: 3,
+    step: 0.05,
+    get: (t) => Number(t.terrainDetail?.gain.value ?? 0),
+    set: (t, v) => t.terrainDetail && (t.terrainDetail.gain.value = v),
+    hint: "brightness of the detail layer. 1 shows the tiles as authored, lit by the colormap's own shading",
+  },
+  {
+    label: "Detail fade start",
+    group: "terrain",
+    min: 0,
+    max: 400,
+    step: 2,
+    get: (t) => Number(t.terrainDetail?.near.value ?? 0),
+    set: (t, v) => t.terrainDetail && (t.terrainDetail.near.value = v),
+    hint: "metres of full-strength detail before the fade begins",
+  },
+  {
+    label: "Detail fade end",
+    group: "terrain",
+    min: 10,
+    max: 800,
+    step: 5,
+    get: (t) => Number(t.terrainDetail?.far.value ?? 0),
+    set: (t, v) => t.terrainDetail && (t.terrainDetail.far.value = v),
+    hint: "metres at which only the colormap remains — the original's railroad vanished at range too. Clamped in-shader to stay above the start",
   },
 ];
 

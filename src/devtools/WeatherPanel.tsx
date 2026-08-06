@@ -19,11 +19,14 @@ export interface WeatherPanelProps {
   scene: SceneHandles | null;
 }
 
-/** Dial ids by group, resolved once. Ids are indices into the shared table. */
-const GROUPED: Record<VisualDialGroup, number[]> = {
+/** Dial ids by group, resolved once. Ids are indices into the shared table.
+ * Exported with DialGroup: the terrain group renders on the Scene tab —
+ * ground detail is not weather — but stays one wire table. */
+export const GROUPED: Record<VisualDialGroup, number[]> = {
   atmosphere: [],
   precipitation: [],
   blades: [],
+  terrain: [],
 };
 VISUAL_DIALS.forEach((dial, id) => GROUPED[dial.group].push(id));
 
@@ -39,7 +42,7 @@ function dialValue(room: RoomVisuals | null, scene: SceneHandles, id: number): n
   return room?.overrides.get(id) ?? VISUAL_DIALS[id]!.get(scene);
 }
 
-function Group({
+export function DialGroup({
   title,
   ids,
   scene,
@@ -194,15 +197,20 @@ export const WeatherPanel = memo(function WeatherPanel({
       {/* Keyed on the preset so every readout re-seeds from the uniforms a switch just
           wrote — otherwise the sliders keep showing the previous preset's numbers while
           the picture has already changed, which is worse than showing nothing. */}
-      <Group key={`a${scene.preset.id}`} title="Atmosphere" ids={GROUPED.atmosphere} scene={scene} />
-      <Group
+      <DialGroup
+        key={`a${scene.preset.id}`}
+        title="Atmosphere"
+        ids={GROUPED.atmosphere}
+        scene={scene}
+      />
+      <DialGroup
         key={`p${scene.preset.id}`}
         title="Precipitation"
         ids={GROUPED.precipitation}
         scene={scene}
       />
       {scene.blades && (
-        <Group key={`b${scene.preset.id}`} title="Blades" ids={GROUPED.blades} scene={scene} />
+        <DialGroup key={`b${scene.preset.id}`} title="Blades" ids={GROUPED.blades} scene={scene} />
       )}
 
       <p className="note">

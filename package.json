@@ -42,7 +42,7 @@
     "three": "^0.185.1"
   },
   "engines": {
-    "node": ">=22.6"
+    "node": ">=22.9"
   },
   "devDependencies": {
     "@colyseus/uwebsockets-transport": "^0.17.21",

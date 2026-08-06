@@ -828,6 +828,62 @@ A `pistol_icon.webp` joined the authored silhouettes (SVG-drawn, same greyscale 
 treatment), so the Glock finally has a shape in the HUD, the loadout editor and the respawn
 screen.
 
+## 5.9 The pre-merge review of the whole PR (2026-08-06)
+
+A five-slice review (server security, netcode, site/routing, HUD/devtools, tests/config) over
+the full 192-file diff. Every finding below was fixed; the suite went 297 → 334. Four
+categories are worth carrying forward, and three of them are recurrences of §5.7's:
+
+**(1) A display bug can undo an authority fix one layer up.** The flat 5 s respawn (§5.8) was
+correct on the server and the countdown still never reached zero: `useCombatFeed` stamped
+`respawnAtMs` with `Date.now()` INSIDE a memo whose deps include a once-per-second expiry
+tick, so the anchor reset every second and the overlay oscillated in the 4–5 s band. It is
+now stamped once per death sequence, in a ref. This was the "respawn timer is bugged" report,
+and the server-side change had already been shipped and verified — measuring the packet is not
+measuring what the player sees.
+
+**(2) Advertised capability, enforced nowhere — again, and not on the documented list.**
+§5.6 recorded `hostPrivateGame` as this shape; the review found two more. `persistentName` was
+checked by nothing, so `POST /auth/anonymous` then `PATCH /api/me` let an unauthenticated
+visitor permanently claim any callsign against a unique column, with no release path — and it
+erased the `recruit-` prefix that identifies a guest. `joinPrivateGame` was likewise
+unenforced because `/api/join-code` had no auth at all. Both are gated now, and the route-level
+HTTP harness (`tests/account/routes.test.ts`) is what will keep them that way — every one of
+these guarantees had previously been "verified against a live server" by hand and pinned by
+nothing.
+
+**(3) A counter with no floor is a counter somebody farms.** `recordSession` incremented
+`matches` unconditionally, so 60 zero-second join/leave cycles credited 60 matches and awarded
+three of the five earnable medals — measured, not reasoned. There is a 30-second floor now.
+The same shape, elsewhere: the community rate limits counted LIVE rows, so deleting your own
+posts reset the per-wall limit that exists to stop harassment, and withdrawing a friend request
+reset the spam bound. Both count an append-only `action_log` now, which is the only kind of
+counter an actor cannot reset.
+
+**(4) A dead end with no exit is a bug even when every individual rule is right.** `leaveClan`
+refused a leader with members (`promote_first`) and no promote or kick endpoint existed, while
+joining was open to anyone — so a stranger joining permanently trapped the founder AND their
+tag. Leaving now hands the clan to its longest-standing member, with `POST /api/clan/promote`
+for choosing. Same category: Discord sign-in threw a UNIQUE violation on every attempt, forever,
+for any user whose Discord address already existed as a password account.
+
+Also fixed: no rate limiting on any credential route (in-process per-IP limiter; forgot-password
+no longer answers differently for a known email); tokens surviving a password reset
+(`users.token_version`); `SESSION_SECRET` required whenever a provider is configured, and
+documented — without it the whole OAuth flow 500s with nothing pointing at the cause; driver
+text and stack traces reaching clients (one error handler, generic bodies); `pair_key` nullable
+despite existing to enforce an invariant (NOT NULL via a table rebuild); the two public stats
+queries reading whole tables in JavaScript; tracking parameters (`?utm_source=`) skipping the
+loadout stop entirely; deploy navigations pushing, so Back out of a match silently redeployed;
+four pages rendering "nothing exists" for "could not load"; stale-response races on three
+pages; touch-layout panels overlapping each other on a phone; and a `role="status"` wrapper
+re-announcing the respawn overlay five times a second.
+
+**Deliberately not fixed:** a dead player's camera stays live. See `docs/12` §8.0 — the corpse
+is frozen and its collider disabled, but look still passes through, which is free scouting in a
+concealment game. A stricter killscreen is an unmade product decision and `setDead` is the seam
+for it.
+
 ## 6. Retention model — what the perks actually are
 
 The brief's shape is "easy to play, better to register". Concretely:

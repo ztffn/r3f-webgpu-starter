@@ -105,7 +105,9 @@ player instinctively recognise this?* — applies to features, not to whether a 
   export, a kill feed in the mockup's chat panel, a death overlay with the server's own
   respawn countdown, a coarse directional damage indicator and a hitmarker. **Aliveness is
   health, everywhere**: a dropped death packet costs the right fall, never a corpse that keeps
-  walking. Respawn is a flat 5 s for every death — it clears the longest death clip
+  walking. A dead player is FROZEN and their collider disabled (`docs/12` §8.0) — but the
+  dead camera is deliberately still live; a stricter killscreen is an unmade decision.
+  Respawn is a flat 5 s for every death — it clears the longest death clip
   (3.73 s); deriving it from the clip's length drifted and was dropped (`docs/12` §8.0
   amendment) — and respawn placement moved off the player's own seat, because reappearing
   where you fell is what made death invisible.
@@ -159,8 +161,11 @@ player instinctively recognise this?* — applies to features, not to whether a 
   count in SQL and read only `fatal = 1` rows for medians — they are public endpoints, so
   anything O(players × rows) there is a denial of service waiting for a population
   (`plans/...-player-statistics-design.md` §6).
-- **Reviewed before merge (Aug 2026):** 21 findings across phases 5–7, all fixed, suite 271 →
-  287. The four categories worth carrying forward, because they will recur:
+- **Reviewed twice before merge (Aug 2026):** 21 findings across phases 5–7 (suite 271 → 287),
+  then a five-slice review of the whole PR (suite 297 → 334; design record §5.9). The second
+  round's lesson worth repeating: a correct server fix can still be invisible or wrong one
+  layer up — the flat respawn window shipped verified and the client's countdown still never
+  reached zero — and three of its four categories were RECURRENCES of the first round's. The four categories worth carrying forward, because they will recur:
   **(1)** unknown rendered as a plausible number — `patienceScore` answered a confident
   *40/100* for every player because absent stance telemetry reads as "never moved";
   **(2)** a comment asserting an invariant the code lacked — `friendships`' unique index

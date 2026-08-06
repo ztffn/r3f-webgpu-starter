@@ -271,6 +271,21 @@ the feed's joined and left lines are a diff of two rosters, so one packet does t
 three. The first roster a client sees is a baseline, or joining a running match prints the
 whole room walking in at once.
 
+**A dead player is frozen, not merely un-rendered (2026-08-06).** `CharacterMotor.setDead`
+ignores movement and disables the Rapier collider; the server calls it when health reaches
+zero and clears it on respawn, and `GameClient` mirrors it in prediction so the corpse
+reconciles instead of rubber-banding. Before this, a killed player holding W drove their own
+falling body across every other client's screen, and the corpse still blocked movement and
+rounds. Pinned by a session test that holds forward for a second and asserts the body has
+not moved.
+
+**The dead player's CAMERA is deliberately still live** — look angles pass straight through
+`setDead`, so a corpse can look around for the respawn window. That is free scouting in a
+game whose premise is concealment, and it is knowingly left in: a stricter killscreen (a
+locked camera, a killcam, or a spectate-the-killer view) is a product decision nobody has
+made yet, and shipping a half-made one would be worse. When it is made, `setDead` is the
+seam — the flag already exists on both sides of the wire.
+
 **Respawn rides as tenths of a second** so the wire can carry fractional times without
 rounding the countdown and the corpse out of step. The server schedules and announces from
 the *same* number, which is what stops the client's countdown outliving the corpse.

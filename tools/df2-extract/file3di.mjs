@@ -18,8 +18,7 @@
 //
 // No dependencies — Node built-ins only. GLB textures use imageio's encodePng.
 
-import { cstr } from "./df2extract.mjs";
-import { encodePng } from "./imageio.mjs";
+import { cstr, encodePng } from "./imageio.mjs";
 
 export const SIG_3DI_V8 = 0x08494433; // "3DI\x08" little-endian (V7 = 0x07... exists, unsupported)
 
@@ -88,7 +87,6 @@ export function parse3di(buf) {
       width,
       height,
       stride,
-      hasAlpha: stride === 2,
       scanLines,
       palette,
     });
@@ -200,7 +198,7 @@ function parseLod(buf, dv, base, soSize) {
   }
   off += c.nMaterials * 120;
 
-  return { ...c, bounds, vertices, normals, faces, subObjects, materials, endOffset: off };
+  return { ...c, bounds, vertices, normals, faces, subObjects, materials };
 }
 
 /* --- GLB export --------------------------------------------------------------
@@ -301,7 +299,7 @@ export function toGlb(model, { lod = 0, scale = 1 } = {}) {
       matIdx =
         jsonMaterials.push({
           pbrMetallicRoughness: { baseColorTexture: { index: texIdx }, metallicFactor: 0, roughnessFactor: 1 },
-          ...(tex.hasAlpha ? { alphaMode: "MASK", alphaCutoff: 0.5, doubleSided: true } : {}),
+          ...(tex.stride === 2 ? { alphaMode: "MASK", alphaCutoff: 0.5, doubleSided: true } : {}),
         }) - 1;
     }
     texToGltf.set(texIndex, matIdx);
@@ -406,6 +404,6 @@ export function describe3di(model) {
     );
   }
   for (const t of model.textures)
-    lines.push(`  tex: ${t.name} ${t.width}x${t.height}${t.hasAlpha ? " +alpha" : ""}`);
+    lines.push(`  tex: ${t.name} ${t.width}x${t.height}${t.stride === 2 ? " +alpha" : ""}`);
   return lines.join("\n");
 }

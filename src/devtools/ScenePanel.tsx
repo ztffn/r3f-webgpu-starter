@@ -11,7 +11,7 @@ import type { LoadedTerrain } from "../df2/loadTerrain";
 import type { Stance } from "../df2/FlyControls";
 import type { SceneHandles } from "../df2/DF2Scene";
 import { CALIBRATED_TERRAIN_SCALE, type TerrainScale } from "../df2/config";
-import { DialGroup, GROUPED } from "./WeatherPanel";
+import { DialGroup, GROUPED } from "./dialGroup";
 
 export interface ScenePanelProps {
   terrain: LoadedTerrain | null;
@@ -179,21 +179,19 @@ export const ScenePanel = memo(function ScenePanel({
         ))}
       </div>
 
-      {terrain && networked && (
+      {terrain && (
         <>
           <span className="eyebrow dev-group">Scale</span>
-          <p className="note" data-dev="scale-locked">
-            Scale dials are hidden in a networked session: the server owns the
-            world scale, and committing one here would rebuild the heightfield —
-            which drops and rejoins the room. Go offline
-            (<code>?scene=scope&amp;motor=1</code>) to calibrate.
-          </p>
-        </>
-      )}
-      {terrain && !networked && (
-        <>
-          <span className="eyebrow dev-group">Scale</span>
-          {SCALE_DIALS.map((d) => {
+          {networked ? (
+            <p className="note" data-dev="scale-locked">
+              Scale dials are hidden in a networked session: the server owns the
+              world scale, and committing one here would rebuild the heightfield —
+              which drops and rejoins the room. Go offline
+              (<code>?scene=scope&amp;motor=1</code>) to calibrate.
+            </p>
+          ) : (
+            <>
+              {SCALE_DIALS.map((d) => {
             const live = drag?.key === d.key ? drag.v : terrainScale[d.key];
             const commit = () => {
               setDrag(null);
@@ -244,11 +242,13 @@ export const ScenePanel = memo(function ScenePanel({
               Reset to calibrated
             </button>
           </div>
-          <p className="note">
-            Committing a scale rebuilds the whole world, so sliders apply on
-            release. URL seeds: <code>?texel=</code> <code>?hscale=</code>{" "}
-            <code>?hsmooth=</code>.
-          </p>
+              <p className="note">
+                Committing a scale rebuilds the whole world, so sliders apply on
+                release. URL seeds: <code>?texel=</code> <code>?hscale=</code>{" "}
+                <code>?hsmooth=</code>.
+              </p>
+            </>
+          )}
         </>
       )}
 

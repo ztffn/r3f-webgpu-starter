@@ -19,20 +19,11 @@
 import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
+import { parseArgs } from "node:util";
+import { cstr } from "./imageio.mjs";
 
 const SIG_PFF3 = 0x33464650; // 'PFF3'
 const SIG_PFF2 = 0x32464650; // 'PFF2'
-
-/** Read a NUL-terminated string from a fixed-length field. */
-export function cstr(buf, off, len) {
-  let s = "";
-  for (let i = 0; i < len; i++) {
-    const c = buf[off + i];
-    if (c === 0) break;
-    s += String.fromCharCode(c);
-  }
-  return s;
-}
 
 /** Parse a PFF3/PFF2 archive buffer into { sig, entries[] }. */
 export function parsePff(buf) {
@@ -105,20 +96,17 @@ async function main() {
 
   if (cmd === "3di") {
     const { parse3di, toGlb, describe3di, UNITS_PER_METER } = await import("./file3di.mjs");
-    // Positional destructuring can't tell "out.glb" from "--lod": walk the
-    // arguments, consuming flag values, so `3di f.3di --lod 2` describes LOD 2
-    // instead of writing a GLB literally named "--lod".
-    let out = null;
-    let lod = 0;
-    let scale = null;
-    const rest = process.argv.slice(4);
-    for (let i = 0; i < rest.length; i++) {
-      const a = rest[i];
-      if (a === "--lod") lod = Number(rest[++i]);
-      else if (a === "--scale") scale = Number(rest[++i]);
-      else if (!a.startsWith("--") && out === null) out = a;
-      else throw new Error(`unexpected argument: ${a}`);
-    }
+    // Positional destructuring can't tell "out.glb" from "--lod"; node's own
+    // parseArgs separates flags from positionals and rejects strays.
+    const { values, positionals } = parseArgs({
+      args: process.argv.slice(4),
+      options: { lod: { type: "string" }, scale: { type: "string" } },
+      allowPositionals: true,
+    });
+    if (positionals.length > 1) throw new Error(`unexpected argument: ${positionals[1]}`);
+    const out = positionals[0] ?? null;
+    const lod = values.lod === undefined ? 0 : Number(values.lod);
+    const scale = values.scale === undefined ? null : Number(values.scale);
     if (!Number.isInteger(lod) || lod < 0) throw new Error(`--lod needs a whole number, got ${lod}`);
     if (scale !== null && !(Number.isFinite(scale) && scale > 0))
       throw new Error(`--scale needs a positive number, got ${scale}`);

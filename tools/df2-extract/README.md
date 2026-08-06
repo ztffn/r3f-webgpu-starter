@@ -10,10 +10,10 @@ everything a future maintainer needs is here or explicitly pointed to.
 
 | File | What it does |
 |---|---|
-| `df2extract.mjs` | PFF archive unpack (`list` / `extract`), `.trn` manifest parse (`trn`), `.3DI` model describe/convert (`3di`). Exports `parsePff()`, `parseTrn()`, `cstr()` for programmatic use |
-| `imageio.mjs` | `decodePcx()` (8-bit RLE + VGA palette), `decodeTga()` (uncompressed truecolor 24/32-bit), `encodePng()` (grey/RGB/RGBA via `node:zlib`) |
+| `df2extract.mjs` | PFF archive unpack (`list` / `extract`), `.trn` manifest parse (`trn`), `.3DI` model describe/convert (`3di`). Exports `parsePff()`, `parseTrn()` for programmatic use |
+| `imageio.mjs` | `decodePcx()` (8-bit RLE + VGA palette), `decodeTga()` (uncompressed truecolor 24/32-bit), `encodePng()` (grey/RGB/RGBA via `node:zlib`), `cstr()` byte-field reader shared by the parsers |
 | `file3di.mjs` | `.3DI` V8 model parser and GLB exporter, including embedded palettized texture export |
-| `prepare-terrain.mjs` | Turns one extracted terrain into web-ready assets: `height.png`, `color.jpg`, `detail.png`, `detail_elev.png`, the baked `grass.png` canopy field, and a `terrain.json` provenance record |
+| `prepare-terrain.mjs` | Turns one extracted terrain into web-ready assets: `height.png`, `color.jpg`, `detail.png` (tile indices), `detail_color.png` (the `_cm` strip repacked as a 16×16 atlas), `detail_elev.png`, the baked `grass.png` canopy field (vegetation families only when a `.cal` is present), and a `terrain.json` provenance record |
 
 ```sh
 node df2extract.mjs list    path/to/archive.pff

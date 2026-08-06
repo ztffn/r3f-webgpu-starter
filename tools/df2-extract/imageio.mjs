@@ -1,12 +1,28 @@
-// Minimal image codecs for the DF2 asset pipeline — Node built-ins only.
+// Minimal image codecs and byte helpers for the DF2 asset pipeline — Node
+// built-ins only.
 //
 //   decodePcx()  8-bit RLE PCX (the format NovaLogic heightmaps/detail maps use)
 //   decodeTga()  uncompressed truecolor TGA (the detail_color strip / sky palettes)
 //   encodePng()  greyscale / RGB PNG via node:zlib
+//   cstr()       NUL-terminated string from a fixed-length field
 //
 // See docs/02-asset-format-specification.md §2/§3/§5.
 
 import zlib from "node:zlib";
+
+/** Read a NUL-terminated string from a fixed-length field. Lives here rather
+ * than in a parser so the PFF and 3DI modules share it without importing each
+ * other — df2extract already dynamic-imports file3di, and a static import back
+ * would close that cycle. */
+export function cstr(buf, off, len) {
+  let s = "";
+  for (let i = 0; i < len; i++) {
+    const c = buf[off + i];
+    if (c === 0) break;
+    s += String.fromCharCode(c);
+  }
+  return s;
+}
 
 // --- PCX ---------------------------------------------------------------------
 

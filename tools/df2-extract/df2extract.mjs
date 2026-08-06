@@ -78,17 +78,36 @@ export function parseTrn(text) {
 }
 
 // --- CLI ---------------------------------------------------------------------
-function main() {
+async function main() {
   const [cmd, file, outdir] = process.argv.slice(2);
   if (!cmd || !file) {
     console.error(
-      "usage:\n  df2extract.mjs list <a.pff>\n  df2extract.mjs extract <a.pff> <outdir>\n  df2extract.mjs trn <f.trn>"
+      "usage:\n  df2extract.mjs list <a.pff>\n  df2extract.mjs extract <a.pff> <outdir>\n" +
+        "  df2extract.mjs trn <f.trn>\n" +
+        "  df2extract.mjs 3di <f.3di> [out.glb] [--lod n] [--scale f]"
     );
     process.exit(1);
   }
 
   if (cmd === "trn") {
     console.log(JSON.stringify(parseTrn(readFileSync(file, "latin1")), null, 2));
+    return;
+  }
+
+  if (cmd === "3di") {
+    const { parse3di, toGlb, describe3di } = await import("./file3di.mjs");
+    const model = parse3di(readFileSync(file));
+    console.log(describe3di(model));
+    if (outdir) {
+      const lodArg = process.argv.indexOf("--lod");
+      const scaleArg = process.argv.indexOf("--scale");
+      const lod = lodArg >= 0 ? Number(process.argv[lodArg + 1]) : 0;
+      // Default 1/256: model units are 1/256 m (verified against the soldier
+      // models and the egypt pyramid footprint), so the GLB comes out in meters.
+      const scale = scaleArg >= 0 ? Number(process.argv[scaleArg + 1]) : 1 / 256;
+      writeFileSync(outdir, toGlb(model, { lod, scale }));
+      console.log(`wrote ${outdir} (lod ${lod}, scale ${scale})`);
+    }
     return;
   }
 

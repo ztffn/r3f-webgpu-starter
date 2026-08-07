@@ -209,6 +209,7 @@ export function FoliageCells({
    * callback, and a re-render on either would be pure waste.
    */
   const warming = useRef(false);
+  const fieldVersion = useRef(field.version);
 
   /**
    * PRECOMPILE PIPELINES, BUFFERS AND BIND GROUPS — once, at mount.
@@ -293,6 +294,17 @@ export function FoliageCells({
     // runs, so the LOD pass below must not race it. It lasts a fraction of a second at
     // load, before anyone is looking around.
     if (warming.current) return;
+
+    // Placement changed under us (the density slider). Drop every bucket's claim so the
+    // budgeted refill below rebuilds them — no mesh rebuild, so no second warm-up.
+    if (fieldVersion.current !== field.version) {
+      fieldVersion.current = field.version;
+      for (const bucket of state.buckets) {
+        bucket.cx = null;
+        bucket.cz = null;
+        bucket.filled = false;
+      }
+    }
 
     const camX = camera.position.x;
     const camZ = camera.position.z;

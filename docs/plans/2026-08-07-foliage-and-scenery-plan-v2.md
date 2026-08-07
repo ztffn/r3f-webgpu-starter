@@ -135,6 +135,30 @@ the trap catching the person documenting the trap. What IS true is narrower: `?b
 leaves `scene` unset, and `?grass=`, `?grasscap=`, `?x=`, `?z=`, `?yaw=`, `?pitch=` and
 `?stance=` are all bench-gated, so a fixed-vantage A/B needs `bench=1`.
 
+### 2.3b Density is nearly free — foliage is nowhere near a limit
+
+With the live density slider (Scene tab, `?foliage=1`), same pinned vantage:
+
+| density | plants | GPU | draw calls | triangles |
+|---|---|---|---|---|
+| 1 | 1,844 | 9.37 ms | 624 | 3,043k |
+| 2 | 3,609 | 9.18 ms | 645 | 3,047k |
+| 4 | 5,160 | 9.57 ms | 658 | 3,052k |
+
+**2.8x the plants for no measurable cost.** GPU is flat inside the ±2.5 ms timer spread, draw
+calls move 624 → 658 because density adds instances to EXISTING buckets rather than creating
+new ones, and triangles move by 9k — the 3M are grass blades, not foliage, whose whole
+geometry is about 13k.
+
+Density SATURATES rather than scaling: each placement site yields at most one plant, so 4x
+the multiplier gives 2.8x the plants and the curve flattens toward "every site accepted".
+That is also why the renderer's buffers cannot overflow.
+
+**Caveat, and it is the important one.** This is ONE vantage, standing, where most foliage is
+distant and cheap per fragment. The expensive case is prone inside a dense stand — the design
+record's §7.2 names prone as the primary case for exactly this reason — and it is untested.
+Do not conclude density is free in general from a standing vantage.
+
 ### 2.4 Concealment costs nothing at runtime, and never did
 
 No runtime concealment measurement exists. `blockingFraction` appears in exactly two places —

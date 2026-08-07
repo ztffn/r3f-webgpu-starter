@@ -92,7 +92,20 @@ const SALT_CELL = 0x43454c;
 export class VegetationField {
   readonly cellSize: number;
   readonly cellsPerTile: number;
-  readonly density: number;
+  /**
+   * Global density multiplier. MUTABLE, unlike everything else here, so a dev slider can
+   * move it without rebuilding the renderer's 500-odd bucket meshes — `setDensity` clears
+   * the cell cache and bumps `version`, and the renderer's existing budgeted refill does
+   * the rest.
+   *
+   * It is NOT on the networked visual-dial wire, deliberately. Cover is gameplay: a client
+   * that grew itself twice the bushes would see cover the server never placed. Offline it
+   * is an instrument; the moment vegetation becomes authoritative this has to come from the
+   * room like weather does.
+   */
+  density: number;
+  /** Bumped whenever cached placement is invalidated, so a renderer can notice. */
+  version = 0;
   readonly mapSeed: number;
   readonly rulesVersion: number;
   readonly waterHeight: number;
@@ -160,6 +173,20 @@ export class VegetationField {
   }
 
   /** Cells currently held. Bounded by `cellsPerTile²`; exposed for instrumentation. */
+  /**
+   * Change the density multiplier and discard every cached cell.
+   *
+   * Cheap by construction: a cell record is rebuilt on demand from
+   * (mapSeed, rulesVersion, wrapped index) and the renderer's buffers are sized for the
+   * WORST case — every placement site accepted — so no density can overflow them.
+   */
+  setDensity(density: number): void {
+    if (density === this.density) return;
+    this.density = density;
+    this.cache.clear();
+    this.version += 1;
+  }
+
   get cachedCellCount(): number {
     return this.cache.size;
   }

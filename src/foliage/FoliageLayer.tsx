@@ -43,6 +43,11 @@ export interface FoliageLayerProps {
   terrain: VegetationTerrain;
   /** Grade and fog, applied after lighting — foliage is the first lit scene surface. */
   atmosphere: Atmosphere;
+  /**
+   * Live density multiplier. Applied to the existing field rather than rebuilding it, so
+   * dragging the slider costs a budgeted cell refill instead of 500 new meshes.
+   */
+  density?: number;
   /** Registered so trunks stop bullets; leaves never do. */
   worldQuery?: CompositeWorldQuery | null;
   waterHeight?: number;
@@ -52,6 +57,7 @@ export interface FoliageLayerProps {
 export function FoliageLayer({
   terrain,
   atmosphere,
+  density,
   worldQuery,
   waterHeight,
   onStats,
@@ -77,6 +83,12 @@ export function FoliageLayer({
   }, []);
 
   useEffect(() => () => assets.foliage.texture.dispose(), [assets]);
+
+  // Not in the field's constructor options: rebuilding the field would rebuild every
+  // bucket mesh and re-run the pipeline warm-up on every drag.
+  useEffect(() => {
+    if (density !== undefined) field.setDensity(density);
+  }, [field, density]);
 
   useEffect(() => {
     if (!worldQuery) return;

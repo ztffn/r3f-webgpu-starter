@@ -258,6 +258,13 @@ export interface SceneHandles {
    * so publishing them separately was three fields encoding one fact.
    */
   roomDials: RoomVisuals | null;
+  /**
+   * Foliage density multiplier, and its setter. Deliberately NOT a `VISUAL_DIALS` entry:
+   * that table is append-only wire identity and room-authoritative, and cover is gameplay
+   * rather than weather. Local only — see `BENCH.admin`.
+   */
+  foliageDensity: number;
+  setFoliageDensity: (value: number) => void;
   grade: ReturnType<typeof createColorGrade>;
   fog: ReturnType<typeof createFog>;
   precipitation: ReturnType<typeof createPrecipitation>;
@@ -869,6 +876,10 @@ export function DF2Scene({
   // A local switch is REFUSED, not merely overwritten, once the room owns the
   // weather: the server broadcasts on change only, so nothing would ever arrive
   // to correct it and the two players would sit in different fog indefinitely.
+  // Live foliage density. Seeded from `?foliagedensity=` so a URL and the slider agree,
+  // then owned here because the layer must not rebuild to change it.
+  const [foliageDensity, setFoliageDensity] = useState(BENCH.foliageDensity ?? 1);
+
   const setPreset = useCallback(
     (id: string) => {
       if (netWeather !== null) return;
@@ -886,8 +897,10 @@ export function DF2Scene({
       preset: weather,
       setPreset,
       roomDials: room,
+      foliageDensity,
+      setFoliageDensity,
     });
-  }, [dialTargets, onSceneReady, room, setPreset, weather]);
+  }, [dialTargets, foliageDensity, onSceneReady, room, setPreset, weather]);
 
   // Stable identity so Terrain's slot memo does not rebuild; reads the uniform at
   // call time so the canopy slider takes effect without a React render.
@@ -1034,6 +1047,7 @@ export function DF2Scene({
           <FoliageLayer
             terrain={heightfield}
             atmosphere={atmosphere}
+            density={foliageDensity}
             worldQuery={worldQuery}
             waterHeight={showWater ? waterLevel : undefined}
           />

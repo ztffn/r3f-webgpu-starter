@@ -193,6 +193,21 @@ export interface BenchConfig {
   foliageDensity?: number;
   /** Window reach in METRES. Cells follow from it, so a cell sweep holds the reach. */
   foliageRadius?: number;
+  /**
+   * `?admin=1` — unlock the dev controls a NETWORKED session otherwise suppresses.
+   *
+   * WHAT IT IS NOT: server authority. The client already sends dial changes upward and
+   * the server refuses them unless it was started with `DF2_ADMIN=1`; a URL parameter
+   * cannot change that and must not be able to, because a flag anyone types is not a
+   * credential. This only says "show me the controls and let them act locally", so the
+   * division is URL reveals UI, server enforces authority.
+   *
+   * Local action on a gameplay quantity is still a fairness statement: growing yourself
+   * twice the cover changes what you can hide behind. Acceptable for a development
+   * instrument on a session you own, which is why the panel labels it rather than
+   * pretending the value is shared.
+   */
+  admin?: boolean;
   stance?: Stance;
   /** Fixed camera position, world metres. */
   x?: number;
@@ -256,6 +271,7 @@ function parse(): BenchConfig {
     foliageCell: num("foliagecell"),
     foliageDensity: num("foliagedensity"),
     foliageRadius: num("foliageradius"),
+    admin: q.get("admin") === "1",
   };
 
   if (q.get("bench") !== "1") {

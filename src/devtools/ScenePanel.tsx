@@ -21,6 +21,7 @@ import {
   type TerrainScale,
 } from "../df2/config";
 import { DialGroup, GROUPED } from "./dialGroup";
+import { BENCH } from "../df2/bench";
 
 export interface ScenePanelProps {
   terrain: LoadedTerrain | null;
@@ -245,6 +246,47 @@ export const ScenePanel = memo(function ScenePanel({
           </button>
         ))}
       </div>
+
+      {scene && BENCH.foliage && (
+        <>
+          <span className="eyebrow dev-group">Foliage</span>
+          {networked && BENCH.admin !== true ? (
+            <p className="note" data-dev="foliage-locked">
+              Density is hidden in a networked session. Cover is gameplay — growing
+              yourself twice the bushes changes what you can hide behind, and nobody
+              else would see it. Add <code>?admin=1</code> to unlock it locally, or go
+              offline.
+            </p>
+          ) : (
+            <label className="dial">
+              <span className="dial-row">
+                <span>Density</span>
+                <b data-dev="readout-foliage-density">{scene.foliageDensity.toFixed(2)}</b>
+              </span>
+              <input
+                type="range"
+                data-dev="dial-foliage-density"
+                data-dev-value={scene.foliageDensity}
+                aria-label="Foliage density"
+                min={0}
+                max={4}
+                step={0.25}
+                value={scene.foliageDensity}
+                // Live, unlike the scale dials: this clears the placement cache and the
+                // renderer's budgeted refill rebuilds cells over the next few frames. No
+                // mesh is rebuilt, so there is nothing to stall on and no second pipeline
+                // warm-up.
+                onChange={(e) => scene.setFoliageDensity(Number(e.target.value))}
+              />
+              <em>
+                multiplies every species&apos; placement probability. 0 clears the map, 2
+                doubles it. Capacity is sized for every site accepted, so it cannot
+                overflow{networked ? " — and it is LOCAL, so no one else sees it" : ""}
+              </em>
+            </label>
+          )}
+        </>
+      )}
 
       {terrain && (
         <>

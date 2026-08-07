@@ -104,3 +104,25 @@ export const FOLIAGE_WIND_PERIOD_SECONDS = 4.7;
 
 /** Metres over which a cell's foliage fades out at the window edge. */
 export const FOLIAGE_FADE_METRES = 24;
+
+/**
+ * Write four floats into `dst` at vec4 slot `index`.
+ *
+ * Exists because WebGPU's eight-vertex-buffer ceiling forces packing in TWO places — the
+ * per-vertex card data in `foliageGeometry` and the per-instance transform in
+ * `FoliageCells` — and both were doing the same `dst[i * 4 + n]` arithmetic by hand.
+ */
+export function packVec4(
+  dst: Float32Array,
+  index: number,
+  x: number,
+  y: number,
+  z: number,
+  w: number
+): void {
+  const base = index * 4;
+  dst[base] = x;
+  dst[base + 1] = y;
+  dst[base + 2] = z;
+  dst[base + 3] = w;
+}

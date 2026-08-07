@@ -86,7 +86,9 @@ export function FoliageLayer({
       new VegetationField({
         terrain,
         cellSize: BENCH.foliageCell,
-        density: BENCH.foliageDensity,
+        // No `density` here: the effect below owns it, and DF2Scene already seeds its
+        // state from `BENCH.foliageDensity`. Passing it twice meant the constructor value
+        // was overwritten on the next tick and could silently disagree with the seed.
         siteSpacing,
         waterHeight,
       }),

@@ -23,11 +23,14 @@ export const BUCKET_EDGES_MS: readonly number[] = [8.33, 16.7, 33.3, 50, 100, 25
 /**
  * A frame worse than this counts as a HITCH — visibly not smooth at any refresh rate
  * this project targets, since 33.3 ms is 30 fps.
+ *
+ * INDEXED OUT OF THE EDGES rather than written again, so the threshold and the histogram
+ * bucket it corresponds to cannot drift apart when someone retunes the edges.
  */
-export const HITCH_MS = 33.3;
+export const HITCH_MS = BUCKET_EDGES_MS[2];
 
 /** A frame worse than this counts as a STALL — long enough to read as a freeze. */
-export const STALL_MS = 250;
+export const STALL_MS = BUCKET_EDGES_MS[5];
 
 /**
  * A frame worse than this is a PAUSE, not a rendering cost: a background tab, a
@@ -103,22 +106,36 @@ export function createFrameStats(ringSize = 2048): FrameStats {
   // most, but allocating 8 kB on the frame path to do it would be its own small hitch.
   const scratch = new Float32Array(ringSize);
 
-  const percentile = (fraction: number): number => {
-    if (ringCount === 0) return 0;
+  /**
+   * Sort the retained ring into `scratch` ONCE and return the filled view.
+   *
+   * One sort per report, not one per percentile: p50 and p99 are two order statistics of
+   * the same sample, and sorting twice copied 8 kB and ran ~22k comparisons for nothing.
+   * A profiler that adds avoidable cost to itself is the wrong example to set.
+   */
+  const sortRing = (): Float32Array | null => {
+    if (ringCount === 0) return null;
     scratch.set(ring.subarray(0, ringCount));
     const view = scratch.subarray(0, ringCount);
     view.sort();
-    // `floor(p * n)`, NOT `ceil(p * n) - 1`, and the difference is not academic: with
-    // exactly 1% bad frames — 990 good and 10 bad — the second form lands on index 989,
-    // the last GOOD frame, and reports a p99 of 10 ms for a run that hitched ten times.
-    // This form indexes the first frame of the tail, which is what "one frame in a
-    // hundred is at least this bad" has to mean to be worth reading. Caught by
-    // tests/df2/frame-stats.test.ts on exactly that distribution.
-    //
-    // No interpolation: these are frame times a person reads before deciding whether to
-    // investigate, and an interpolated percentile implies precision the sample lacks.
-    const index = Math.min(ringCount - 1, Math.max(0, Math.floor(fraction * ringCount)));
-    return view[index];
+    return view;
+  };
+
+  /**
+   * `floor(p * n)`, NOT `ceil(p * n) - 1`, and the difference is not academic: with
+   * exactly 1% bad frames — 990 good and 10 bad — the second form lands on index 989,
+   * the last GOOD frame, and reports a p99 of 10 ms for a run that hitched ten times.
+   * This form indexes the first frame of the tail, which is what "one frame in a
+   * hundred is at least this bad" has to mean to be worth reading. Caught by
+   * tests/df2/frame-stats.test.ts on exactly that distribution.
+   *
+   * No interpolation: these are frame times a person reads before deciding whether to
+   * investigate, and an interpolated percentile implies precision the sample lacks.
+   */
+  const at = (sorted: Float32Array | null, fraction: number): number => {
+    if (sorted === null) return 0;
+    const index = Math.min(sorted.length - 1, Math.max(0, Math.floor(fraction * sorted.length)));
+    return sorted[index];
   };
 
   return {
@@ -152,12 +169,13 @@ export function createFrameStats(ringSize = 2048): FrameStats {
     },
 
     report() {
+      const sorted = sortRing();
       const out: FrameStatsReport = {
         windowFrames,
         meanMs: windowFrames > 0 ? windowTotal / windowFrames : 0,
         worstMs: windowWorst,
-        p50Ms: percentile(0.5),
-        p99Ms: percentile(0.99),
+        p50Ms: at(sorted, 0.5),
+        p99Ms: at(sorted, 0.99),
         worstEverMs: worstEver,
         frames,
         hitches,

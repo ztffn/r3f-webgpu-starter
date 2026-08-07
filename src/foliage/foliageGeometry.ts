@@ -27,6 +27,7 @@
 
 import * as THREE from "three/webgpu";
 import type { Species } from "./species.ts";
+import { packVec4 } from "./foliageConfig.ts";
 import { hash3i, rng32 } from "./vegetationHash.ts";
 
 export type CardVariant = "A" | "B" | "C" | "D";
@@ -506,10 +507,7 @@ export function buildFoliageGeometry(
   // packs the same way (FoliageCells), which lands the total at seven.
   const cardPacked = new Float32Array(out.leaf.length * 4);
   for (let i = 0; i < out.leaf.length; i += 1) {
-    cardPacked[i * 4] = out.card[i * 2];
-    cardPacked[i * 4 + 1] = out.card[i * 2 + 1];
-    cardPacked[i * 4 + 2] = out.sway[i];
-    cardPacked[i * 4 + 3] = out.billboard[i];
+    packVec4(cardPacked, i, out.card[i * 2], out.card[i * 2 + 1], out.sway[i], out.billboard[i]);
   }
   geometry.setAttribute("aCard", new THREE.Float32BufferAttribute(cardPacked, 4));
   geometry.setAttribute("leaf", new THREE.Float32BufferAttribute(out.leaf, 1));

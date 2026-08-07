@@ -33,6 +33,7 @@ import {
   FOLIAGE_FADE_METRES,
   FOLIAGE_LOD_DISTANCES,
   FOLIAGE_LOD_HYSTERESIS,
+  packVec4,
   FOLIAGE_VIEW_RADIUS_METRES,
 } from "./foliageConfig.ts";
 import {
@@ -439,10 +440,7 @@ function fill(
     const z = cell.offsetZ[source];
     const instanceScale = cell.scale[source];
 
-    instanceArray[i * 4] = x;
-    instanceArray[i * 4 + 1] = y;
-    instanceArray[i * 4 + 2] = z;
-    instanceArray[i * 4 + 3] = instanceScale;
+    packVec4(instanceArray, i, x, y, z, instanceScale);
     // Seed as a float in [0,1): the shader wants a variation dial, not an integer, and
     // 24 bits of mantissa is far more variation than the eye can distinguish.
     seedArray[i] = (cell.seed[source] >>> 8) / 16777216;

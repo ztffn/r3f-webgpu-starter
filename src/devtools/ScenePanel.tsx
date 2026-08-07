@@ -6,7 +6,7 @@
 // anything without it. It needs to be somewhere a developer looks, not somewhere
 // a player dismisses.
 
-import { memo, useEffect, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import {
   loadTerrainIndex,
   type LoadedTerrain,
@@ -84,6 +84,35 @@ const SCALE_DIALS: ScaleDial[] = [
  * rate, and every prop here is identity-stable state or a useState setter, so
  * memo bails on all of those renders.
  */
+/**
+ * The foliage dials that REBUILD, so they commit on pointer release. Module scope beside
+ * `SCALE_DIALS`, reading and writing through `SceneHandles` rather than carrying bound
+ * setters, so the descriptor is a plain constant instead of being rebuilt inside JSX on
+ * every render.
+ */
+const FOLIAGE_REBUILD_DIALS = [
+  {
+    key: "radius",
+    label: "Spawner reach",
+    min: 96,
+    max: 768,
+    step: 32,
+    read: (s: SceneHandles) => s.foliageRadius,
+    write: (s: SceneHandles, v: number) => s.setFoliageRadius(v),
+    hint: "how far plants are placed at all. Nothing is drawn past it, which is why a vista has a bare middle distance. Rebuilds",
+  },
+  {
+    key: "spacing",
+    label: "Site spacing",
+    min: 1.5,
+    max: 8,
+    step: 0.25,
+    read: (s: SceneHandles) => s.foliageSpacing,
+    write: (s: SceneHandles, v: number) => s.setFoliageSpacing(v),
+    hint: "metres between candidate sites. Count scales as 1/spacing², so halving it quadruples the plants. 1.7 m is ~10x the default. Rebuilds",
+  },
+] as const;
+
 export const ScenePanel = memo(function ScenePanel({
   terrain,
   grounded,
@@ -104,9 +133,20 @@ export const ScenePanel = memo(function ScenePanel({
   // time by construction). Committing rebuilds the WHOLE world — heightfield,
   // chunk geometry, grass, motor terrain — so unlike the grass dials these
   // commit on release, and this mirror is what moves under the thumb.
-  const [pending, setPending] = useState<{ key: "radius" | "spacing"; v: number } | null>(
-    null
+  // Live density is coalesced through a frame; see the dial's onChange.
+  const densityPending = useRef<number | null>(null);
+  const densityFrame = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (densityFrame.current !== null) cancelAnimationFrame(densityFrame.current);
+    },
+    []
   );
+
+  const [pending, setPending] = useState<{
+    key: (typeof FOLIAGE_REBUILD_DIALS)[number]["key"];
+    v: number;
+  } | null>(null);
   const [drag, setDrag] = useState<{ key: keyof TerrainScale; v: number } | null>(null);
 
   // The prepared-terrain list, for the map selector. Null until fetched (and
@@ -279,7 +319,21 @@ export const ScenePanel = memo(function ScenePanel({
                 // renderer's budgeted refill rebuilds cells over the next few frames. No
                 // mesh is rebuilt, so there is nothing to stall on and no second pipeline
                 // warm-up.
-                onChange={(e) => scene.setFoliageDensity(Number(e.target.value))}
+                // COALESCED to one apply per animation frame. Each apply clears the
+                // placement cache and invalidates every bucket, so an unthrottled drag
+                // queued a dozen full cell rebuilds and threw all but the last away.
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  densityPending.current = v;
+                  if (densityFrame.current !== null) return;
+                  densityFrame.current = requestAnimationFrame(() => {
+                    densityFrame.current = null;
+                    if (densityPending.current !== null) {
+                      scene.setFoliageDensity(densityPending.current);
+                      densityPending.current = null;
+                    }
+                  });
+                }}
               />
               <em>
                 multiplies placement PROBABILITY, and SATURATES: a site yields at most one
@@ -295,39 +349,19 @@ export const ScenePanel = memo(function ScenePanel({
               reconstructs the cell window and re-runs the pipeline warm-up. Dragging
               those per tick would stall the drag. */}
           {(!networked || BENCH.admin === true) &&
-            (
-              [
-                {
-                  key: "radius" as const,
-                  label: "Spawner reach",
-                  min: 96,
-                  max: 768,
-                  step: 32,
-                  value: scene.foliageRadius,
-                  commit: scene.setFoliageRadius,
-                  unit: "m",
-                  hint: "how far plants are placed at all. Nothing is drawn past it, which is why a vista has a bare middle distance. Rebuilds",
-                },
-                {
-                  key: "spacing" as const,
-                  label: "Site spacing",
-                  min: 1.5,
-                  max: 8,
-                  step: 0.25,
-                  value: scene.foliageSpacing,
-                  commit: scene.setFoliageSpacing,
-                  unit: "m",
-                  hint: "metres between candidate sites. Count scales as 1/spacing², so halving it quadruples the plants. 1.7 m is ~10x the default. Rebuilds",
-                },
-              ] as const
-            ).map((d) => {
-              const live = pending?.key === d.key ? pending.v : d.value;
+            FOLIAGE_REBUILD_DIALS.map((d) => {
+              const held = pending?.key === d.key ? pending : null;
+              const live = held ? held.v : d.read(scene);
+              const commit = () => {
+                if (held) d.write(scene, held.v);
+                setPending(null);
+              };
               return (
                 <label key={d.key} className="dial">
                   <span className="dial-row">
                     <span>{d.label}</span>
                     <b data-dev={`readout-foliage-${d.key}`}>
-                      {live.toFixed(d.step < 1 ? 2 : 0)} {d.unit}
+                      {live.toFixed(d.step < 1 ? 2 : 0)} m
                     </b>
                   </span>
                   <input
@@ -340,15 +374,13 @@ export const ScenePanel = memo(function ScenePanel({
                     step={d.step}
                     value={live}
                     onChange={(e) => setPending({ key: d.key, v: Number(e.target.value) })}
-                    onPointerUp={() => {
-                      if (pending?.key === d.key) d.commit(pending.v);
-                      setPending(null);
-                    }}
-                    onKeyUp={() => {
-                      if (pending?.key === d.key) d.commit(pending.v);
-                      setPending(null);
-                    }}
-                    onBlur={() => setPending(null)}
+                    onPointerUp={commit}
+                    onKeyUp={commit}
+                    onBlur={commit}
+                    // The guard the SCALE_DIALS pattern has and the first copy of this
+                    // block dropped: alt-tabbing mid-drag otherwise leaves `pending` set,
+                    // so the slider keeps showing an uncommitted value.
+                    onPointerCancel={() => setPending(null)}
                   />
                   <em>{d.hint}</em>
                 </label>

@@ -29,8 +29,12 @@ export interface PerfSample {
    * did, on the first GPU measurement of the foliage layer, while the camera visibly
    * snagged. Read `frames.p99Ms`, `frames.worstEverMs` and `frames.hitches` before
    * believing any mean on this panel.
+   *
+   * OPTIONAL because a hot reload pairs a new reader with the last sample the OLD monitor
+   * emitted, which has no distribution on it. Typing it required and guarding it at the
+   * use site asserted a guarantee the runtime does not hold.
    */
-  frames: FrameStatsReport;
+  frames?: FrameStatsReport;
   /**
    * GPU time for the render pass, ms, or null when unavailable.
    *

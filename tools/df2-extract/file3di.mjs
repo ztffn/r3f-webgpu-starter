@@ -370,7 +370,13 @@ export function toGlb(model, { lod = 0, scale = 1 } = {}) {
   for (let i = 0; i < L.faces.length; i++) {
     const f = L.faces[i];
     const mat = f.material >= 0 && f.material < L.materials.length ? L.materials[f.material] : null;
-    const key = `${mat ? mat.texIndex : -1}|${mat ? mat.flags & RENDER_FLAGS : 0}`;
+    // TEXTURED gates the binding: on an untextured material the texIndex byte is
+    // stale storage, not a reference. Binding it anyway painted texture 0 across
+    // rbuilda's interior wall band where the engine drew flat colour — so an
+    // untextured material resolves to -1 (the base-colour fallback), which also
+    // keeps it in a separate group from a TEXTURED one sharing the same byte.
+    const boundTex = mat && (mat.flags & MAT.TEXTURED) !== 0 ? mat.texIndex : -1;
+    const key = `${boundTex}|${mat ? mat.flags & RENDER_FLAGS : 0}`;
     let g = groups.get(key);
     if (!g) {
       groups.set(key, (g = []));
@@ -379,7 +385,7 @@ export function toGlb(model, { lod = 0, scale = 1 } = {}) {
       // and the mask — disagree and you silently get more glTF materials than
       // primitives, or fewer, with no error.
       g.key = key;
-      g.texIndex = mat ? mat.texIndex : -1;
+      g.texIndex = boundTex;
       g.flags = mat ? mat.flags : 0;
     }
     g.push({ f, vBase: faceVertBase[i], nBase: faceNormBase[i] });

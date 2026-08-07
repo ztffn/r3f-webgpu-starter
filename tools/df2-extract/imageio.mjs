@@ -107,6 +107,17 @@ export function decodeTga(buf) {
   const channels = depth / 8;
   const topToBottom = (descriptor & 0x20) !== 0;
   const start = 18 + idLength;
+  // Bounds-check before decoding: reading past a Buffer's end yields undefined,
+  // which Uint8Array assignment coerces to 0 — a truncated strip would decode
+  // "successfully" into black rows and ship as a corrupt committed atlas with
+  // nothing in the pipeline ever reporting a problem.
+  const needed = start + width * height * channels;
+  if (buf.length < needed) {
+    throw new Error(
+      `Truncated TGA: header says ${width}x${height} at ${depth}bpp ` +
+        `(${needed} bytes), file has ${buf.length}`
+    );
+  }
   const pixels = new Uint8Array(width * height * channels);
   for (let y = 0; y < height; y++) {
     const srcRow = topToBottom ? y : height - 1 - y;

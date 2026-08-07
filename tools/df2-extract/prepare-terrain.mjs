@@ -146,17 +146,27 @@ const VEGETATION = /^(gs|grs)/i;
 const calPath = find(trn.char_data, [".cal"]);
 let vegTiles = null;
 if (calPath) {
-  const lines = readFileSync(calPath, "latin1")
-    .split(/\r?\n/)
-    .filter((l) => l.trim().length);
+  // The format is ONE LINE PER DETAIL INDEX, so the line's raw position IS the
+  // tile index. Filtering blank lines before indexing (as this once did) shifts
+  // every material after a stray blank line by one — vegetation classified as
+  // rock gets its canopy zeroed, silently, and grass is concealment. Only the
+  // trailing newline's empty tail is trimmed; an interior blank keeps its index
+  // and is reported rather than squeezed out.
+  const lines = readFileSync(calPath, "latin1").split(/\r?\n/);
+  while (lines.length > 0 && lines[lines.length - 1].trim() === "") lines.pop();
   vegTiles = new Set();
   const hardTiles = [];
-  const materials = lines.map((l, i) => {
+  const materials = [];
+  lines.forEach((l, i) => {
+    if (l.trim() === "") {
+      console.log(`  ! char_data line ${i + 1} is blank — tile ${i} gets no material`);
+      return;
+    }
     const [name, param] = l.split(",");
     const mat = name.trim();
+    materials.push(mat);
     if (VEGETATION.test(mat)) vegTiles.add(i);
     if (Number(param) > 0) hardTiles.push(i);
-    return mat;
   });
   meta.assets.charData = {
     entries: lines.length,

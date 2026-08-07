@@ -45,16 +45,20 @@ export interface HeightmapSource {
   size: number;
   metersPerTexel?: number;
   heightScale?: number;
+  /** Terracing-reconstruction passes; defaults to HEIGHT_SMOOTH_PASSES. */
+  smoothPasses?: number;
 }
 
 /**
  * Reconstruct sub-unit relief that 8-bit storage quantised away.
  *
  * The source heightmap has 256 levels, so the smallest representable change is one raw
- * unit — 1 m at HEIGHT_SCALE 1.0, across a 2 m texel, which is a **26.6 degree facet**.
- * Measured on Green Mile: the MEDIAN facet angle is exactly that 26.6 degrees, and 48% of
- * adjacent samples are identical. The surface is step-flat-step-flat, and that terracing
- * is what reads as jagged and noisy. It is a storage artifact, not authored relief.
+ * unit — 1 m at HEIGHT_SCALE 1.0, across a texel (2 m at the time of measurement; 1 m
+ * since the 2026-08-06 calibration, which makes raw facets steeper still). Measured on
+ * Green Mile at the 2 m texel: the MEDIAN facet angle is exactly the one-step 26.6
+ * degrees, and 48% of adjacent samples are identical. The surface is step-flat-step-flat,
+ * and that terracing is what reads as jagged and noisy. A storage artifact, not authored
+ * relief.
  *
  * DF2 itself never showed it: Voxel Space drew one column per screen column straight from
  * the samples and never built triangles out of the steps, so quantisation appeared as
@@ -159,6 +163,7 @@ export class Heightfield {
       size,
       metersPerTexel: WORLD_SIZE / size,
       heightScale: TERRAIN_HEIGHT / 255,
+      smoothPasses: HEIGHT_SMOOTH_PASSES,
       // The synthetic field is continuous fBm quantised to bytes on the way out, so it
       // terraces for the same reason the extracted map does.
     };
@@ -183,7 +188,7 @@ export class Heightfield {
     }
     const grid = new Float32Array(size * size);
     for (let i = 0; i < size * size; i++) grid[i] = data[i] * scale;
-    smoothTerracing(grid, size, HEIGHT_SMOOTH_PASSES);
+    smoothTerracing(grid, size, src.smoothPasses ?? HEIGHT_SMOOTH_PASSES);
     return new Heightfield(size, cellSize, grid, scale);
   }
 

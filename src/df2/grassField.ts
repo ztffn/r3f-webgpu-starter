@@ -157,8 +157,8 @@ export function createGrassField(opts: GrassFieldOptions): GrassField {
     // MESH LOD IS NOT ALWAYS MIP LEVEL. Mip k has spacing `texelSize * 2^k`; mesh LOD k
     // has spacing `chunkSize / LOD_SEGMENTS[0] * 2^k`. Those are equal only when the
     // chunk's finest vertex spacing IS one texel — true for the 1024-texel real map
-    // (256/128 = 2 m = METERS_PER_TEXEL) and FALSE for the synthetic fallback, where a
-    // 512-sample grid over 2048 m gives a 4 m texel against 2 m vertices. Deriving the
+    // (128 m chunk / 128 segments = 1 m = METERS_PER_TEXEL) and FALSE for the synthetic
+    // fallback, whose 512-sample grid has a texel twice its vertex spacing. Deriving the
     // offset keeps the pairing honest instead of leaving it a coincidence between three
     // constants that fails silently when any of them moves.
     return lod.add(float(mipOffset)).max(float(0));

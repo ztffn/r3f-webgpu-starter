@@ -41,9 +41,9 @@ interface ScaleDial {
   hint: string;
 }
 
-// Calibration dials (docs runbook W1). METERS_PER_TEXEL is calibrated — its dial
-// is an A/B instrument; HEIGHT_SCALE is the open half, and this slider against
-// the running retail game is how it gets closed.
+// Calibration dials (docs runbook W1). Both scales are now calibrated, so these
+// are A/B instruments rather than open questions — kept because the next map
+// format or a disputed measurement wants them.
 const SCALE_DIALS: ScaleDial[] = [
   {
     key: "metersPerTexel",
@@ -59,7 +59,7 @@ const SCALE_DIALS: ScaleDial[] = [
     min: 0.05,
     max: 3,
     step: 0.05,
-    hint: "metres per raw elevation unit — UNCALIBRATED, the dial to settle",
+    hint: "metres per raw elevation unit — calibrated 0.5 (the editor manual's 1/2 m)",
   },
   {
     key: "smoothPasses",

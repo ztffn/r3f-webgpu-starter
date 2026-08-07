@@ -9,39 +9,109 @@
 // If absent, the renderer falls back to synthetic fBm terrain.
 export const TERRAIN_SLUG = "gmile"; // EXP2b "Green Mile"
 
-// --- Real-map scale (UNCALIBRATED — see docs/01 §7) --------------------------
+/** A URL- or env-supplied name safe to interpolate into an asset path. */
+export function isAssetSlug(value: string): boolean {
+  return /^[a-z0-9_-]{1,32}$/.test(value);
+}
+
+/**
+ * Resolve a requested map name to a loadable slug, falling back to
+ * TERRAIN_SLUG on anything that is not a plain slug. Pure — the game server
+ * validates `DF2_MAP` through this same rule (tools/game-server/server.ts).
+ */
+export function resolveMapSlug(requested: string | null | undefined): string {
+  return requested && isAssetSlug(requested) ? requested : TERRAIN_SLUG;
+}
+
+/** `?map=` — pick a different prepared terrain (e.g. `egypt`). */
+export function readMapSlug(search: string): string {
+  return resolveMapSlug(new URLSearchParams(search).get("map"));
+}
+
+// --- Real-map scale ----------------------------------------------------------
 // DF terrain images are 1024x1024. These two constants convert that grid into
 // world units and are the main "does it feel right" dials:
 //   METERS_PER_TEXEL — horizontal spacing => world size = 1024 * this
 //   HEIGHT_SCALE     — metres per raw 8-bit elevation unit (0-255)
 // (1024, not 1023: the field stores 1024 distinct samples and wraps modulo, with
 // no duplicated edge row — see Heightfield.ts.)
-// Defaults give a ~2 km map, which puts the ~800 m concealment range at roughly
-// 40% of the map width — consistent with DF2's long-range engagements.
-export const METERS_PER_TEXEL = 2.0;
-export const HEIGHT_SCALE = 1.0;
+//
+// METERS_PER_TEXEL is CALIBRATED (2026-08-06) against two independent anchors:
+// .3DI model units are 1/256 m (five standing character models measure 467-470
+// units = 1.83 m), and the egypt map's painted pyramid footprints (~170 texels)
+// match KHUFU.3DI's 44430-unit = 173.6 m base at 1.021 m/texel — i.e. 1 texel
+// = 1 m, maps are 1.024 km square. Method + probes: docs/plans/2026-08-06-
+// retail-df2-reverse-engineering-runbook.md (W1).
+//
+// HEIGHT_SCALE is CALIBRATED too (2026-08-07), and from first-party
+// DOCUMENTATION rather than measurement: the official DF2 mission-editor manual
+// (DF2MED.PDF, "Terrain Overrides") states the mission's water level is
+// "measured in 1/2 meters". Water level and terrain elevation are the same
+// quantity to the engine — it compares them to decide what is submerged, and a
+// mission's `water_level` overrides the .trn's `water_height` — so one raw
+// elevation unit IS half a metre. Retail relief comes out at 68-127 m across a
+// 1.024 km map, which is the rolling terrain DF2 had.
+//
+// Cross-check worth keeping: the pre-calibration pair (2.0 texel, 1.0 height)
+// had the same 1:2 height-to-texel RATIO as the calibrated pair (1.0, 0.5). The
+// terrain SHAPE that was tuned by eye was right all along; only its absolute
+// size was 2x too large. So the fog, grass and LOD tuning done before the
+// calibration still describes the same surface.
+//
+// NOTE: perf baselines quoted in comments/docs (e.g. "19.6 ms at Green Mile
+// (5, 375)") were measured at the old 2.0 texel — those world coordinates now
+// land on different terrain, so re-measure rather than compare.
+export const METERS_PER_TEXEL = 1.0;
+export const HEIGHT_SCALE = 0.5;
+
+/**
+ * Live terrain-scale overrides: seeded from the URL dials (`?texel=`, `?hscale=`,
+ * `?hsmooth=` — bench.ts), dialled from the dev console's Scene tab, consumed by
+ * DF2Scene's world build. Offline calibration instrument — see the bench.ts note.
+ * Field names deliberately match HeightmapSource so the world build can spread it.
+ */
+export interface TerrainScale {
+  metersPerTexel: number;
+  heightScale: number;
+  smoothPasses: number;
+}
+
 // Passes of a [1,2,1] binomial filter used to reconstruct the sub-unit relief that
 // 8-bit elevation storage quantised away. 0 keeps the raw surface.
 //
 // The heightmap has 256 levels, so the smallest representable step is one raw unit —
-// 1 m at the scale above, across a 2 m texel, which is a 26.6 degree facet. Measured on
-// Green Mile the MEDIAN facet angle is exactly 26.6 degrees and 48% of adjacent samples
-// are identical: the surface is step-flat-step-flat. That terracing is a storage
-// artifact, and it is what makes the terrain read as jagged rather than as the soft
-// rolling relief DF2 showed (docs/07 §9).
+// 1 m at the scale above, across a texel (2 m when this was measured; 1 m since the
+// 2026-08-06 calibration, making raw facets steeper still). Measured on Green Mile at
+// the 2 m texel the MEDIAN facet angle was exactly the one-step 26.6 degrees and 48%
+// of adjacent samples are identical: the surface is step-flat-step-flat. That
+// terracing is a storage artifact, and it is what makes the terrain read as jagged
+// rather than as the soft rolling relief DF2 showed (docs/07 §9). If terracing looks
+// worse after the calibration, the suspect is the still-uncalibrated HEIGHT_SCALE.
 //
 // 2 passes clears the 2-texel terracing while leaving the tens-of-metres features that
 // carry the terrain's shape. Raising it flattens real relief; 0 shows the raw data,
 // which is the honest A/B for judging this.
 export const HEIGHT_SMOOTH_PASSES = 2;
 
+/**
+ * The one statement of the shipped scale. GameApp seeds its dial state from
+ * this (URL dials layered on top), the Scene tab's reset returns to it, and a
+ * DF2Scene mounted without the prop builds with it. Three consumers, one rule.
+ */
+export const CALIBRATED_TERRAIN_SCALE: TerrainScale = {
+  metersPerTexel: METERS_PER_TEXEL,
+  heightScale: HEIGHT_SCALE,
+  smoothPasses: HEIGHT_SMOOTH_PASSES,
+};
+
 // --- Synthetic fallback world ------------------------------------------------
-// Only used when no real terrain assets are present. Matched to the real map's
-// 2 m texel so chunking, LOD and grass behave identically in both modes.
-// 2048 m, matching the real map's extent (1024 texels x 2 m) so chunk size, LOD
-// distances and the derived view radius come out identical in both modes. At the
-// old 1024 m the fallback's 128 m chunks could not reach the fog distance.
-export const WORLD_SIZE = 2048; // meters
+// Only used when no real terrain assets are present. DERIVED from the real
+// map's extent (1024 texels x METERS_PER_TEXEL) so chunk size, LOD distances
+// and the view radius come out identical in both modes — a literal here went
+// stale the moment the texel was calibrated, breaking exactly that promise.
+// The fallback's own sample spacing is WORLD_SIZE / GRID_CELLS (2 m — coarser
+// than the real map's texel; it is procedural, only the chunking must match).
+export const WORLD_SIZE = 1024 * METERS_PER_TEXEL; // meters
 export const TERRAIN_HEIGHT = 130; // meters, peak of the synthetic field
 // Samples per side, which is also the tiling PERIOD: there is no duplicated edge
 // row, every lookup wraps modulo this (Heightfield.ts).
@@ -58,14 +128,23 @@ export const CHUNK_COUNT = 8;
 //
 // DERIVED, not fixed: Terrain.tsx computes ceil(FOG_FAR / chunkSize) and clamps
 // to this cap. A fixed radius silently breaks whenever the world size changes —
-// at the synthetic fallback's 128 m chunk a radius of 9 reached only 1152 m
-// against a 2200 m fog distance, so the terrain ended in mid-air well inside the
-// fog. Deriving it keeps the drawn extent tied to what the fog actually hides.
-export const VIEW_RADIUS_MAX_CHUNKS = 12;
+// at a 128 m chunk a radius of 9 reached only 1152 m against a 2200 m fog
+// distance, so the terrain ended in mid-air well inside the fog. Deriving it
+// keeps the drawn extent tied to what the fog actually hides.
+//
+// The cap is 18 because the 2026-08-06 texel calibration halved the chunk to
+// 128 m, and reaching the 2200 m preset fog now NEEDS 18 (2304 m) — the old cap
+// of 12 reintroduced the mid-air edge it was written to prevent. What the cap
+// still guards against is the ?texel= dial's extremes (texel 0.25 would ask for
+// 69). Note the fog distances themselves predate the calibration: 2.2 km of
+// view on a 1.024 km map is 2+ world repeats, so the weather presets likely
+// want retuning toward DF2's real (short) sightlines — docs runbook W1.
+export const VIEW_RADIUS_MAX_CHUNKS = 18;
 
 // Segment resolutions per LOD, highest detail first. A chunk built at N segments
-// has (N+1)^2 grid vertices. At 128 segments over a ~256 m chunk the vertex
-// spacing matches the source heightmap's 2 m texel spacing exactly.
+// has (N+1)^2 grid vertices. At 128 segments over a 128 m chunk the vertex
+// spacing matches the source heightmap's 1 m texel spacing exactly (the same
+// 1:1 that held at 128 segments per 256 m chunk under the old 2 m texel).
 export const LOD_SEGMENTS: number[] = [128, 64, 32, 16, 8];
 
 // LOD switch distances, expressed in CHUNK WIDTHS from the camera so they scale

@@ -28,7 +28,7 @@ import {
 import { createMotorWorld, initRapier } from "../../src/motor/MotorWorld.ts";
 import { DEFAULT_MOTOR_TUNING } from "../../src/motor/MotorTypes.ts";
 import type { ServerConnection, ServerTransport } from "../../src/net/Transport.ts";
-import { TERRAIN_SLUG } from "../../src/df2/config.ts";
+import { resolveMapSlug } from "../../src/df2/config.ts";
 import { WEATHER_PRESET_IDS, weatherPresetIndex } from "../../src/df2/weather.ts";
 import { clampVisualDial } from "../../src/df2/visualDials.ts";
 import { loadServerTerrain } from "./terrain.ts";
@@ -112,8 +112,12 @@ function pickWeatherIndex(): number {
  */
 const MAX_SESSION_SECONDS = 6 * 3600;
 
+// `DF2_MAP=egypt` serves a different prepared terrain; the default stays gmile.
+// Validated through the same rule as the client's `?map=` — the raw env value
+// reaches join(assetRoot, slug), so it must never carry path segments.
+const MAP_SLUG = resolveMapSlug(process.env.DF2_MAP);
 const RAPIER = await initRapier();
-const terrain = loadServerTerrain(TERRAIN_SLUG);
+const terrain = loadServerTerrain(MAP_SLUG);
 const tickMs = DEFAULT_MOTOR_TUNING.fixedTimestepSeconds * 1000;
 
 /** Per-room adapter from Colyseus callbacks onto the project transport seam. */
@@ -226,8 +230,8 @@ class GameRoom extends Room {
     const joinCode = isPrivate ? makeJoinCode() : undefined;
     if (isPrivate) this.setPrivate(true);
     this.metadata = {
-      label: label ?? `${TERRAIN_SLUG} — ${isPrivate ? "private" : "public"}`,
-      map: TERRAIN_SLUG,
+      label: label ?? `${MAP_SLUG} — ${isPrivate ? "private" : "public"}`,
+      map: MAP_SLUG,
       weather: WEATHER_PRESET_IDS[weatherIndex]!,
       inputClass,
       community: false,
@@ -445,7 +449,7 @@ const server = new Server({ transport });
 server.define(GAME_ROOM, GameRoom).filterBy(["inputClass"]);
 await server.listen(PORT);
 console.log(
-  `game server on ws://localhost:${PORT} — ${TERRAIN_SLUG}, ` +
+  `game server on ws://localhost:${PORT} — ${MAP_SLUG}, ` +
     `${Math.round(1000 / tickMs)} Hz tick, ${PATCH_HZ} Hz patch, weather ${WEATHER_LABEL}` +
     (ADMIN ? ", CLIENT DIALS ALLOWED (DF2_ADMIN=1)" : "")
 );

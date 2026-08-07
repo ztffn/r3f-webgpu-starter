@@ -126,6 +126,22 @@ export interface BenchConfig {
   rainCount?: number;
   rainArea?: number;
   rainHeight?: number;
+  /**
+   * Terrain scale dials — `?texel=1&hscale=0.5&hsmooth=2`. World metres per heightmap
+   * texel, metres per raw 8-bit elevation unit, and terracing smooth passes.
+   *
+   * These exist for exactly one job: dialling the still-uncalibrated HEIGHT_SCALE
+   * against the running retail game (docs/plans/…-runbook.md W1) the way ?weather=
+   * dials were used for the skyboxes. METERS_PER_TEXEL is calibrated (1.0 — see
+   * config.ts) so `?texel=` is an A/B instrument, not an open question. The whole
+   * world builds from these (chunks, motor terrain, grass placement), so they are
+   * baked at load — reload to change — and OFFLINE dials only: a networked session's
+   * server simulates the config scale, and a client dialled away from it would
+   * disagree with every authoritative position.
+   */
+  texel?: number;
+  heightScale?: number;
+  heightSmooth?: number;
   /** Per-texel share of the baked height field. Baked, so reload to change. */
   strand?: number;
   /** Longest span a ray searches, metres. Sets step size for grazing rays. */
@@ -199,6 +215,9 @@ function parse(): BenchConfig {
     bladePush: num("bladepush"),
     bladePushRadius: num("bladepushradius"),
     bladeSun: num("bladesun"),
+    texel: num("texel"),
+    heightScale: num("hscale"),
+    heightSmooth: num("hsmooth"),
     water: num("water"),
     fogBase: num("fogbase"),
     fogTop: num("fogtop"),

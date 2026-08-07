@@ -215,8 +215,13 @@ player instinctively recognise this?* — applies to features, not to whether a 
   mod team, who hold the rights (`01-...md` §3),
   so the pipeline reproduces from source. The distinction that still holds: **retail**-extracted
   DF2 data is personal-use-only and never committed.
-- Scale constants (`HEIGHT_SCALE`, `METERS_PER_TEXEL`) are **not yet calibrated** — they're
-  placeholders in `src/df2/config.ts`.
+- `METERS_PER_TEXEL` is **calibrated: 1 texel = 1 m** (maps are 1.024 km square), via
+  .3DI units (256/m — soldier models are 1.83 m) against the egypt map's painted pyramid
+  footprints (`docs/06` §8). `HEIGHT_SCALE` is **calibrated too: 0.5 m per raw elevation
+  unit** — the official mission-editor manual states water level is measured in 1/2 metres,
+  and water and terrain elevation are the same quantity to the engine (`docs/06` §8).
+  Both scales now ship real values in `src/df2/config.ts`; the Scene tab's sliders remain
+  as A/B instruments.
 
 ## Commands
 

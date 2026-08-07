@@ -214,9 +214,21 @@ either modding installer).
 - **Stretch-height → world-units scale.** The `detail_elev` greyscale (0–255) maps to some
   world height; the multiplier (and whether it's modulated by `sun_slope`/terrain scale) is
   not yet pinned. Tune visually against the real map, then confirm if base-game data clarifies.
-- **Heightmap → world-height scale.** 1024² grid confirmed; the vertical scale
-  (`HEIGHT_SCALE`) is still a placeholder. `METERS_PER_TEXEL` is no longer open — see the
-  calibration below.
+> **CONFIRMED (2026-08-07): 1 raw elevation unit = 0.5 m — `HEIGHT_SCALE = 0.5`.**
+> From first-party DOCUMENTATION, not measurement: `DF2MED.PDF` ("Terrain Overrides") says
+> a mission's water level is *"measured in 1/2 meters"*. Water level and terrain elevation
+> are one quantity to the engine — it compares them to decide what is submerged, and a
+> mission's `water_level` overrides the `.trn`'s `water_height` (Warfields sets 30 over
+> DMD3's 0; the retail `Example.mis` sets 20 over DFDG1's 11) — so the heightmap's raw unit
+> is half a metre. Sanity: retail relief lands at 68 m (DMD3), 96 m (DFG1), 103 m (DFG5),
+> 127 m (DMG6) across a 1.024 km map.
+>
+> **Cross-check worth keeping:** the pre-calibration placeholders (2.0 m texel, 1.0 height)
+> carried the SAME 1:2 height-to-texel ratio as the calibrated pair (1.0, 0.5). The terrain
+> *shape* someone tuned by eye was right all along; only its absolute size was 2× too big.
+> That is why the fog/grass/LOD tuning done before calibration still describes this surface.
+>
+> Probe: `pdftotext DF2MED.PDF - | grep -i "1/2 met"`.
 
 > **CONFIRMED (2026-08-06): 1 texel = 1 m, maps are 1.024 km square; 256 .3DI units = 1 m.**
 > Two independent anchors agree: (1) five standing character models (BGUY01, THUG01,

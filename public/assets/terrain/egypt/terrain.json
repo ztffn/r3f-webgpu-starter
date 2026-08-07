@@ -41,6 +41,13 @@
       "height": 1024,
       "distinctIndices": 5
     },
+    "detailColor": {
+      "file": "detail_color.png",
+      "tileSize": 64,
+      "tiles": 256,
+      "grid": 16,
+      "atlasSize": 1024
+    },
     "detailElev": {
       "file": "detail_elev.png",
       "width": 64,
@@ -58,7 +65,8 @@
       "rawMax": 64,
       "rawMean": 54,
       "detailIndicesUsed": 5,
-      "substituted": false
+      "substituted": false,
+      "vegetationGated": false
     }
   },
   "missing": []

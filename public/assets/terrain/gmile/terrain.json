@@ -59,8 +59,11 @@
       "rawMax": 255,
       "rawMean": 30.7,
       "detailIndicesUsed": 62,
-      "substituted": true
+      "substituted": true,
+      "vegetationGated": false
     }
   },
-  "missing": []
+  "missing": [
+    "dfdg1_cm"
+  ]
 }

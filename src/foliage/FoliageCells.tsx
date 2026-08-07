@@ -107,7 +107,7 @@ export function FoliageCells({
   radiusMetres = FOLIAGE_VIEW_RADIUS_METRES,
   onStats,
 }: FoliageCellsProps) {
-  const { camera } = useThree();
+  const { camera, gl, scene } = useThree();
   const statsAt = useRef(0);
 
   const state = useMemo(() => {
@@ -202,6 +202,84 @@ export function FoliageCells({
     [state]
   );
 
+  /**
+   * Whether the one-time warm-up is holding the buckets. Read by the frame loop.
+   *
+   * A ref rather than state: it is set and cleared inside an effect and a promise
+   * callback, and a re-render on either would be pure waste.
+   */
+  const warming = useRef(false);
+
+  /**
+   * PRECOMPILE PIPELINES, BUFFERS AND BIND GROUPS — once, at mount.
+   *
+   * The hitch this removes was measured rather than guessed: the first camera sweep
+   * across new territory cost 8 frames over 33 ms and every repeat sweep over the same
+   * arc cost zero. That asymmetry is the signature of first-draw setup, not of a
+   * steady-state cost, and it is invisible in a mean (p50 did not move at all).
+   *
+   * IT HAS TO RUN ON THE REAL BUCKET MESHES. `Renderer._createObjectPipeline`, which is
+   * what `compileAsync` runs per object, does three things: uploads the geometry's
+   * buffers, creates the object's bind group, and compiles the pipeline. Only the last
+   * is shared — three's geometry cache key is STRUCTURAL (attribute names, item sizes,
+   * strides), so every bucket and every LOD of one species already share a pipeline.
+   * The per-object work is the instance buffers and the bind group, so warming a single
+   * representative bucket would warm the cheap part and leave the expensive part.
+   *
+   * `frustumCulled` is switched off for the pass because `compileAsync` frustum-culls
+   * exactly like `render` does — it calls the same `_projectObject`. Warming with the
+   * live camera would otherwise compile only what is already on screen, which is
+   * precisely the case that never hitches.
+   *
+   * The LOD templates are spread across buckets by index so all `FOLIAGE_LOD_COUNT`
+   * geometries get uploaded in one pass. They are shared templates, so that is a dozen
+   * uploads rather than one per bucket.
+   */
+  useEffect(() => {
+    const renderer = gl as unknown as {
+      compileAsync?: (object: THREE.Object3D, camera: THREE.Camera, scene: THREE.Scene) => Promise<unknown>;
+    };
+    // WebGL2 fallback and older renderers simply skip it; the hitch is a WebGPU
+    // pipeline-creation cost and a missing warm-up is a slow first sweep, not a bug.
+    if (typeof renderer.compileAsync !== "function") return;
+
+    const restore = state.buckets.map((bucket) => ({
+      bucket,
+      visible: bucket.mesh.visible,
+      frustumCulled: bucket.mesh.frustumCulled,
+      geometry: bucket.mesh.geometry,
+    }));
+
+    warming.current = true;
+    state.buckets.forEach((bucket, i) => {
+      bucket.mesh.visible = true;
+      bucket.mesh.frustumCulled = false;
+      bucket.mesh.geometry = bucket.geometries[i % bucket.geometries.length];
+    });
+
+    let cancelled = false;
+    void renderer
+      .compileAsync(state.group, camera, scene as THREE.Scene)
+      .catch(() => {
+        // A failed warm-up costs a slow first sweep and nothing else, so it must not
+        // take the layer down with it.
+      })
+      .finally(() => {
+        if (cancelled) return;
+        for (const entry of restore) {
+          entry.bucket.mesh.visible = entry.visible;
+          entry.bucket.mesh.frustumCulled = entry.frustumCulled;
+          entry.bucket.mesh.geometry = entry.geometry;
+        }
+        warming.current = false;
+      });
+
+    return () => {
+      cancelled = true;
+      warming.current = false;
+    };
+  }, [state, camera, gl, scene]);
+
   const matrix = useMemo(() => new THREE.Matrix4(), []);
   const quaternion = useMemo(() => new THREE.Quaternion(), []);
   const position = useMemo(() => new THREE.Vector3(), []);
@@ -210,6 +288,11 @@ export function FoliageCells({
 
   useFrame((_, delta) => {
     uniforms.time.value = (uniforms.time.value as number) + delta;
+
+    // The warm-up owns every bucket's visibility, geometry and frustum flag while it
+    // runs, so the LOD pass below must not race it. It lasts a fraction of a second at
+    // load, before anyone is looking around.
+    if (warming.current) return;
 
     const camX = camera.position.x;
     const camZ = camera.position.z;

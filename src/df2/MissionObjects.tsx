@@ -13,7 +13,7 @@ import { useEffect, useMemo, useState } from "react";
 import * as THREE from "three/webgpu";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import type { Heightfield } from "./Heightfield";
-import { isAssetSlug } from "./config";
+import { isAssetSlug, readMapSlug } from "./config";
 import { disposeSubtree } from "./DevPlacedObject";
 
 interface Placement {
@@ -92,11 +92,19 @@ export function MissionObjects({ heightfield }: { heightfield: Heightfield }) {
       typeof window === "undefined" ? "" : window.location.search
     );
     const s = p.get("mission");
-    const yaw = Number(p.get("misyaw"));
+    // A bare `?misyaw` flag reads as "" and Number("") is 0 — that must fall
+    // through to the measured default rather than silently zero the -90° offset.
+    const rawYaw = p.get("misyaw");
+    const yaw = rawYaw === null || rawYaw.trim() === "" ? Number.NaN : Number(rawYaw);
+    // Object.hasOwn, not `in`: `in` walks the prototype chain, so
+    // `?misaxis=constructor` passed the whitelist and the placement effect then
+    // destructured Object.prototype's constructor as an axis mapping — a crash
+    // (or NaN positions) from a URL parameter.
+    const requestedAxis = p.get("misaxis") ?? "xy";
     return {
       slug: s && isAssetSlug(s) ? s : null,
-      axis: (p.get("misaxis") ?? "xy") in AXES ? p.get("misaxis") ?? "xy" : "xy",
-      yawOffset: Number.isFinite(yaw) && p.get("misyaw") !== null ? yaw : DEFAULT_YAW_OFFSET_DEG,
+      axis: Object.hasOwn(AXES, requestedAxis) ? requestedAxis : "xy",
+      yawOffset: Number.isFinite(yaw) ? yaw : DEFAULT_YAW_OFFSET_DEG,
       // Bearings add to the yaw (measured — see DEFAULT_YAW_OFFSET_DEG);
       // `?miscw=1` negates the term for the opposite sense.
       facingSign: p.get("miscw") === "1" ? -1 : 1,
@@ -156,6 +164,18 @@ export function MissionObjects({ heightfield }: { heightfield: Heightfield }) {
       if (!alive) {
         acquired.forEach(disposeSubtree);
         return;
+      }
+      // A mission is authored for ONE terrain; seated on any other heightfield
+      // every wall is half-buried or floating while placement itself works
+      // perfectly — the same "otherwise undiagnosable" class as the ?map=/server
+      // mismatch in DF2Scene, so it gets the same loud console line.
+      const mapSlug = readMapSlug(typeof window === "undefined" ? "" : window.location.search);
+      if (mission.terrain && mission.terrain.toLowerCase() !== mapSlug) {
+        console.warn(
+          `[MissionObjects] "${mission.name}" was authored for terrain ` +
+            `"${mission.terrain}" but the loaded map is "${mapSlug}" — every ` +
+            `placement will seat on the wrong ground. Try ?map=${mission.terrain.toLowerCase()}.`
+        );
       }
       console.log(
         `[MissionObjects] "${mission.name}" by ${mission.designer} — ` +

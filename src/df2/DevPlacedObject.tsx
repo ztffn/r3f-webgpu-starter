@@ -69,6 +69,11 @@ export function DevPlacedObject({ heightfield }: { heightfield: Heightfield }) {
     if (slugs.length === 0) return;
     let alive = true;
     const loader = new GLTFLoader();
+    // Captured for the cleanup, like MissionObjects: disposal must NOT ride
+    // through a setState updater — React drops updates queued on an unmounting
+    // component without ever running the updater, so `setScenes(prev => ...)`
+    // in the cleanup silently leaked every GLB's GPU footprint per unmount.
+    let acquired: THREE.Object3D[] = [];
     Promise.all(
       slugs.map((slug) =>
         loader
@@ -85,14 +90,13 @@ export function DevPlacedObject({ heightfield }: { heightfield: Heightfield }) {
         usable.forEach(disposeSubtree);
         return;
       }
+      acquired = usable;
       setScenes(usable);
     });
     return () => {
       alive = false;
-      setScenes((prev) => {
-        prev.forEach(disposeSubtree);
-        return [];
-      });
+      setScenes([]);
+      acquired.forEach(disposeSubtree);
     };
   }, [slugs]);
 

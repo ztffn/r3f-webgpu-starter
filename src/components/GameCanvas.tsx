@@ -51,9 +51,16 @@ export function GameCanvas({
       dpr={effectiveDpr}
       camera={camera}
       gl={async (props) => {
-        const renderer = new THREE.WebGPURenderer(
-          props as ConstructorParameters<typeof THREE.WebGPURenderer>[0]
-        );
+        const renderer = new THREE.WebGPURenderer({
+          ...(props as ConstructorParameters<typeof THREE.WebGPURenderer>[0]),
+          // GPU TIMING, and only under ?debug=1 because the queries are not free.
+          // A CONSTRUCTOR parameter, not a settable property: the backend reads
+          // `parameters.trackTimestamp` once (three's Backend.js), so it cannot be
+          // switched on later from a panel. Without it `resolveTimestampsAsync`
+          // warns and returns undefined, which PerfMonitor reports as "not
+          // measured" rather than as zero.
+          trackTimestamp: BENCH.debug === true,
+        });
         await renderer.init();
         return renderer;
       }}

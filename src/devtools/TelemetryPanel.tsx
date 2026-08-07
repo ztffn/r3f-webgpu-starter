@@ -6,6 +6,7 @@
 // correspondence with docs/10 and docs/11.
 
 import type { PerfSample } from "../df2/PerfMonitor";
+import { BUCKET_EDGES_MS } from "../df2/frameStats";
 import type { FlyState } from "../df2/FlyControls";
 import type { CombatSnapshot } from "../fps/ui/CombatTelemetry";
 import { impactTelemetryKey, shotTelemetryKey } from "../fps/ui/CombatTelemetry";
@@ -28,8 +29,43 @@ export function TelemetryPanel({ perf, fly, combat }: TelemetryPanelProps) {
           <span>
             {perf.ms.toFixed(1)} ms · peak {perf.worstMs.toFixed(0)}
           </span>
+          {/* The mean above is the number that read "no cost" while the camera visibly
+              snagged. p99 and worst-since-load do not reset, so a hitch that happened
+              once is still on screen a minute later. */}
+          {/* Guarded because a hot reload pairs a NEW panel with the LAST sample the old
+              monitor emitted, which has no distribution on it — that combination threw
+              into the router's error boundary and cost a blank screen until a full
+              reload. Dev-only tooling, edited constantly; the guard is cheaper than the
+              interruption. */}
+          {perf.frames && (
+            <>
+          <span data-dev="perf-percentiles">
+            p50 {perf.frames.p50Ms.toFixed(1)} · p99 {perf.frames.p99Ms.toFixed(1)} · max{" "}
+            {perf.frames.worstEverMs.toFixed(0)} ms
+          </span>
+          <span
+            className={perf.frames.hitches > 0 ? "warn" : undefined}
+            data-dev="perf-hitches"
+            data-dev-value={String(perf.frames.hitches)}
+          >
+            {perf.frames.hitches} hitch · {perf.frames.stalls} stall · {perf.frames.pauses}{" "}
+            pause / {perf.frames.frames} frames
+          </span>
+          <span data-dev="perf-histogram" data-dev-value={perf.frames.buckets.join(",")}>
+            {BUCKET_EDGES_MS.map((edge, i) =>
+              perf.frames.buckets[i] > 0 ? (
+                <span key={edge} className="bucket">
+                  {Number.isFinite(edge) ? `<${edge.toFixed(0)}` : "1s+"}:
+                  {perf.frames.buckets[i]}{" "}
+                </span>
+              ) : null
+            )}
+          </span>
+            </>
+          )}
           <span>
             {perf.drawCalls} calls · {(perf.triangles / 1000).toFixed(0)}k tris
+            {perf.gpuMs != null && ` · gpu ${perf.gpuMs.toFixed(2)} ms`}
           </span>
           <span className={perf.backend === "WebGPU" ? undefined : "warn"}>
             {perf.backend}

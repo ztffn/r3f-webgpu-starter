@@ -6,9 +6,15 @@
 // Frame time is reported alongside FPS because FPS hides the size of a change.
 // Going from 120 to 60 fps and from 60 to 40 fps cost the same 8 ms, but read as a
 // 60 fps drop and a 20 fps drop. Milliseconds are what you optimise against.
+//
+// THE DISTRIBUTION LIVES IN frameStats.ts, and that split is the point. A mean plus a
+// per-window peak could not answer "did it stutter while I looked around" — the peak was
+// erased every reporting interval and frames over 1 s were discarded outright. The
+// percentiles, the cumulative histogram and the hitch counters survive reports.
 
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useRef } from "react";
+import { createFrameStats, type FrameStatsReport } from "./frameStats";
 
 export interface PerfSample {
   fps: number;
@@ -16,6 +22,23 @@ export interface PerfSample {
   ms: number;
   /** Worst frame in the window, ms — where hitches show up. */
   worstMs: number;
+  /**
+   * The distribution, and the cumulative counters that outlive a report.
+   *
+   * `ms` above is a mean, and a mean with hitches in it reads as "no cost" — which it
+   * did, on the first GPU measurement of the foliage layer, while the camera visibly
+   * snagged. Read `frames.p99Ms`, `frames.worstEverMs` and `frames.hitches` before
+   * believing any mean on this panel.
+   */
+  frames: FrameStatsReport;
+  /**
+   * GPU time for the render pass, ms, or null when unavailable.
+   *
+   * Requires the renderer to have been constructed with `trackTimestamp` (GameCanvas
+   * does so only under `?debug=1`, because the queries are not free). Null is honest:
+   * it means "not measured", never "zero".
+   */
+  gpuMs: number | null;
   drawCalls: number;
   triangles: number;
   /**
@@ -39,16 +62,19 @@ export function PerfMonitor({ onSample, interval = 500 }: PerfMonitorProps) {
       reset?: () => void;
       render?: { drawCalls?: number; triangles?: number };
     };
-    backend?: { isWebGPUBackend?: boolean };
+    backend?: { isWebGPUBackend?: boolean; trackTimestamp?: boolean };
+    resolveTimestampsAsync?: (type?: string) => Promise<number | undefined>;
   };
+  const stats = useRef(createFrameStats());
   const acc = useRef({
-    frames: 0,
-    total: 0,
-    worst: 0,
     calls: 0,
     tris: 0,
     last: performance.now(),
     since: performance.now(),
+    /** Last resolved GPU duration. Null until one resolves; never faked to 0. */
+    gpuMs: null as number | null,
+    /** One resolve in flight at a time — the promise settles well after the frame. */
+    gpuPending: false,
   });
 
   // three's WebGPU path zeroes info at the TOP of its rAF callback, before R3F
@@ -75,29 +101,46 @@ export function PerfMonitor({ onSample, interval = 500 }: PerfMonitorProps) {
     a.tris = gl.info?.render?.triangles ?? 0;
     gl.info?.reset?.();
 
-    // Ignore the first frame after a stall (tab switch, shader compile), which
-    // would otherwise dominate the worst-frame figure.
-    if (dt < 1000) {
-      a.frames++;
-      a.total += dt;
-      if (dt > a.worst) a.worst = dt;
+    // EVERY frame is recorded. The old sampler dropped anything over 1 s on the
+    // reasoning that a tab switch would dominate the worst frame — true, but it also
+    // deleted the shader-compile stalls that are the most likely cause of a snag while
+    // turning. frameStats counts those separately instead (`pauses`).
+    stats.current.record(dt);
+
+    if (now - a.since < interval) return;
+    a.since = now;
+
+    const frames = stats.current.report();
+    if (frames.windowFrames === 0) return;
+
+    // GPU time is resolved on the report tick, not per frame: the query resolves
+    // asynchronously and awaiting it on the frame path would serialise the CPU against
+    // the GPU, which is the one thing a profiler must never do to its subject.
+    if (gl.backend?.trackTimestamp === true && !a.gpuPending && gl.resolveTimestampsAsync) {
+      a.gpuPending = true;
+      gl.resolveTimestampsAsync("render")
+        .then((duration) => {
+          if (typeof duration === "number") a.gpuMs = duration;
+        })
+        .catch(() => {
+          // A backend that cannot resolve should read as "not measured", not as 0.
+          a.gpuMs = null;
+        })
+        .finally(() => {
+          a.gpuPending = false;
+        });
     }
 
-    if (now - a.since >= interval && a.frames > 0) {
-      const mean = a.total / a.frames;
-      onSample({
-        fps: 1000 / mean,
-        ms: mean,
-        worstMs: a.worst,
-        drawCalls: a.calls,
-        triangles: a.tris,
-        backend: gl.backend?.isWebGPUBackend ? "WebGPU" : "WebGL2",
-      });
-      a.frames = 0;
-      a.total = 0;
-      a.worst = 0;
-      a.since = now;
-    }
+    onSample({
+      fps: 1000 / frames.meanMs,
+      ms: frames.meanMs,
+      worstMs: frames.worstMs,
+      frames,
+      gpuMs: a.gpuMs,
+      drawCalls: a.calls,
+      triangles: a.tris,
+      backend: gl.backend?.isWebGPUBackend ? "WebGPU" : "WebGL2",
+    });
   });
 
   return null;

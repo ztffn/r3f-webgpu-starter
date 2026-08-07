@@ -17,6 +17,7 @@ import { VegetationField, type VegetationTerrain } from "./VegetationField.ts";
 import { VegetationWorldQuery } from "./VegetationWorldQuery.ts";
 import { FOLIAGE_VIEW_RADIUS_METRES } from "./foliageConfig.ts";
 import type { CompositeWorldQuery } from "../fps/core/WorldQuery.ts";
+import type { Atmosphere } from "../df2/atmosphere.ts";
 import { BENCH, publishFoliage } from "../df2/bench.ts";
 
 function parseVariant(value: string | undefined): CardVariant {
@@ -40,13 +41,21 @@ function parseAlphaMode(value: string | undefined): FoliageAlphaMode {
 
 export interface FoliageLayerProps {
   terrain: VegetationTerrain;
+  /** Grade and fog, applied after lighting — foliage is the first lit scene surface. */
+  atmosphere: Atmosphere;
   /** Registered so trunks stop bullets; leaves never do. */
   worldQuery?: CompositeWorldQuery | null;
   waterHeight?: number;
   onStats?: (stats: FoliageStats) => void;
 }
 
-export function FoliageLayer({ terrain, worldQuery, waterHeight, onStats }: FoliageLayerProps) {
+export function FoliageLayer({
+  terrain,
+  atmosphere,
+  worldQuery,
+  waterHeight,
+  onStats,
+}: FoliageLayerProps) {
   const variant = parseVariant(BENCH.foliageVariant);
   const alphaMode = parseAlphaMode(BENCH.foliageAlpha);
   const radiusMetres = BENCH.foliageRadius ?? FOLIAGE_VIEW_RADIUS_METRES;
@@ -101,6 +110,7 @@ export function FoliageLayer({ terrain, worldQuery, waterHeight, onStats }: Foli
       field={field}
       texture={assets.foliage.texture as unknown as THREE.Texture}
       uniforms={assets.uniforms}
+      atmosphere={atmosphere}
       variant={variant}
       alphaMode={alphaMode}
       radiusMetres={radiusMetres}

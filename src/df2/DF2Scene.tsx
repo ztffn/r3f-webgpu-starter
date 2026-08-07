@@ -897,13 +897,18 @@ export function DF2Scene({
   );
 
   const waterMaterial = useMemo(() => {
-    const m = new THREE.MeshStandardNodeMaterial();
+    // Lit, so it takes the term after lighting. docs/08 §8 invariant 7 named the water as
+    // one of three surfaces bypassing the atmosphere entirely; it had been taking three's
+    // linear scene fog, which fades to a flat colour while the terrain it meets at the
+    // shoreline fades to the sky.
+    const WaterMaterial = atmosphere.litClass(THREE.MeshStandardNodeMaterial);
+    const m = new WaterMaterial();
     m.color = new THREE.Color(WATER_COLOR);
     m.roughness = 0.15;
     m.transparent = true;
     m.opacity = 0.82;
     return m;
-  }, []);
+  }, [atmosphere]);
   useEffect(() => () => waterMaterial.dispose(), [waterMaterial]);
 
   // Gameplay collision reads the canonical CPU heightfield, never Terrain's
@@ -929,9 +934,13 @@ export function DF2Scene({
 
       {/* The background is set imperatively in an effect above, because it is a NODE
           rather than a texture — it has to be fogged, and a plain cubemap cannot be. */}
-      {/* Scene fog stays declared for anything using three's automatic path — the
-          water, and any object added later. Terrain and grass take the shared term
-          instead, which the scene fog cannot express. */}
+      {/* Scene fog stays declared for what is STILL on three's automatic path, which is
+          now only the GLB-loaded surfaces: mission props, dev-placed objects and the
+          soldier, all of which arrive as plain non-node materials from the loader. Water
+          and foliage moved to `atmosphere.shadeLit` and set `fog = false` themselves.
+          Terrain and grass never used it. Once the GLB material pass lands this
+          declaration has no consumer left and should go — a live scene fog that nothing
+          reads is a trap for the next material added. */}
       <fog
         attach="fog"
         args={[weather.fogColor, fogRangeOf(weather).near, fogRangeOf(weather).far]}
@@ -1024,6 +1033,7 @@ export function DF2Scene({
         <Suspense fallback={null}>
           <FoliageLayer
             terrain={heightfield}
+            atmosphere={atmosphere}
             worldQuery={worldQuery}
             waterHeight={showWater ? waterLevel : undefined}
           />

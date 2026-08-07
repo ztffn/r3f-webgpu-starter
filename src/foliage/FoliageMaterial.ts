@@ -43,6 +43,7 @@ import {
   vec3,
   vec4,
 } from "three/tsl";
+import type { Atmosphere } from "../df2/atmosphere.ts";
 import type { Species } from "./species.ts";
 import {
   FOLIAGE_ALPHA_CUTOFF,
@@ -92,6 +93,14 @@ export interface FoliageMaterialOptions {
   map: THREE.Texture;
   species: Species;
   alphaMode: FoliageAlphaMode;
+  /**
+   * The scene's atmosphere. NOT optional in practice, and the reason it is threaded this
+   * far down: this material is LIT, so without it foliage takes three's automatic linear
+   * scene fog — a flat colour — while the terrain it stands on fades to the sky cubemap
+   * sampled along the view ray. That is the "foliage reads darker than the terrain"
+   * defect the design record opened with (§7.3).
+   */
+  atmosphere: Atmosphere;
   /** Shared across every species' material so one slider drives the whole system. */
   uniforms?: FoliageUniforms;
   windAmplitude?: number;
@@ -134,7 +143,12 @@ export function createFoliageMaterial(options: FoliageMaterialOptions): FoliageM
   const { map, species, alphaMode } = options;
   const uniforms = options.uniforms ?? createFoliageUniforms(options);
 
-  const material = new THREE.MeshStandardNodeMaterial();
+  // Grade and fog AFTER lighting, which is the only correct point for a lit surface —
+  // `colorNode` would fog the albedo and then light the fog. Before this, a bush at 200 m
+  // faded toward the flat preset fog colour while the terrain under it faded toward the
+  // sky cubemap: the "foliage reads darker than the terrain" defect of the design record.
+  const Material = options.atmosphere.litClass(THREE.MeshStandardNodeMaterial);
+  const material = new Material();
   material.name = `foliage-${species.id}-${alphaMode}`;
   material.side = THREE.DoubleSide;
   material.roughness = 0.92;

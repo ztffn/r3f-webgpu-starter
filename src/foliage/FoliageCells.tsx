@@ -42,6 +42,7 @@ import {
   type CardVariant,
 } from "./foliageGeometry.ts";
 import { createFoliageMaterial, type FoliageAlphaMode, type FoliageUniforms } from "./FoliageMaterial.ts";
+import type { Atmosphere } from "../df2/atmosphere.ts";
 import { SPECIES } from "./species.ts";
 import type { VegetationField } from "./VegetationField.ts";
 import { hash3i } from "./vegetationHash.ts";
@@ -64,6 +65,8 @@ export interface FoliageCellsProps {
   field: VegetationField;
   texture: THREE.Texture;
   uniforms: FoliageUniforms;
+  /** Grade and fog. Threaded to the material because foliage is LIT (FoliageMaterial). */
+  atmosphere: Atmosphere;
   variant: CardVariant;
   alphaMode: FoliageAlphaMode;
   /** Reach in METRES; the cell count follows from the field's cell size. */
@@ -96,6 +99,7 @@ export function FoliageCells({
   field,
   texture,
   uniforms,
+  atmosphere,
   variant,
   alphaMode,
   radiusMetres = FOLIAGE_VIEW_RADIUS_METRES,
@@ -117,7 +121,8 @@ export function FoliageCells({
       )
     );
     const materials = SPECIES.map(
-      (species) => createFoliageMaterial({ map: texture, species, alphaMode, uniforms }).material
+      (species) =>
+        createFoliageMaterial({ map: texture, species, alphaMode, uniforms, atmosphere }).material
     );
 
     // Worst case a cell can hold for one species is every placement site, which is what
@@ -180,7 +185,10 @@ export function FoliageCells({
     }
 
     return { group, buckets, templates, materials, capacity, radiusCells };
-  }, [field, texture, uniforms, variant, alphaMode, radiusMetres]);
+    // atmosphere in the deps: a preset switch keeps the same Atmosphere object (its
+    // uniforms are live), so this does not rebuild on weather — but a rebuilt world hands
+    // down a new one, and materials still carrying the old fog would fog by a dead uniform.
+  }, [field, texture, uniforms, atmosphere, variant, alphaMode, radiusMetres]);
 
   useEffect(
     () => () => {

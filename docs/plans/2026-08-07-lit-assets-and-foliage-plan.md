@@ -56,26 +56,59 @@ Verified after: typecheck clean on both configs, 368 tests (334 + 34), bundle bu
 
 ## 2. The seam, and why `colorNode` cannot carry it
 
-`NodeMaterial.setupOutput(builder, outputNode)` runs AFTER `setupLighting()`, and the `output`
-property node holds the post-lighting colour before `material.outputNode` replaces the result.
-So the whole term is:
+`NodeMaterial.setupOutput(builder, outputNode)` runs AFTER `setupLighting()`, which is the only
+point where fog and the grade can reach a lit surface — §2.0 has the form that actually works
+and the two that did not. It is reached through `atmosphere.litClass(Base)`.
 
-```ts
-material.fog = false;
-material.outputNode = vec4(atmosphere.shade(output.rgb), output.a);
-```
-
-No subclass, no monkey-patch, public TSL only, and it compiles on both backends. `fog = false`
-is not optional — three's linear scene fog is still declared for anything using the automatic
-path, and leaving it on double-fogs with a different colour. That pairing is exactly the kind
-of thing invariant 7 exists to make unforgettable, so both halves live in ONE call
-(`Atmosphere.shadeLit`) rather than being two things a material must remember.
+`fog = false` travels WITH it, in the subclass constructor rather than left to the caller.
+Three's linear scene fog is still declared for anything on the automatic path, so leaving it on
+double-fogs with a different colour. That pairing is exactly the kind of thing invariant 7
+exists to make unforgettable, so it is one call and not two things a material must remember.
 
 **The grade goes post-lighting too, deliberately.** It is a global `.trn` look — tint, gamma,
 saturation — being simulated per material, so on a lit surface the analogue of "grade the
 pre-shaded colormap" is "grade the lit result". Grading albedo and then lighting it would put
 lit surfaces on a different curve from the terrain they stand on, which is the seam the whole
 module exists to prevent.
+
+### 2.0 What the seam actually took, after two wrong attempts
+
+Both wrong attempts produced the SAME failure, and it is worth knowing because it looks like
+nothing:
+
+```
+THREE.TSL: Length of parameters exceeds maximum length of function 'vec4()' type.
+```
+
+The scene renders BLACK and no line of code looks wrong. Cause: TSL node types resolve during
+the BUILD, not when the graph is written, so swizzling a node whose type is not yet known does
+not narrow. `output`'s declared type is the literal string `"output"`; `vec4(light, alpha).max(0)`
+is a math node whose width a builder has to ask for. Either way `vec4(x.rgb, x.a)` hands `vec4()`
+more than four components.
+
+`vec4(output)` first does not fix it. What works is forcing a declared variable and assigning
+through a swizzle, which cannot miscount:
+
+```ts
+const shaded = vec4(outputNode).toVar();
+shaded.rgb.assign(shade(shaded.rgb));
+return super.setupOutput(builder, shaded);
+```
+
+Wrapped as `atmosphere.litClass(Base)` — a cached subclass per base material class, with `fog`
+forced off in its constructor. A subclass rather than an instance-patched method on purpose:
+shaded and unshaded materials of the same base are then different classes and cannot share a
+compiled pipeline.
+
+**Verified rendering** at `?scene=scope&motor=1&net=1&debug=1&water=40` — terrain built, water
+drawing through `litClass`, no TSL error and no pipeline failure in the load's console.
+
+Two process notes worth more than the fix. The vantage URL in the vegetation design record no
+longer starts a scene under the `/play` router, and `?bench=1` alone leaves `scene` unset — the
+working form is above, and `?water=` is what draws the water plane at all, since every `.trn`
+ships `water_height 0`. And the console must be read on a FLUSHED buffer: the reader returns
+oldest-first, so a stale error from a previous load reads exactly like a live one, which cost
+this session two wrong conclusions in both directions.
 
 ### 2.1 Plain materials are the awkward case
 
@@ -194,6 +227,36 @@ for.
 (deferred 2026-08-07). Consequence to expect rather than avoid — step 3 tunes against surfaces
 that are all `roughness 1, metalness 0`, which is what makes everything read as chalk, so the
 dials want a second pass when roughness lands. A known second pass, not a wasted first one.
+
+## 5.1 MEASURED ON A GPU: the foliage layer has never rendered on WebGPU
+
+Found the first time this branch was opened in Chrome, and it is the reason every number in
+the design record is a draw-call count:
+
+```
+THREE.WebGPURenderer: Render pipeline creation failed (renderPipeline_foliage-acacia-mask_41):
+  Vertex buffer count (10) exceeds the maximum number of vertex buffers (8).
+```
+
+Every foliage pipeline fails, so no plant is drawn. Ten buffers because the material declares
+seven custom attributes — `sway`, `billboard`, `card`, `leaf`, `aOrigin`, `aScale`, `aSeed` —
+on top of `position`, `normal` and `uv`. WebGPU's `maxVertexBuffers` floor is 8.
+
+**Present on the branch WITHOUT any of this branch's changes** — verified by checking out the
+pre-seam files and reloading, which is also how the separate `vec4()` fault below was
+attributed. It went unseen because the environment the layer was built in has no GPU and falls
+back to WebGL2 on SwiftShader, where the attribute limit is higher: the layer worked there and
+cannot work here, and no screenshot from that environment could have shown it.
+
+The fix is packing, and it must respect the per-vertex / per-instance split because attributes
+in different groups cannot share a buffer:
+
+- per-vertex: `card.xy` + `sway` + `billboard` → one `vec4`, with `leaf` folded in or kept
+  separate (4 buffers → 2)
+- per-instance: `aOrigin.xyz` + `aScale` → one `vec4`, `aSeed` separate (3 buffers → 2)
+
+That lands at 7 and leaves headroom. **Nothing about the sweep in §5 step 5 can run until this
+is done** — it is now the first task on the layer, ahead of any tuning.
 
 ## 6. Carried forward from the branch's review
 

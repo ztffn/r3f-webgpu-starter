@@ -6,13 +6,18 @@
 // anything without it. It needs to be somewhere a developer looks, not somewhere
 // a player dismisses.
 
-import { memo, useState } from "react";
-import type { LoadedTerrain } from "../df2/loadTerrain";
+import { memo, useEffect, useState } from "react";
+import {
+  loadTerrainIndex,
+  type LoadedTerrain,
+  type TerrainIndexEntry,
+} from "../df2/loadTerrain";
 import type { Stance } from "../df2/FlyControls";
 import type { SceneHandles } from "../df2/DF2Scene";
 import {
   CALIBRATED_TERRAIN_SCALE,
   TERRAIN_SCALE_LIMITS,
+  readMapSlug,
   type TerrainScale,
 } from "../df2/config";
 import { DialGroup, GROUPED } from "./dialGroup";
@@ -100,6 +105,34 @@ export const ScenePanel = memo(function ScenePanel({
   // commit on release, and this mirror is what moves under the thumb.
   const [drag, setDrag] = useState<{ key: keyof TerrainScale; v: number } | null>(null);
 
+  // The prepared-terrain list, for the map selector. Null until fetched (and
+  // when no index ships, in which case the selector simply does not render).
+  const [maps, setMaps] = useState<TerrainIndexEntry[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void loadTerrainIndex().then((entries) => {
+      if (alive) setMaps(entries);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  // What is on screen right now: the loaded map's slug, or (synthetic fallback)
+  // whatever the URL asked for.
+  const currentSlug =
+    terrain?.slug ?? readMapSlug(typeof window === "undefined" ? "" : window.location.search);
+  // A RELOAD, not runtime switching: the whole world — heightfield, chunks,
+  // grass, motor terrain — is baked at load, same rule as the ?texel= seeds
+  // (docs/01 Phase 1.6 tracks live map switching). Offline-only control, and
+  // offline is always an explicit URL (a bare /play is networked by default),
+  // so setting ?map= here cannot flip the launch mode — `map` is itself an
+  // explicit launch parameter (launchParams.ts).
+  const switchMap = (slug: string) => {
+    const url = new URL(window.location.href);
+    url.searchParams.set("map", slug);
+    window.location.assign(url.toString());
+  };
+
   return (
     <>
       <span className="eyebrow dev-group">Terrain</span>
@@ -132,6 +165,38 @@ export const ScenePanel = memo(function ScenePanel({
           </>
         )}
       </dl>
+
+      {/* Networked, the room owns the map (the server names it in ROOM_INFO),
+          so the selector renders offline only — like the scale dials below. */}
+      {!networked && maps !== null && maps.length > 0 && (
+        <label className="dial">
+          <span className="dial-row">
+            <span>Map</span>
+          </span>
+          <select
+            data-dev="map-select"
+            data-dev-value={currentSlug}
+            aria-label="Map"
+            value={maps.some((m) => m.slug === currentSlug) ? currentSlug : ""}
+            onChange={(e) => {
+              if (e.target.value !== "" && e.target.value !== currentSlug)
+                switchMap(e.target.value);
+            }}
+          >
+            {!maps.some((m) => m.slug === currentSlug) && (
+              <option value="" disabled>
+                {currentSlug} (not prepared)
+              </option>
+            )}
+            {maps.map((m) => (
+              <option key={m.slug} value={m.slug}>
+                {m.name === m.slug ? m.slug : `${m.name} (${m.slug})`}
+              </option>
+            ))}
+          </select>
+          <em>reloads with ?map= — the whole world is baked at load, like the scale seeds</em>
+        </label>
+      )}
 
       <span className="eyebrow dev-group">View</span>
       <div className="btns">

@@ -17,8 +17,15 @@
 // inputs in /assets/ — see README § Asset policy and docs/01 §3. What stays out is
 // retail-extracted data. See docs/06-asset-extraction-findings.md for the formats.
 
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, copyFileSync } from "node:fs";
-import { join, extname } from "node:path";
+import {
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  readdirSync,
+  copyFileSync,
+  existsSync,
+} from "node:fs";
+import { join, extname, dirname } from "node:path";
 import { parseTrn } from "./df2extract.mjs";
 import { decodePcx, decodeTga, encodePng } from "./imageio.mjs";
 
@@ -278,3 +285,25 @@ if (dmPath) {
 writeFileSync(join(outDir, "terrain.json"), JSON.stringify(meta, null, 2));
 console.log(`  terrain.json written -> ${outDir}`);
 if (meta.missing.length) console.log(`  missing refs: ${meta.missing.join(", ")}`);
+
+// --- terrain index (the dev map selector's list) -------------------------------
+// Rebuilt from the OUTPUT layout on every run, so preparing a map is what
+// publishes it to the selector — no hand-kept list to drift. Scans outDir's
+// parent for sibling directories carrying a terrain.json; a run with a one-off
+// outDir elsewhere just writes a harmless index next to that output.
+const terrainRoot = dirname(outDir);
+const prepared = readdirSync(terrainRoot)
+  .filter((d) => existsSync(join(terrainRoot, d, "terrain.json")))
+  .sort();
+const index = prepared.map((slug) => {
+  const m = JSON.parse(readFileSync(join(terrainRoot, slug, "terrain.json"), "utf8"));
+  return { slug, name: m.trn?.terrain_name ?? slug };
+});
+// Authors reuse terrain_name (dfg4 and dfg5 are both "Green One"), and a
+// selector with two identical entries is worse than a slug — on a collision,
+// every holder of the name falls back to its own slug.
+const nameCount = new Map();
+for (const e of index) nameCount.set(e.name, (nameCount.get(e.name) ?? 0) + 1);
+for (const e of index) if (nameCount.get(e.name) > 1) e.name = e.slug;
+writeFileSync(join(terrainRoot, "index.json"), JSON.stringify(index, null, 2));
+console.log(`  index.json  ${index.length} prepared terrains: ${prepared.join(", ") || "none"}`);

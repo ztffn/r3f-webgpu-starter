@@ -8,6 +8,7 @@
 // synthetic terrain — which now renders grass too (syntheticMaps.ts).
 
 import * as THREE from "three/webgpu";
+import { isAssetSlug } from "./config";
 
 /** Shape of terrain.json emitted by prepare-terrain.mjs. Exported so the Node
  * game server types the same manifest (type-only — this module is browser-only
@@ -212,6 +213,38 @@ function colorTextureFromRgba({ rgba, width, height }: Rgba): THREE.DataTexture 
   tex.anisotropy = 8;
   tex.needsUpdate = true;
   return tex;
+}
+
+/** One prepared terrain in /assets/terrain/index.json. */
+export interface TerrainIndexEntry {
+  slug: string;
+  name: string;
+}
+
+/**
+ * The prepared-terrain list, for the dev map selector.
+ *
+ * prepare-terrain.mjs rebuilds index.json every time a map is prepared, so
+ * committing a new map is what publishes it here — no hand-kept list. Returns
+ * null when the index is absent or not JSON; the content-type guard is the
+ * same SPA-rewrite defence loadTerrain uses, because a catch-all rewrite
+ * answers 200 text/html for any path. Entries are slug-validated on the way
+ * in — the slug is interpolated into asset paths and URLs.
+ */
+export async function loadTerrainIndex(): Promise<TerrainIndexEntry[] | null> {
+  try {
+    const res = await fetch("/assets/terrain/index.json");
+    if (!res.ok) return null;
+    const type = res.headers.get("content-type") ?? "";
+    if (!type.includes("json")) return null;
+    const entries = (await res.json()) as TerrainIndexEntry[];
+    if (!Array.isArray(entries)) return null;
+    return entries
+      .filter((e) => typeof e?.slug === "string" && isAssetSlug(e.slug))
+      .map((e) => ({ slug: e.slug, name: typeof e.name === "string" ? e.name : e.slug }));
+  } catch {
+    return null;
+  }
 }
 
 export async function loadTerrain(slug: string): Promise<LoadedTerrain | null> {

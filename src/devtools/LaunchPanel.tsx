@@ -4,8 +4,10 @@
 // worse than a reload), so this panel is the honest UI for them — it edits the
 // URL those parameters actually come from, and says so on its Apply button.
 
-import { memo, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { WEATHER_PRESET_IDS } from "../df2/weather";
+import { TERRAIN_SLUG } from "../df2/config";
+import { loadTerrainIndex, type TerrainIndexEntry } from "../df2/loadTerrain";
 import { KNOWN_LAUNCH_PARAMS, launchFlag, setLaunchFlag } from "../ui/launchParams";
 
 /** The scene the URL asks for. "" is the default (networked scope demo). */
@@ -26,6 +28,8 @@ interface LaunchState {
   label: string;
   touch: boolean;
   weather: string;
+  map: string;
+  mission: string;
   debug: boolean;
   hud: boolean;
   hudpreview: boolean;
@@ -63,6 +67,11 @@ function readCurrent(): LaunchState {
     label: q.get("label") ?? "",
     touch: q.get("input") === "touch",
     weather: q.get("weather") ?? "",
+    // Known parameters (so not in `extras`) that previously had no control —
+    // Apply silently DROPPED ?map= and ?mission= from the baked URL, sending
+    // an egypt session quietly back to the default map.
+    map: q.get("map") ?? "",
+    mission: q.get("mission") ?? "",
     debug: launchFlag(q, "debug"),
     hud: launchFlag(q, "hud"),
     hudpreview: launchFlag(q, "hudpreview"),
@@ -89,6 +98,8 @@ function buildSearch(s: LaunchState): string {
   if (s.label !== "") q.set("label", s.label);
   if (s.touch) q.set("input", "touch");
   if (s.weather !== "") q.set("weather", s.weather);
+  if (s.map !== "") q.set("map", s.map);
+  if (s.mission !== "") q.set("mission", s.mission);
   setLaunchFlag(q, "debug", s.debug);
   setLaunchFlag(q, "hud", s.hud);
   setLaunchFlag(q, "hudpreview", s.hudpreview);
@@ -133,6 +144,19 @@ export const LaunchPanel = memo(function LaunchPanel() {
   const [state, setState] = useState<LaunchState>(readCurrent);
   const set = <K extends keyof LaunchState>(key: K, value: LaunchState[K]) =>
     setState((was) => ({ ...was, [key]: value }));
+
+  // Prepared terrains for the map select; null (index absent) leaves only the
+  // default and whatever the URL already carries, so the value still round-trips.
+  const [maps, setMaps] = useState<TerrainIndexEntry[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void loadTerrainIndex().then((entries) => {
+      if (alive) setMaps(entries);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const search = useMemo(() => buildSearch(state), [state]);
   const url = search === "" ? "/play" : `/play?${search}`;
@@ -214,6 +238,37 @@ export const LaunchPanel = memo(function LaunchPanel() {
           ))}
         </select>
         <em>Offline only — a networked room owns its weather and ignores this.</em>
+      </label>
+
+      <span className="eyebrow dev-group">Map</span>
+      <label className="dial">
+        <select
+          data-dev="launch-map"
+          value={state.map}
+          onChange={(event) => set("map", event.target.value)}
+        >
+          <option value="">default ({TERRAIN_SLUG})</option>
+          {(maps ?? []).map((m) => (
+            <option key={m.slug} value={m.slug}>
+              {m.name === m.slug ? m.slug : `${m.name} (${m.slug})`}
+            </option>
+          ))}
+          {/* A slug the URL carries but the index does not list still round-trips. */}
+          {state.map !== "" && !(maps ?? []).some((m) => m.slug === state.map) && (
+            <option value={state.map}>{state.map}</option>
+          )}
+        </select>
+        <em>Networked, this must match the server's DF2_MAP — a mismatch warns and desyncs.</em>
+      </label>
+      <label className="dial">
+        <span className="dial-row">mission</span>
+        <input
+          type="text"
+          data-dev="launch-mission"
+          value={state.mission}
+          placeholder="local mission slug (?mission=)"
+          onChange={(event) => set("mission", event.target.value)}
+        />
       </label>
 
       <span className="eyebrow dev-group">HUD &amp; debug</span>

@@ -158,8 +158,14 @@ function pushCard(target: CardSpec[], spec: CardSpec): void {
   target.push(spec);
 }
 
-/** Crown extent for a species: foliage occupies [baseY, topY] with radius `radius`. */
-function crownOf(species: Species): { baseY: number; topY: number; radius: number } {
+/**
+ * Crown extent for a species: foliage occupies [baseY, topY] with radius `radius`.
+ *
+ * Exported for the impostor bake, whose blocking-fraction audit must measure over the
+ * SAME frontal rectangle this module solves against — a re-derived crown would let the
+ * two drift apart silently.
+ */
+export function crownOf(species: Species): { baseY: number; topY: number; radius: number } {
   const hasTrunk = species.trunk !== null;
   return {
     baseY: hasTrunk ? species.heightMetres * 0.44 : species.heightMetres * 0.06,

@@ -61,6 +61,21 @@ export const FOLIAGE_DENSITY = 1;
 export const FOLIAGE_VIEW_RADIUS_METRES = 192;
 
 /**
+ * Outer reach of the far impostor ring, metres. `?foliagefar=` and the Scene tab
+ * override it; 0 disables the ring.
+ *
+ * The ring is the octahedral-impostor tier past the near window — before it existed,
+ * nothing drew past FOLIAGE_VIEW_RADIUS_METRES and every vista had a bare middle
+ * distance (the design record's longest-standing open item). Capped by the Scene dial at
+ * 1024 because the per-species instance buffers are sized for the worst case over the
+ * whole ring, which grows with its area.
+ */
+export const FOLIAGE_FAR_RADIUS_METRES = 768;
+
+/** Metres over which the far ring's impostors shrink out at its outer edge. */
+export const FOLIAGE_FAR_FADE_METRES = 64;
+
+/**
  * Distance (m) at which a cell drops to each LOD, measured to the cell CENTRE.
  *
  * Parallel to the species' LOD tiers, last entry catches everything beyond. Distance
@@ -90,6 +105,22 @@ export const FOLIAGE_BUILD_MS = 3;
 
 /** Alpha-test cutoff for every foliage material. Matches glTF MASK's default. */
 export const FOLIAGE_ALPHA_CUTOFF = 0.5;
+
+/**
+ * Alpha cutoff for the far impostor tier, where the fragment's alpha is a BLEND of three
+ * baked views. Near a silhouette edge the views disagree, the blend dilutes alpha that
+ * each view baked as fully covered, and testing at 0.5 erodes the silhouette — the
+ * fairness-violating direction. 0.4 is the reference exporter's clamp, kept because the
+ * bake itself still tests at FOLIAGE_ALPHA_CUTOFF so the silhouette SOURCE matches the
+ * near field; only the blend is given slack.
+ */
+export const FOLIAGE_IMPOSTOR_ALPHA_CUTOFF = 0.4;
+
+/**
+ * Bark/stem colour, linear. Lives here rather than inline in the material because the
+ * impostor bake paints the same trunk into the atlas — two hard-coded copies would drift.
+ */
+export const FOLIAGE_BARK_COLOR: readonly [number, number, number] = [0.19, 0.15, 0.11];
 
 /**
  * Peak horizontal sway of a leaf card at full height, metres, and the wind's period.

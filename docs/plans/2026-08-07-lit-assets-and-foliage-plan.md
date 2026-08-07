@@ -109,8 +109,9 @@ compiled pipeline.
 **Verified rendering** at `?scene=scope&motor=1&net=1&debug=1&water=40` — terrain built, water
 drawing through `litClass`, no TSL error and no pipeline failure in the load's console.
 
-Two process notes worth more than the fix. The vantage URL in the vegetation design record no
-longer starts a scene under the `/play` router, and `?bench=1` alone leaves `scene` unset — the
+Two process notes worth more than the fix. **The first half of this note was WRONG — see v2 §2.3:**
+`?scene=terrain&bench=1` starts the scene and pins the camera fine; the belief that it did not
+was a hidden-tab artifact. What holds is that `?bench=1` alone leaves `scene` unset — the
 working form is above, and `?water=` is what draws the water plane at all, since every `.trn`
 ships `water_height 0`. And the console must be read on a FLUSHED buffer: the reader returns
 oldest-first, so a stale error from a previous load reads exactly like a live one, which cost

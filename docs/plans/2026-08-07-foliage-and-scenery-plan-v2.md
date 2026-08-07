@@ -91,6 +91,60 @@ suspected when it was.
 third-party material this session lacked a GPU model, a resolution or an object count. Our
 own figures are equally worthless quoted without the vantage, the backend and the dpr.
 
+### 2.3 MEASURED: where the frame budget actually goes
+
+Ablation at a PINNED camera (`?scene=terrain&bench=1&x=512&z=576&yaw=3.142&pitch=-0.12&dpr=1`),
+median of 16 GPU-timer reads per configuration:
+
+| configuration | GPU | delta | draw calls | triangles |
+|---|---|---|---|---|
+| terrain only | **2.2 ms** | — | 422 | 310k |
+| + grass march | **6.75 ms** | +4.5 | 510 | 540k |
+| + near-field blades | **10.35 ms** | +3.6 | 511 | 3,040k |
+| + foliage | **~10.8 ms** | +0.45 | 624 | 3,043k |
+
+**Grass is roughly three quarters of the GPU budget** — the march 42%, the blade layer 33%.
+Terrain is 21%. **Foliage is about 4% and inside the measurement noise.** The whole session's
+anxiety about what vegetation costs was misplaced at this density.
+
+Three things follow that change other conclusions in this document:
+
+- **CPU is not the limit.** It reads 8.3 ms in EVERY configuration, which is the 120 Hz
+  cadence, not a workload. Only the GPU timer varies. Attribution on this project has to be
+  done on GPU time; frame time is cadence-pinned and will report every configuration as
+  identical.
+- **Draw calls are cheap on this GPU.** Foliage's 113 extra calls cost about 0.45 ms, so
+  roughly 4 microseconds each at the margin. That is a real number to plan with, and it
+  *weakens* §4's framing: instancing the mission props from 864 calls to 230 saves on the
+  order of 2.5 ms rather than rescuing a catastrophe. Still worth more than foliage's entire
+  cost, so still worth doing — but as a measured trade, not an emergency.
+- **The cost structures are opposite.** The march adds 4.5 ms for only 230k extra triangles
+  because it is a per-fragment raymarch — pixels, not geometry. The blades add 3.6 ms for
+  2.5M triangles in a single draw call — geometry, not pixels. Any optimisation has to know
+  which of the two it is aiming at.
+
+**Instrument limitation found while doing this.** `gpuMs` reports the last resolved timestamp,
+and its spread at a static camera is ±2.5 ms. That is fine for a 4.5 ms delta and useless for
+a 0.45 ms one. It should feed its own percentile accumulator the way frame times do; until it
+does, treat any GPU delta under about 2 ms as unresolved.
+
+**Correction to an earlier claim in this session, recorded because the wrong version is in a
+commit message.** `?scene=terrain&bench=1&…` starts the scene and pins the camera perfectly
+well. The belief that it did not was formed entirely during the hidden-tab period of §2.2 —
+the trap catching the person documenting the trap. What IS true is narrower: `?bench=1` alone
+leaves `scene` unset, and `?grass=`, `?grasscap=`, `?x=`, `?z=`, `?yaw=`, `?pitch=` and
+`?stance=` are all bench-gated, so a fixed-vantage A/B needs `bench=1`.
+
+### 2.4 Concealment costs nothing at runtime, and never did
+
+No runtime concealment measurement exists. `blockingFraction` appears in exactly two places —
+the geometry builder that SOLVES for it at build time, and the test that asserts it. `docs/04`'s
+concealment query is entirely unbuilt. So it is absent from the budget above by construction,
+not by omission, and it should stay out of any performance conversation.
+
+It is still the constraint that stops us adopting the cheap distance tricks in §5. A design
+rule with a zero runtime price is the best kind to keep.
+
 ## 3. What the hitch actually was
 
 Measured with §2's protocol, same arc, same pacing:

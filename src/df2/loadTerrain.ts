@@ -289,7 +289,7 @@ export async function loadTerrain(slug: string): Promise<LoadedTerrain | null> {
             };
           })
         : null;
-    // The rejection is consumed by the `await` in the return below; this spare
+    // The rejection is consumed by the guarded `await` below; this spare
     // handler only stops the browser flagging it as unhandled in the window
     // where the colormap/grass loads are still in flight.
     detailPromise?.catch(() => {});
@@ -335,6 +335,25 @@ export async function loadTerrain(slug: string): Promise<LoadedTerrain | null> {
       );
     }
 
+    // The detail layer is OPTIONAL — `detail` is nullable and every consumer
+    // handles null — so its failure must not reject the whole load. Awaited
+    // inside its own catch rather than in the return: thrown there it landed in
+    // the outer catch, which silently swapped the already-loaded real map for
+    // the synthetic fallback world (and, networked, desynced this client
+    // against a server that had loaded the real heightfield fine).
+    let detail: LoadedTerrain["detail"] = null;
+    if (detailPromise) {
+      try {
+        detail = await detailPromise;
+      } catch (err) {
+        console.warn(
+          `[df2] terrain "${slug}": close-range detail assets failed to load — ` +
+            `rendering without the detail layer:`,
+          err
+        );
+      }
+    }
+
     return {
       slug,
       name: meta.trn.terrain_name ?? slug,
@@ -342,7 +361,7 @@ export async function loadTerrain(slug: string): Promise<LoadedTerrain | null> {
       heights: data,
       size,
       colorMap,
-      detail: detailPromise ? await detailPromise : null,
+      detail,
       grassMap,
       grassSource,
       waterHeight: meta.trn.water_height ?? 0,

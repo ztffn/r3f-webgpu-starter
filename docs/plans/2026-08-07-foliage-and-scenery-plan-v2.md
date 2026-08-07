@@ -159,6 +159,27 @@ distant and cheap per fragment. The expensive case is prone inside a dense stand
 record's §7.2 names prone as the primary case for exactly this reason — and it is untested.
 Do not conclude density is free in general from a standing vantage.
 
+### 2.3c 10x the plants costs 2.6 ms — spacing is the lever, not density
+
+Density saturates (§2.3b). Plant count is bounded by SITES per area, so the dial that
+actually multiplies it is site spacing: count scales as 1/spacing².
+
+Same load, same pinned camera, spacing 5.33 m → 1.75 m:
+
+| | plants | GPU | draw calls | triangles | fps |
+|---|---|---|---|---|---|
+| default | 5,863 | 9.57 ms | 635 | 3,029k | 106 |
+| spacing 1.75 m | **52,839** | **12.19 ms** | 673 | 3,203k | 94 |
+
+**9.0x the plants for +2.6 ms**, which matches the prediction from (5.33/1.75)² = 9.3.
+Draw calls barely move — density and spacing both fill EXISTING buckets — and 52k plants
+add only 174k triangles against grass's 3M.
+
+**Cross-run comparison warning.** The default row here reads 5,863 plants where an earlier
+run at nominally identical settings read 1,844. Treat only WITHIN-run deltas as reliable;
+the earlier figure was probably sampled before the bucket window finished filling, since
+that run waited on `pendingChunks` but not on `pendingBuckets`. Wait on both.
+
 ### 2.4 Concealment costs nothing at runtime, and never did
 
 No runtime concealment measurement exists. `blockingFraction` appears in exactly two places —

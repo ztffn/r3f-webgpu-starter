@@ -104,6 +104,9 @@ export const ScenePanel = memo(function ScenePanel({
   // time by construction). Committing rebuilds the WHOLE world — heightfield,
   // chunk geometry, grass, motor terrain — so unlike the grass dials these
   // commit on release, and this mirror is what moves under the thumb.
+  const [pending, setPending] = useState<{ key: "radius" | "spacing"; v: number } | null>(
+    null
+  );
   const [drag, setDrag] = useState<{ key: keyof TerrainScale; v: number } | null>(null);
 
   // The prepared-terrain list, for the map selector. Null until fetched (and
@@ -269,7 +272,7 @@ export const ScenePanel = memo(function ScenePanel({
                 data-dev-value={scene.foliageDensity}
                 aria-label="Foliage density"
                 min={0}
-                max={4}
+                max={10}
                 step={0.25}
                 value={scene.foliageDensity}
                 // Live, unlike the scale dials: this clears the placement cache and the
@@ -279,12 +282,78 @@ export const ScenePanel = memo(function ScenePanel({
                 onChange={(e) => scene.setFoliageDensity(Number(e.target.value))}
               />
               <em>
-                multiplies every species&apos; placement probability. 0 clears the map, 2
-                doubles it. Capacity is sized for every site accepted, so it cannot
-                overflow{networked ? " — and it is LOCAL, so no one else sees it" : ""}
+                multiplies placement PROBABILITY, and SATURATES: a site yields at most one
+                plant, so past ~3 it barely moves (measured: 4x gave 2.8x the plants). Site
+                spacing below is the real lever on count. Live — no rebuild
+                {networked ? " — and LOCAL, so no one else sees it" : ""}
               </em>
             </label>
           )}
+
+          {/* REBUILD dials, so they commit on release. Radius changes how many buckets
+              exist and spacing changes every bucket's buffer capacity, so either one
+              reconstructs the cell window and re-runs the pipeline warm-up. Dragging
+              those per tick would stall the drag. */}
+          {(!networked || BENCH.admin === true) &&
+            (
+              [
+                {
+                  key: "radius" as const,
+                  label: "Spawner reach",
+                  min: 96,
+                  max: 768,
+                  step: 32,
+                  value: scene.foliageRadius,
+                  commit: scene.setFoliageRadius,
+                  unit: "m",
+                  hint: "how far plants are placed at all. Nothing is drawn past it, which is why a vista has a bare middle distance. Rebuilds",
+                },
+                {
+                  key: "spacing" as const,
+                  label: "Site spacing",
+                  min: 1.5,
+                  max: 8,
+                  step: 0.25,
+                  value: scene.foliageSpacing,
+                  commit: scene.setFoliageSpacing,
+                  unit: "m",
+                  hint: "metres between candidate sites. Count scales as 1/spacing², so halving it quadruples the plants. 1.7 m is ~10x the default. Rebuilds",
+                },
+              ] as const
+            ).map((d) => {
+              const live = pending?.key === d.key ? pending.v : d.value;
+              return (
+                <label key={d.key} className="dial">
+                  <span className="dial-row">
+                    <span>{d.label}</span>
+                    <b data-dev={`readout-foliage-${d.key}`}>
+                      {live.toFixed(d.step < 1 ? 2 : 0)} {d.unit}
+                    </b>
+                  </span>
+                  <input
+                    type="range"
+                    data-dev={`dial-foliage-${d.key}`}
+                    data-dev-value={live}
+                    aria-label={d.label}
+                    min={d.min}
+                    max={d.max}
+                    step={d.step}
+                    value={live}
+                    onChange={(e) => setPending({ key: d.key, v: Number(e.target.value) })}
+                    onPointerUp={() => {
+                      if (pending?.key === d.key) d.commit(pending.v);
+                      setPending(null);
+                    }}
+                    onKeyUp={() => {
+                      if (pending?.key === d.key) d.commit(pending.v);
+                      setPending(null);
+                    }}
+                    onBlur={() => setPending(null)}
+                  />
+                  <em>{d.hint}</em>
+                </label>
+              );
+            })}
         </>
       )}
 

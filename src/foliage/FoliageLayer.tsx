@@ -48,6 +48,19 @@ export interface FoliageLayerProps {
    * dragging the slider costs a budgeted cell refill instead of 500 new meshes.
    */
   density?: number;
+  /**
+   * Spawner reach in METRES, and the spacing between candidate placement sites.
+   *
+   * Both REBUILD, unlike density: spacing changes `placementGrid` and therefore every
+   * bucket's buffer capacity, and radius changes how many buckets exist. So they arrive
+   * as props that reconstruct the field and the cell window, and the pipeline warm-up
+   * runs again — which is why the panel commits them on release rather than per tick.
+   *
+   * Spacing is the real lever on plant COUNT. Density saturates, because a site yields at
+   * most one plant, so plants per area is bounded by sites per area — 1/spacing².
+   */
+  radiusMetres?: number;
+  siteSpacing?: number;
   /** Registered so trunks stop bullets; leaves never do. */
   worldQuery?: CompositeWorldQuery | null;
   waterHeight?: number;
@@ -58,13 +71,15 @@ export function FoliageLayer({
   terrain,
   atmosphere,
   density,
+  radiusMetres: radiusOverride,
+  siteSpacing,
   worldQuery,
   waterHeight,
   onStats,
 }: FoliageLayerProps) {
   const variant = parseVariant(BENCH.foliageVariant);
   const alphaMode = parseAlphaMode(BENCH.foliageAlpha);
-  const radiusMetres = BENCH.foliageRadius ?? FOLIAGE_VIEW_RADIUS_METRES;
+  const radiusMetres = radiusOverride ?? BENCH.foliageRadius ?? FOLIAGE_VIEW_RADIUS_METRES;
 
   const field = useMemo(
     () =>
@@ -72,9 +87,10 @@ export function FoliageLayer({
         terrain,
         cellSize: BENCH.foliageCell,
         density: BENCH.foliageDensity,
+        siteSpacing,
         waterHeight,
       }),
-    [terrain, waterHeight]
+    [terrain, siteSpacing, waterHeight]
   );
 
   const assets = useMemo(() => {

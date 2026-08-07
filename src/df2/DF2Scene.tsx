@@ -74,6 +74,10 @@ const FoliageLayer = lazy(() =>
   import("../foliage/FoliageLayer").then((m) => ({ default: m.FoliageLayer }))
 );
 import { BENCH } from "./bench";
+import {
+  FOLIAGE_SITE_SPACING,
+  FOLIAGE_VIEW_RADIUS_METRES,
+} from "../foliage/foliageConfig";
 import { DevPlacedObject } from "./DevPlacedObject";
 import { MissionObjects } from "./MissionObjects";
 import type { TerrainScale } from "./config";
@@ -265,6 +269,14 @@ export interface SceneHandles {
    */
   foliageDensity: number;
   setFoliageDensity: (value: number) => void;
+  /**
+   * Spawner reach and site spacing. Both REBUILD the layer, so the panel commits them on
+   * release; density is live because it does not.
+   */
+  foliageRadius: number;
+  setFoliageRadius: (value: number) => void;
+  foliageSpacing: number;
+  setFoliageSpacing: (value: number) => void;
   grade: ReturnType<typeof createColorGrade>;
   fog: ReturnType<typeof createFog>;
   precipitation: ReturnType<typeof createPrecipitation>;
@@ -879,6 +891,10 @@ export function DF2Scene({
   // Live foliage density. Seeded from `?foliagedensity=` so a URL and the slider agree,
   // then owned here because the layer must not rebuild to change it.
   const [foliageDensity, setFoliageDensity] = useState(BENCH.foliageDensity ?? 1);
+  const [foliageRadius, setFoliageRadius] = useState(
+    BENCH.foliageRadius ?? FOLIAGE_VIEW_RADIUS_METRES
+  );
+  const [foliageSpacing, setFoliageSpacing] = useState(FOLIAGE_SITE_SPACING);
 
   const setPreset = useCallback(
     (id: string) => {
@@ -899,8 +915,21 @@ export function DF2Scene({
       roomDials: room,
       foliageDensity,
       setFoliageDensity,
+      foliageRadius,
+      setFoliageRadius,
+      foliageSpacing,
+      setFoliageSpacing,
     });
-  }, [dialTargets, foliageDensity, onSceneReady, room, setPreset, weather]);
+  }, [
+    dialTargets,
+    foliageDensity,
+    foliageRadius,
+    foliageSpacing,
+    onSceneReady,
+    room,
+    setPreset,
+    weather,
+  ]);
 
   // Stable identity so Terrain's slot memo does not rebuild; reads the uniform at
   // call time so the canopy slider takes effect without a React render.
@@ -1048,6 +1077,8 @@ export function DF2Scene({
             terrain={heightfield}
             atmosphere={atmosphere}
             density={foliageDensity}
+            radiusMetres={foliageRadius}
+            siteSpacing={foliageSpacing}
             worldQuery={worldQuery}
             waterHeight={showWater ? waterLevel : undefined}
           />

@@ -392,26 +392,33 @@ export function DF2Scene({
   // undefined = still loading, null = no assets (synthetic), object = real map
   const [loaded, setLoaded] = useState<LoadedTerrain | null | undefined>(undefined);
 
+  // The slug this client loads — also what the room's reported map is checked
+  // against once ROOM_INFO arrives.
+  const mapSlug = useMemo(
+    () => readMapSlug(typeof window === "undefined" ? "" : window.location.search),
+    []
+  );
+
   useEffect(() => {
     let alive = true;
-    const slug = readMapSlug(typeof window === "undefined" ? "" : window.location.search);
-    // ?map= has no room-authority plumbing yet (the room's metadata carries its
-    // map, but nothing here reads it) — networked with a mismatched server the
-    // client's collision heights disagree with the authority and reconciliation
-    // fights every step. Loud, because it is otherwise undiagnosable.
-    if (netDemo && slug !== TERRAIN_SLUG) {
+    // The heuristic HALF of the mismatch warning: a client-set ?map= against
+    // the presumed-default server, warned before the join even resolves. The
+    // definitive check is the ROOM_INFO effect below, which compares against
+    // the map the room actually reports — this one exists because it can fire
+    // even when the server is unreachable.
+    if (netDemo && mapSlug !== TERRAIN_SLUG) {
       console.warn(
-        `[DF2Scene] networked with ?map=${slug} — the server must be running the same ` +
-          `map (DF2_MAP=${slug}) or movement will desync. Room-owned map is not wired yet.`
+        `[DF2Scene] networked with ?map=${mapSlug} — the server must be running the same ` +
+          `map (DF2_MAP=${mapSlug}) or movement will desync.`
       );
     }
-    loadTerrain(slug).then((t) => {
+    loadTerrain(mapSlug).then((t) => {
       if (alive) setLoaded(t);
     });
     return () => {
       alive = false;
     };
-  }, [netDemo]);
+  }, [netDemo, mapSlug]);
 
   useEffect(() => {
     onStatus?.({ loading: loaded === undefined, terrain: loaded ?? null });
@@ -475,6 +482,21 @@ export function DF2Scene({
   useEffect(() => {
     onRoomInfo?.(roomInfo);
   }, [onRoomInfo, roomInfo]);
+  // The definitive map-mismatch check, covering BOTH directions: the heuristic
+  // above only catches a client-set ?map=, but a server switched with
+  // DF2_MAP=egypt against a default client was completely silent — the room's
+  // metadata carried its map and nothing client-side read it. The server now
+  // names its map in ROOM_INFO; disagreement is loud because the symptom
+  // (rubber-banding on every slope) is otherwise undiagnosable.
+  useEffect(() => {
+    if (roomInfo?.map !== undefined && roomInfo.map !== mapSlug) {
+      console.error(
+        `[DF2Scene] map mismatch: this client loaded "${mapSlug}" but the room ` +
+          `simulates "${roomInfo.map}". Movement WILL desync — rejoin with ` +
+          `?map=${roomInfo.map}.`
+      );
+    }
+  }, [roomInfo, mapSlug]);
   // Health takes the same route for the same reason. The hook is what subscribes;
   // this effect only forwards, so a change wakes the HUD and nothing in the scene.
   const health = usePlayerVitals(gameClient);
@@ -787,28 +809,36 @@ export function DF2Scene({
   );
 
   /**
-   * THE ONE PLACE the room's visuals are written: preset first, then the room's dial
-   * overrides on top.
+   * The PRESET's writes into the shared uniforms — grade, fog, precipitation.
    *
-   * One effect rather than three, and the ordering is why. These uniforms are shared
-   * — the preset rewrites the same fog and grade values a dial overrides — so with
-   * separate effects the only thing sequencing them was their position in this file,
-   * 200 lines apart, enforced by a comment. There is no lint rule here to catch a
-   * reordered hook, and the failure is silent: a preset switch wipes the room's
-   * dialled fog. Two adjacent statements cannot be reordered by accident.
+   * SPLIT from the room-override apply below, and the split is load-bearing
+   * for OFFLINE dials: grade, fog and precipitation are constructed once and
+   * survive a world rebuild, so this effect must not re-run just because
+   * terrainKit or bladeKit changed identity. It used to (via dialTargets), and
+   * offline — where no room override ever re-applies — a texel commit snapped
+   * every dialled fog and grade value back to the preset while the Weather
+   * tab's sliders still showed the dialled numbers. Hence also `loaded` rather
+   * than `world` for the .trn filter: the filter is the MAP's, stable across
+   * scale rebuilds.
    *
-   * `weather` IS A DEPENDENCY, and leaving it out is what made the preset buttons
-   * look dead. These are imperative writes into live uniforms, so an effect that
-   * never re-runs leaves them frozen at whatever the URL loaded with — while the sky
-   * still swapped, because that memo does list `weather`. A preset appeared to
-   * half-work: new sky, same graded ground, same fog range.
+   * `weather` IS A DEPENDENCY, and leaving it out is what made the preset
+   * buttons look dead. These are imperative writes into live uniforms, so an
+   * effect that never re-runs leaves them frozen at whatever the URL loaded
+   * with — while the sky still swapped, because that memo does list `weather`.
+   * A preset appeared to half-work: new sky, same graded ground, same fog range.
+   *
+   * ORDERING with the override effect below: preset first, overrides on top.
+   * They are DECLARED adjacent in that order, and any commit that runs both
+   * runs them in declaration order — a preset switch changes `weather`, which
+   * changes dialTargets, so both fire together and the room's dialled fog
+   * survives the switch. Do not reorder or separate these two effects.
    */
   useEffect(() => {
     // A real map's own .trn values win over a neutral preset's, since they are what
     // the author graded the colormap for.
     grade.set(
-      world?.filter && weather.id === "day"
-        ? { filter: world.filter, gamma: 128, saturation: 128 }
+      loaded?.filter && weather.id === "day"
+        ? { filter: loaded.filter, gamma: 128, saturation: 128 }
         : weather
     );
     fog.set(fogSettings(weather, noise, windVector));
@@ -817,8 +847,19 @@ export function DF2Scene({
     // precipitation to the preset made it reachable only by changing the whole scene.
     precipitation.setIntensity(BENCH.rain ?? weather.rain);
     precipitation.uniforms.mode.value = BENCH.snow ?? weather.snow;
+  }, [fog, grade, loaded, noise, precipitation, weather, windVector]);
+
+  /**
+   * The room's dial overrides, applied over whatever the preset just wrote —
+   * and re-applied onto FRESH uniforms after a world rebuild (dialTargets
+   * changes identity when terrainKit/bladeKit rebuild, and the new detail and
+   * blade uniforms start at their defaults). Offline (room === null) this is a
+   * no-op, which is exactly what keeps offline-dialled atmosphere alive across
+   * rebuilds. See the ordering note on the preset effect above.
+   */
+  useEffect(() => {
     if (room !== null) applyVisualDials(dialTargets, room.overrides);
-  }, [dialTargets, fog, grade, noise, precipitation, room, weather, windVector, world]);
+  }, [dialTargets, room]);
 
   // A local switch is REFUSED, not merely overwritten, once the room owns the
   // weather: the server broadcasts on change only, so nothing would ever arrive
@@ -912,9 +953,12 @@ export function DF2Scene({
       {/* Props, not `args`: `args` makes R3F reconstruct the light on a preset
           switch, which swaps `fillRef.current` out from under the Lighting
           dials. Its two siblings are patched in place; this now matches. */}
+      {/* fillSkyColor, not weather.skyColor: the fill's colour is what the sky
+          CASTS, and a near-black night sky multiplied into any intensity kept
+          the "Sky fill" dial visibly inert on dark presets (weather.ts). */}
       <hemisphereLight
         ref={fillRef}
-        color={weather.skyColor}
+        color={lighting.fillSkyColor}
         groundColor={lighting.groundColor}
         intensity={lighting.fillIntensity}
         position={[0, 400, 0]}

@@ -34,7 +34,8 @@ export interface WeatherPreset extends ColorGradeSettings {
   fogColor: string;
   fogNear: number;
   fogFar: number;
-  /** Flat background, used only when `sky` is null, and the hemisphere light's colour. */
+  /** Flat background, used only when `sky` is null; also the DEFAULT fill sky
+   * colour (`SceneLighting.fillSkyColor`) — dark presets override that. */
   skyColor: string;
   /**
    * Ground fog: the world height where it is thickest, and how thick it is per metre.
@@ -80,7 +81,16 @@ export interface SceneLighting {
   /** Directional key light colour and strength. */
   sunColor: string;
   sunIntensity: number;
-  /** Hemisphere bounce: sky colour from above, ground tint from below. */
+  /**
+   * Hemisphere bounce: what shines DOWN from above, and the ground tint below.
+   *
+   * `fillSkyColor` defaults to the preset's own sky colour, which is right for
+   * daylight — but a near-black night sky multiplied into any fillIntensity is
+   * still near-black, so a dark preset that promises readable fill must set
+   * this to what its fill LIGHT looks like (moonlight glow), not what its sky
+   * looks like. Without it the "Sky fill" dial is visibly inert at night.
+   */
+  fillSkyColor: string;
   fillIntensity: number;
   groundColor: string;
   /** Flat lift, so a shadowed face is never pure black. */
@@ -118,6 +128,9 @@ export function lightingOf(preset: WeatherPreset): SceneLighting {
     // because it is warmer than the sky it hangs in, not the same colour.
     sunColor: "#fff4e0",
     sunIntensity,
+    // The sky IS the fill's colour by default — see the SceneLighting note for
+    // why a dark preset must override this rather than trust the derivation.
+    fillSkyColor: preset.skyColor,
     fillIntensity,
     groundColor: "#5a5340",
     ambientIntensity: 0.05 + 0.25 * (1 - sky),
@@ -129,6 +142,12 @@ export function lightingOf(preset: WeatherPreset): SceneLighting {
 const DAY: WeatherPreset = {
   id: "day",
   sky: null,
+  // The pre-preset hand-tuned daylight, kept EXPLICIT rather than derived: the
+  // sky-luminance derivation yields roughly half of it (sun 1.28, fill 0.50)
+  // for this sky, which dimmed the water and every prop in plain midday — and
+  // this is the preset every documented URL and every room without a weather
+  // override starts in, the state the scene's look was tuned against.
+  light: { sunIntensity: 2.4, fillIntensity: 0.75 },
   skyColor: SKY_COLOR,
   fogColor: FOG_COLOR,
   fogNear: FOG_NEAR,
@@ -341,7 +360,10 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
     sky: "night",
     // Moonlight: a real key, but cold and weak, with enough cool fill that a
     // shadowed face is readable rather than black. A DF2 night map is playable.
-    light: { sunIntensity: 0.22, sunColor: "#9fb6d8", fillIntensity: 0.35, ambientIntensity: 0.10, groundColor: "#1b1f27" },
+    // `fillSkyColor` is the moonlit glow the fill CASTS, not the near-black sky
+    // (#080402) — multiplied by that, the tuned 0.35 contributed ~0.4% of a
+    // white fill and the promise above rested entirely on the 0.10 ambient.
+    light: { sunIntensity: 0.22, sunColor: "#9fb6d8", fillSkyColor: "#3d4c68", fillIntensity: 0.35, ambientIntensity: 0.10, groundColor: "#1b1f27" },
     skyColor: "#080402",
     fogColor: "#080402",
     fogNear: 92,

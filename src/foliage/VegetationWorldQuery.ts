@@ -22,13 +22,13 @@
 // invariant 6 states for concealment.
 
 import * as THREE from "three/webgpu";
-import type { WorldHit, WorldQuery } from "../fps/core/WorldQuery.ts";
+import type { WorldHit, WorldQuerySource } from "../fps/core/WorldQuery.ts";
 import { SPECIES } from "./species.ts";
 import type { VegetationField } from "./VegetationField.ts";
 
 const DIRECTION_EPSILON = 1e-12;
 
-export class VegetationWorldQuery implements WorldQuery {
+export class VegetationWorldQuery implements WorldQuerySource {
   private readonly field: VegetationField;
   private readonly origin = new THREE.Vector3();
   private readonly direction = new THREE.Vector3();
@@ -173,6 +173,10 @@ export class VegetationWorldQuery implements WorldQuery {
           // ignored that would make every trunk on the map stop the same round.
           penetrationThicknessMetres: trunk.penetrationThicknessMetres * scale,
           damageable: null,
+          // Reports and telemetry only, never identity — `objectId` above is the
+          // identity. One shared proxy name for every trunk on the map, the same way
+          // the heightfield names its single collider proxy.
+          objectName: this.proxyObject.name,
           object: this.proxyObject,
         };
       }

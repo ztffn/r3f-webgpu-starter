@@ -29,6 +29,24 @@ export interface WorldHit extends SharedWorldHit {
   readonly object: THREE.Object3D;
 }
 
+/**
+ * An analytic query composed into `CompositeWorldQuery` alongside terrain and colliders.
+ *
+ * Deliberately NOT the shared `WorldQuery`: that contract is Three-free because the
+ * server implements it, so its hit carries no `object`. A source composed here is
+ * browser-side and must name the Three object it stands for — one shared proxy for the
+ * whole system, exactly as `HeightfieldWorldQuery` does, since the point of a source is
+ * that its geometry was never instantiated as scene objects.
+ */
+export interface WorldQuerySource {
+  raycast(
+    origin: THREE.Vector3Like,
+    direction: THREE.Vector3Like,
+    maxDistance: number,
+    excludeObjectId?: string
+  ): WorldHit | null;
+}
+
 export interface WorldQueryRegistration {
   readonly root: THREE.Object3D;
   readonly kind: WorldHitKind;
@@ -492,7 +510,7 @@ export class HeightfieldWorldQuery implements WorldQuery {
 export class CompositeWorldQuery implements RegisteredWorldQuery {
   private readonly colliders: ThreeWorldQuery;
   private readonly terrain: HeightfieldWorldQuery | null;
-  private readonly sources = new Set<WorldQuery>();
+  private readonly sources = new Set<WorldQuerySource>();
   private raycasts = 0;
 
   constructor(heightfield: HeightfieldQuerySource | null, layer = 0) {
@@ -508,7 +526,7 @@ export class CompositeWorldQuery implements RegisteredWorldQuery {
    * thousands of identical colliders answers for itself analytically rather than
    * registering thousands of `THREE.Object3D`s for a raycaster to walk.
    */
-  addSource(source: WorldQuery): () => void {
+  addSource(source: WorldQuerySource): () => void {
     this.sources.add(source);
     return () => {
       this.sources.delete(source);

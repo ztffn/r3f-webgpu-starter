@@ -31,4 +31,15 @@ export const ROOM_INFO = 3;
 export interface RoomInfo {
   /** Present only for a private room. Absent means the room is public. */
   joinCode?: string;
+  /**
+   * The terrain slug this room's server is simulating.
+   *
+   * Sent so the client can DETECT a map mismatch: a server started with
+   * DF2_MAP=egypt against a client that loaded the default map desyncs on
+   * every slope, and before this field nothing on either side could say why —
+   * the room's Colyseus metadata carries the map, but a joined client never
+   * reads metadata. Optional because an older server may not send it; absent
+   * means "unknown", never "default".
+   */
+  map?: string;
 }

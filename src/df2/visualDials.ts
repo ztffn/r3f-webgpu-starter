@@ -1,4 +1,5 @@
-// The 25 live visual dials, as one table: wire contract and accessors together.
+// The live visual dials, as one table: wire contract and accessors together.
+// (The count is pinned by tests/motor/session.test.ts, not by this comment.)
 //
 // Extracted from WeatherDebug so the debug panel and the authoritative server can
 // agree on what a dial IS — its identity on the wire, its legal range, and how to
@@ -14,6 +15,7 @@ import type { BladeUniforms } from "./BladeMaterial";
 import type { createColorGrade } from "./colorGrade";
 import type { createFog } from "./fog";
 import type { createPrecipitation } from "./Precipitation";
+import type { TerrainDetailUniforms } from "./TerrainMaterial";
 
 /**
  * What a dial needs to read and write. `SceneHandles` satisfies this structurally
@@ -27,9 +29,26 @@ export interface VisualDialTargets {
   readonly fog: ReturnType<typeof createFog>;
   readonly precipitation: ReturnType<typeof createPrecipitation>;
   readonly blades: BladeUniforms | null;
+  /** Null when the map ships no detail_color assets (loadTerrain.ts). */
+  readonly terrainDetail: TerrainDetailUniforms | null;
+  /**
+   * The three scene lights, by ref so a dial writes the live light without a
+   * React re-render. Typed structurally rather than importing Three — this
+   * module is imported by the Node server (docs/12 §3, no Three at runtime).
+   */
+  readonly lights: {
+    readonly sun: { current: { intensity: number } | null };
+    readonly fill: { current: { intensity: number } | null };
+    readonly ambient: { current: { intensity: number } | null };
+  };
 }
 
-export type VisualDialGroup = "atmosphere" | "precipitation" | "blades";
+export type VisualDialGroup =
+  | "atmosphere"
+  | "precipitation"
+  | "blades"
+  | "terrain"
+  | "lighting";
 
 export interface VisualDial {
   readonly label: string;
@@ -310,6 +329,84 @@ export const VISUAL_DIALS: readonly VisualDial[] = [
     step: 0.05,
     get: (t) => Number(t.blades?.twist.value ?? 0),
     set: (t, v) => t.blades && (t.blades.twist.value = v),
+  },
+
+  // --- terrain detail ----------------------------------------------------------
+  // The close-range detail_color pass (08 §6.3). APPENDED — see the wire rule above.
+  {
+    label: "Detail gain",
+    group: "terrain",
+    min: 0.2,
+    max: 3,
+    step: 0.05,
+    get: (t) => Number(t.terrainDetail?.gain.value ?? 0),
+    set: (t, v) => t.terrainDetail && (t.terrainDetail.gain.value = v),
+    hint: "brightness of the detail layer. 1 shows the tiles as authored, lit by the colormap's own shading",
+  },
+  {
+    label: "Detail fade start",
+    group: "terrain",
+    min: 0,
+    max: 400,
+    step: 2,
+    get: (t) => Number(t.terrainDetail?.near.value ?? 0),
+    set: (t, v) => t.terrainDetail && (t.terrainDetail.near.value = v),
+    hint: "metres of full-strength detail before the fade begins",
+  },
+  {
+    label: "Detail fade end",
+    group: "terrain",
+    min: 10,
+    max: 800,
+    step: 5,
+    get: (t) => Number(t.terrainDetail?.far.value ?? 0),
+    set: (t, v) => t.terrainDetail && (t.terrainDetail.far.value = v),
+    hint: "metres at which only the colormap remains — the original's railroad vanished at range too. Clamped in-shader to stay above the start",
+  },
+  {
+    label: "Detail power",
+    group: "terrain",
+    min: 0,
+    max: 1,
+    step: 0.01,
+    get: (t) => Number(t.terrainDetail?.power.value ?? 0),
+    set: (t, v) => t.terrainDetail && (t.terrainDetail.power.value = v),
+    hint: "master opacity of the layer — lowering it blends back toward the plain colormap, which is the lever if the tiles read too dark or saturated",
+  },
+
+  // --- lighting ------------------------------------------------------------------
+  // The preset sets these (weather.ts `lightingOf`); these dials sweep them live.
+  // APPENDED — see the wire rule above. CONTRAST is the sun-to-fill RATIO: overcast
+  // is a small sun against a large fill, not a dimmer sun.
+  {
+    label: "Sun intensity",
+    group: "lighting",
+    min: 0,
+    max: 4,
+    step: 0.05,
+    get: (t) => t.lights.sun.current?.intensity ?? 0,
+    set: (t, v) => t.lights.sun.current && (t.lights.sun.current.intensity = v),
+    hint: "directional key light. Alone it only makes night darker — raise Sky fill with it to soften shadows instead of deepening them",
+  },
+  {
+    label: "Sky fill",
+    group: "lighting",
+    min: 0,
+    max: 3,
+    step: 0.05,
+    get: (t) => t.lights.fill.current?.intensity ?? 0,
+    set: (t, v) => t.lights.fill.current && (t.lights.fill.current.intensity = v),
+    hint: "hemisphere bounce, sky above and ground below. This is the overcast dial: high fill against a low sun is what makes shadows soft rather than deep",
+  },
+  {
+    label: "Ambient floor",
+    group: "lighting",
+    min: 0,
+    max: 1,
+    step: 0.01,
+    get: (t) => t.lights.ambient.current?.intensity ?? 0,
+    set: (t, v) => t.lights.ambient.current && (t.lights.ambient.current.intensity = v),
+    hint: "flat lift so a face pointing away from both sun and sky reads dark rather than pure black. Small values only — this is the dial that flattens a scene",
   },
 ];
 

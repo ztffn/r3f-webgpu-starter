@@ -187,6 +187,12 @@ node tools/df2-extract/prepare-terrain.mjs <extractedDir> <trnName> <outDir> \
 `prepare-terrain.mjs` writes `<outDir>/terrain.json` plus the PNG/JPEG assets. Point `<outDir>`
 at `public/assets/terrain/<slug>/`, and set `TERRAIN_SLUG` in `config.ts`.
 
+Every run also regenerates `public/assets/terrain/index.json` — the dev map selector's list of
+prepared terrains — by scanning `<outDir>`'s siblings for a `terrain.json`, so preparing a map
+is what publishes it to the selector; there is no hand-kept list. Display names come from
+`terrain_name`, and two maps sharing one (dfg4 and dfg5 are both "Green One") fall back to
+their slugs.
+
 ### 5.2 `terrain.json` — the contract between tool and runtime
 
 Consumed by `loadTerrain.ts`; its TypeScript shape is `TerrainMeta` there.
@@ -196,9 +202,16 @@ Consumed by `loadTerrain.ts`; its TypeScript shape is `TerrainMeta` there.
 - `assets.height` — `{ file, width, height, rawMin, rawMax }`. 8-bit greyscale PNG.
 - `assets.color` — the colormap, JPEG passthrough.
 - `assets.detail` — per-texel zoning **indices** 0–255 as greyscale.
+- `assets.detailColor` — the `_cm` strip repacked as a square atlas:
+  `{ file, tileSize, tiles, grid, atlasSize }`. Present only when the strip was; **both
+  `detail` and `detailColor` must exist** for the close-range pass (§6.3) to build.
+- `assets.charData` — the `.cal` summary: entry count, distinct materials, vegetation tile
+  count, hard tiles. A line's position in the `.cal` IS its tile index — the parser keeps
+  raw line indices, so a stray interior blank line cannot shift every later tile's material.
 - `assets.detailElev` — the strip. Carries `substituted`, `substitutedFrom`, `referencedName`.
-- `assets.grass` — the baked canopy field, and **`substituted`** if it was baked from a
-  strip that isn't the one the `.trn` asked for.
+- `assets.grass` — the baked canopy field, **`substituted`** if it was baked from a strip
+  that isn't the one the `.trn` asked for, and **`vegetationGated`** when a `.cal`
+  restricted the canopy to vegetation families.
 
 ### 5.3 The grass chain, and why provenance is tracked
 
@@ -282,6 +295,41 @@ procedural biome blend by height and slope.
 Dark blotches in a render are usually the data, not the shader — verified at IoU 0.95 with and
 without grass (`07` §9). Do not "fix" them without deciding you want to fight the baked
 lighting, which is an art decision, not a bug fix.
+
+**Close-range detail pass (Aug 2026).** When the prepared assets carry
+`detail.png` (per-texel tile index, NEAREST — indices must never interpolate) and
+`detail_color.png` (the `_cm` strip repacked as a 16×16 atlas, since the native 64×16384
+exceeds WebGPU's default texture cap), each 1 m texel renders its own full 64×64 tile —
+tile-per-texel, the mapping DFG5's railroad proves (`06` §11) — blended over the colormap
+and faded out by ~160 m. The blend is a **lit lerp, deliberately NOT the era's modulate**:
+the tile shows its authored colour times a lighting term (colormap luminance over its own
+level-6 mip's luminance — isolates the baked shading without polluting the tile's hue),
+lerped in by strength. Both modulate variants failed structurally in linear light —
+multiplying two sub-white colours darkens and SQUARES saturation; the gamma-equivalent
+gain (2^2.2) fixed the mean but kept the saturation blowout. Four traps paid for:
+**(1)** the atlas must not mipmap (tiles bleed into neighbours) and tile UVs are inset
+half a texel so bilinear never crosses an atlas seam; **(2)** indices can't be mipmapped
+either, so the dithered type boundaries — which follow slope/height contours — alias into
+contour-hugging stripes at grazing angles; a `fwidth`-based texels-per-pixel fade kills
+this where the distance fade can't reach; **(3)** the grass bake zeroes canopy on tiles
+whose `.cal` char_data param is non-zero (hard ground: railroad, concrete) or the rails
+grow stubble; **(4)** the lighting ratio's NUMERATOR must be smoothed to ~8 m (a metre
+constant converted to a mip level per texel size, so the `?texel=` dial rescales it),
+never the full-res colormap — at full resolution it stamps the colormap's per-texel
+luminance noise (which is albedo the tiles already express, not lighting; ±2.5× between
+adjacent texels, measured) onto every tile, and the ground reads as hard tone-plates on
+the 1 m grid. That was the reported "terracing", first misattributed to the grass march; the
+march was exonerated by its own hitFrac debug view (plates on ground with no hits) and
+the ratio convicted by simulating the exact shader arithmetic against the real map
+offline. Verify a shading claim by rendering its math, not by reasoning about it.
+Gain, power (master layer opacity — the taste lever for "tiles read darker and more
+saturated than the colormap", which they authentically are) and both fade distances are
+live dials (`visualDials.ts`, rendered on the Scene tab — ground detail is not weather).
+The pass is optional at RUNTIME too: a failed fetch or decode of either detail asset
+degrades to `detail: null` with a console warning. It must never reject the whole load —
+awaited inside the load's outer try it did, silently swapping the real map for the
+synthetic fallback world (and desyncing a networked client against a server that had
+loaded the real heightfield fine).
 
 ### 6.4 `GrassMaterial` — the columnar march
 
@@ -1035,6 +1083,21 @@ Bundle is ~1.77 MB (490 kB gzip), dominated by Three. Not yet code-split.
   legitimate path, provided it stays labelled (§5.3).
 - **Stretch-height → world-units scale** — what raw 0–255 canopy actually meant (`06` §8).
 - **Near-field grass detail vs coverage** trade-off is unresolved.
+- **Detail relief, modern path** — `detail_elev` is a general sub-texel extrusion map
+  (`06` §11: rails 40, ties 20, dirt ruts ~6), which the original rendered as stretched
+  voxel columns. Reproducing that through the march is the authentic-but-expensive route;
+  the modern candidates are prepare-time products of the SAME strip: a per-tile normal
+  atlas (Sobel over each 64×64 tile) shading the detail layer, and a distance-gated
+  parallax offset for actual silhouette at close range. Both are a couple of texture
+  samples inside the existing detail pass. Decide after the relief-vs-canopy bake split
+  (`06` §11) so vegetation and hard relief stop sharing one field.
+- **Canopy bake reads relief as grass** — **CLOSED (2026-08-06, same day).** The bake now
+  sources canopy from vegetation families only (`Gs*`/`Grs*` per the `.cal`; `Sw*` still
+  excluded pending the retail check), with the no-`.cal` community sets keeping the old
+  full-stretch behaviour under a `vegetationGated: false` provenance flag in
+  `terrain.json`. DFG5 re-baked: 95 vegetation tiles feed the canopy, map mean 16.8 → 13.3.
+  What remains open here is only the render side: relief (rails, ruts) has no modern
+  representation yet — the normal/parallax phases of the roadmap plan.
 - **Concealment's consumer** — `04` §7: Pillars 5 and 10 suggest concealment should have no
   player-facing readout at all, which turns "boolean vs. percentage" into a question about AI
   input fidelity rather than UI. Decide the consumer first.

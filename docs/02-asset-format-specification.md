@@ -50,10 +50,12 @@ dependencies required.
 
 ## 2. TGA loader
 
-> **⬜ Not implemented.** Nothing on the terrain/grass path needs it — the colormap is JPEG,
-> and the heightmap, detail map and `detail_elev` strip are all PCX. TGA is only the
-> `detail_color` (`_cm`) strip, which the columnar shader does not use (it takes colour from
-> the colormap — rendering design doc §4.1, AS BUILT). Implement when `.3DI` textures land.
+> **✅ Implemented** as `decodeTga()` in `tools/df2-extract/imageio.mjs` (Aug 2026), validated
+> against `DFG5_CM.TGA` (64×16384, 32-bit detail-color strip) and `SKYGRD01.TGA` (16×257,
+> 24-bit sky gradient). Uncompressed truecolor only, as specified below; the columnar shader
+> still takes ground colour from the colormap (rendering design doc §4.1, AS BUILT) — the
+> renderer does not consume `detail_color` yet, and DFG5's railroad shows what that costs
+> (`06-...md` §11).
 
 Handles NovaLogic's TGA usage specifically: uncompressed truecolor images at 24-bit or
 32-bit pixel depth (`ImageType == UNCOMP_TRUECOLOR`). Does not need to handle
@@ -90,12 +92,57 @@ against real data** — for the terrain heightmap, detail map and `detail_elev` 
 
 ## 4. `.3DI` model format (character/vehicle/object geometry)
 
-> **⬜ Not implemented.** Structurally reverse-engineered and specified below, but no decoder
-> exists. Off the terrain/grass critical path — the range/concealment tests use a capsule
-> stand-in for a player, not a real model (`07-...md` §8).
+> **✅ Implemented and corpus-validated (2026-08-06).** `tools/df2-extract/file3di.mjs`
+> parses V8 and exports GLB (`df2extract.mjs 3di <f> [out.glb]`); 642 of the 644 retail
+> models parse with exact end-of-buffer alignment (the 2 failures are V7-signature LAMP
+> variants). Corrections found against the reference tool are folded into the tables
+> below, plus the facts it left open:
+>
+> - **`HeaderLodInfo` is 36 bytes, not 20** — the C# declared `Size=20` but lays out
+>   9×u32; 36 makes the 128-byte header exact and puts `TextureCount` at offset 124.
+> - **`ModelSubObject` is 112 bytes** (the C# trailing `int[48]` is really `byte[48]`) —
+>   confirmed by EOF alignment across the corpus.
+> - **Embedded texture body**: after the 52-byte header come `_bmSize` bytes of indexed
+>   pixels (stride `_bmSize/(w*h)`: 1 = opaque, 2 = index+alpha), then a 256×4 **BGRA**
+>   palette.
+> - **UVs are int32 16.16 fixed point and ALREADY NORMALISED** — `u = tu/65536`, with **no
+>   texture-size division**. Values outside [0,1) tile and need wrap sampling.
+>   *Trap worth keeping:* reading them as texel coordinates in 24.8 (`tu/256/width`) is
+>   numerically IDENTICAL for a 256-wide texture and wrong for every other size — 64-wide
+>   tiles 4× too much, 512-wide 2× too little. Both of this project's guesses (24.8, then
+>   22.10) reproduced that class of error, each visibly wrong on a different subset of
+>   props, until the format spec settled it. Sub-object offsets in the same file ARE 24.8,
+>   and normals are 1.14 (÷16384); three different fixed-point conventions in one file.
+> - **Face vertex and normal indices are SUB-OBJECT LOCAL** — they index that mesh's own
+>   vertex/normal block, not the LOD's global array. Add the running sum of preceding
+>   sub-objects' counts. Read globally, a multi-part model silently draws its later parts
+>   out of the first part's vertices: the T-80 exported as a hull with no turret and no
+>   gun barrel, while single-part models looked perfect.
+> - **A pixel ratio above 2 is not a stride** — it is N animation frames sharing one
+>   palette (ratio 1 = indexed, ratio 2 = index + alpha byte, 0x00 transparent).
+> - **Model forward is +X, up is +Z.** Converting to a y-up target is a −90° **ROTATION**
+>   about X — `(x, y, z) → (x, z, −y)` — never the reflection `(x, z, y)`. The reflection
+>   mirrors every model; reversing triangle winding makes it *render* plausibly (faces
+>   point outward again) while leaving the geometry handed the wrong way, so symmetric
+>   props look correct and asymmetric ones read as rotated by an amount no yaw offset can
+>   fix. A rotation preserves winding — do not reverse it. Normals take the same rotation.
+> - Mission placement in the same space, **measured against DF2 data** (docs runbook,
+>   2026-08-07): mission `(x, y)` maps straight to world `(X, Z)`, and
+>   **`yaw = facing − 90°`**, pitch negated about X, roll positive about Z, **YXZ** order.
+>   Only the pitch/roll/order part comes from opennova's `MissionEntity.GetWorldRotation`;
+>   its position mapping (`x,−y`) and yaw (`180 − facing`) are **wrong for DF2** — that
+>   code targets Joint Operations, two engine generations later. Do not copy them across
+>   without re-measuring.
+>
+> Source for the four points above: NovaHQ **NovaResearch**,
+> `Shared/3DI File Format.md` — the most precise DF-era format documentation found so far.
+> - **Units: 256 model units = 1 m.** Standing character models measure 467–470 units
+>   (1.83 m); LOD-header bounds are the int16 vertex bounds ×256 (i.e. meters in 16.16).
+>   This plus the egypt pyramid footprint calibrated `METERS_PER_TEXEL` (see `06` §9).
 
 Confirmed structure for `FileVersion.V8` (only version this project needs to support,
-per the reference tool — other versions throw `NotSupportedException`).
+per the reference tool — other versions throw `NotSupportedException`). Signature
+`0x08494433` ("3DI\x08"); the two V7 files (`0x07494433`) are not parsed.
 
 ### 4.1 Top-level file layout
 
@@ -174,17 +221,85 @@ Immediately following the header, in order:
 5. **PartAnims** (`nPartAnims` × 12 bytes) — currently treated as opaque/unparsed in the
    reference implementation (read-and-discard). Needs further reversal if per-part
    animation is required.
-6. **ColPlanes** (`nColPlanes` × 8 bytes) — collision planes, currently skipped
-   (`reader.BaseStream.Position += 0x08 * nColPlanes` in reference).
-7. **ColVolumes** (`nColVolumes` × 0x50 bytes) — collision volumes, currently skipped
-   (`+= 0x50 * nColVolumes` in reference).
+6. **ColPlanes** (`nColPlanes` × 8 bytes) — **parsed and verified.** `Nx, Ny, Nz` as
+   int16 in **1.14 fixed point (÷16384)** then `D` as int16, in model units (1/256 m).
+   All 23,461 planes in the retail corpus have unit-length normals, which confirms the
+   fixed-point reading. A stone column has 6 planes, a crate 6 (its planes sit at ±348 and
+   ±361 units — exactly its mesh extent), an adobe building 146.
+7. **ColVolumes** (`nColVolumes` × 0x50 bytes) — **stride certain, LAYOUT NOT.** 80 bytes
+   is what makes the file measure out to EOF, but NovaResearch's v5/v8 struct (Flags,
+   Type, `int32[6]` bbox, splitting plane, BSP children, PlaneCount) does not describe
+   these bytes: read that way the boxes come out inverted and far outside the model, and
+   no 6×int32 run anywhere in the record matches the mesh extent. `file3di.mjs` keeps them
+   raw rather than exposing fields that would look authoritative and be wrong.
+
+**Collision architecture:** 388 of 623 models carry collision — 23,461 planes and 3,083
+volumes. It is a set of convex volumes bounded by half-space planes (the volume record
+holds BSP child indices), *separate from the render mesh* and far coarser: a 475-face
+adobe building reduces to 18 volumes over 146 planes. So a shot is tested against
+half-spaces, not triangles.
+
+**Surface identity ("what did I just hit") is on the MATERIAL, not the collision volume** —
+material flag bits 16-19 and 26-29 encode bullet-impact surface types. Two of the labelled
+bits check out against the corpus: bit 19 ("foliage/leaves") appears on the cypress, bit 27
+("cloth/flag") on the flags. A wooden crate carries bit 17, a metal wall bits 16+17, a
+stone column bit 18. See §4's flag table.
 8. **Materials** (`nMaterials` × `ModelMaterial`, 0x78/120 bytes each):
 
    | Field | Type | Notes |
    |---|---|---|
-   | Name | char[16] | |
-   | BitFlags | byte | |
-   | IndexG/B/W/A | byte each | Texture index references; `TexIndex` property returns `IndexG` |
+   | Name | char[16] | offset 0 |
+   | **Flags** | **u32 @ 16** | render + surface flags, see below |
+   | IndexG/B/W/A | byte each @ 52 | Texture index references; the texture is `IndexG` |
+
+   **Material flags (u32 at offset 16) — NOT a byte.** The widely-copied C# reference
+   declares a byte plus three pad bytes, which silently discards every bit above 7 and
+   with them `ColorKey`, `Hidden` and `AlphaBlend`. Measured across the 18,115 materials
+   in the retail corpus:
+
+   | Bit | Name | Meaning | Share |
+   |---|---|---|---|
+   | 0 `0x0001` | Textured | samples a texture | 89.6% |
+   | 1 `0x0002` | **DoubleSided** | render both faces | **32.8%** |
+   | 3 `0x0008` | HiddenAuto | bound texture missing | 1.6% |
+   | 5 `0x0020` | FlatLit | skip lighting | 5.8% |
+   | 7 `0x0080` | SpecialBlend | special alpha rendering | 1.2% |
+   | 9 `0x0200` | ColorKey | palette index 0 is transparent | — |
+   | 10 `0x0400` | ShadowPriority | | — |
+   | 11 `0x0800` | Hidden | documented "face skipped" — **do NOT act on it**, see below | 1.0% |
+   | 14 `0x4000` | Animated | cycle material frames | 6.8% |
+   | 15 `0x8000` | AlphaBlend | alpha blend mode | 24.0% |
+
+   Double-siding is per material and lands where you would expect: tent canopies, foliage
+   and building interiors carry it; crates and solid masonry do not.
+
+   **`Hidden` (bit 11) must NOT be treated as "drop this face" — measured 2026-08-07.**
+   Acting on it punched a 12.2 × 6.9 m hole in `rbuilda`'s interior (28 faces, a whole
+   room's inner wall band), obvious the moment you stand inside one. The materials that
+   set it also lack `Textured` and set `HiddenAuto` ("bound texture missing"), so whatever
+   the bit gates is conditional in a way the v8 notes do not capture. Parse it; ignore it.
+
+   **Sampling:** magnify these textures with NEAREST. They are 8–64 px across and the
+   engine point-sampled them; bilinear magnification rounds the corners off window
+   openings and smears alpha into a halo. Window glass is genuinely graduated alpha (169
+   distinct values on `rbuilda`'s), so `AlphaBlend` really does mean blend, not cutout.
+
+   **Transparent texels hold a CHROMA KEY, and it is often pure green.** `palette[0]` on
+   the EdBro husk is literally `(0,255,0)`, and the transparent regions of the desert
+   truck's textures average the same. Alpha hides it at full resolution, but mip
+   generation averages RGB across neighbours *regardless of alpha*, so the key bleeds into
+   the silhouette and blooms as a coloured fringe with distance — misreadable as LOD
+   fading. A converter must **alpha-bleed**: dilate real colour outward until every
+   transparent texel holds a plausible RGB, leaving alpha untouched. Dilate to full
+   coverage, not a few passes: the deepest mip averages the whole image, so a green pocket
+   in the middle of a large transparent region still reaches the screen.
+
+   **Bits 13 and 16-28 are set but undocumented for v8.** The v10 page assigns bits 16-19
+   and 26-29 to *bullet-impact surface types*, and the v8 corpus uses exactly that region
+   (bit 16 on 1576 materials, 17 on 1228, 18 on 889, 26 on 851, …; 43 distinct patterns).
+   So DF2 already tags each material with what a round hitting it should do — directly
+   useful to the ballistics work, and the model-side counterpart of the terrain's
+   `char_data` surface classes.
 
 ### 4.6 Conversion target
 
@@ -218,7 +333,11 @@ detail-elevation strip, `_cm` detail-color strip.
 | `detail_map` | `<t>_m.pcx` | **PCX, 1024×1024, 8-bit palettized** — per-texel detail index (high-frequency; e.g. 62 distinct indices on Green Mile) |
 | `detail_color` | `<set>_cm.tga` | **64×16384 RGBA strip = 256 tiles of 64×64** — ground textures per detail index |
 | `detail_elev` | `<set>_dm.pcx` | **64×16384 greyscale strip = 256 tiles of 64×64** — per-index grass **stretch height** |
-| env params | (in `.trn`) | `sky_height`, `horizon`, `water_map`, `water_height`, `filter` RGB, `gamma`, `saturation`, `sun_slope` — plain scalars |
+| `char_data` | `<set>_cm.cal` | **Plaintext, 256 lines `<material>,<param>`** — ground character per detail index (line *N* = index *N−1*). Vocabulary seen: `Gs2`/`Gs3` grass, `Dt2` dirt, `Rk2` rock, `Md3` mud, `rd1` railroad, `ct1` concrete, `null`. `param` is 40 on the hard surfaces (`rd1`/`ct1`), 0 otherwise |
+| `sky_map` | `clouds<NN>.pcx` | **PCX, 512×512 palettized** cloud layer (the shipped set skips `clouds09`) |
+| `sky_palette` | `skygrd<NN>.tga` | **TGA, 16×257, 24-bit** sky gradient LUT |
+| `water_map` | `ripple1.pcx` | **PCX, 256×256 palettized** water ripple tile |
+| env params | (in `.trn`) | `sky_height`, `horizon`, `water_height`, `filter` RGB, `gamma`, `saturation`, `sun_slope` — plain scalars |
 
 **Corrections to the original guess:** colormap is **JPEG** (not TGA); the heightmap is the
 `_d.pcx` (`_d` = elevation — the `_m.pcx` is the *detail* map, not the heightmap); the

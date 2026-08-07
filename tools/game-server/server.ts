@@ -28,7 +28,7 @@ import {
 import { createMotorWorld, initRapier } from "../../src/motor/MotorWorld.ts";
 import { DEFAULT_MOTOR_TUNING } from "../../src/motor/MotorTypes.ts";
 import type { ServerConnection, ServerTransport } from "../../src/net/Transport.ts";
-import { TERRAIN_SLUG } from "../../src/df2/config.ts";
+import { TERRAIN_SLUG, isAssetSlug } from "../../src/df2/config.ts";
 import { WEATHER_PRESET_IDS, weatherPresetIndex } from "../../src/df2/weather.ts";
 import { clampVisualDial } from "../../src/df2/visualDials.ts";
 import { loadServerTerrain } from "./terrain.ts";
@@ -43,9 +43,6 @@ import {
 
 const PORT = Number(process.argv[2] ?? 2567);
 const PATCH_HZ = 20;
-/** The whole tile: the client walks an endlessly tiling map, the server's
- * static collider has real edges, so cover all of it. */
-const SURFACE_SPAN_METRES = 2048;
 
 /**
  * `DF2_WEATHER` — a preset id, `random` for one per room, or `rotate` to cycle.
@@ -112,9 +109,35 @@ function pickWeatherIndex(): number {
  */
 const MAX_SESSION_SECONDS = 6 * 3600;
 
+// `DF2_MAP=egypt` serves a different prepared terrain; the default stays gmile.
+// Checked with the same slug rule as the client's `?map=` (the raw env value
+// reaches join(assetRoot, slug), so it must never carry path segments) — but
+// REFUSED rather than silently defaulted, like the missing-JWT_SECRET case: an
+// operator who typed DF2_MAP=EGYPT was silently serving gmile while telling
+// players to join with ?map=egypt, and every one of them desynced.
+const MAP_REQUESTED = process.env.DF2_MAP || undefined;
+if (MAP_REQUESTED !== undefined && !isAssetSlug(MAP_REQUESTED)) {
+  throw new Error(
+    `DF2_MAP "${MAP_REQUESTED}" is not a valid map slug (lowercase a-z, 0-9, _ or -, ` +
+      `max 32 chars). Refusing to start rather than silently serving "${TERRAIN_SLUG}".`
+  );
+}
+const MAP_SLUG = MAP_REQUESTED ?? TERRAIN_SLUG;
 const RAPIER = await initRapier();
-const terrain = loadServerTerrain(TERRAIN_SLUG);
+const terrain = loadServerTerrain(MAP_SLUG);
 const tickMs = DEFAULT_MOTOR_TUNING.fixedTimestepSeconds * 1000;
+/**
+ * The whole tile: the client walks an endlessly tiling map, the server's
+ * static collider has real edges, so cover exactly one period of it.
+ *
+ * DERIVED from the loaded map, not a constant. The literal 2048 it replaces
+ * was the pre-calibration tile size; after the 1 m/texel calibration the tile
+ * is 1024 m, and the stale constant quietly built a collider over 2x2 map
+ * periods — a 4097² height grid (~67 MB plus Rapier's copy) sampling 16.8
+ * million points at every server start, where one period describes the same
+ * ground at a quarter of that.
+ */
+const SURFACE_SPAN_METRES = terrain.worldSize;
 
 /** Per-room adapter from Colyseus callbacks onto the project transport seam. */
 class RoomBridge implements ServerTransport {
@@ -226,8 +249,8 @@ class GameRoom extends Room {
     const joinCode = isPrivate ? makeJoinCode() : undefined;
     if (isPrivate) this.setPrivate(true);
     this.metadata = {
-      label: label ?? `${TERRAIN_SLUG} — ${isPrivate ? "private" : "public"}`,
-      map: TERRAIN_SLUG,
+      label: label ?? `${MAP_SLUG} — ${isPrivate ? "private" : "public"}`,
+      map: MAP_SLUG,
       weather: WEATHER_PRESET_IDS[weatherIndex]!,
       inputClass,
       community: false,
@@ -317,9 +340,14 @@ class GameRoom extends Room {
     // private room, not only its creator: anyone already inside got there with the
     // code, so they know it — the only person who does not is the host, and
     // singling them out would mean tracking who created the room for no gain.
-    // A public room sends an empty object, because there is nothing to gate.
+    // A public room carries no code, because there is nothing to gate. The map
+    // always rides along: it is how the client detects that it loaded a
+    // different terrain than this room simulates (RoomInfo.map).
     const meta = this.metadata as RoomMetadata | undefined;
-    const info: RoomInfo = meta?.joinCode !== undefined ? { joinCode: meta.joinCode } : {};
+    const info: RoomInfo = {
+      map: MAP_SLUG,
+      ...(meta?.joinCode !== undefined ? { joinCode: meta.joinCode } : {}),
+    };
     client.send(ROOM_INFO, info);
 
     console.log(
@@ -445,7 +473,7 @@ const server = new Server({ transport });
 server.define(GAME_ROOM, GameRoom).filterBy(["inputClass"]);
 await server.listen(PORT);
 console.log(
-  `game server on ws://localhost:${PORT} — ${TERRAIN_SLUG}, ` +
+  `game server on ws://localhost:${PORT} — ${MAP_SLUG}, ` +
     `${Math.round(1000 / tickMs)} Hz tick, ${PATCH_HZ} Hz patch, weather ${WEATHER_LABEL}` +
     (ADMIN ? ", CLIENT DIALS ALLOWED (DF2_ADMIN=1)" : "")
 );

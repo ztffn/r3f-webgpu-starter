@@ -17,8 +17,10 @@
 //   node df2extract.mjs trn     <file.trn>
 
 import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
-import { basename, join, resolve, sep } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
+import { parseArgs } from "node:util";
+import { cstr } from "./imageio.mjs";
 
 const SIG_PFF3 = 0x33464650; // 'PFF3'
 const SIG_PFF2 = 0x32464650; // 'PFF2'
@@ -35,7 +37,10 @@ export function parsePff(buf) {
   const sig =
     signature === SIG_PFF3 ? "PFF3" : signature === SIG_PFF2 ? "PFF2" : null;
   if (!sig) throw new Error(`Not a PFF archive (sig 0x${signature.toString(16)})`);
-  if (headerSize !== 20 || recordSize !== 32)
+  // recordSize 36 is the later PFF3 revision: the same 32-byte record plus a
+  // trailing 4-byte checksum (verified against MED.PFF: offsets stay contiguous
+  // and the name field is still 16 bytes).
+  if (headerSize !== 20 || (recordSize !== 32 && recordSize !== 36))
     throw new Error(`Unexpected headerSize=${headerSize} recordSize=${recordSize}`);
 
   const entries = [];
@@ -47,12 +52,7 @@ export function parsePff(buf) {
     const fileModified = dv.getUint32(o + 12, true);
     // The name field is the remaining 16 bytes of the 32-byte record, NUL-padded.
     // Reading only 15 truncated any name that filled the field.
-    let name = "";
-    for (let k = 0; k < 16; k++) {
-      const c = buf[o + 16 + k];
-      if (c === 0) break;
-      name += String.fromCharCode(c);
-    }
+    const name = cstr(buf, o + 16, 16);
     entries.push({ deleted: !!deleted, fileOffset, fileSize, fileModified, name });
   }
   return { sig, headerSize, recordCount, recordSize, recordOffset, entries };
@@ -78,17 +78,101 @@ export function parseTrn(text) {
 }
 
 // --- CLI ---------------------------------------------------------------------
-function main() {
+async function main() {
   const [cmd, file, outdir] = process.argv.slice(2);
   if (!cmd || !file) {
     console.error(
-      "usage:\n  df2extract.mjs list <a.pff>\n  df2extract.mjs extract <a.pff> <outdir>\n  df2extract.mjs trn <f.trn>"
+      "usage:\n  df2extract.mjs list <a.pff>\n  df2extract.mjs extract <a.pff> <outdir>\n" +
+        "  df2extract.mjs trn <f.trn>\n" +
+        "  df2extract.mjs 3di <f.3di> [out.glb] [--lod n] [--scale f]\n" +
+        "  df2extract.mjs mission <f.mis> <ITEMS.DEF> [outdir] [--models <3di dir>]"
     );
     process.exit(1);
   }
 
   if (cmd === "trn") {
     console.log(JSON.stringify(parseTrn(readFileSync(file, "latin1")), null, 2));
+    return;
+  }
+
+  if (cmd === "3di") {
+    const { parse3di, toGlb, describe3di, UNITS_PER_METER } = await import("./file3di.mjs");
+    // Positional destructuring can't tell "out.glb" from "--lod"; node's own
+    // parseArgs separates flags from positionals and rejects strays.
+    const { values, positionals } = parseArgs({
+      args: process.argv.slice(4),
+      options: { lod: { type: "string" }, scale: { type: "string" } },
+      allowPositionals: true,
+    });
+    if (positionals.length > 1) throw new Error(`unexpected argument: ${positionals[1]}`);
+    const out = positionals[0] ?? null;
+    const lod = values.lod === undefined ? 0 : Number(values.lod);
+    const scale = values.scale === undefined ? null : Number(values.scale);
+    if (!Number.isInteger(lod) || lod < 0) throw new Error(`--lod needs a whole number, got ${lod}`);
+    if (scale !== null && !(Number.isFinite(scale) && scale > 0))
+      throw new Error(`--scale needs a positive number, got ${scale}`);
+
+    const model = parse3di(readFileSync(file));
+    console.log(describe3di(model));
+    if (out) {
+      // Default: model units are 1/256 m (UNITS_PER_METER — the calibrated
+      // measurement lives in file3di.mjs), so the GLB comes out in meters.
+      const s = scale ?? 1 / UNITS_PER_METER;
+      mkdirSync(dirname(resolve(out)), { recursive: true });
+      writeFileSync(out, toGlb(model, { lod, scale: s }));
+      console.log(`wrote ${out} (lod ${lod}, scale ${s})`);
+    }
+    return;
+  }
+
+  if (cmd === "mission") {
+    const { parseItemsDef, parseMis, resolveMission } = await import("./mission.mjs");
+    const { parse3di, toGlb, UNITS_PER_METER } = await import("./file3di.mjs");
+    const { values, positionals } = parseArgs({
+      args: process.argv.slice(4),
+      options: { models: { type: "string" } },
+      allowPositionals: true,
+    });
+    const [itemsPath, outDir] = positionals;
+    if (!itemsPath) throw new Error("mission needs <ITEMS.DEF> after the .mis");
+
+    const items = parseItemsDef(readFileSync(itemsPath, "latin1"));
+    const mission = parseMis(readFileSync(file, "latin1"));
+    const { placements, skipped } = resolveMission(mission, items);
+    const models = [...new Set(placements.map((p) => p.model))].sort();
+    console.log(
+      `"${mission.name}" by ${mission.designer} on terrain ${mission.terrain}: ` +
+        `${placements.length} placed, ${models.length} distinct models ` +
+        `(skipped ${skipped.markers} markers, ${skipped.noModel} model-less, ${skipped.unknown} unknown)`
+    );
+    if (!outDir) return;
+
+    mkdirSync(outDir, { recursive: true });
+    writeFileSync(
+      join(outDir, "mission.json"),
+      JSON.stringify({ ...mission, items: undefined, placements, models }, null, 1)
+    );
+    console.log(`  mission.json -> ${outDir}`);
+
+    // --models <dir> holds the .3DI corpus; each referenced model becomes a GLB
+    // beside the mission so one fetch per MODEL serves every placement of it.
+    if (values.models) {
+      mkdirSync(join(outDir, "models"), { recursive: true });
+      let done = 0;
+      const missing = [];
+      for (const m of models) {
+        const src = join(values.models, `${m.toUpperCase()}.3DI`);
+        try {
+          const glb = toGlb(parse3di(readFileSync(src)), { scale: 1 / UNITS_PER_METER });
+          writeFileSync(join(outDir, "models", `${m}.glb`), glb);
+          done++;
+        } catch (e) {
+          missing.push(`${m} (${e.message.slice(0, 60)})`);
+        }
+      }
+      console.log(`  models: ${done}/${models.length} converted`);
+      for (const m of missing) console.warn(`  ! ${m}`);
+    }
     return;
   }
 
@@ -144,4 +228,10 @@ function main() {
 // Run as CLI only when invoked directly. pathToFileURL, not string concatenation:
 // import.meta.url percent-encodes, so a path containing a space or any non-ASCII
 // character never matched and the tool exited 0 having done nothing at all.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();
+// main() is async (the 3di command lazy-imports its module), so failures must be
+// caught here or they surface as unhandled rejections instead of a clean message.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
+  main().catch((err) => {
+    console.error(err.message);
+    process.exit(1);
+  });

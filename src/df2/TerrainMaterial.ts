@@ -8,10 +8,53 @@
 // disagreed about the same texture and the grass read as a different tone to the
 // bare ground beside it. The synthetic fallback bakes its own shading in
 // (syntheticMaps.ts) so it can take this same path.
+//
+// CLOSE-RANGE DETAIL: the original's near-field ground color comes from the
+// detail_color strip, not the colormap — DFG5's railroad exists ONLY there
+// (docs/06 §11). When the prepared assets carry the index map + tile atlas,
+// each 1 m texel renders its own full 64×64 tile (tile-per-texel, ~1.6 cm/px)
+// modulated over the pre-shaded colormap and faded out with distance, which is
+// also how the original behaved: the track vanished at colormap range.
 
 import * as THREE from "three/webgpu";
-import { texture, uv } from "three/tsl";
+import {
+  float,
+  fract,
+  fwidth,
+  mix,
+  positionView,
+  positionWorld,
+  smoothstep,
+  texture,
+  uniform,
+  uv,
+  vec2,
+} from "three/tsl";
 import type { Atmosphere } from "./atmosphere";
+import { luminance } from "./colorGrade";
+import type { LoadedTerrain } from "./loadTerrain";
+
+/**
+ * The detail pass's live dials (dev console Scene/Weather tab via
+ * visualDials.ts). Uniform writes, so tuning never rebuilds the material —
+ * rebuilding discards the terrain geometry cache and stalls for ~1 s.
+ */
+export interface TerrainDetailUniforms {
+  /** Plain brightness multiplier on the detail layer. 1 shows the tiles as
+   * authored, lit by the colormap's own local shading. */
+  gain: { value: number };
+  /**
+   * Master opacity of the layer: scales the lerp toward the tile colour, so
+   * lowering it blends back to the plain colormap everywhere. The lever for
+   * "the detail reads too dark/saturated" — the tiles ARE darker and more
+   * saturated than the pale colormap, so this is taste, not error.
+   */
+  power: { value: number };
+  /** Full detail inside this distance (metres). */
+  near: { value: number };
+  /** Detail fully faded past this distance (metres). */
+  far: { value: number };
+}
 
 export interface TerrainMaterialOptions {
   /** Colormap: extracted for a real map, CPU-baked for the synthetic fallback. */
@@ -25,16 +68,117 @@ export interface TerrainMaterialOptions {
    * colours the moment a preset made it non-neutral.
    */
   atmosphere: Atmosphere;
+  /** The close-range detail inputs as loadTerrain hands them over — one
+   * all-or-nothing record, null when the map ships no detail assets. */
+  detail?: LoadedTerrain["detail"];
+  /** World metres per detail-map texel — one detail tile spans one texel. */
+  metersPerTexel?: number;
 }
 
-export function createTerrainMaterial(
-  opts: TerrainMaterialOptions
-): THREE.MeshBasicNodeMaterial {
-  const { colorMap, atmosphere } = opts;
+export interface TerrainMaterialKit {
+  material: THREE.MeshBasicNodeMaterial;
+  /** Live dials, or null when the map ships no detail assets. */
+  detail: TerrainDetailUniforms | null;
+}
+
+/** Detail layer fade defaults: fully present inside NEAR, gone past FAR
+ * (metres). The original resolved its detail pass over roughly this range;
+ * past it only the colormap remains, which is why the railroad vanished at
+ * distance. Live-tunable via visualDials. */
+const DETAIL_NEAR = 48;
+const DETAIL_FAR = 160;
+
+/** The lighting ratio's two smoothing scales, in METRES (converted to mip
+ * levels per-map so the texel-size calibration dial rescales them too). */
+const LOCAL_LUMA_METERS = 8;
+const REGION_LUMA_METERS = 64;
+
+export function createTerrainMaterial(opts: TerrainMaterialOptions): TerrainMaterialKit {
+  const { colorMap, atmosphere, detail: detailAssets, metersPerTexel } = opts;
 
   const material = new THREE.MeshBasicNodeMaterial();
 
-  material.colorNode = atmosphere.shade(texture(colorMap, uv()));
+  let ground = texture(colorMap, uv()).rgb;
+  let detail: TerrainDetailUniforms | null = null;
+
+  if (detailAssets) {
+    const grid = float(detailAssets.grid);
+    // From the manifest, never re-derived from the GPU texture: the derivation
+    // atlasWidth/grid holds only while the atlas is unpadded, and it would
+    // break silently the day the atlas gains power-of-two padding.
+    const tileTexels = float(detailAssets.tileSize);
+
+    const uGain = uniform(1);
+    const uPower = uniform(1);
+    const uNear = uniform(DETAIL_NEAR);
+    const uFar = uniform(DETAIL_FAR);
+    detail = { gain: uGain, power: uPower, near: uNear, far: uFar };
+
+    // The index map and the colormap share the terrain uv (both wrap with the
+    // map period). NEAREST sampling returns the texel's tile index intact.
+    const index = texture(detailAssets.indexMap, uv()).r.mul(255).round();
+    const cell = vec2(index.mod(grid), index.div(grid).floor());
+
+    // Within the texel the full tile plays out: tile-per-texel (docs/06 §11).
+    // Inset by half a tile texel so bilinear filtering never reads the
+    // neighbouring tile across an atlas seam.
+    const texelWorld = float(metersPerTexel ?? 1);
+    const mapTexelPos = positionWorld.xz.div(texelWorld);
+    const inTile = fract(mapTexelPos);
+    const inset = inTile.mul(tileTexels.sub(1).div(tileTexels)).add(float(0.5).div(tileTexels));
+    const atlasUv = cell.add(inset).div(grid);
+    const tileRgb = texture(detailAssets.atlas, atlasUv).rgb;
+
+    // Distance fade. Edges ascending — smoothstep with edge0 > edge1 is
+    // undefined in WGSL and GLSL both — then inverted: near = full strength.
+    // The dial can drag far below near, so far is floored a metre above it.
+    const distance = positionView.length();
+    const far = uFar.max(uNear.add(1));
+    const distanceFade = smoothstep(uNear, far, distance).oneMinus();
+
+    // Screen-density fade — the anti-terracing term. The index map's type
+    // boundaries follow slope/height contours and are DITHERED per texel;
+    // indices can't be mipmapped (averaging two tile ids names an unrelated
+    // tile), so at grazing angles — where one pixel spans several texels while
+    // the DISTANCE is still short — the dither aliases into contour-hugging
+    // stripes. Fade the layer by how many map texels a pixel actually covers:
+    // in by one-texel-per-pixel, gone by three. fwidth needs a fragment-stage
+    // input, hence positionWorld rather than the vertex uv.
+    const texelsPerPixel = fwidth(mapTexelPos).length();
+    const densityFade = smoothstep(float(1), float(3), texelsPerPixel).oneMinus();
+
+    const strength = distanceFade.mul(densityFade).mul(uPower);
+
+    // Lit lerp, NOT modulate. Two modulate variants were tried and both fail
+    // structurally: multiplying colormap × tile in linear light darkens every
+    // product of two sub-white colours and SQUARES their saturation — the
+    // gamma-equivalent gain (2^2.2) fixed the mean brightness but kept the
+    // saturation blowout, and a unit gain went near-black. Instead the tile
+    // shows its own authored colour, lit by the colormap's local shading:
+    // luminance over a deep-mip regional luminance isolates the baked
+    // lighting (docs/06 §6) without polluting the tile's hue, so a rail in a
+    // baked shadow darkens with the shadow while staying rail-grey.
+    //
+    // BOTH ends of the ratio are mip samples, and the numerator's scale is
+    // load-bearing. Sampled at full resolution the numerator carried the
+    // colormap's per-texel luminance noise — which is mostly per-texel ALBEDO
+    // the tiles already express, not lighting — so every 1 m texel got its own
+    // ±2.5× brightness stamp and the ground read as hard tone-plates on the
+    // texel grid (the "terracing" report; verified by simulating this exact
+    // arithmetic against the real map, sim_lit vs sim_lit_mip3). 8 m keeps the
+    // baked shadows, which live at tens of metres, and drops the noise. The
+    // scales are METRES converted to mip levels here, so the ?texel=
+    // calibration dial rescales them with the world instead of silently
+    // changing what the ratio smooths over.
+    const mipFor = (metres: number) => float(Math.max(0, Math.log2(metres / (metersPerTexel ?? 1))));
+    const local = texture(colorMap, uv()).level(mipFor(LOCAL_LUMA_METERS)).rgb;
+    const region = texture(colorMap, uv()).level(mipFor(REGION_LUMA_METERS)).rgb;
+    const lighting = luminance(local).div(luminance(region).max(0.02)).clamp(0.2, 3);
+    const detailRgb = tileRgb.mul(lighting).mul(uGain);
+    ground = mix(ground, detailRgb, strength);
+  }
+
+  material.colorNode = atmosphere.shade(ground);
   // three's AUTOMATIC fog is off, and not as an optimisation: three fogs from the
   // rasterised fragment's depth while the march fogs from its ray hit, which sits
   // somewhere else entirely. The two agreed only while both were plain linear distance;
@@ -45,5 +189,5 @@ export function createTerrainMaterial(
   // (terrainGeometry.ts). Being unlit, a back face now shows terrain colour rather
   // than the black that made near-plane clipping look like a void.
   material.side = THREE.DoubleSide;
-  return material;
+  return { material, detail };
 }

@@ -1,14 +1,14 @@
 {
-  "source": "gmile",
+  "source": "egypt",
   "trn": {
-    "terrain_name": "EXP2-Green Mile",
+    "terrain_name": "Egypt",
     "terrain_creator": "Celtic",
-    "color_map": "ct502_c",
-    "elev_map": "ct502_d",
-    "detail_map": "ct502_m",
-    "detail_color": "dfdg1_cm",
-    "detail_elev": "dfdg1_dm",
-    "char_data": "dfdg1_cm",
+    "color_map": "ct501_c",
+    "elev_map": "ct501_d",
+    "detail_map": "ct501_m",
+    "detail_color": "ct1_cm",
+    "detail_elev": "ct1_dm",
+    "char_data": "dfg1_cm",
     "sky_map": "clouds01",
     "sky_palette": "skygrd01",
     "sky_height": 1236,
@@ -29,8 +29,8 @@
       "file": "height.png",
       "width": 1024,
       "height": 1024,
-      "rawMin": 5,
-      "rawMax": 174
+      "rawMin": 14,
+      "rawMax": 55
     },
     "color": {
       "file": "color.jpg"
@@ -39,7 +39,14 @@
       "file": "detail.png",
       "width": 1024,
       "height": 1024,
-      "distinctIndices": 62
+      "distinctIndices": 5
+    },
+    "detailColor": {
+      "file": "detail_color.png",
+      "tileSize": 64,
+      "tiles": 256,
+      "grid": 16,
+      "atlasSize": 1024
     },
     "detailElev": {
       "file": "detail_elev.png",
@@ -47,23 +54,20 @@
       "height": 16384,
       "tileSize": 64,
       "tiles": 256,
-      "substituted": true,
-      "substitutedFrom": "ct1_dm.pcx",
-      "referencedName": "dfdg1_dm"
+      "substituted": false,
+      "referencedName": "ct1_dm"
     },
     "grass": {
       "file": "grass.png",
       "width": 1024,
       "height": 1024,
       "rawMin": 0,
-      "rawMax": 255,
-      "rawMean": 30.7,
-      "detailIndicesUsed": 62,
-      "substituted": true,
+      "rawMax": 64,
+      "rawMean": 54,
+      "detailIndicesUsed": 5,
+      "substituted": false,
       "vegetationGated": false
     }
   },
-  "missing": [
-    "dfdg1_cm"
-  ]
+  "missing": []
 }

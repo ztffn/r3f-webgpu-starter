@@ -14,14 +14,14 @@ import { Terrain } from "./Terrain";
 import { PerfMonitor, type PerfSample } from "./PerfMonitor";
 import { FlyControls, type FlyState, type Stance } from "./FlyControls";
 import { Heightfield } from "./Heightfield";
-import { createTerrainMaterial } from "./TerrainMaterial";
+import { createTerrainMaterial, type TerrainDetailUniforms } from "./TerrainMaterial";
 import { createGrassMaterial, type GrassUniforms } from "./GrassMaterial";
 import { createBladeMaterial, createBladeMesh, type BladeUniforms } from "./BladeMaterial";
 import { createColorGrade } from "./colorGrade";
 import { createFog } from "./fog";
 import { bakeNoiseTexture } from "./noiseTexture";
 import { cubeTexture, normalWorldGeometry } from "three/tsl";
-import { WEATHER_PRESETS, readWeather, type WeatherPreset } from "./weather";
+import { WEATHER_PRESETS, readWeather, lightingOf, type WeatherPreset } from "./weather";
 import { createAtmosphere } from "./atmosphere";
 import { createPrecipitation } from "./Precipitation";
 import { buildBladeGeometry } from "./bladeGeometry";
@@ -69,10 +69,14 @@ const ImpactEffects = lazy(() =>
   import("../fps/presentation/ImpactEffects").then((m) => ({ default: m.ImpactEffects }))
 );
 import { BENCH } from "./bench";
+import { DevPlacedObject } from "./DevPlacedObject";
+import { MissionObjects } from "./MissionObjects";
+import type { TerrainScale } from "./config";
 import {
+  readMapSlug,
   TERRAIN_SLUG,
+  CALIBRATED_TERRAIN_SCALE,
   HEIGHT_SCALE,
-  METERS_PER_TEXEL,
   lodSchedule,
   GRASS_SCALE,
   GRASS_STEPS,
@@ -253,6 +257,8 @@ export interface SceneHandles {
   fog: ReturnType<typeof createFog>;
   precipitation: ReturnType<typeof createPrecipitation>;
   blades: BladeUniforms | null;
+  terrainDetail: TerrainDetailUniforms | null;
+  lights: VisualDialTargets["lights"];
 }
 
 export interface DF2SceneProps {
@@ -260,6 +266,13 @@ export interface DF2SceneProps {
   grass?: boolean;
   grounded?: boolean;
   stance?: Stance;
+  /**
+   * Live terrain-scale override (dev console Scene tab). Changing it rebuilds
+   * the whole world — heightfield, chunks, grass, motor terrain — so the owner
+   * commits it on slider release, not per input tick. Real maps only; the
+   * synthetic fallback keeps its own scale.
+   */
+  terrainScale?: TerrainScale;
   onPerf?: (s: PerfSample) => void;
   onFly?: (s: FlyState) => void;
   /** The room's join code, once a private room has sent it. */
@@ -343,6 +356,7 @@ export function DF2Scene({
   grass = true,
   grounded = false,
   stance = "stand",
+  terrainScale,
   onStatus,
   onPerf,
   onFly,
@@ -378,15 +392,33 @@ export function DF2Scene({
   // undefined = still loading, null = no assets (synthetic), object = real map
   const [loaded, setLoaded] = useState<LoadedTerrain | null | undefined>(undefined);
 
+  // The slug this client loads — also what the room's reported map is checked
+  // against once ROOM_INFO arrives.
+  const mapSlug = useMemo(
+    () => readMapSlug(typeof window === "undefined" ? "" : window.location.search),
+    []
+  );
+
   useEffect(() => {
     let alive = true;
-    loadTerrain(TERRAIN_SLUG).then((t) => {
+    // The heuristic HALF of the mismatch warning: a client-set ?map= against
+    // the presumed-default server, warned before the join even resolves. The
+    // definitive check is the ROOM_INFO effect below, which compares against
+    // the map the room actually reports — this one exists because it can fire
+    // even when the server is unreachable.
+    if (netDemo && mapSlug !== TERRAIN_SLUG) {
+      console.warn(
+        `[DF2Scene] networked with ?map=${mapSlug} — the server must be running the same ` +
+          `map (DF2_MAP=${mapSlug}) or movement will desync.`
+      );
+    }
+    loadTerrain(mapSlug).then((t) => {
       if (alive) setLoaded(t);
     });
     return () => {
       alive = false;
     };
-  }, []);
+  }, [netDemo, mapSlug]);
 
   useEffect(() => {
     onStatus?.({ loading: loaded === undefined, terrain: loaded ?? null });
@@ -397,11 +429,13 @@ export function DF2Scene({
     if (loaded === undefined) return null; // don't build anything while loading
 
     if (loaded) {
+      // GameApp owns the dial state (URL seeds included); a DF2Scene mounted
+      // without the prop builds at the shipped calibration. TerrainScale's
+      // fields deliberately match HeightmapSource, so it spreads.
       const heightfield = Heightfield.fromHeightmap({
         data: loaded.heights,
         size: loaded.size,
-        metersPerTexel: METERS_PER_TEXEL,
-        heightScale: HEIGHT_SCALE,
+        ...(terrainScale ?? CALIBRATED_TERRAIN_SCALE),
       });
       return {
         heightfield,
@@ -409,6 +443,7 @@ export function DF2Scene({
         heightSize: loaded.size,
         size: loaded.size,
         colorMap: loaded.colorMap,
+        detail: loaded.detail,
         grassMap: loaded.grassMap,
         filter: loaded.filter,
         waterHeight: loaded.waterHeight,
@@ -426,11 +461,12 @@ export function DF2Scene({
       heightSize: bytes.size,
       size,
       colorMap,
+      detail: null,
       grassMap,
       filter: undefined,
       waterHeight: 0,
     };
-  }, [loaded]);
+  }, [loaded, terrainScale]);
 
   const heightfield = world?.heightfield ?? null;
   // The networked client's lifetime belongs to this scene, not to
@@ -446,6 +482,21 @@ export function DF2Scene({
   useEffect(() => {
     onRoomInfo?.(roomInfo);
   }, [onRoomInfo, roomInfo]);
+  // The definitive map-mismatch check, covering BOTH directions: the heuristic
+  // above only catches a client-set ?map=, but a server switched with
+  // DF2_MAP=egypt against a default client was completely silent — the room's
+  // metadata carried its map and nothing client-side read it. The server now
+  // names its map in ROOM_INFO; disagreement is loud because the symptom
+  // (rubber-banding on every slope) is otherwise undiagnosable.
+  useEffect(() => {
+    if (roomInfo?.map !== undefined && roomInfo.map !== mapSlug) {
+      console.error(
+        `[DF2Scene] map mismatch: this client loaded "${mapSlug}" but the room ` +
+          `simulates "${roomInfo.map}". Movement WILL desync — rejoin with ` +
+          `?map=${roomInfo.map}.`
+      );
+    }
+  }, [roomInfo, mapSlug]);
   // Health takes the same route for the same reason. The hook is what subscribes;
   // this effect only forwards, so a change wakes the HUD and nothing in the scene.
   const health = usePlayerVitals(gameClient);
@@ -587,13 +638,19 @@ export function DF2Scene({
     scene.background = fog.applySky(cubeTexture(skyBox), normalWorldGeometry);
   }, [fog, scene, skyBox, weather]);
 
-  const material = useMemo(
+  const terrainKit = useMemo(
     () =>
       world?.colorMap
-        ? createTerrainMaterial({ colorMap: world.colorMap, atmosphere })
+        ? createTerrainMaterial({
+            colorMap: world.colorMap,
+            atmosphere,
+            detail: world.detail,
+            metersPerTexel: world.heightfield.cellSize,
+          })
         : null,
     [atmosphere, world]
   );
+  const material = terrainKit?.material ?? null;
   useEffect(() => () => material?.dispose(), [material]);
 
   // --- columnar grass (docs/07) ---------------------------------------------
@@ -728,6 +785,16 @@ export function DF2Scene({
    * room WRITES through it — two hand-kept lists of the same five fields is exactly
    * the drift `visualDials.ts` exists to prevent.
    */
+  // Preset lighting, recomputed when the preset changes; the refs below let the
+  // Lighting dials write the live lights without a re-render.
+  const lighting = useMemo(() => lightingOf(weather), [weather]);
+  const sunRef = useRef<THREE.DirectionalLight>(null);
+  const fillRef = useRef<THREE.HemisphereLight>(null);
+  const ambientRef = useRef<THREE.AmbientLight>(null);
+  // Stable across every re-render, so dialTargets does not churn a nested object
+  // each time fog or grade changes.
+  const lights = useMemo(() => ({ sun: sunRef, fill: fillRef, ambient: ambientRef }), []);
+
   const dialTargets = useMemo<VisualDialTargets>(
     () => ({
       rain: BENCH.rain ?? weather.rain,
@@ -735,33 +802,43 @@ export function DF2Scene({
       fog,
       precipitation,
       blades: bladeKit?.uniforms ?? null,
+      terrainDetail: terrainKit?.detail ?? null,
+      lights,
     }),
-    [bladeKit, fog, grade, precipitation, weather]
+    [bladeKit, fog, grade, precipitation, terrainKit, weather]
   );
 
   /**
-   * THE ONE PLACE the room's visuals are written: preset first, then the room's dial
-   * overrides on top.
+   * The PRESET's writes into the shared uniforms — grade, fog, precipitation.
    *
-   * One effect rather than three, and the ordering is why. These uniforms are shared
-   * — the preset rewrites the same fog and grade values a dial overrides — so with
-   * separate effects the only thing sequencing them was their position in this file,
-   * 200 lines apart, enforced by a comment. There is no lint rule here to catch a
-   * reordered hook, and the failure is silent: a preset switch wipes the room's
-   * dialled fog. Two adjacent statements cannot be reordered by accident.
+   * SPLIT from the room-override apply below, and the split is load-bearing
+   * for OFFLINE dials: grade, fog and precipitation are constructed once and
+   * survive a world rebuild, so this effect must not re-run just because
+   * terrainKit or bladeKit changed identity. It used to (via dialTargets), and
+   * offline — where no room override ever re-applies — a texel commit snapped
+   * every dialled fog and grade value back to the preset while the Weather
+   * tab's sliders still showed the dialled numbers. Hence also `loaded` rather
+   * than `world` for the .trn filter: the filter is the MAP's, stable across
+   * scale rebuilds.
    *
-   * `weather` IS A DEPENDENCY, and leaving it out is what made the preset buttons
-   * look dead. These are imperative writes into live uniforms, so an effect that
-   * never re-runs leaves them frozen at whatever the URL loaded with — while the sky
-   * still swapped, because that memo does list `weather`. A preset appeared to
-   * half-work: new sky, same graded ground, same fog range.
+   * `weather` IS A DEPENDENCY, and leaving it out is what made the preset
+   * buttons look dead. These are imperative writes into live uniforms, so an
+   * effect that never re-runs leaves them frozen at whatever the URL loaded
+   * with — while the sky still swapped, because that memo does list `weather`.
+   * A preset appeared to half-work: new sky, same graded ground, same fog range.
+   *
+   * ORDERING with the override effect below: preset first, overrides on top.
+   * They are DECLARED adjacent in that order, and any commit that runs both
+   * runs them in declaration order — a preset switch changes `weather`, which
+   * changes dialTargets, so both fire together and the room's dialled fog
+   * survives the switch. Do not reorder or separate these two effects.
    */
   useEffect(() => {
     // A real map's own .trn values win over a neutral preset's, since they are what
     // the author graded the colormap for.
     grade.set(
-      world?.filter && weather.id === "day"
-        ? { filter: world.filter, gamma: 128, saturation: 128 }
+      loaded?.filter && weather.id === "day"
+        ? { filter: loaded.filter, gamma: 128, saturation: 128 }
         : weather
     );
     fog.set(fogSettings(weather, noise, windVector));
@@ -770,8 +847,19 @@ export function DF2Scene({
     // precipitation to the preset made it reachable only by changing the whole scene.
     precipitation.setIntensity(BENCH.rain ?? weather.rain);
     precipitation.uniforms.mode.value = BENCH.snow ?? weather.snow;
+  }, [fog, grade, loaded, noise, precipitation, weather, windVector]);
+
+  /**
+   * The room's dial overrides, applied over whatever the preset just wrote —
+   * and re-applied onto FRESH uniforms after a world rebuild (dialTargets
+   * changes identity when terrainKit/bladeKit rebuild, and the new detail and
+   * blade uniforms start at their defaults). Offline (room === null) this is a
+   * no-op, which is exactly what keeps offline-dialled atmosphere alive across
+   * rebuilds. See the ordering note on the preset effect above.
+   */
+  useEffect(() => {
     if (room !== null) applyVisualDials(dialTargets, room.overrides);
-  }, [dialTargets, fog, grade, noise, precipitation, room, weather, windVector, world]);
+  }, [dialTargets, room]);
 
   // A local switch is REFUSED, not merely overwritten, once the room owns the
   // weather: the server broadcasts on change only, so nothing would ever arrive
@@ -785,17 +873,16 @@ export function DF2Scene({
   );
 
   useEffect(() => {
+    // Spread of dialTargets, not a second field list: SceneHandles structurally
+    // extends VisualDialTargets, and two hand-kept copies of the same fields is
+    // exactly the drift the dialTargets comment above warns about.
     onSceneReady?.({
+      ...dialTargets,
       preset: weather,
-      rain: BENCH.rain ?? weather.rain,
       setPreset,
       roomDials: room,
-      grade,
-      fog,
-      precipitation,
-      blades: bladeKit?.uniforms ?? null,
     });
-  }, [bladeKit, fog, grade, onSceneReady, precipitation, room, setPreset, weather]);
+  }, [dialTargets, onSceneReady, room, setPreset, weather]);
 
   // Stable identity so Terrain's slot memo does not rebuild; reads the uniform at
   // call time so the canopy slider takes effect without a React render.
@@ -821,7 +908,11 @@ export function DF2Scene({
   // `?water=` forces a level, because no map in this pack has one — every .trn ships
   // water_height 0, which is below the terrain's own minimum, so the plane never draws
   // and the submerged path has never been exercised.
-  const waterLevel = BENCH.water ?? (world?.waterHeight ?? 0) * HEIGHT_SCALE;
+  // The heightfield's OWN scale, not the config constant — the terrain is built
+  // at the live dial value, and water that reads a different scale parts company
+  // with the ground the moment the height slider moves.
+  const waterLevel =
+    BENCH.water ?? (world?.waterHeight ?? 0) * (heightfield?.heightScale ?? HEIGHT_SCALE);
   const showWater = !!heightfield && waterLevel > heightfield.minHeight;
   // Follows the camera, so it only has to out-reach the fog, not the world — and the
   // preset's fog, since a weather preset can pull the far distance in.
@@ -843,17 +934,37 @@ export function DF2Scene({
 
       {/* Sun. The terrain is unlit (its colormap is pre-shaded); this lights the
           water and anything else added to the scene later. */}
+      {/* Lighting comes from the PRESET, not constants: a hardcoded 2.4 sun left
+          props in full daylight at night while the unlit terrain went dark
+          around them. Contrast is the sun-to-fill ratio, so overcast raises
+          fill as it lowers sun rather than just dimming (weather.ts
+          `lightingOf`). Live handles so the Lighting dials can drive them. */}
       <directionalLight
+        ref={sunRef}
         position={[
           SUN_DIRECTION[0] * SUN_DISTANCE,
           SUN_DIRECTION[1] * SUN_DISTANCE,
           SUN_DIRECTION[2] * SUN_DISTANCE,
         ]}
-        intensity={2.4}
-        color={"#fff4e0"}
+        intensity={lighting.sunIntensity}
+        color={lighting.sunColor}
       />
-      {/* Sky/ground fill */}
-      <hemisphereLight args={[weather.skyColor, "#5a5340", 0.75]} position={[0, 400, 0]} />
+      {/* Sky/ground bounce */}
+      {/* Props, not `args`: `args` makes R3F reconstruct the light on a preset
+          switch, which swaps `fillRef.current` out from under the Lighting
+          dials. Its two siblings are patched in place; this now matches. */}
+      {/* fillSkyColor, not weather.skyColor: the fill's colour is what the sky
+          CASTS, and a near-black night sky multiplied into any intensity kept
+          the "Sky fill" dial visibly inert on dark presets (weather.ts). */}
+      <hemisphereLight
+        ref={fillRef}
+        color={lighting.fillSkyColor}
+        groundColor={lighting.groundColor}
+        intensity={lighting.fillIntensity}
+        position={[0, 400, 0]}
+      />
+      {/* Flat floor, so a face pointing away from sun AND sky is dark, not black */}
+      <ambientLight ref={ambientRef} intensity={lighting.ambientIntensity} />
 
       {heightfield && material && (
         <Terrain
@@ -899,6 +1010,9 @@ export function DF2Scene({
       )}
 
       {showWater && <Water level={waterLevel} span={waterSpan} material={waterMaterial} />}
+
+      {heightfield && <DevPlacedObject heightfield={heightfield} />}
+      {heightfield && <MissionObjects heightfield={heightfield} />}
 
       {scopeDemo && FPS_DEBUG.shotTrajectory && (
         <Suspense fallback={null}>

@@ -8,6 +8,7 @@
 // synthetic terrain — which now renders grass too (syntheticMaps.ts).
 
 import * as THREE from "three/webgpu";
+import { isAssetSlug } from "./config";
 
 /** Shape of terrain.json emitted by prepare-terrain.mjs. Exported so the Node
  * game server types the same manifest (type-only — this module is browser-only
@@ -26,7 +27,14 @@ export interface TerrainMeta {
   assets: {
     height?: { file: string; width: number; height: number; rawMin: number; rawMax: number };
     color?: { file: string };
-    detail?: { file: string; distinctIndices: number };
+    detail?: { file: string; width: number; height: number; distinctIndices: number };
+    detailColor?: { file: string; tileSize: number; tiles: number; grid: number; atlasSize: number };
+    charData?: {
+      entries: number;
+      materials: string[];
+      vegetationTiles: number;
+      hardTiles: number[];
+    };
     grass?: {
       file: string;
       width: number;
@@ -36,6 +44,8 @@ export interface TerrainMeta {
       rawMean: number;
       /** True when baked from a SUBSTITUTED detail_elev strip (docs/06 §7). */
       substituted?: boolean;
+      /** True when a .cal restricted the canopy to vegetation families (docs/06 §11.1). */
+      vegetationGated?: boolean;
     };
     detailElev?: { substituted?: boolean; referencedName?: string };
   };
@@ -53,6 +63,24 @@ export interface LoadedTerrain {
   heights: Uint8Array;
   size: number;
   colorMap: THREE.Texture | null;
+  /**
+   * The close-range detail pass's inputs, or null when the map ships no
+   * detail_color assets. ONE nullable record rather than parallel fields: the
+   * pieces are all-or-nothing, and a record makes that structural instead of a
+   * comment plus a sentinel in every consumer.
+   */
+  detail: {
+    /** Per-texel tile INDEX (0-255), NEAREST — indices must never interpolate. */
+    indexMap: THREE.DataTexture;
+    /** The detail_color strip repacked as a square tile atlas — the original's
+     * close-range ground color; the colormap never carried it (docs/06 §11). */
+    atlas: THREE.Texture;
+    /** Tiles per atlas row/column, from the manifest. */
+    grid: number;
+    /** Tile edge in atlas pixels, from the manifest — NOT re-derived from the
+     * texture, so padding the atlas later cannot silently skew tile lookup. */
+    tileSize: number;
+  } | null;
   /** Per-texel grass canopy height, 0-255. LINEAR-filtered — it is the envelope. */
   grassMap: THREE.DataTexture | null;
   grassSource: GrassSource;
@@ -143,19 +171,29 @@ export function grassFromColormap(rgba: Uint8ClampedArray, width: number, height
   return out;
 }
 
-function makeGrassTexture(data: Uint8Array, size: number): THREE.DataTexture {
+/** Wrapping single-channel map over the terrain grid; the filter is the caller's
+ * one real choice, made where the data's meaning is known. */
+function makeR8Texture(
+  data: Uint8Array,
+  size: number,
+  filter: THREE.MagnificationTextureFilter
+): THREE.DataTexture {
   const tex = new THREE.DataTexture(data, size, size, THREE.RedFormat, THREE.UnsignedByteType);
+  tex.magFilter = filter;
+  tex.minFilter = filter;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+function makeGrassTexture(data: Uint8Array, size: number): THREE.DataTexture {
   // LINEAR: this texture is the canopy ENVELOPE (where grass grows and roughly
   // how tall), not the columns themselves. Per-column height and colour come
   // from the shader's cell hash, which runs at sub-metre grass-cell resolution.
   // Sampling the envelope NEAREST just stamps the 2 m terrain texel grid onto
   // the canopy as visible blocks.
-  tex.magFilter = THREE.LinearFilter;
-  tex.minFilter = THREE.LinearFilter;
-  tex.wrapS = THREE.RepeatWrapping;
-  tex.wrapT = THREE.RepeatWrapping;
-  tex.needsUpdate = true;
-  return tex;
+  return makeR8Texture(data, size, THREE.LinearFilter);
 }
 
 /** Colormap texture built from pixels already in hand, so the file decodes once. */
@@ -175,6 +213,38 @@ function colorTextureFromRgba({ rgba, width, height }: Rgba): THREE.DataTexture 
   tex.anisotropy = 8;
   tex.needsUpdate = true;
   return tex;
+}
+
+/** One prepared terrain in /assets/terrain/index.json. */
+export interface TerrainIndexEntry {
+  slug: string;
+  name: string;
+}
+
+/**
+ * The prepared-terrain list, for the dev map selector.
+ *
+ * prepare-terrain.mjs rebuilds index.json every time a map is prepared, so
+ * committing a new map is what publishes it here — no hand-kept list. Returns
+ * null when the index is absent or not JSON; the content-type guard is the
+ * same SPA-rewrite defence loadTerrain uses, because a catch-all rewrite
+ * answers 200 text/html for any path. Entries are slug-validated on the way
+ * in — the slug is interpolated into asset paths and URLs.
+ */
+export async function loadTerrainIndex(): Promise<TerrainIndexEntry[] | null> {
+  try {
+    const res = await fetch("/assets/terrain/index.json");
+    if (!res.ok) return null;
+    const type = res.headers.get("content-type") ?? "";
+    if (!type.includes("json")) return null;
+    const entries = (await res.json()) as TerrainIndexEntry[];
+    if (!Array.isArray(entries)) return null;
+    return entries
+      .filter((e) => typeof e?.slug === "string" && isAssetSlug(e.slug))
+      .map((e) => ({ slug: e.slug, name: typeof e.name === "string" ? e.name : e.slug }));
+  } catch {
+    return null;
+  }
 }
 
 export async function loadTerrain(slug: string): Promise<LoadedTerrain | null> {
@@ -215,6 +285,47 @@ export async function loadTerrain(slug: string): Promise<LoadedTerrain | null> {
     let colorMap: THREE.Texture | null = null;
     let grassMap: THREE.DataTexture | null = null;
     let grassSource: GrassSource = "none";
+
+    // --- close-range detail color (index map + tile atlas) ----------------
+    // Both or neither: an index map without tiles has nothing to point at.
+    // Kicked off here and awaited at the end so its two fetches overlap the
+    // colormap/grass loads below instead of lengthening the serial chain.
+    const detailAssets = meta.assets.detail;
+    const detailColorMeta = meta.assets.detailColor;
+    const detailPromise =
+      detailAssets && detailColorMeta
+        ? Promise.all([
+            loadSquare(`${base}/${detailAssets.file}`, {
+              width: detailAssets.width,
+              height: detailAssets.height,
+            }),
+            new THREE.TextureLoader().loadAsync(`${base}/${detailColorMeta.file}`),
+          ]).then(([d, atlas]) => {
+            atlas.flipY = false;
+            atlas.colorSpace = THREE.SRGBColorSpace;
+            // No mipmaps: minification would average across tile boundaries in
+            // the atlas, bleeding one ground type into another. The material
+            // fades the detail layer out well before aliasing gets objectionable.
+            atlas.generateMipmaps = false;
+            atlas.magFilter = THREE.LinearFilter;
+            atlas.minFilter = THREE.LinearFilter;
+            atlas.wrapS = THREE.ClampToEdgeWrapping;
+            atlas.wrapT = THREE.ClampToEdgeWrapping;
+            return {
+              // NEAREST is load-bearing: these are tile INDICES. Interpolating
+              // between index 244 and index 17 yields a tile that exists but
+              // has nothing to do with either neighbour.
+              indexMap: makeR8Texture(d.data, d.size, THREE.NearestFilter),
+              atlas,
+              grid: detailColorMeta.grid,
+              tileSize: detailColorMeta.tileSize,
+            };
+          })
+        : null;
+    // The rejection is consumed by the guarded `await` below; this spare
+    // handler only stops the browser flagging it as unhandled in the window
+    // where the colormap/grass loads are still in flight.
+    detailPromise?.catch(() => {});
 
     if (useRealStrip) {
       if (meta.assets.color) {
@@ -257,6 +368,25 @@ export async function loadTerrain(slug: string): Promise<LoadedTerrain | null> {
       );
     }
 
+    // The detail layer is OPTIONAL — `detail` is nullable and every consumer
+    // handles null — so its failure must not reject the whole load. Awaited
+    // inside its own catch rather than in the return: thrown there it landed in
+    // the outer catch, which silently swapped the already-loaded real map for
+    // the synthetic fallback world (and, networked, desynced this client
+    // against a server that had loaded the real heightfield fine).
+    let detail: LoadedTerrain["detail"] = null;
+    if (detailPromise) {
+      try {
+        detail = await detailPromise;
+      } catch (err) {
+        console.warn(
+          `[df2] terrain "${slug}": close-range detail assets failed to load — ` +
+            `rendering without the detail layer:`,
+          err
+        );
+      }
+    }
+
     return {
       slug,
       name: meta.trn.terrain_name ?? slug,
@@ -264,6 +394,7 @@ export async function loadTerrain(slug: string): Promise<LoadedTerrain | null> {
       heights: data,
       size,
       colorMap,
+      detail,
       grassMap,
       grassSource,
       waterHeight: meta.trn.water_height ?? 0,

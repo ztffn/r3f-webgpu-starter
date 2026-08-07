@@ -166,3 +166,12 @@ assets/3d/characters/player1/textures/
 account.db
 account.db-shm
 account.db-wal
+# Retail-derived conversions. Personal-use-only, never committed (docs/01 §3).
+# `local/` holds .3DI -> GLB models and imported missions.
+public/assets/local/
+# Prepared RETAIL terrains are symlinks into _tempAssets/. Named individually
+# because sibling slugs here (egypt, gmile) come from community freeware and ARE
+# committed — a blanket rule would drop those too.
+public/assets/terrain/dfg4
+public/assets/terrain/dfg5
+public/assets/terrain/dmd3

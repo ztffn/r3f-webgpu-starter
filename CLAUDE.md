@@ -114,11 +114,12 @@ player instinctively recognise this?* — applies to features, not to whether a 
   Plan: `plans/2026-08-04-death-and-damage-feedback-v1.md`.
 - **Next up (combat authority):** server-authoritative damage, weather and world state —
   the worked brief is `docs/plans/2026-08-03-character-animation-session-handoff.md`.
-  Also still queued (`01-...md` Phase 1.6): human-test Green Mile, then runtime map switching.
-  Note that **the real grass data path has never been run** — Green Mile's strip is missing so
-  it renders a stand-in canopy, but egypt / R66 / blizzard / vul001 ship their own strips and
-  load as `grassSource: "real"` (`06-...md` §7). Preparing one of those is the cheapest way to
-  exercise it.
+  Also still queued (`01-...md` Phase 1.6): human-test Green Mile, then runtime map switching
+  (the dev console's map selector reloads into `?map=`; it does not switch live).
+  The real grass data path **now runs**: egypt is prepared, committed and verified loading
+  `grassSource: "real"` in-browser (2026-08-07). Green Mile still renders a stand-in canopy —
+  its own strip is missing (`06-...md` §7) — and R66 / blizzard / vul001 ship strips but are
+  not prepared yet.
 - **Accounts (Aug 2026):** `@colyseus/auth` + **Kysely** (not `@colyseus/database`, which is
   rejected — see the design record §2.2), running **inside the game server process** on the
   Express app the Colyseus transport already owns. `mountAccounts()` is the whole seam.
@@ -141,6 +142,15 @@ player instinctively recognise this?* — applies to features, not to whether a 
   the listing filter. Private rooms use Colyseus's own `private` flag; the join code lives in
   room metadata and is stripped before any response, which is why the listing is built
   server-side. Design record §5.4 has the verification and what is still open.
+- **Map identity and selection (Aug 2026):** the server refuses an invalid `DF2_MAP` at
+  startup instead of silently serving the default, names its map in the ROOM_INFO join
+  message, and the client raises a console error when it loaded a different terrain than
+  the room simulates — the desync that mismatch produces is otherwise undiagnosable. The
+  server's static collider span is **derived from the loaded map**, not a constant (the
+  stale 2048 quietly cost 4x memory after the texel calibration). Offline, the dev
+  console's Scene tab has a map selector fed by `public/assets/terrain/index.json`, which
+  `prepare-terrain.mjs` regenerates on every run (display-name collisions fall back to
+  slugs), and the Launch tab round-trips `?map=` and `?mission=` instead of dropping them.
 - **Entitlements and medals (Aug 2026, phase 7 done):** `src/account/medals.ts` is the
   catalogue and the only award rule; every combat medal carries `earnable: false`
   because nothing writes kills yet, and `earnedMedals` checks that flag **before** the
@@ -215,8 +225,13 @@ player instinctively recognise this?* — applies to features, not to whether a 
   mod team, who hold the rights (`01-...md` §3),
   so the pipeline reproduces from source. The distinction that still holds: **retail**-extracted
   DF2 data is personal-use-only and never committed.
-- Scale constants (`HEIGHT_SCALE`, `METERS_PER_TEXEL`) are **not yet calibrated** — they're
-  placeholders in `src/df2/config.ts`.
+- `METERS_PER_TEXEL` is **calibrated: 1 texel = 1 m** (maps are 1.024 km square), via
+  .3DI units (256/m — soldier models are 1.83 m) against the egypt map's painted pyramid
+  footprints (`docs/06` §8). `HEIGHT_SCALE` is **calibrated too: 0.5 m per raw elevation
+  unit** — the official mission-editor manual states water level is measured in 1/2 metres,
+  and water and terrain elevation are the same quantity to the engine (`docs/06` §8).
+  Both scales now ship real values in `src/df2/config.ts`; the Scene tab's sliders remain
+  as A/B instruments.
 
 ## Commands
 

@@ -1,5 +1,11 @@
 # Lit surfaces, placed scenery, and the foliage layer
 
+> **SUPERSEDED by `2026-08-07-foliage-and-scenery-plan-v2.md`.** This record was written
+> before anything had been measured on a GPU, and the measurements changed the ORDER of the
+> work, not just its confidence. Its §4 (the legacy/new producer split and the shared
+> prototype manifest) still stands and v2 refers back to it; everything about sequencing,
+> and its §2 description of the atmosphere seam, is out of date.
+
 Plan for the branch that joins three things which turned out to be one: the post-lighting
 atmosphere term (`docs/08` §8 invariant 7's known-open half), the vegetation runtime that
 sat unmerged on `claude/foliage-rendering-research-jtr43e` since 2026-08-02, and the

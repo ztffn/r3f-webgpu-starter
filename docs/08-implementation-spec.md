@@ -187,6 +187,12 @@ node tools/df2-extract/prepare-terrain.mjs <extractedDir> <trnName> <outDir> \
 `prepare-terrain.mjs` writes `<outDir>/terrain.json` plus the PNG/JPEG assets. Point `<outDir>`
 at `public/assets/terrain/<slug>/`, and set `TERRAIN_SLUG` in `config.ts`.
 
+Every run also regenerates `public/assets/terrain/index.json` — the dev map selector's list of
+prepared terrains — by scanning `<outDir>`'s siblings for a `terrain.json`, so preparing a map
+is what publishes it to the selector; there is no hand-kept list. Display names come from
+`terrain_name`, and two maps sharing one (dfg4 and dfg5 are both "Green One") fall back to
+their slugs.
+
 ### 5.2 `terrain.json` — the contract between tool and runtime
 
 Consumed by `loadTerrain.ts`; its TypeScript shape is `TerrainMeta` there.
@@ -196,9 +202,16 @@ Consumed by `loadTerrain.ts`; its TypeScript shape is `TerrainMeta` there.
 - `assets.height` — `{ file, width, height, rawMin, rawMax }`. 8-bit greyscale PNG.
 - `assets.color` — the colormap, JPEG passthrough.
 - `assets.detail` — per-texel zoning **indices** 0–255 as greyscale.
+- `assets.detailColor` — the `_cm` strip repacked as a square atlas:
+  `{ file, tileSize, tiles, grid, atlasSize }`. Present only when the strip was; **both
+  `detail` and `detailColor` must exist** for the close-range pass (§6.3) to build.
+- `assets.charData` — the `.cal` summary: entry count, distinct materials, vegetation tile
+  count, hard tiles. A line's position in the `.cal` IS its tile index — the parser keeps
+  raw line indices, so a stray interior blank line cannot shift every later tile's material.
 - `assets.detailElev` — the strip. Carries `substituted`, `substitutedFrom`, `referencedName`.
-- `assets.grass` — the baked canopy field, and **`substituted`** if it was baked from a
-  strip that isn't the one the `.trn` asked for.
+- `assets.grass` — the baked canopy field, **`substituted`** if it was baked from a strip
+  that isn't the one the `.trn` asked for, and **`vegetationGated`** when a `.cal`
+  restricted the canopy to vegetation families.
 
 ### 5.3 The grass chain, and why provenance is tracked
 
@@ -312,6 +325,11 @@ offline. Verify a shading claim by rendering its math, not by reasoning about it
 Gain, power (master layer opacity — the taste lever for "tiles read darker and more
 saturated than the colormap", which they authentically are) and both fade distances are
 live dials (`visualDials.ts`, rendered on the Scene tab — ground detail is not weather).
+The pass is optional at RUNTIME too: a failed fetch or decode of either detail asset
+degrades to `detail: null` with a console warning. It must never reject the whole load —
+awaited inside the load's outer try it did, silently swapping the real map for the
+synthetic fallback world (and desyncing a networked client against a server that had
+loaded the real heightfield fine).
 
 ### 6.4 `GrassMaterial` — the columnar march
 

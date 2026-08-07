@@ -81,7 +81,14 @@ width).
    preset so a switch reseeds them. Verified: `?weather=night` now reads sun 0.22 /
    fill 0.35 / ambient 0.10 against the old constant 2.4.
 
-   **Still open, and the balance will move when it lands:** (b) the post-lighting `shade`
+   **(b) DELIVERED 2026-08-07** — `atmosphere.litClass(Base)` shades after lighting and
+   forces the scene fog off (`docs/08` §8 invariant 7 has the mechanism and the TSL typing
+   trap that cost two attempts). The water plane and the foliage layer take it. **GLB-loaded
+   surfaces still do not**, because `GLTFLoader` emits plain non-node materials — so the
+   night-prop case below is only half fixed, and the retune it predicts is now due. The
+   original text follows.
+
+   **Was open, and the balance will move when it lands:** (b) the post-lighting `shade`
    for fog and grade (`docs/08` §8 invariant 7). Until lit surfaces receive fog, night
    props sit in unfogged darkness and the preset values above are tuned against a scene
    that is missing a term — expect to retune once (b) exists. The night preset currently

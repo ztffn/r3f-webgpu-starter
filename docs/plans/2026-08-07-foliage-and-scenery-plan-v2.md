@@ -359,6 +359,42 @@ undeformed geometry — cheap because the shadow disagrees with the silhouette.
 - **A tight shadow box** if shadows ever land: the forest pen shadows a ±200 unit
   orthographic volume near the camera rather than sizing a frustum to the world.
 
+## 5.5 START HERE next session
+
+Everything below is measured or specified; nothing needs re-deriving. Pick one of the first
+two — they are independent of each other.
+
+**A — server-side trunk collision (smaller, closes a live bug).** Players are currently shot
+through trees: the vegetation query runs on the client only while damage is
+server-authoritative. Measured affordable at 4.8-8.4 µs per ray (§2.3d). The four steps and
+the faithfulness check are §2.5. **Read the determinism precondition there before you start**
+— the density and spacing sliders become a desync and a cheat surface the moment this lands,
+so placement config has to come from the room like weather does.
+
+**B — the octahedral impostor far ring (larger, closes the biggest visual gap).** Nothing is
+drawn past the foliage reach, so every vista has a bare middle distance; the reach is a slider
+now so you can see the gap in one drag. §5 has the libraries assessed and why none is usable
+as a dependency (all WebGL-only, and the one that matters patches the same `positionNode` our
+material owns). §5.1 has the parameters worth copying — hemi-octahedral, 12 sprites a side,
+2048² atlas, albedo plus packed normal-and-depth — and the reason this is the ONLY far
+representation that can pass the blocking-fraction rule: it is a rendered image of the real
+geometry, so its silhouette is correct from every angle. Bake it OFFLINE in
+`tools/vegetation`, not at runtime. **Its atlas is alpha-cut, so `alphaMips` applies to it and
+its clamp must be reconciled with our 0.5 cutoff.** Do §5.1's index-indirection piece first if
+the ring needs more instances than buckets can carry.
+
+**Cheap and independent, whenever:** the six-slot remote-player grass parting (§5.1) — remote
+players currently leave grass undisturbed, which hides information the game should show; the
+tighter per-cell bounding sphere computed from actual instances; and giving `gpuMs` its own
+percentile accumulator so deltas under 2 ms become readable.
+
+**If frame time is the goal, none of the above is the answer.** Grass is three quarters of the
+GPU budget and foliage is 4% (§2.3). The march is per-fragment and the blades are per-vertex,
+so they need different fixes.
+
+**Before you measure anything, read §2.2.** Three traps each produced a wrong conclusion in
+the session that wrote this document.
+
 ## 6. Order
 
 1. **Measure the warm-up** (§3). One foregrounded sweep. Cheap and it closes a loop.

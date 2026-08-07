@@ -445,8 +445,35 @@ sweep, and a long-range view over many plants.
 Escape the vsync cap before concluding anything — `8.3 / 16.7 / 33.3 ms` are cadences, not
 measurements, and a cost that lives entirely inside one of them is invisible (`docs/09` §0).
 
+### 7.2b MEASURED ON A GPU, 2026-08-07 — and §7's premise is spent
+
+This section was written without a GPU. Everything below it that quotes a frame time is
+superseded by `2026-08-07-foliage-and-scenery-plan-v2.md`, which measured on real hardware.
+The headline corrections:
+
+- **No plant had ever drawn on WebGPU.** Ten vertex buffers against WebGPU's limit of eight
+  — the seven custom attributes plus position, normal and uv — so every foliage pipeline
+  failed to create. It worked in the SwiftShader environment this design was written in,
+  where the limit is higher. Fixed by packing (`aCard`, `aInstance`); the §2.1 module table's
+  attribute list is stale as a result.
+- **The layer costs about 4% of GPU time and is inside the measurement noise.** Grass is
+  three quarters of the budget. The anxiety this document carries about vegetation cost does
+  not survive measurement at these densities.
+- **Density and reach are live dials now** (Scene tab, `?foliage=1`), so the sweep in §7.2 no
+  longer needs a reload per configuration. Density SATURATES — a site yields at most one
+  plant — so spacing is the real lever: 5.33 m → 1.75 m gave 9x the plants for +2.6 ms.
+- **The first-view hitch is fixed.** It was 8 hitches on a first camera sweep and zero on
+  repeats — first-draw pipeline, buffer and bind-group setup, now warmed at mount with
+  `compileAsync` over the real buckets.
+- **The trunk query is sublinear:** 4.8 µs per 300 m ray at default density, 8.4 µs at ten
+  times the sites. Ballistic trunk collision is affordable at any density this layer reaches.
+
 ### 7.3 Known open items
 
+- ~~**Foliage reads darker than the terrain.**~~ **FIXED 2026-08-07** — it was taking three's
+  linear scene fog while the terrain faded to the sky cubemap. It now goes through
+  `atmosphere.litClass`, which shades after lighting (`docs/08` §8 invariant 7). Original
+  text follows.
 - **Foliage reads darker than the terrain.** The terrain is unlit pre-shaded colormap;
   foliage is PBR-lit by the scene's sun and hemisphere fill. Expect to dial the tints and
   light response — but do it on real hardware and against a reference, not in a software
@@ -454,7 +481,11 @@ measurements, and a cost that lives entirely inside one of them is invisible (`d
 - **Shadows are not in the experiment.** The scene's directional light does not cast, so the
   memo's shadows-off / near-only / full axis is unavailable without enabling shadow maps
   globally — which would change every existing frame time. Deferred deliberately.
-- **No impostor ring beyond the window — now the top item.** Geometry stops dead at the
+- **No impostor ring beyond the window — STILL the top item, and now the reach is a slider
+  so the gap is one drag away.** An octahedral impostor is the only far representation
+  assessed that keeps the silhouette correct from every angle, which §4 requires; the
+  parameters worth copying and the libraries rejected are in plan v2 §5.
+- **Original text:** **No impostor ring beyond the window.** Geometry stops dead at the
   window edge, which on any vista leaves the entire middle distance bare and is the single
   biggest reason the layer reads as sparse. Measured: 600 m of window at 64 m cells puts
   27,687 plants and 512 draw calls on screen. A far ring of impostor-only cells at a coarser

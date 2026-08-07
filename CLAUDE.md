@@ -31,6 +31,8 @@ player instinctively recognise this?* — applies to features, not to whether a 
 | `plans/2026-08-04-web-platform-and-ui-design.md` | **The web product: brand, site/HUD design system, accounts stack, tiers, phasing, hosting — the four traps phases 1–4 hit (§5.2) and the 21 findings the pre-merge review found (§5.7).** Read before touching `src/site/`, `src/ui/`, `src/hud/` or `src/devtools/` |
 | `plans/2026-08-04-community-layer-design.md` | **Profiles, tagwall, friends, presence, clans: the privacy model, the rate limits, and why `pair_key` is the only thing that can enforce one friendship per pair.** Read before touching `tools/account/community*` |
 | `plans/2026-08-04-player-statistics-design.md` | **The dfhub metric vocabulary, the three telemetry tables, and which of them nothing writes yet.** Read before adding any figure to a stats page |
+| `plans/2026-08-07-foliage-and-scenery-plan-v2.md` | **The vegetation layer as measured on a GPU: where the frame budget actually goes, how to measure this project, three traps that each produced a wrong conclusion, and three third-party libraries assessed and rejected.** Read before touching `src/foliage/` or quoting any performance number |
+| `plans/2026-08-02-foliage-vegetation-design.md` | The vegetation DESIGN — placement determinism, per-cell buckets, the blocking-fraction rule. Its §7 frame times predate a GPU; §7.2b lists what measurement overturned |
 
 ## Current state (August 2026)
 
@@ -196,6 +198,31 @@ player instinctively recognise this?* — applies to features, not to whether a 
   crash, not a soft failure. `accountClient.request` now rejects a 200 that is not JSON so it
   surfaces as an error message rather than a blank page, but that is a net, not the fix.
   `netlify.toml` is for static previews only.
+- **Vegetation layer (Aug 2026, behind `?foliage=1`):** bushes and trees as deterministic
+  RECORDS keyed on the wrapped cell index — Three-free, so a server can sample them — feeding
+  per-cell `InstancedMesh` buckets with a cell-uniform LOD and analytic trunk cylinders for
+  ballistics. **Every LOD preserves the plant's blocking fraction (0.55), asserted in tests**:
+  a distant tier that quietly thinned would hand free vision of a concealed target to whoever
+  triggered it (`docs/08` §8 invariant 6). Two defects had made it un-judgeable and both were
+  invisible to reasoning: ten vertex attributes against WebGPU's eight-buffer limit, so **no
+  plant had ever drawn on the primary backend**, and it took three's flat scene fog while
+  terrain faded to the sky. Measured: ~4% of GPU time, and 9x the plants for +2.6 ms. Live
+  dials on the Scene tab for density (saturates — spacing is the real lever), spawner reach
+  and site spacing. **Trunks stop bullets on the CLIENT ONLY while damage is
+  server-authoritative**, so players are currently shot through trees — measured affordable
+  and specified in plan v2 §2.5. Nothing is drawn past the reach, which is why vistas have a
+  bare middle distance.
+- **Lit surfaces get fog and the grade (Aug 2026):** `atmosphere.litClass(Base)` shades AFTER
+  lighting and forces the scene fog off in one call. This was the gating piece for the whole
+  asset phase (`docs/08` §8 invariant 7, which carries the TSL typing trap that cost two
+  attempts and renders the scene BLACK with nothing looking wrong). Water and foliage take it;
+  **GLB surfaces still do not**, because the loader emits plain non-node materials.
+- **Frame-time instrument (Aug 2026):** `src/df2/frameStats.ts` — percentiles, a cumulative
+  histogram and hitch counters that no report resets, plus GPU time under `?debug=1`. It
+  exists because a mean read 8.5 ms while the same run contained a 1.6-second frame. **Read
+  p99, worst-since-load and the hitch count before believing any mean**, and read plan v2 §2.2
+  before measuring: an unfocused Chrome window produces NO frames rather than slow ones, so a
+  frame-budgeted loader reads as a hang.
 - **Next up (web product):** community-hosted servers (§6b), then a real checkout
   (`/supporter/checkout` is an honest stub today). Clans landed. Known gaps: kills/deaths are still unwritten pending
   feat/server-ballistics — `recordLongestShot` exists and is tested but has no caller, and

@@ -1,0 +1,65 @@
+{
+  "source": "egypt",
+  "trn": {
+    "terrain_name": "Egypt",
+    "terrain_creator": "Celtic",
+    "color_map": "ct501_c",
+    "elev_map": "ct501_d",
+    "detail_map": "ct501_m",
+    "detail_color": "ct1_cm",
+    "detail_elev": "ct1_dm",
+    "char_data": "dfg1_cm",
+    "sky_map": "clouds01",
+    "sky_palette": "skygrd01",
+    "sky_height": 1236,
+    "horizon": 1,
+    "water_map": "ripple1",
+    "water_height": 0,
+    "filter": [
+      128,
+      128,
+      128
+    ],
+    "gamma": 128,
+    "saturation": 128,
+    "sun_slope": 70
+  },
+  "assets": {
+    "height": {
+      "file": "height.png",
+      "width": 1024,
+      "height": 1024,
+      "rawMin": 14,
+      "rawMax": 55
+    },
+    "color": {
+      "file": "color.jpg"
+    },
+    "detail": {
+      "file": "detail.png",
+      "width": 1024,
+      "height": 1024,
+      "distinctIndices": 5
+    },
+    "detailElev": {
+      "file": "detail_elev.png",
+      "width": 64,
+      "height": 16384,
+      "tileSize": 64,
+      "tiles": 256,
+      "substituted": false,
+      "referencedName": "ct1_dm"
+    },
+    "grass": {
+      "file": "grass.png",
+      "width": 1024,
+      "height": 1024,
+      "rawMin": 0,
+      "rawMax": 64,
+      "rawMean": 54,
+      "detailIndicesUsed": 5,
+      "substituted": false
+    }
+  },
+  "missing": []
+}

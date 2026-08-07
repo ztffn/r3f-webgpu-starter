@@ -84,7 +84,8 @@ async function main() {
     console.error(
       "usage:\n  df2extract.mjs list <a.pff>\n  df2extract.mjs extract <a.pff> <outdir>\n" +
         "  df2extract.mjs trn <f.trn>\n" +
-        "  df2extract.mjs 3di <f.3di> [out.glb] [--lod n] [--scale f]"
+        "  df2extract.mjs 3di <f.3di> [out.glb] [--lod n] [--scale f]\n" +
+        "  df2extract.mjs mission <f.mis> <ITEMS.DEF> [outdir] [--models <3di dir>]"
     );
     process.exit(1);
   }
@@ -120,6 +121,57 @@ async function main() {
       mkdirSync(dirname(resolve(out)), { recursive: true });
       writeFileSync(out, toGlb(model, { lod, scale: s }));
       console.log(`wrote ${out} (lod ${lod}, scale ${s})`);
+    }
+    return;
+  }
+
+  if (cmd === "mission") {
+    const { parseItemsDef, parseMis, resolveMission } = await import("./mission.mjs");
+    const { parse3di, toGlb, UNITS_PER_METER } = await import("./file3di.mjs");
+    const { values, positionals } = parseArgs({
+      args: process.argv.slice(4),
+      options: { models: { type: "string" } },
+      allowPositionals: true,
+    });
+    const [itemsPath, outDir] = positionals;
+    if (!itemsPath) throw new Error("mission needs <ITEMS.DEF> after the .mis");
+
+    const items = parseItemsDef(readFileSync(itemsPath, "latin1"));
+    const mission = parseMis(readFileSync(file, "latin1"));
+    const { placements, skipped } = resolveMission(mission, items);
+    const models = [...new Set(placements.map((p) => p.model))].sort();
+    console.log(
+      `"${mission.name}" by ${mission.designer} on terrain ${mission.terrain}: ` +
+        `${placements.length} placed, ${models.length} distinct models ` +
+        `(skipped ${skipped.markers} markers, ${skipped.noModel} model-less, ${skipped.unknown} unknown)`
+    );
+    if (!outDir) return;
+
+    mkdirSync(outDir, { recursive: true });
+    writeFileSync(
+      join(outDir, "mission.json"),
+      JSON.stringify({ ...mission, items: undefined, placements, models }, null, 1)
+    );
+    console.log(`  mission.json -> ${outDir}`);
+
+    // --models <dir> holds the .3DI corpus; each referenced model becomes a GLB
+    // beside the mission so one fetch per MODEL serves every placement of it.
+    if (values.models) {
+      mkdirSync(join(outDir, "models"), { recursive: true });
+      let done = 0;
+      const missing = [];
+      for (const m of models) {
+        const src = join(values.models, `${m.toUpperCase()}.3DI`);
+        try {
+          const glb = toGlb(parse3di(readFileSync(src)), { scale: 1 / UNITS_PER_METER });
+          writeFileSync(join(outDir, "models", `${m}.glb`), glb);
+          done++;
+        } catch (e) {
+          missing.push(`${m} (${e.message.slice(0, 60)})`);
+        }
+      }
+      console.log(`  models: ${done}/${models.length} converted`);
+      for (const m of missing) console.warn(`  ! ${m}`);
     }
     return;
   }

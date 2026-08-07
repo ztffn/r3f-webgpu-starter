@@ -180,6 +180,59 @@ run at nominally identical settings read 1,844. Treat only WITHIN-run deltas as 
 the earlier figure was probably sampled before the bucket window finished filling, since
 that run waited on `pendingChunks` but not on `pendingBuckets`. Wait on both.
 
+### 2.3d The trunk query is sublinear in plant count — collision is affordable
+
+Node benchmark over the real placement field, flat terrain (query cost under test, not
+placement realism), 5,000 rays of 300 m after warming the cell cache:
+
+| | plants in 17x17 cells | per ray | cell tests/ray | trunk tests/ray |
+|---|---|---|---|---|
+| default (5.33 m spacing) | 3,685 | **4.8 us** | 12.7 | 12.0 |
+| 10x sites (1.75 m) | 33,177 | **8.4 us** | 11.2 | 93.4 |
+
+**9x the plants costs 1.76x per ray.** Sublinear because the spatial grid walk is unchanged —
+still about 12 cells along a 300 m ray — and only the trunks INSIDE those cells multiply,
+most of them rejected by a cheap cylinder test.
+
+For scale: 64 players firing 10 rounds a second is 640 rays a second, which at 8.4 us is
+about 0.5% of one core. Ballistic trunk collision is affordable at any density this layer can
+reach. Movement collision is a bounded proximity query rather than a 300 m ray, so it is
+cheaper still.
+
+### 2.5 HANDOFF: server-side trunk collision, specified but not built
+
+The bug it fixes is live. `VegetationWorldQuery` is registered ONLY on the client
+(`FoliageLayer`), and `tools/game-server`, `src/motor` and `GameServer.ts` contain zero
+references to vegetation. Damage has been server-authoritative since August, so a round can
+stop in a trunk on screen while the server resolves a clean hit — the server is always the
+more permissive of the two, which means players are being shot through trees.
+
+Why it is a refactor rather than a registration: `ServerWorldQuery` implements the **Three-free**
+`src/combat/WorldQuery.ts`, whose `WorldHit` carries no `object`, while `VegetationWorldQuery`
+uses `THREE.Vector3` scratch and returns the browser hit with a proxy `Object3D`. Duplicating
+the cylinder math into a server copy is the "two surfaces where there should be one" failure
+`docs/08` §11 names, so:
+
+1. Extract the ray-versus-capped-cylinder math and the cell walk into a Three-free
+   `src/foliage/trunkQuery.ts`, returning plain numbers (distance, point, normal, objectId,
+   surfaceId, penetration thickness). `VegetationField` and `species.ts` are already Three-free,
+   so nothing else has to move.
+2. `VegetationWorldQuery` becomes a thin wrapper that adds `object`, `objectName` and Three
+   vectors. Its existing tests should pass unchanged — that is the check that the extraction
+   was faithful.
+3. `ServerWorldQuery` takes an optional trunk source and composes it nearest-wins, exactly as
+   `CompositeWorldQuery` already does.
+4. Construct the field server-side from the loaded heightfield (`tools/game-server/terrain.ts`
+   already builds the same `Heightfield`) and pass it in.
+
+**The determinism precondition, which the density and spacing sliders now threaten.** Both
+sides agree only because placement is a pure function of (mapSeed, rulesVersion, wrapped cell)
+— so cellSize, siteSpacing and density MUST match. Today the sliders are harmless because the
+server has no vegetation. The moment step 4 lands they become a desync and a cheat surface,
+since thinning your own trunks removes cover others rely on. Placement config then has to come
+from the room like weather does, and the sliders become offline-or-admin only. `?admin=1` is
+already the right seam.
+
 ### 2.4 Concealment costs nothing at runtime, and never did
 
 No runtime concealment measurement exists. `blockingFraction` appears in exactly two places —

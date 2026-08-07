@@ -31,9 +31,24 @@ export interface VisualDialTargets {
   readonly blades: BladeUniforms | null;
   /** Null when the map ships no detail_color assets (loadTerrain.ts). */
   readonly terrainDetail: TerrainDetailUniforms | null;
+  /**
+   * The three scene lights, by ref so a dial writes the live light without a
+   * React re-render. Typed structurally rather than importing Three — this
+   * module is imported by the Node server (docs/12 §3, no Three at runtime).
+   */
+  readonly lights: {
+    readonly sun: { current: { intensity: number } | null };
+    readonly fill: { current: { intensity: number } | null };
+    readonly ambient: { current: { intensity: number } | null };
+  };
 }
 
-export type VisualDialGroup = "atmosphere" | "precipitation" | "blades" | "terrain";
+export type VisualDialGroup =
+  | "atmosphere"
+  | "precipitation"
+  | "blades"
+  | "terrain"
+  | "lighting";
 
 export interface VisualDial {
   readonly label: string;
@@ -357,6 +372,41 @@ export const VISUAL_DIALS: readonly VisualDial[] = [
     get: (t) => Number(t.terrainDetail?.power.value ?? 0),
     set: (t, v) => t.terrainDetail && (t.terrainDetail.power.value = v),
     hint: "master opacity of the layer — lowering it blends back toward the plain colormap, which is the lever if the tiles read too dark or saturated",
+  },
+
+  // --- lighting ------------------------------------------------------------------
+  // The preset sets these (weather.ts `lightingOf`); these dials sweep them live.
+  // APPENDED — see the wire rule above. CONTRAST is the sun-to-fill RATIO: overcast
+  // is a small sun against a large fill, not a dimmer sun.
+  {
+    label: "Sun intensity",
+    group: "lighting",
+    min: 0,
+    max: 4,
+    step: 0.05,
+    get: (t) => t.lights.sun.current?.intensity ?? 0,
+    set: (t, v) => t.lights.sun.current && (t.lights.sun.current.intensity = v),
+    hint: "directional key light. Alone it only makes night darker — raise Sky fill with it to soften shadows instead of deepening them",
+  },
+  {
+    label: "Sky fill",
+    group: "lighting",
+    min: 0,
+    max: 3,
+    step: 0.05,
+    get: (t) => t.lights.fill.current?.intensity ?? 0,
+    set: (t, v) => t.lights.fill.current && (t.lights.fill.current.intensity = v),
+    hint: "hemisphere bounce, sky above and ground below. This is the overcast dial: high fill against a low sun is what makes shadows soft rather than deep",
+  },
+  {
+    label: "Ambient floor",
+    group: "lighting",
+    min: 0,
+    max: 1,
+    step: 0.01,
+    get: (t) => t.lights.ambient.current?.intensity ?? 0,
+    set: (t, v) => t.lights.ambient.current && (t.lights.ambient.current.intensity = v),
+    hint: "flat lift so a face pointing away from both sun and sky reads dark rather than pure black. Small values only — this is the dial that flattens a scene",
   },
 ];
 

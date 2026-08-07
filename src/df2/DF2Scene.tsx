@@ -21,7 +21,7 @@ import { createColorGrade } from "./colorGrade";
 import { createFog } from "./fog";
 import { bakeNoiseTexture } from "./noiseTexture";
 import { cubeTexture, normalWorldGeometry } from "three/tsl";
-import { WEATHER_PRESETS, readWeather, type WeatherPreset } from "./weather";
+import { WEATHER_PRESETS, readWeather, lightingOf, type WeatherPreset } from "./weather";
 import { createAtmosphere } from "./atmosphere";
 import { createPrecipitation } from "./Precipitation";
 import { buildBladeGeometry } from "./bladeGeometry";
@@ -70,6 +70,7 @@ const ImpactEffects = lazy(() =>
 );
 import { BENCH } from "./bench";
 import { DevPlacedObject } from "./DevPlacedObject";
+import { MissionObjects } from "./MissionObjects";
 import type { TerrainScale } from "./config";
 import {
   readMapSlug,
@@ -257,6 +258,7 @@ export interface SceneHandles {
   precipitation: ReturnType<typeof createPrecipitation>;
   blades: BladeUniforms | null;
   terrainDetail: TerrainDetailUniforms | null;
+  lights: VisualDialTargets["lights"];
 }
 
 export interface DF2SceneProps {
@@ -761,6 +763,16 @@ export function DF2Scene({
    * room WRITES through it — two hand-kept lists of the same five fields is exactly
    * the drift `visualDials.ts` exists to prevent.
    */
+  // Preset lighting, recomputed when the preset changes; the refs below let the
+  // Lighting dials write the live lights without a re-render.
+  const lighting = useMemo(() => lightingOf(weather), [weather]);
+  const sunRef = useRef<THREE.DirectionalLight>(null);
+  const fillRef = useRef<THREE.HemisphereLight>(null);
+  const ambientRef = useRef<THREE.AmbientLight>(null);
+  // Stable across every re-render, so dialTargets does not churn a nested object
+  // each time fog or grade changes.
+  const lights = useMemo(() => ({ sun: sunRef, fill: fillRef, ambient: ambientRef }), []);
+
   const dialTargets = useMemo<VisualDialTargets>(
     () => ({
       rain: BENCH.rain ?? weather.rain,
@@ -769,6 +781,7 @@ export function DF2Scene({
       precipitation,
       blades: bladeKit?.uniforms ?? null,
       terrainDetail: terrainKit?.detail ?? null,
+      lights,
     }),
     [bladeKit, fog, grade, precipitation, terrainKit, weather]
   );
@@ -880,17 +893,34 @@ export function DF2Scene({
 
       {/* Sun. The terrain is unlit (its colormap is pre-shaded); this lights the
           water and anything else added to the scene later. */}
+      {/* Lighting comes from the PRESET, not constants: a hardcoded 2.4 sun left
+          props in full daylight at night while the unlit terrain went dark
+          around them. Contrast is the sun-to-fill ratio, so overcast raises
+          fill as it lowers sun rather than just dimming (weather.ts
+          `lightingOf`). Live handles so the Lighting dials can drive them. */}
       <directionalLight
+        ref={sunRef}
         position={[
           SUN_DIRECTION[0] * SUN_DISTANCE,
           SUN_DIRECTION[1] * SUN_DISTANCE,
           SUN_DIRECTION[2] * SUN_DISTANCE,
         ]}
-        intensity={2.4}
-        color={"#fff4e0"}
+        intensity={lighting.sunIntensity}
+        color={lighting.sunColor}
       />
-      {/* Sky/ground fill */}
-      <hemisphereLight args={[weather.skyColor, "#5a5340", 0.75]} position={[0, 400, 0]} />
+      {/* Sky/ground bounce */}
+      {/* Props, not `args`: `args` makes R3F reconstruct the light on a preset
+          switch, which swaps `fillRef.current` out from under the Lighting
+          dials. Its two siblings are patched in place; this now matches. */}
+      <hemisphereLight
+        ref={fillRef}
+        color={weather.skyColor}
+        groundColor={lighting.groundColor}
+        intensity={lighting.fillIntensity}
+        position={[0, 400, 0]}
+      />
+      {/* Flat floor, so a face pointing away from sun AND sky is dark, not black */}
+      <ambientLight ref={ambientRef} intensity={lighting.ambientIntensity} />
 
       {heightfield && material && (
         <Terrain
@@ -938,6 +968,7 @@ export function DF2Scene({
       {showWater && <Water level={waterLevel} span={waterSpan} material={waterMaterial} />}
 
       {heightfield && <DevPlacedObject heightfield={heightfield} />}
+      {heightfield && <MissionObjects heightfield={heightfield} />}
 
       {scopeDemo && FPS_DEBUG.shotTrajectory && (
         <Suspense fallback={null}>

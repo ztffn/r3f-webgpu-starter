@@ -931,12 +931,16 @@ test("a killed player respawns with full health at a spawn point", () => {
 test("the visual dial wire order is append-only and every range is usable", () => {
   // Same hazard as the weather presets: a dial's INDEX is its identity on the wire,
   // so inserting one in the middle repoints an admin's fog setting at a blade twist.
-  assert.equal(VISUAL_DIALS.length, 29, "a dial was added or removed — see the wire rule");
+  assert.equal(VISUAL_DIALS.length, 32, "a dial was added or removed — see the wire rule");
   assert.equal(VISUAL_DIALS[0]!.label, "Preset grade strength");
   assert.equal(VISUAL_DIALS[24]!.label, "Twist");
   // The terrain-detail dials were APPENDED (Aug 2026) — indices 0-24 are pinned above.
   assert.equal(VISUAL_DIALS[27]!.label, "Detail fade end");
   assert.equal(VISUAL_DIALS[28]!.label, "Detail power");
+  // Lighting APPENDED after those — 0-28 stay where they were.
+  assert.equal(VISUAL_DIALS[29]!.label, "Sun intensity");
+  assert.equal(VISUAL_DIALS[30]!.label, "Sky fill");
+  assert.equal(VISUAL_DIALS[31]!.label, "Ambient floor");
 
   VISUAL_DIALS.forEach((dial, id) => {
     assert.ok(dial.max > dial.min, `${dial.label} has an empty range`);

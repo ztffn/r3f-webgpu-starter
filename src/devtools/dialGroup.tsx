@@ -17,6 +17,7 @@ export const GROUPED: Record<VisualDialGroup, number[]> = {
   precipitation: [],
   blades: [],
   terrain: [],
+  lighting: [],
 };
 VISUAL_DIALS.forEach((dial, id) => GROUPED[dial.group].push(id));
 

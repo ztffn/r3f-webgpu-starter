@@ -56,10 +56,73 @@ export interface WeatherPreset extends ColorGradeSettings {
    */
   groundFogBase: number;
   groundFogDensity: number;
+  /**
+   * Scene lighting. OPTIONAL — `lightingOf()` derives a sane default from the
+   * preset's own sky colour, so a new preset is not obliged to hand-tune this.
+   *
+   * `sun` is the directional key light; `fill` is the hemisphere bounce (sky
+   * above, ground below) and `ambient` is flat omnidirectional lift.
+   *
+   * CONTRAST IS THE RATIO, not the sun alone. Overcast is not "a dimmer sun" —
+   * it is a small sun against a large fill, which is why an overcast preset
+   * raises `fill` as it lowers `sun`. Dropping only the sun gives night-with-
+   * daylight-shadows, which is what this project shipped before.
+   */
+  light?: Partial<SceneLighting>;
   /** Fraction of the precipitation pool drawn, 0-1. 0 is dry. */
   rain: number;
   /** 0 rain, 1 snow. Blended, so a value between the two is sleet. */
   snow: number;
+}
+
+/** What the scene's three lights are set to for a given preset. */
+export interface SceneLighting {
+  /** Directional key light colour and strength. */
+  sunColor: string;
+  sunIntensity: number;
+  /** Hemisphere bounce: sky colour from above, ground tint from below. */
+  fillIntensity: number;
+  groundColor: string;
+  /** Flat lift, so a shadowed face is never pure black. */
+  ambientIntensity: number;
+}
+
+/** sRGB hex -> rough relative luminance, 0-1. */
+function luminanceOf(hex: string): number {
+  const h = hex.replace("#", "");
+  const v = (i: number) => parseInt(h.slice(i, i + 2), 16) / 255;
+  return 0.2126 * v(0) + 0.7152 * v(2) + 0.0722 * v(4);
+}
+
+/**
+ * The lighting a preset asks for, with derived defaults where it says nothing.
+ *
+ * Derivation, deliberately simple and meant to be dialled rather than trusted:
+ * the sky's own luminance drives how much KEY light there is, because a dark
+ * sky means a hidden or absent sun. Fill moves the OTHER way — the dimmer and
+ * flatter the sky, the larger the fill's share, which is what turns a hard
+ * midday shadow into overcast's soft one. Ambient is a small floor so a face
+ * pointing away from everything is dark rather than black.
+ *
+ * A preset's own `light` always wins; this only fills the gaps.
+ */
+export function lightingOf(preset: WeatherPreset): SceneLighting {
+  const sky = luminanceOf(preset.skyColor);
+  // Key falls off faster than the sky does: at half sky luminance the sun is
+  // well under half, which is what keeps dusk from reading as bright.
+  const sunIntensity = 0.15 + 2.25 * sky * sky;
+  // Fill is the complement — bright sky, small share; dull sky, large share.
+  const fillIntensity = 0.25 + 0.85 * (1 - sky);
+  return {
+    // Warm the key slightly away from the sky's own hue: a sun reads as sunlight
+    // because it is warmer than the sky it hangs in, not the same colour.
+    sunColor: "#fff4e0",
+    sunIntensity,
+    fillIntensity,
+    groundColor: "#5a5340",
+    ambientIntensity: 0.05 + 0.25 * (1 - sky),
+    ...preset.light,
+  };
 }
 
 /** Neutral: what shipped before presets existed, and what every real .trn carries. */
@@ -144,6 +207,10 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
   overcast: {
     id: "overcast",
     sky: "overcast",
+    // Overcast is the case the derivation cannot infer: the sky is not dark, it
+    // is a diffuser. Almost no key, a large white fill — shadows go soft rather
+    // than deep, which is the whole look.
+    light: { sunIntensity: 0.25, fillIntensity: 1.35, ambientIntensity: 0.35, sunColor: "#cfd2d6" },
     skyColor: "#5b595f",
     fogColor: "#6a6565",
     fogNear: 195,
@@ -272,6 +339,9 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
   night: {
     id: "night",
     sky: "night",
+    // Moonlight: a real key, but cold and weak, with enough cool fill that a
+    // shadowed face is readable rather than black. A DF2 night map is playable.
+    light: { sunIntensity: 0.22, sunColor: "#9fb6d8", fillIntensity: 0.35, ambientIntensity: 0.10, groundColor: "#1b1f27" },
     skyColor: "#080402",
     fogColor: "#080402",
     fogNear: 92,

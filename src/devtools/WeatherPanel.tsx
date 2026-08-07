@@ -86,6 +86,14 @@ export const WeatherPanel = memo(function WeatherPanel({
         ids={GROUPED.precipitation}
         scene={scene}
       />
+      {/* Keyed on the preset: switching one recomputes the lights, and the
+          sliders have to reseed from the new values rather than show the old. */}
+      <DialGroup
+        key={`l${scene.preset.id}`}
+        title="Lighting"
+        ids={GROUPED.lighting}
+        scene={scene}
+      />
       {scene.blades && (
         <DialGroup key={`b${scene.preset.id}`} title="Blades" ids={GROUPED.blades} scene={scene} />
       )}

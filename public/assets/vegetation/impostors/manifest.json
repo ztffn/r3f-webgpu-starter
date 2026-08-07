@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "source": "procedural (src/foliage, bake-impostors.mjs)",
+  "variant": "B",
+  "spritesPerSide": 12,
+  "tileSize": 170,
+  "bakeAlphaCutoff": 0.5,
+  "runtimeAlphaCutoff": 0.4,
+  "species": {
+    "forest-tree-01": {
+      "albedo": "forest-tree-01-albedo.png",
+      "normalDepth": "forest-tree-01-normal.png",
+      "centerY": 12.7,
+      "radius": 13.1747,
+      "horizonCoverageMean": 0.4228,
+      "horizonCoverageMin": 0.4042
+    },
+    "forest-tree-02": {
+      "albedo": "forest-tree-02-albedo.png",
+      "normalDepth": "forest-tree-02-normal.png",
+      "centerY": 9.25,
+      "radius": 9.9198,
+      "horizonCoverageMean": 0.4254,
+      "horizonCoverageMin": 0.3972
+    },
+    "forest-tree-03": {
+      "albedo": "forest-tree-03-albedo.png",
+      "normalDepth": "forest-tree-03-normal.png",
+      "centerY": 5.95,
+      "radius": 6.3548,
+      "horizonCoverageMean": 0.4339,
+      "horizonCoverageMin": 0.4108
+    },
+    "forest-tree-04": {
+      "albedo": "forest-tree-04-albedo.png",
+      "normalDepth": "forest-tree-04-normal.png",
+      "centerY": 5.15,
+      "radius": 5.4951,
+      "horizonCoverageMean": 0.4363,
+      "horizonCoverageMin": 0.4124
+    },
+    "acacia": {
+      "albedo": "acacia-albedo.png",
+      "normalDepth": "acacia-normal.png",
+      "centerY": 3.1909,
+      "radius": 4.5934,
+      "horizonCoverageMean": 0.5319,
+      "horizonCoverageMin": 0.4686
+    },
+    "bush": {
+      "albedo": "bush-albedo.png",
+      "normalDepth": "bush-normal.png",
+      "centerY": 0.8823,
+      "radius": 1.4575,
+      "horizonCoverageMean": 0.5443,
+      "horizonCoverageMin": 0.4451
+    },
+    "scrub": {
+      "albedo": "scrub-albedo.png",
+      "normalDepth": "scrub-normal.png",
+      "centerY": 0.3709,
+      "radius": 0.7854,
+      "horizonCoverageMean": 0.5507,
+      "horizonCoverageMin": 0.5141
+    }
+  }
+}

@@ -31,14 +31,18 @@ import {
   attribute,
   cameraPosition,
   float,
+  fract,
   mix,
   modelWorldMatrix,
   normalize,
   positionLocal,
+  screenCoordinate,
+  select,
   smoothstep,
   texture,
   uniform,
   uv,
+  varying,
   vec2,
   vec3,
   vec4,
@@ -47,6 +51,7 @@ import type { Atmosphere } from "../df2/atmosphere.ts";
 import type { Species } from "./species.ts";
 import {
   FOLIAGE_ALPHA_CUTOFF,
+  FOLIAGE_BARK_COLOR,
   FOLIAGE_WIND_AMPLITUDE,
   FOLIAGE_WIND_PERIOD_SECONDS,
 } from "./foliageConfig.ts";
@@ -59,6 +64,42 @@ export const FOLIAGE_ALPHA_MODES: readonly FoliageAlphaMode[] = [
   "hash",
   "blend",
 ];
+
+/**
+ * Whether a fragment survives the near/far tier crossfade, as a TSL bool node.
+ *
+ * `t` is the band position — smoothstep(fadeStart, fadeEnd, distance to the plant's
+ * base) — 0 fully near, 1 fully far. The two tiers call this with opposite `tier` over
+ * the SAME noise, so every pixel shows exactly one representation: combined coverage
+ * through the band is constant by construction.
+ *
+ * WHY A DITHER AND NOT THE ORIGINAL SHRINK: the shrink-toward-base fade was authored
+ * for 1.5 m bushes, where it is invisible. On a 25 m tree it reads as the tree GROWING
+ * out of the ground while its impostor melts into it — reported the first time anyone
+ * walked toward an authored tree. Dissolving pixels keeps the silhouette at full size
+ * on both sides of the handoff. The noise is interleaved gradient noise over screen
+ * pixels — stable enough in motion without TAA, and the pattern is shared by every
+ * foliage material so the partition stays exact.
+ */
+function crossfadeKeep(t: NodeArg, tier: "near" | "far"): NodeArg {
+  const noise = fract(
+    float(52.9829189).mul(
+      fract(
+        screenCoordinate.x.mul(0.06711056).add(screenCoordinate.y.mul(0.00583715))
+      )
+    )
+  );
+  return tier === "near" ? noise.greaterThanEqual(t) : noise.lessThan(t);
+}
+
+/** Gate an opacity node through the crossfade; discarded pixels fail every alpha mode. */
+export function applyCrossfade(opacity: NodeArg, t: NodeArg, tier: "near" | "far"): NodeArg {
+  return select(crossfadeKeep(t, tier), opacity, float(0));
+}
+
+// The convention atmosphere.ts uses: TSL's overloaded node types collapse under
+// inference, so graph-shaped values go untyped and tsc checks the structure instead.
+type NodeArg = any;
 
 /**
  * A float uniform, with its node type preserved.
@@ -174,6 +215,14 @@ export function createFoliageMaterial(options: FoliageMaterialOptions): FoliageM
   const instanceScale = instanceData.w;
   const instanceSeed = attribute<"float">("aSeed", "float");
 
+  // World position of the plant's base, for wind phase and the tier crossfade. The
+  // mesh transform is a pure translation (the cell's origin), so this is exact. Built
+  // outside positionNode because the crossfade gate reads it from the fragment stage.
+  const worldOrigin = modelWorldMatrix.mul(vec4(instanceOrigin, 1)).xyz;
+  const bandPosition = varying(
+    smoothstep(uniforms.fadeStart, uniforms.fadeEnd, worldOrigin.sub(cameraPosition).length())
+  );
+
   material.positionNode = Fn(() => {
     // `positionLocal` here is already instance-transformed: NodeMaterial applies the
     // instance matrix BEFORE it evaluates positionNode and then ASSIGNS this result over
@@ -182,10 +231,6 @@ export function createFoliageMaterial(options: FoliageMaterialOptions): FoliageM
     // whole cell at its origin.
     const local = positionLocal.toVar();
     const offset = local.sub(instanceOrigin).toVar();
-
-    // World position of the plant's base, for wind phase and for distance fade. The mesh
-    // transform is a pure translation (the cell's origin), so this is exact.
-    const worldOrigin = modelWorldMatrix.mul(vec4(instanceOrigin, 1)).xyz.toVar();
 
     // --- Cylindrical billboard (impostor LOD) --------------------------------
     // Yaw-only, which is correct for vegetation: a full spherical billboard tips a tree
@@ -217,16 +262,6 @@ export function createFoliageMaterial(options: FoliageMaterialOptions): FoliageM
       vec3(phase.sin().mul(amplitude), 0, phase.mul(0.83).cos().mul(amplitude.mul(0.6)))
     );
 
-    // --- Distance fade -------------------------------------------------------
-    // Shrink toward the base rather than fade the alpha. An alpha ramp under an alpha
-    // TEST does not fade — it holds full opacity and then vanishes at the cutoff — and
-    // the memo's own advice is to earn a dithered cross-fade with a measurement rather
-    // than assume one. Shrinking is order-independent, needs no second draw, and keeps
-    // the plant fully opaque for as long as it is visible at all.
-    const distance = worldOrigin.sub(cameraPosition).length();
-    const fade = float(1).sub(smoothstep(uniforms.fadeStart, uniforms.fadeEnd, distance));
-    offset.mulAssign(fade);
-
     return instanceOrigin.add(offset);
   })();
 
@@ -235,10 +270,12 @@ export function createFoliageMaterial(options: FoliageMaterialOptions): FoliageM
   // Per-instance tone, so a stand of one species does not read as a stamped repeat. One
   // tone per plant, not per card: a plant that varies within itself reads as noise.
   const tone = float(0.82).add(instanceSeed.mul(0.36));
-  const bark = vec3(0.19, 0.15, 0.11);
+  const bark = vec3(FOLIAGE_BARK_COLOR[0], FOLIAGE_BARK_COLOR[1], FOLIAGE_BARK_COLOR[2]);
 
   material.colorNode = mix(bark, tint.mul(tone), leafFlag);
-  material.opacityNode = mix(float(1), texel.a, leafFlag);
+  // The window-edge handoff dissolves per pixel (see crossfadeKeep) — the far ring
+  // dissolves IN over the same band with the complementary pattern.
+  material.opacityNode = applyCrossfade(mix(float(1), texel.a, leafFlag), bandPosition, "near");
 
   applyAlphaMode(material, alphaMode);
 

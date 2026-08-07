@@ -43,6 +43,8 @@ import {
   type CardVariant,
 } from "./foliageGeometry.ts";
 import { createFoliageMaterial, type FoliageAlphaMode, type FoliageUniforms } from "./FoliageMaterial.ts";
+import { createTreeMaterial } from "./TreeMaterial.ts";
+import { buildTreeTemplate, type TreePrototypes } from "./treePrototypes.ts";
 import type { Atmosphere } from "../df2/atmosphere.ts";
 import { SPECIES } from "./species.ts";
 import type { VegetationField } from "./VegetationField.ts";
@@ -72,6 +74,12 @@ export interface FoliageCellsProps {
   atmosphere: Atmosphere;
   variant: CardVariant;
   alphaMode: FoliageAlphaMode;
+  /**
+   * Loaded tree prototypes, or null when the assets are absent. A species whose
+   * `prototype` cannot be resolved simply grows no buckets — its placement records
+   * still exist (gameplay does not depend on the renderer having art).
+   */
+  prototypes?: TreePrototypes | null;
   /** Reach in METRES; the cell count follows from the field's cell size. */
   radiusMetres?: number;
   /** Reported on a throttle, never per frame — the HUD must not re-render at 120 Hz. */
@@ -105,6 +113,7 @@ export function FoliageCells({
   atmosphere,
   variant,
   alphaMode,
+  prototypes = null,
   radiusMetres = FOLIAGE_VIEW_RADIUS_METRES,
   onStats,
 }: FoliageCellsProps) {
@@ -118,15 +127,31 @@ export function FoliageCells({
 
     // Template geometry per (species, LOD). Built once and shared by every bucket; a
     // bucket's own geometry objects are thin views over these attribute buffers.
-    const templates = SPECIES.map((species) =>
-      Array.from({ length: FOLIAGE_LOD_COUNT }, (_, lod) =>
+    // Prototype species use their authored mesh in EVERY geometric LOD slot for now —
+    // 600 triangles needs no reduction, and their lodScale keeps the in-window impostor
+    // tier out of reach anyway. A null entry means "no art for this species": it grows
+    // no buckets, and its placement records simply go undrawn.
+    const templates = SPECIES.map((species) => {
+      if (species.prototype) {
+        const prototype = prototypes?.byId.get(species.prototype);
+        if (!prototype) return null;
+        const built = buildTreeTemplate(prototype, species);
+        return Array.from({ length: FOLIAGE_LOD_COUNT }, () => built);
+      }
+      return Array.from({ length: FOLIAGE_LOD_COUNT }, (_, lod) =>
         buildFoliageGeometry(species, variant, lod)
-      )
-    );
-    const materials = SPECIES.map(
-      (species) =>
-        createFoliageMaterial({ map: texture, species, alphaMode, uniforms, atmosphere }).material
-    );
+      );
+    });
+    const materials = SPECIES.map((species, s) => {
+      if (templates[s] === null) return null;
+      if (species.prototype) {
+        const prototype = prototypes?.byId.get(species.prototype);
+        if (!prototype) return null;
+        return createTreeMaterial({ prototype, species, alphaMode, atmosphere, uniforms });
+      }
+      return createFoliageMaterial({ map: texture, species, alphaMode, uniforms, atmosphere })
+        .material;
+    });
 
     // Worst case a cell can hold for one species is every placement site, which is what
     // the buffers are sized for. Fixed capacity is what makes "allocate once" possible.
@@ -136,12 +161,15 @@ export function FoliageCells({
     for (let dz = -radiusCells; dz <= radiusCells; dz += 1) {
       for (let dx = -radiusCells; dx <= radiusCells; dx += 1) {
         for (let s = 0; s < SPECIES.length; s += 1) {
+          const speciesTemplates = templates[s];
+          const material = materials[s];
+          if (speciesTemplates === null || material === null) continue;
           const instance = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 4), 4);
           const seed = new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1);
           instance.setUsage(THREE.DynamicDrawUsage);
           seed.setUsage(THREE.DynamicDrawUsage);
 
-          const geometries = templates[s].map((template) => {
+          const geometries = speciesTemplates.map((template) => {
             const geometry = new THREE.BufferGeometry();
             for (const name of SHARED_ATTRIBUTES) {
               const attributeData = template.geometry.getAttribute(name);
@@ -153,7 +181,7 @@ export function FoliageCells({
             return geometry;
           });
 
-          const mesh = new THREE.InstancedMesh(geometries[0], materials[s], capacity);
+          const mesh = new THREE.InstancedMesh(geometries[0], material, capacity);
           mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
           mesh.count = 0;
           mesh.visible = false;
@@ -187,7 +215,7 @@ export function FoliageCells({
     // atmosphere in the deps: a preset switch keeps the same Atmosphere object (its
     // uniforms are live), so this does not rebuild on weather — but a rebuilt world hands
     // down a new one, and materials still carrying the old fog would fog by a dead uniform.
-  }, [field, texture, uniforms, atmosphere, variant, alphaMode, radiusMetres]);
+  }, [field, texture, uniforms, atmosphere, variant, alphaMode, prototypes, radiusMetres]);
 
   useEffect(
     () => () => {
@@ -195,10 +223,13 @@ export function FoliageCells({
         bucket.mesh.dispose();
         for (const geometry of bucket.geometries) geometry.dispose();
       }
+      // Deduplicated: a prototype species holds the SAME build in every LOD slot.
+      const geometries = new Set<THREE.BufferGeometry>();
       for (const template of state.templates) {
-        for (const build of template) build.geometry.dispose();
+        for (const build of template ?? []) geometries.add(build.geometry);
       }
-      for (const material of state.materials) material.dispose();
+      for (const geometry of geometries) geometry.dispose();
+      for (const material of state.materials) material?.dispose();
     },
     [state]
   );
@@ -364,7 +395,8 @@ export function FoliageCells({
 
       visibleBuckets += 1;
       visibleInstances += bucket.mesh.count;
-      triangles += bucket.mesh.count * state.templates[bucket.speciesIndex][bucket.lod].triangleCount;
+      // Buckets only exist for species whose templates resolved, hence the assertion.
+      triangles += bucket.mesh.count * state.templates[bucket.speciesIndex]![bucket.lod].triangleCount;
     }
 
     if (onStats) {

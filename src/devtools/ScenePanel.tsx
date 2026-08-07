@@ -111,6 +111,16 @@ const FOLIAGE_REBUILD_DIALS = [
     write: (s: SceneHandles, v: number) => s.setFoliageSpacing(v),
     hint: "metres between candidate sites. Count scales as 1/spacing², so halving it quadruples the plants. 1.7 m is ~10x the default. Rebuilds",
   },
+  {
+    key: "far",
+    label: "Far ring",
+    min: 0,
+    max: 1024,
+    step: 64,
+    read: (s: SceneHandles) => s.foliageFar,
+    write: (s: SceneHandles, v: number) => s.setFoliageFar(v),
+    hint: "octahedral-impostor reach past the spawner window; 0 turns the ring off. Capped at 1024 because its instance buffers are sized for the worst case over the whole ring. Rebuilds",
+  },
 ] as const;
 
 export const ScenePanel = memo(function ScenePanel({

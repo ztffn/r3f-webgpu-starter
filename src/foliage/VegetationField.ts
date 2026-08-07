@@ -136,7 +136,10 @@ export class VegetationField {
     this.placementGrid = Math.max(1, Math.round(this.cellSize / this.siteSpacing));
     this.density = options.density ?? FOLIAGE_DENSITY;
     this.mapSeed = (options.mapSeed ?? 0) >>> 0;
-    this.rulesVersion = options.rulesVersion ?? 1;
+    // 2: the four authored forest-tree species joined the table (2026-08-07), which
+    // shifts the acceptance thresholds of every site — old and new placement must not
+    // believe they agree.
+    this.rulesVersion = options.rulesVersion ?? 2;
     this.waterHeight = options.waterHeight ?? -Infinity;
   }
 

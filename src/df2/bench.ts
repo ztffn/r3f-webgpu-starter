@@ -193,6 +193,8 @@ export interface BenchConfig {
   foliageDensity?: number;
   /** Window reach in METRES. Cells follow from it, so a cell sweep holds the reach. */
   foliageRadius?: number;
+  /** Far impostor ring reach in METRES; 0 disables the ring. */
+  foliageFar?: number;
   /**
    * `?admin=1` — unlock the dev controls a NETWORKED session otherwise suppresses.
    *
@@ -271,6 +273,7 @@ function parse(): BenchConfig {
     foliageCell: num("foliagecell"),
     foliageDensity: num("foliagedensity"),
     foliageRadius: num("foliageradius"),
+    foliageFar: num("foliagefar"),
     admin: q.get("admin") === "1",
   };
 
@@ -341,6 +344,8 @@ export interface FoliageBenchSample {
   alphaOccupancy: number;
   /** Coverage per mip level; should track level 0, or the silhouette thins with range. */
   levelCoverage: number[];
+  /** Impostors drawn by the far ring; absent while the ring is off or still loading. */
+  farInstances?: number;
 }
 
 declare global {

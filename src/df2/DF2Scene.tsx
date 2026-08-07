@@ -75,6 +75,7 @@ const FoliageLayer = lazy(() =>
 );
 import { BENCH } from "./bench";
 import {
+  FOLIAGE_FAR_RADIUS_METRES,
   FOLIAGE_SITE_SPACING,
   FOLIAGE_VIEW_RADIUS_METRES,
 } from "../foliage/foliageConfig";
@@ -277,6 +278,9 @@ export interface SceneHandles {
   setFoliageRadius: (value: number) => void;
   foliageSpacing: number;
   setFoliageSpacing: (value: number) => void;
+  /** Far impostor ring reach, metres; 0 disables it. Rebuilds the ring, not the field. */
+  foliageFar: number;
+  setFoliageFar: (value: number) => void;
   grade: ReturnType<typeof createColorGrade>;
   fog: ReturnType<typeof createFog>;
   precipitation: ReturnType<typeof createPrecipitation>;
@@ -895,6 +899,7 @@ export function DF2Scene({
     BENCH.foliageRadius ?? FOLIAGE_VIEW_RADIUS_METRES
   );
   const [foliageSpacing, setFoliageSpacing] = useState(FOLIAGE_SITE_SPACING);
+  const [foliageFar, setFoliageFar] = useState(BENCH.foliageFar ?? FOLIAGE_FAR_RADIUS_METRES);
 
   const setPreset = useCallback(
     (id: string) => {
@@ -919,12 +924,15 @@ export function DF2Scene({
       setFoliageRadius,
       foliageSpacing,
       setFoliageSpacing,
+      foliageFar,
+      setFoliageFar,
     });
   }, [
     dialTargets,
     foliageDensity,
     foliageRadius,
     foliageSpacing,
+    foliageFar,
     onSceneReady,
     room,
     setPreset,
@@ -1079,6 +1087,8 @@ export function DF2Scene({
             density={foliageDensity}
             radiusMetres={foliageRadius}
             siteSpacing={foliageSpacing}
+            farRadiusMetres={foliageFar}
+            lights={lights}
             worldQuery={worldQuery}
             waterHeight={showWater ? waterLevel : undefined}
           />

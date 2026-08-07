@@ -1,0 +1,73 @@
+{
+  "schema": "df2.vegetation-prototypes/v1",
+  "source": {
+    "file": "low_poly_forest_tree_pack.glb",
+    "title": "Low Poly Forest Tree Pack",
+    "author": "99.Miles (https://sketchfab.com/99.Miles)",
+    "license": "CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)",
+    "url": "https://sketchfab.com/3d-models/low-poly-forest-tree-pack-5ff5a51e74324845a4e4905f182dfb2b"
+  },
+  "normalisation": "unit height, base at origin, trunk axis at x=z=0; species.heightMetres restores metres",
+  "prototypes": [
+    {
+      "id": "forest-tree-01",
+      "sourceNodes": [
+        "Tree_Trunk_01.001_Tree_Trunk_01_0",
+        "Tree_Branches_01_Tree_Branches_01_0"
+      ],
+      "authoredHeightMetres": 25.413,
+      "unit": {
+        "crownRadius": 0.1791,
+        "crownBase": 0.1952,
+        "trunkRadius": 0.0687,
+        "trunkHeight": 0.9084
+      },
+      "triangles": 630
+    },
+    {
+      "id": "forest-tree-02",
+      "sourceNodes": [
+        "Tree_Trunk_01.002_Tree_Trunk_01_0",
+        "Tree_Branches_01.002_Tree_Branches_01_0"
+      ],
+      "authoredHeightMetres": 18.458,
+      "unit": {
+        "crownRadius": 0.2972,
+        "crownBase": 0.1006,
+        "trunkRadius": 0.0742,
+        "trunkHeight": 0.92
+      },
+      "triangles": 624
+    },
+    {
+      "id": "forest-tree-03",
+      "sourceNodes": [
+        "Tree_Trunk_02_Tree_Trunk_02_0",
+        "Tree_Branches_02_Tree_Branches_02_0"
+      ],
+      "authoredHeightMetres": 11.866,
+      "unit": {
+        "crownRadius": 0.3619,
+        "crownBase": 0.1954,
+        "trunkRadius": 0.1215,
+        "trunkHeight": 0.8234
+      },
+      "triangles": 285
+    },
+    {
+      "id": "forest-tree-04",
+      "sourceNodes": [
+        "Tree_Trunk_01_Tree_Trunk_01_0",
+        "Tree_Branches_01.001_Tree_Branches_01_0"
+      ],
+      "authoredHeightMetres": 10.338,
+      "unit": {
+        "crownRadius": 0.2888,
+        "crownBase": 0.1006,
+        "trunkRadius": 0.0699,
+        "trunkHeight": 0.92
+      },
+      "triangles": 624
+    }
+  ]
+}

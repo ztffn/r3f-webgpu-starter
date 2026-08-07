@@ -38,14 +38,24 @@ separate; vegetation should not become one Rapier body per plant.
 
 ## Next stages
 
-This first stage is deliberately lossless apart from Meshopt packing. Runtime integration will
-add three explicit stages:
+This first stage is deliberately lossless apart from Meshopt packing. Runtime integration
+adds three explicit stages — the first two exist now (2026-08-07):
 
-1. normalize/pivot each selected prefab and deduplicate repeated source layout nodes;
-2. author or generate near/mid geometry LODs and an impostor atlas (the existing foliage
-   renderer already supplies the card/impostor policy);
+1. **DONE — `extract-prototypes.mjs`**: pairs trunk and branch nodes by co-location, bakes
+   transforms, normalises each tree to UNIT height with its base at the origin, converts
+   leaf materials from BLEND to MASK, and writes `prototypes/prototypes.glb` (trunk and
+   leaf primitives split per tree, textures deduped, base colour only) plus a manifest
+   with attribution and the unit-space crown/trunk measurements a species record needs.
+   The stage-1 whole-pack runtime GLB is NOT committed — this output is.
+2. **DONE — impostor atlases**: `bake-impostors.mjs` bakes prototype species from the same
+   GLB (textured mode: colour from the pack's own textures, sRGB-linearised; note the pack
+   authors leaf uvs in v ∈ [1,2] and relies on REPEAT wrap — a clamping sampler bakes every
+   crown to nothing). Geometric LODs beyond the authored mesh are still unauthored; at
+   ~600 triangles per tree nothing needs them yet.
 3. map logical species to collider records and add parity tests comparing analytic trunk hits
-   with the expected cylinder bounds.
+   with the expected cylinder bounds. (`species.ts` carries the records, pinned to the
+   extraction manifest by `tests/foliage/species-prototypes.test.ts`; the ray-parity tests
+   remain open.)
 
 Source license and attribution are copied into the manifest from the GLB's asset metadata; do
 not publish a processed pack without retaining those credits.

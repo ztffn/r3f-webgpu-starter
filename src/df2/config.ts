@@ -16,8 +16,13 @@ export function isAssetSlug(value: string): boolean {
 
 /**
  * Resolve a requested map name to a loadable slug, falling back to
- * TERRAIN_SLUG on anything that is not a plain slug. Pure — the game server
- * validates `DF2_MAP` through this same rule (tools/game-server/server.ts).
+ * TERRAIN_SLUG on anything that is not a plain slug.
+ *
+ * CLIENT semantics: a bad `?map=` quietly gets the default world, which is the
+ * right shape for a URL parameter. The game server deliberately does NOT route
+ * `DF2_MAP` through this fallback — an operator typo silently serving the
+ * wrong map desyncs every client told to join the intended one, so server.ts
+ * validates with `isAssetSlug` and refuses to start instead.
  */
 export function resolveMapSlug(requested: string | null | undefined): string {
   return requested && isAssetSlug(requested) ? requested : TERRAIN_SLUG;
@@ -76,17 +81,43 @@ export interface TerrainScale {
   smoothPasses: number;
 }
 
+/**
+ * Legal bounds for the live terrain-scale dials — ONE copy, clamped against by
+ * both the ScenePanel sliders and the URL seeds (`?texel=` etc., GameApp).
+ * The URL path used to be unbounded, and the failure is not cosmetic:
+ * `?texel=0` builds a heightfield with cellSize 0 (division by zero, NaN
+ * heights, the motor falls forever) and `?hsmooth=1000000` runs a million
+ * full-grid smoothing passes on the main thread — a frozen tab from a URL.
+ */
+export const TERRAIN_SCALE_LIMITS = {
+  metersPerTexel: { min: 0.25, max: 4 },
+  heightScale: { min: 0.05, max: 3 },
+  smoothPasses: { min: 0, max: 6 },
+} as const;
+
+/** Clamp a (possibly URL-seeded) scale into the dial bounds above. */
+export function clampTerrainScale(scale: TerrainScale): TerrainScale {
+  const clamp = (v: number, r: { readonly min: number; readonly max: number }) =>
+    Math.min(r.max, Math.max(r.min, v));
+  return {
+    metersPerTexel: clamp(scale.metersPerTexel, TERRAIN_SCALE_LIMITS.metersPerTexel),
+    heightScale: clamp(scale.heightScale, TERRAIN_SCALE_LIMITS.heightScale),
+    smoothPasses: Math.round(clamp(scale.smoothPasses, TERRAIN_SCALE_LIMITS.smoothPasses)),
+  };
+}
+
 // Passes of a [1,2,1] binomial filter used to reconstruct the sub-unit relief that
 // 8-bit elevation storage quantised away. 0 keeps the raw surface.
 //
 // The heightmap has 256 levels, so the smallest representable step is one raw unit —
-// 1 m at the scale above, across a texel (2 m when this was measured; 1 m since the
-// 2026-08-06 calibration, making raw facets steeper still). Measured on Green Mile at
+// 0.5 m at the calibrated HEIGHT_SCALE, across a 1 m texel (2 m when this was
+// measured, before the 2026-08-06 calibration). Measured on Green Mile at
 // the 2 m texel the MEDIAN facet angle was exactly the one-step 26.6 degrees and 48%
 // of adjacent samples are identical: the surface is step-flat-step-flat. That
 // terracing is a storage artifact, and it is what makes the terrain read as jagged
-// rather than as the soft rolling relief DF2 showed (docs/07 §9). If terracing looks
-// worse after the calibration, the suspect is the still-uncalibrated HEIGHT_SCALE.
+// rather than as the soft rolling relief DF2 showed (docs/07 §9). Both scales are
+// CALIBRATED now (see above), so if terracing looks wrong the honest A/B is
+// `?hsmooth=0` against the raw data, not a scale hunt.
 //
 // 2 passes clears the 2-texel terracing while leaving the tens-of-metres features that
 // carry the terrain's shape. Raising it flattens real relief; 0 shows the raw data,

@@ -10,7 +10,11 @@ import { memo, useState } from "react";
 import type { LoadedTerrain } from "../df2/loadTerrain";
 import type { Stance } from "../df2/FlyControls";
 import type { SceneHandles } from "../df2/DF2Scene";
-import { CALIBRATED_TERRAIN_SCALE, type TerrainScale } from "../df2/config";
+import {
+  CALIBRATED_TERRAIN_SCALE,
+  TERRAIN_SCALE_LIMITS,
+  type TerrainScale,
+} from "../df2/config";
 import { DialGroup, GROUPED } from "./dialGroup";
 
 export interface ScenePanelProps {
@@ -43,29 +47,27 @@ interface ScaleDial {
 
 // Calibration dials (docs runbook W1). Both scales are now calibrated, so these
 // are A/B instruments rather than open questions — kept because the next map
-// format or a disputed measurement wants them.
+// format or a disputed measurement wants them. Bounds come from
+// TERRAIN_SCALE_LIMITS so the URL seeds clamp to exactly what these sliders allow.
 const SCALE_DIALS: ScaleDial[] = [
   {
     key: "metersPerTexel",
     label: "Texel size",
-    min: 0.25,
-    max: 4,
+    ...TERRAIN_SCALE_LIMITS.metersPerTexel,
     step: 0.05,
     hint: "metres per heightmap texel — calibrated 1.0 (map = 1.024 km)",
   },
   {
     key: "heightScale",
     label: "Height scale",
-    min: 0.05,
-    max: 3,
+    ...TERRAIN_SCALE_LIMITS.heightScale,
     step: 0.05,
     hint: "metres per raw elevation unit — calibrated 0.5 (the editor manual's 1/2 m)",
   },
   {
     key: "smoothPasses",
     label: "Terrace smoothing",
-    min: 0,
-    max: 6,
+    ...TERRAIN_SCALE_LIMITS.smoothPasses,
     step: 1,
     hint: "reconstruction passes; 0 shows the raw terraced data",
   },

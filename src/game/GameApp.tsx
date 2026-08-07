@@ -30,7 +30,11 @@ import type { GameClient } from "../net/GameClient";
 import type { LoadedTerrain } from "../df2/loadTerrain";
 import type { PerfSample } from "../df2/PerfMonitor";
 import { BENCH, publish } from "../df2/bench";
-import { CALIBRATED_TERRAIN_SCALE, type TerrainScale } from "../df2/config";
+import {
+  CALIBRATED_TERRAIN_SCALE,
+  clampTerrainScale,
+  type TerrainScale,
+} from "../df2/config";
 
 interface LaunchConfig {
   scopeDemo: boolean;
@@ -168,11 +172,22 @@ export default function GameApp() {
   const [stance, setStance] = useState<Stance>(BENCH.stance ?? "stand");
   // Calibration state (docs runbook W1): URL dials seed it, the Scene tab's
   // sliders commit into it on release, DF2Scene rebuilds the world from it.
-  const [terrainScale, setTerrainScale] = useState<TerrainScale>(() => ({
-    metersPerTexel: BENCH.texel ?? CALIBRATED_TERRAIN_SCALE.metersPerTexel,
-    heightScale: BENCH.heightScale ?? CALIBRATED_TERRAIN_SCALE.heightScale,
-    smoothPasses: BENCH.heightSmooth ?? CALIBRATED_TERRAIN_SCALE.smoothPasses,
-  }));
+  //
+  // OFFLINE ONLY, like the sliders (bench.ts says why): the server simulates
+  // the calibrated scale, so a networked client seeded from a leftover
+  // calibration URL would disagree with every authoritative position and
+  // rubber-band forever — with no warning, unlike the ?map= mismatch case.
+  // And CLAMPED to the same bounds as the sliders: the raw URL path accepted
+  // ?texel=0 (NaN world) and ?hsmooth=1000000 (frozen tab).
+  const [terrainScale, setTerrainScale] = useState<TerrainScale>(() =>
+    netDemo
+      ? CALIBRATED_TERRAIN_SCALE
+      : clampTerrainScale({
+          metersPerTexel: BENCH.texel ?? CALIBRATED_TERRAIN_SCALE.metersPerTexel,
+          heightScale: BENCH.heightScale ?? CALIBRATED_TERRAIN_SCALE.heightScale,
+          smoothPasses: BENCH.heightSmooth ?? CALIBRATED_TERRAIN_SCALE.smoothPasses,
+        })
+  );
 
   const [perf, setPerf] = useState<PerfSample | null>(null);
   const [fly, setFly] = useState<FlyState | null>(null);

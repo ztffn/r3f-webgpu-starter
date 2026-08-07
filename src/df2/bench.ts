@@ -130,14 +130,15 @@ export interface BenchConfig {
    * Terrain scale dials — `?texel=1&hscale=0.5&hsmooth=2`. World metres per heightmap
    * texel, metres per raw 8-bit elevation unit, and terracing smooth passes.
    *
-   * These exist for exactly one job: dialling the still-uncalibrated HEIGHT_SCALE
-   * against the running retail game (docs/plans/…-runbook.md W1) the way ?weather=
-   * dials were used for the skyboxes. METERS_PER_TEXEL is calibrated (1.0 — see
-   * config.ts) so `?texel=` is an A/B instrument, not an open question. The whole
-   * world builds from these (chunks, motor terrain, grass placement), so they are
-   * baked at load — reload to change — and OFFLINE dials only: a networked session's
-   * server simulates the config scale, and a client dialled away from it would
-   * disagree with every authoritative position.
+   * BOTH scales are calibrated now (config.ts — texel 2026-08-06, height scale
+   * 2026-08-07 from the mission-editor manual's 1/2 m), so these are A/B
+   * instruments rather than open questions, kept for the next map format or a
+   * disputed measurement. The whole world builds from these (chunks, motor
+   * terrain, grass placement), so they are baked at load — reload to change —
+   * and OFFLINE dials only: a networked session's server simulates the config
+   * scale, and a client dialled away from it would disagree with every
+   * authoritative position. GameApp enforces both halves of that: it ignores
+   * these seeds when networked and clamps them to TERRAIN_SCALE_LIMITS offline.
    */
   texel?: number;
   heightScale?: number;

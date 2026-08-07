@@ -39,6 +39,7 @@ export const LAUNCH_PARAMS: readonly LaunchParamSpec[] = [
   { name: "debug", flag: "default-off", explicit: true, redirectsFromRoot: true },
   { name: "weather", explicit: true, redirectsFromRoot: true },
   { name: "map", explicit: true, redirectsFromRoot: true },
+  { name: "mission", explicit: true, redirectsFromRoot: true },
   { name: "blades", flag: "default-on", explicit: true, redirectsFromRoot: true },
   { name: "hudpreview", flag: "default-off", explicit: true, redirectsFromRoot: false },
   { name: "server", explicit: false, redirectsFromRoot: false },

@@ -481,6 +481,11 @@ The headline corrections:
 - **Shadows are not in the experiment.** The scene's directional light does not cast, so the
   memo's shadows-off / near-only / full axis is unavailable without enabling shadow maps
   globally — which would change every existing frame time. Deferred deliberately.
+- ~~**No impostor ring beyond the window — STILL the top item.**~~ **BUILT 2026-08-07** —
+  a hemi-octahedral impostor ring baked offline from each species' LOD 0, drawn as one
+  instanced mesh per species out to a dialable 768 m for +3 draw calls and no resolvable
+  GPU delta. Plan v2 §5.4 records the as-built shape, the measured coverage audit, and
+  the three traps found landing it. Original text follows.
 - **No impostor ring beyond the window — STILL the top item, and now the reach is a slider
   so the gap is one drag away.** An octahedral impostor is the only far representation
   assessed that keeps the silhouette correct from every angle, which §4 requires; the

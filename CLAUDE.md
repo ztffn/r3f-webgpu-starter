@@ -210,8 +210,16 @@ player instinctively recognise this?* — applies to features, not to whether a 
   dials on the Scene tab for density (saturates — spacing is the real lever), spawner reach
   and site spacing. **Trunks stop bullets on the CLIENT ONLY while damage is
   server-authoritative**, so players are currently shot through trees — measured affordable
-  and specified in plan v2 §2.5. Nothing is drawn past the reach, which is why vistas have a
-  bare middle distance.
+  and specified in plan v2 §2.5. Past the near window, a **hemi-octahedral impostor ring**
+  (baked offline by `npm run bake:impostors`, one instanced mesh per species, default
+  768 m, `?foliagefar=` / Scene-tab dial) fills the middle distance for +3 draw calls —
+  plan v2 §5.4 has the as-built shape and its traps, including why the index indirection
+  is CPU compaction rather than a storage buffer (the WebGL2 fallback's storage-read
+  emulation goes stale under CPU writes). **Four authored forest trees** (CC-BY pack,
+  extracted to unit-height prototypes by `tools/vegetation/extract-prototypes.mjs`) run
+  through both tiers as species `forest-tree-01..04`; the window-edge handoff is a
+  per-pixel dithered dissolve, not a size fade — the shrink read as trees GROWING once
+  25 m pines existed (plan v2 §5.4b).
 - **Lit surfaces get fog and the grade (Aug 2026):** `atmosphere.litClass(Base)` shades AFTER
   lighting and forces the scene fog off in one call. This was the gating piece for the whole
   asset phase (`docs/08` §8 invariant 7, which carries the TSL typing trap that cost two

@@ -359,6 +359,102 @@ undeformed geometry — cheap because the shadow disagrees with the silhouette.
 - **A tight shadow box** if shadows ever land: the forest pen shadows a ±200 unit
   orthographic volume near the camera rather than sizing a frustum to the world.
 
+## 5.4 LANDED 2026-08-07: the octahedral far ring (§5.5's option B)
+
+Built in the session after this document was written. What exists now:
+
+- **Offline bake** (`npm run bake:impostors` → `tools/vegetation/bake-impostors.mjs`): a
+  software rasteriser (`src/foliage/impostorBake.ts`, Three-free, deterministic) renders
+  each species' LOD 0 from a 12×12 hemi-octahedral view grid into a 2040² albedo atlas
+  and a packed normal+depth atlas, written as PNGs plus a manifest to
+  `public/assets/vegetation/impostors/`. The PNGs are decoded at runtime by our own codec
+  (`impostorPng.ts`) because canvas decode premultiplies alpha — it zeroes the RGB of
+  transparent texels, which is the alphaMips dark-fringe defect reintroduced at level 0.
+- **Far ring** (`src/foliage/FarFoliageCells.tsx`, behind `?foliage=1`, `?foliagefar=`
+  and a Scene-tab dial, default 768 m): ONE plain Mesh over an InstancedBufferGeometry
+  per species — 3 draw calls for the whole ring — filled from the same `VegetationField`
+  by radial distance, refilled budgeted on camera cell crossings, growing in over the
+  near window's own fade band (shared uniforms, exact complement).
+- **Material** (`FarFoliageMaterial.ts`): TSL, unlit + hand-rolled sun/hemisphere term
+  from the baked normals fed per frame from the LIVE scene lights, `shade` on colorNode,
+  three-view blend with per-instance yaw by rotating the sampled view. Blend cutoff 0.4
+  against the bake's 0.5 (§5.1's reconciliation — the bake defines the silhouette at the
+  near field's cutoff; only the view blend gets slack).
+- **The blocking-fraction audit** became a measurement: rendered horizon-view coverage of
+  the crown rectangle is 0.45–0.64 by azimuth, mean 0.53–0.55 against the 0.55 analytic
+  solve — the analytic model is an azimuth AVERAGE, so the test asserts the mean tracks
+  it and a per-view floor only catches catastrophic thinning (`impostor-bake.test.ts`).
+
+Measured at the §2.3 vantage: 22,370 far impostors = **+3 draw calls, +45k triangles,
+GPU delta unresolved** (inside the ±2.5 ms timer spread), and a §2.1 camera sweep adds
+**0 hitches** — the ring's three pipelines ride the same mount-time warm-up.
+
+Three findings that will save the next person time:
+
+- **The WebGL2 fallback cannot read CPU-updated storage buffers.** §5.1's index
+  indirection was NOT built with a storage buffer for a measured reason: three 0.185's
+  GLSLNodeBuilder emulates storage reads through a DataTexture (`setupPBO`) that only
+  refreshes after compute dispatches — `WebGLAttributeUtils.updateAttribute` updates the
+  GL buffer, never the emulation texture — so a CPU-written index list goes silently
+  stale on the fallback. CPU compaction into plain instanced attributes keeps one graph
+  on both backends and gives up only per-frame GPU culling, which 45k triangles do not
+  need.
+- **The colormap already contains painted vegetation, and it will gaslight you.** Most
+  "far plants" visible at any vantage are pale blobs and dark clumps PAINTED into the
+  1999 colormap. Judging the far ring visually requires an ownership probe (one HMR
+  edit setting the ring's colorNode to magenta answers it in one screenshot).
+- **A flat-lit tint reads two shades lighter than intuition.** Linear 0.4 encodes to
+  sRGB 0.66; the first bake rendered every impostor pale sage and the cause was NOT a
+  broken sample — it was uncovered normal texels defaulting to straight-up plus
+  unweighted normal mips, which converged every distant normal toward the sky and maxed
+  both the sun term and the sky fill. Fixed by filling uncovered normals with the tile's
+  mean covered normal at bake time and weighting the loader's normal mips by the albedo
+  chain's alpha.
+
+Still open on the ring: the near-window LOD3 yaw billboard was deliberately kept (only
+scrub reaches it in-window; swapping it to the octahedral card is cheap once wanted),
+depth parallax from the baked depth channel is unused, and the atlas is baked for
+variant B only — `?foliagevariant=` changes the near field but not the far ring.
+
+### 5.4b Authored forest trees (same day): the pipeline's first real art
+
+The CC-BY tree pack (`_tempAssets/3d/_Vegetation/low_poly_forest_tree_pack.glb`) now runs
+end to end: `tools/vegetation/extract-prototypes.mjs` pairs each trunk with its crown and
+writes four UNIT-HEIGHT prototypes to `public/assets/vegetation/prototypes/` (1.17 MiB,
+attribution in the manifest); four species rows (`forest-tree-01..04`) carry heights,
+trunk cylinders and crowns computed from the manifest's unit measurements — pinned by
+`species-prototypes.test.ts` — and placement `rulesVersion` bumped to 2; the near field
+renders them through the existing cell buckets with a lit textured `TreeMaterial`
+(six vertex buffers); and the impostor baker's textured mode bakes their atlases from the
+same GLB, so the far ring inherited the trees without a line of ring code changing.
+
+**The size-crossfade at the window edge did not survive 25 m trees.** The shrink-toward-
+base handoff, invisible on 1.5 m bushes, read as trees GROWING out of the ground the
+first time anyone walked toward one. All three materials now hand off by a PER-PIXEL
+dithered dissolve over the same band (`crossfadeKeep` in FoliageMaterial): the two tiers
+use complementary patterns of one shared interleaved-gradient noise, so every pixel
+shows exactly one representation at full size and combined coverage through the band is
+constant — which is also strictly better for docs/08 §8 invariant 6 than two half-shrunk
+copies were.
+
+Traps this phase added to the pile:
+- **The pack authors leaf uvs in v ∈ [1,2]** and relies on REPEAT wrapping. A clamping
+  sampler bakes every crown to NOTHING while trunks look perfect — the atlas preview
+  caught it; a coverage number alone would have too (0.03 vs 0.42).
+- **Authored textures are sRGB; the atlas and the flat-colour path are linear.** The bake
+  linearises before filtering, or the far tier and near tier disagree by a gamma curve.
+- Absolute GPU numbers taken during this phase are CONTAMINATED: another session was
+  running three SwiftShader Chromes on the machine and the tab sat at a suspiciously
+  exact 30.03 fps. Within-run A/B only; re-measure the tree layer's true cost on a quiet
+  machine before tuning densities (§2.2's third trap, live example).
+
+Open after this phase: tree far-impostors are LARGE cards (a 25 m pine's card is ~26 m
+wide), so the three-view blend's ghosting during lateral movement is more visible on
+trees than on bushes — a per-species handoff distance (trees staying real geometry
+further out) is the likely fix and needs per-species window radii; the ray-parity tests
+for the new trunk records remain open; and `plants_asset_set.glb` and
+`low_poly_rocks_and_trees.glb` are ingested by nothing yet.
+
 ## 5.5 START HERE next session
 
 Everything below is measured or specified; nothing needs re-deriving. Pick one of the first

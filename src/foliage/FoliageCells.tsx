@@ -48,7 +48,9 @@ import type { VegetationField } from "./VegetationField.ts";
 import { hash3i } from "./vegetationHash.ts";
 import { REFERENCE_P11 } from "../df2/config.ts";
 
-const SHARED_ATTRIBUTES = ["position", "normal", "uv", "sway", "billboard", "card", "leaf"] as const;
+// Seven buffers total: these five plus the two instance attributes below. WebGPU allows
+// eight, and the unpacked form asked for ten — see foliageGeometry's packing note.
+const SHARED_ATTRIBUTES = ["position", "normal", "uv", "aCard", "leaf"] as const;
 
 export interface FoliageStats {
   /** Buckets submitted to the renderer this frame (before frustum culling). */
@@ -79,8 +81,8 @@ interface Bucket {
   mesh: THREE.InstancedMesh;
   /** One geometry view per LOD, all sharing this bucket's instance attributes. */
   geometries: THREE.BufferGeometry[];
-  origin: THREE.InstancedBufferAttribute;
-  scale: THREE.InstancedBufferAttribute;
+  /** `origin.xyz` + uniform scale in `w`, packed to stay inside maxVertexBuffers. */
+  instance: THREE.InstancedBufferAttribute;
   seed: THREE.InstancedBufferAttribute;
   speciesIndex: number;
   /** Offset from the camera's cell; fixed for the bucket's lifetime. */
@@ -133,11 +135,9 @@ export function FoliageCells({
     for (let dz = -radiusCells; dz <= radiusCells; dz += 1) {
       for (let dx = -radiusCells; dx <= radiusCells; dx += 1) {
         for (let s = 0; s < SPECIES.length; s += 1) {
-          const origin = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 3), 3);
-          const scale = new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1);
+          const instance = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 4), 4);
           const seed = new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1);
-          origin.setUsage(THREE.DynamicDrawUsage);
-          scale.setUsage(THREE.DynamicDrawUsage);
+          instance.setUsage(THREE.DynamicDrawUsage);
           seed.setUsage(THREE.DynamicDrawUsage);
 
           const geometries = templates[s].map((template) => {
@@ -146,8 +146,7 @@ export function FoliageCells({
               const attributeData = template.geometry.getAttribute(name);
               if (attributeData) geometry.setAttribute(name, attributeData);
             }
-            geometry.setAttribute("aOrigin", origin);
-            geometry.setAttribute("aScale", scale);
+            geometry.setAttribute("aInstance", instance);
             geometry.setAttribute("aSeed", seed);
             geometry.boundingSphere = template.geometry.boundingSphere;
             return geometry;
@@ -167,8 +166,7 @@ export function FoliageCells({
           buckets.push({
             mesh,
             geometries,
-            origin,
-            scale,
+            instance,
             seed,
             speciesIndex: s,
             dx,
@@ -333,11 +331,10 @@ function fill(
 ): void {
   const cell = field.cell(bucket.cx as number, bucket.cz as number);
   const [start, count] = cell.speciesRanges[bucket.speciesIndex] ?? [0, 0];
-  const capacity = bucket.scale.count;
+  const capacity = bucket.instance.count;
   const used = Math.min(count, capacity);
 
-  const originArray = bucket.origin.array as Float32Array;
-  const scaleArray = bucket.scale.array as Float32Array;
+  const instanceArray = bucket.instance.array as Float32Array;
   const seedArray = bucket.seed.array as Float32Array;
 
   for (let i = 0; i < used; i += 1) {
@@ -347,10 +344,10 @@ function fill(
     const z = cell.offsetZ[source];
     const instanceScale = cell.scale[source];
 
-    originArray[i * 3] = x;
-    originArray[i * 3 + 1] = y;
-    originArray[i * 3 + 2] = z;
-    scaleArray[i] = instanceScale;
+    instanceArray[i * 4] = x;
+    instanceArray[i * 4 + 1] = y;
+    instanceArray[i * 4 + 2] = z;
+    instanceArray[i * 4 + 3] = instanceScale;
     // Seed as a float in [0,1): the shader wants a variation dial, not an integer, and
     // 24 bits of mantissa is far more variation than the eye can distinguish.
     seedArray[i] = (cell.seed[source] >>> 8) / 16777216;
@@ -371,8 +368,7 @@ function fill(
   bucket.mesh.updateMatrix();
   bucket.mesh.updateMatrixWorld(true);
   bucket.mesh.instanceMatrix.needsUpdate = true;
-  bucket.origin.needsUpdate = true;
-  bucket.scale.needsUpdate = true;
+  bucket.instance.needsUpdate = true;
   bucket.seed.needsUpdate = true;
   bucket.mesh.visible = used > 0;
 

@@ -492,9 +492,26 @@ export function buildFoliageGeometry(
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(out.position, 3));
   geometry.setAttribute("normal", new THREE.Float32BufferAttribute(out.normal, 3));
   geometry.setAttribute("uv", new THREE.Float32BufferAttribute(out.uv, 2));
-  geometry.setAttribute("sway", new THREE.Float32BufferAttribute(out.sway, 1));
-  geometry.setAttribute("billboard", new THREE.Float32BufferAttribute(out.billboard, 1));
-  geometry.setAttribute("card", new THREE.Float32BufferAttribute(out.card, 2));
+  // PACKED INTO ONE vec4, and this is a hard WebGPU limit rather than a tidy-up.
+  //
+  // `maxVertexBuffers` is 8. Declared separately, this material asked for ten —
+  // position, normal, uv, sway, billboard, card, leaf plus three instance attributes —
+  // and EVERY foliage pipeline failed to create, so no plant was ever drawn:
+  // "Vertex buffer count (10) exceeds the maximum number of vertex buffers (8)".
+  // It went unseen because the environment this layer was written in has no GPU and
+  // falls back to WebGL2 on SwiftShader, where the limit is higher.
+  //
+  // `card.xy` + `sway` + `billboard` fill one vec4; `leaf` stays its own float because
+  // a fifth component will not fit. Two buffers instead of four, and the instance side
+  // packs the same way (FoliageCells), which lands the total at seven.
+  const cardPacked = new Float32Array(out.leaf.length * 4);
+  for (let i = 0; i < out.leaf.length; i += 1) {
+    cardPacked[i * 4] = out.card[i * 2];
+    cardPacked[i * 4 + 1] = out.card[i * 2 + 1];
+    cardPacked[i * 4 + 2] = out.sway[i];
+    cardPacked[i * 4 + 3] = out.billboard[i];
+  }
+  geometry.setAttribute("aCard", new THREE.Float32BufferAttribute(cardPacked, 4));
   geometry.setAttribute("leaf", new THREE.Float32BufferAttribute(out.leaf, 1));
   // Computed from the crown rather than the vertices: a billboard's vertices are
   // reconstructed in the shader, so a bounds fit to the authored positions would be

@@ -17,7 +17,9 @@ test("every variant and LOD builds a non-empty, consistent mesh", () => {
         assert.ok(position.count > 0, `${species.id} ${variant} lod${lod} is empty`);
         assert.equal(position.count % 3, 0, "non-indexed triangles");
         assert.equal(position.count / 3, build.triangleCount);
-        for (const name of ["normal", "uv", "sway", "billboard", "card", "leaf"]) {
+        // aCard packs (card.xy, sway, billboard) — four separate attributes before the
+        // WebGPU vertex-buffer limit forced them into one (foliageGeometry).
+        for (const name of ["normal", "uv", "aCard", "leaf"]) {
           assert.equal(
             build.geometry.getAttribute(name).count,
             position.count,
@@ -94,16 +96,18 @@ test("triangle count falls monotonically across the geometric LODs", () => {
 test("the impostor is one card and carries a usable billboard offset", () => {
   const build = buildFoliageGeometry(SPECIES[0], "B", FOLIAGE_IMPOSTOR_LOD);
   assert.equal(build.cardCount, 1);
-  const billboard = build.geometry.getAttribute("billboard");
-  const card = build.geometry.getAttribute("card");
-  for (let i = 0; i < billboard.count; i += 1) {
-    assert.equal(billboard.getX(i), 1);
+  // Packed: aCard is (card.x, card.y, sway, billboard), so billboard is W and the card
+  // offset is XY of the same attribute.
+  const cardData = build.geometry.getAttribute("aCard");
+  for (let i = 0; i < cardData.count; i += 1) {
+    assert.equal(cardData.getW(i), 1);
   }
   // The offsets must be real: a degenerate card would vanish if the billboard branch in
   // the shader were ever bypassed, and a vegetation system that silently disappears is
   // the worst failure available to it.
   let widest = 0;
-  for (let i = 0; i < card.count; i += 1) widest = Math.max(widest, Math.abs(card.getX(i)));
+  for (let i = 0; i < cardData.count; i += 1)
+    widest = Math.max(widest, Math.abs(cardData.getX(i)));
   assert.ok(widest > 0.1, "impostor card offsets are degenerate");
 });
 
@@ -133,8 +137,9 @@ test("a trunk vertex never sways, so the ballistic proxy cannot drift from the m
   assert.ok(species);
   const build = buildFoliageGeometry(species, "C", 0);
   const leaf = build.geometry.getAttribute("leaf");
-  const sway = build.geometry.getAttribute("sway");
+  // Sway is Z of the packed aCard attribute.
+  const cardData = build.geometry.getAttribute("aCard");
   for (let i = 0; i < leaf.count; i += 1) {
-    if (leaf.getX(i) === 0) assert.equal(sway.getX(i), 0);
+    if (leaf.getX(i) === 0) assert.equal(cardData.getZ(i), 0);
   }
 });

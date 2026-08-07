@@ -160,12 +160,18 @@ export function createFoliageMaterial(options: FoliageMaterialOptions): FoliageM
   // Explicit type arguments: `attribute`'s node type parameter is unconstrained, so an
   // inferred string literal widens to `string` and every chained operation on the result
   // then fails to resolve. Naming the type is the whole fix.
-  const swayAttribute = attribute<"float">("sway", "float");
-  const billboardFlag = attribute<"float">("billboard", "float");
-  const cardOffset = attribute<"vec2">("card", "vec2");
+  // PACKED, to stay inside WebGPU's eight vertex buffers. Declared one-per-value this
+  // material asked for ten and every pipeline failed to create, so nothing was drawn —
+  // foliageGeometry's packing note has the error and why a software rasteriser hid it.
+  // `aCard` is (card.xy, sway, billboard); `aInstance` is (origin.xyz, scale).
+  const cardData = attribute<"vec4">("aCard", "vec4");
+  const cardOffset = cardData.xy;
+  const swayAttribute = cardData.z;
+  const billboardFlag = cardData.w;
   const leafFlag = attribute<"float">("leaf", "float");
-  const instanceOrigin = attribute<"vec3">("aOrigin", "vec3");
-  const instanceScale = attribute<"float">("aScale", "float");
+  const instanceData = attribute<"vec4">("aInstance", "vec4");
+  const instanceOrigin = instanceData.xyz;
+  const instanceScale = instanceData.w;
   const instanceSeed = attribute<"float">("aSeed", "float");
 
   material.positionNode = Fn(() => {

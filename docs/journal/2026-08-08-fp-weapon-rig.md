@@ -156,45 +156,116 @@ against each weapon's own enter/exit seconds, anchored at 4 so the sniper reprod
 18.2 and the change is purely the spread. First attempt used 5, which sped up every weapon —
 user caught it as a blanket feel change I'd described as a fix.
 
-## Weapon bob — three wrong models in a row
+## Weapon bob — the one idea, and three wrong models on the way to it
 
-Built it, user said "run animation feels too fast, like baby steps." Went through three
-iterations, each wrong for a different reason. Worth recording all three.
+The central idea, which I did not have on the first attempt and which everything else falls
+out of: **accumulate bob phase from DISTANCE TRAVELLED, not from elapsed time.**
 
-**v1: fixed stride.** `metresPerCycle` constant at 1.9 m, so every extra m/s became cadence
-and none became reach. 6.32 footfalls/s at 6 m/s, roughly double a real sprint. Fixed by
-lengthening stride toward a sprint value → 3.53/s.
+```js
+this.bobPhase = (this.bobPhase + (speed * dt) / metresPerCycle) % 1;
+```
 
-**v2: removed the follow filter.** Measured that the filter ate the vertical: at rate 12 the
-lateral kept 21.00 mm of 28 authored, the vertical kept **2.31 mm of 10**. Frequency-selective,
-because the vertical runs faster. So any vertical amplitude tuned would have been fiction.
-Removed it. User: "way faster and snappier, not in a good way, even tinier feet, no weight."
-Correct — I'd removed the crutch, not the defect.
+That one line does two unrelated jobs at once, which is why it feels like the right shape
+rather than a trick:
 
-**v3, after research:** two more bugs underneath.
-- `|sin(2θ)|` is **4× the stride rate, not 2×** — rectification already doubles, so I doubled
-  twice. 6.74 Hz at walking pace. That's the "tinier feet" literally. It also has a **cusp at
-  every footfall** — that's the "snappy", and it's what the filter had been rounding off.
-  Classic figure-eight is unrectified `sin(2θ)`.
-- Stride was ~4× too short. Half-Life 2 uses this exact distance-driven scheme with a
-  **7.32 m stride** and never shuffles. Scheme was never wrong; constant was too small. Now
-  1.9 → 3.6 m following Doom 3 (stride +18% while speed +57%), with a hard cadence clamp.
-- Filter question settled by sources: Source computes look-lag FIRST then **adds** bob;
-  DarkPlaces puts them behind separate cvars. Bob is a displacement you author, not a signal
-  you chase. Weight comes from look-lag — mine was at a 58 ms half-life vs Source's 140 ms,
-  and clamped to 6 mm vs 8 cm. Retuned.
+1. **It is frame-rate independent by construction.** There is no `dt` term left to get
+   wrong, because `speed * dt` IS the distance. Walk ten metres and you are at the same
+   point in the gait whether you did it in 300 frames or 1400. I verified it: at 144 Hz and
+   240 Hz over identical ground the phase agrees to six decimals (0.736842 both).
+2. **It locks the gait to stride instead of to the clock.** Slowing down stretches the
+   cycle rather than merely shrinking the bob. A time-driven bob has to be told about speed
+   separately and then gets the relationship wrong; a distance-driven one never has to be
+   told at all.
 
-Two more caught by my own tests: the amplitude floor (0.35, Quake III's rule for creeping)
-was applying at a standstill so the bob never settled; and my gait expression
-`max(g, g * sprintBlend)` can never exceed `g`, so the sprint input did nothing. Gait now
-derives from speed alone, which is more honest anyway.
+The engine survey is worth recording because it shows this is the road everyone walked.
+Quake (`cl_bobcycle 0.6`) and Half-Life (`cl_bobcycle 0.8`) use a **fixed period** — running
+bobs BIGGER, never faster, which is the opposite failure and is why later engines dropped it.
+Quake III and Doom 3 use a **constant cadence per movement state** (`pm_walkbob 0.3`,
+`pm_runbob 0.4`), so stride length falls out of speed and cadence is bounded structurally.
+Half-Life 2 is **distance-driven, exactly this scheme**. So the mechanism was never the
+question; the constants were.
 
-Research (subagent, ~520k tokens across two rounds) also produced the only citable procedural
-sprint pose in existence — OpenSpades, read from source: roll −31.5°, pitch +17.2°, yaw
-−5.7°, translation 23 cm across / 15 cm down / 5 cm back. Shape is **roll-dominant,
-yaw-minimal, translation-large**. The agent caught itself having inverted the vertical axis
-and corrected three of its own earlier estimates that were 3–5× off. User's tuned poses lean
-the other way (LMG yaw 21.5 against roll 24.5, nearly equal). Reported, not changed.
+### Wrong model 1 — fixed stride
+
+`metresPerCycle` constant at 1.9 m. Every extra metre per second became cadence and none of
+it became reach: **6.32 footfalls/s at 6 m/s**, roughly double a real sprint. The user's
+description was "baby steps", which is exactly right and exactly the arithmetic.
+
+Half-Life 2 runs the same scheme over a **7.32 m stride** and never shuffles. Mine was a
+quarter of that. The scheme was never wrong; the constant was too small. Fixed by lengthening
+stride toward a sprint value (1.9 → 3.6 m, following Doom 3, where stride grows only 18%
+while speed rises 57% — most of the extra speed SHOULD become cadence, just not all of it),
+plus a hard cadence clamp so no future speed change can quietly reintroduce it. 3.53
+footfalls/s at 6 m/s.
+
+### Wrong model 2 — the follow filter, and why removing it made things worse
+
+I had run the whole figure through an exponential follow so the weapon would lag the body.
+Measured what it actually cost, at rate 12:
+
+| component | frequency at 3.2 m/s | travel surviving |
+|---|---|---|
+| lateral `sin θ` | 1.68 Hz | 21.00 mm of 28 authored |
+| vertical | 6.74 Hz | **2.31 mm of 10 authored** |
+
+So I removed it — and the user immediately said "way faster and snappier, not in a good way,
+even tinier feet, no weight to it." Correct, and the most useful single piece of feedback of
+the session: **I had removed the crutch, not the defect.** The filter was rounding off a
+sharpness that should never have existed.
+
+The thing I under-appreciated at the time is that a lowpass on a two-frequency figure does
+not *attenuate* it. Unequal gain **and** unequal phase across the two components means it
+**deforms** the shape — the figure-eight comes out squashed vertically and skewed. And the
+escape route is closed: to keep the vertical within 5% you need λ ≥ 64 s⁻¹, which passes 66%
+of the error every frame at 60 fps. **Any filter fast enough to leave the bob intact is doing
+nothing at all.** There is no good value; the mechanism is wrong.
+
+The rule, once I had it: **the bob is a displacement you author, not a signal you chase.** A
+follow filter exists to manufacture lag from an input you do not control — the mouse. The bob
+is already exactly the motion you want. Shipped engines never mix the two: Source computes
+look lag first and *adds* bob on top (`CalcViewModelLag` then `AddViewModelBob`, in that
+order); Doom 3 adds three independent terms; DarkPlaces puts them behind separate cvars
+entirely. Weight belongs to look-lag, which I had at a 58 ms half-life against Source's own
+140 ms, clamped to 6 mm against 8 cm. Retuned there instead.
+
+### Wrong model 3 — I doubled the frequency twice
+
+The one that made me laugh. The vertical was `-|sin(2θ)|`. Rectification **already** doubles
+frequency, so rectifying an already-doubled wave doubles twice: **4× the stride rate, not
+2×**. 6.74 Hz at walking pace, four vertical humps per two footfalls. That is the "tinier
+feet" literally, in arithmetic.
+
+It also carries a **cusp at every footfall** — a hard corner where the derivative flips sign.
+That is the "snappy". And it was what the filter had been rounding off, which is why removing
+the filter made a bug I hadn't found yet suddenly visible.
+
+Quake III avoids this by folding the rectification into the phase mapping rather than applying
+it on top — it maps each half-cycle to 0→π so `sin` is already non-negative and its `fabs` is
+a no-op. Pick one doubling mechanism, not both.
+
+The classic figure-eight is **unrectified `sin(2θ)`**: smooth, one dip per footfall, and it
+actually swings both ways. `|sin|` is always positive, so a rectified weapon can only ever
+rise — it is a bounce, not a figure-eight.
+
+### What the tests ended up asserting
+
+Two lessons here, both worth keeping.
+
+**Assert the invariant, not the derived value.** The frame-rate test first compared rendered
+OUTPUT across rates and failed — but the failure was my test harness, not the code:
+`for (t = 0; t < seconds; t += dt)` accumulates float error and runs a different number of
+steps per rate, so the rates travelled different distances (12.907 m at 30 Hz vs 12.800 at
+144). Fixed step count, and then assert **phase** exactly (that is the guarantee) rather than
+output.
+
+**A test that would have caught the whole mess.** The regression test now asserts that the
+authored amplitude is the amplitude the player actually gets — both axes within 2% of what
+the table says. Under the filter that test fails instantly at 27% on the vertical. I had a
+tuning UI exposing numbers that were fiction and no test connecting a dialled value to a
+rendered one.
+
+Three bugs in this section, and every one was caught by measuring output rather than reading
+code. Compare the sprint pose below, which had no such test and shipped broken.
 
 ## Sprint — one state written twice
 

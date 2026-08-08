@@ -216,10 +216,3 @@ export const SPECIES_BY_ID: Readonly<Record<SpeciesId, Species>> = Object.freeze
     {} as Record<SpeciesId, Species>
   )
 );
-
-/** Table index, which is what instance records store — one byte instead of a string. */
-export function speciesIndex(id: SpeciesId): number {
-  const index = SPECIES.findIndex((s) => s.id === id);
-  if (index < 0) throw new Error(`Unknown species: ${id}`);
-  return index;
-}

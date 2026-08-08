@@ -84,6 +84,28 @@ export interface VegetationCell {
 
 const EMPTY_RANGES = SPECIES.map(() => [0, 0] as const);
 
+/**
+ * The one cell with nothing in it, shared by every empty cell.
+ *
+ * Nothing in an empty cell varies, and empty cells are not rare — water, cliffs and the
+ * macro field's clearings are all of them, a large share of the map at low density. A
+ * fresh literal per empty cell allocates six zero-length typed arrays for a value that
+ * is a constant. Frozen only in the sense that no consumer writes to a cell record.
+ */
+const EMPTY_CELL: VegetationCell = {
+  count: 0,
+  offsetX: new Float32Array(0),
+  offsetZ: new Float32Array(0),
+  baseY: new Float32Array(0),
+  rotationY: new Float32Array(0),
+  scale: new Float32Array(0),
+  seed: new Uint32Array(0),
+  speciesRanges: EMPTY_RANGES,
+  maxRadius: 0,
+  minY: 0,
+  maxY: 0,
+};
+
 /** Lattice divisions per tile for the macro density field. Integer, so it tiles. */
 const MACRO_LATTICE = 16;
 const SALT_MACRO = 0x4d41;
@@ -175,7 +197,6 @@ export class VegetationField {
     return cell;
   }
 
-  /** Cells currently held. Bounded by `cellsPerTile²`; exposed for instrumentation. */
   /**
    * Change the density multiplier and discard every cached cell.
    *
@@ -190,6 +211,7 @@ export class VegetationField {
     this.version += 1;
   }
 
+  /** Cells currently held. Bounded by `cellsPerTile²`; exposed for instrumentation. */
   get cachedCellCount(): number {
     return this.cache.size;
   }
@@ -208,18 +230,20 @@ export class VegetationField {
     const fz = v - z0;
     const sx = fx * fx * (3 - 2 * fx);
     const sz = fz * fz * (3 - 2 * fz);
-    const corner = (ix: number, iz: number) => {
-      const wxi = ((ix % MACRO_LATTICE) + MACRO_LATTICE) % MACRO_LATTICE;
-      const wzi = ((iz % MACRO_LATTICE) + MACRO_LATTICE) % MACRO_LATTICE;
-      return hash3i(wxi, wzi, this.mapSeed, SALT_MACRO) / 4294967296;
-    };
-    const c00 = corner(x0, z0);
-    const c10 = corner(x0 + 1, z0);
-    const c01 = corner(x0, z0 + 1);
-    const c11 = corner(x0 + 1, z0 + 1);
+    const c00 = this.macroCorner(x0, z0);
+    const c10 = this.macroCorner(x0 + 1, z0);
+    const c01 = this.macroCorner(x0, z0 + 1);
+    const c11 = this.macroCorner(x0 + 1, z0 + 1);
     const top = c00 + (c10 - c00) * sx;
     const bottom = c01 + (c11 - c01) * sx;
     return top + (bottom - top) * sz;
+  }
+
+  /** One lattice corner of the macro field, wrapped so the field tiles with the terrain. */
+  private macroCorner(ix: number, iz: number): number {
+    const wxi = ((ix % MACRO_LATTICE) + MACRO_LATTICE) % MACRO_LATTICE;
+    const wzi = ((iz % MACRO_LATTICE) + MACRO_LATTICE) % MACRO_LATTICE;
+    return hash3i(wxi, wzi, this.mapSeed, SALT_MACRO) / 4294967296;
   }
 
   private build(wx: number, wz: number): VegetationCell {
@@ -290,21 +314,7 @@ export class VegetationField {
       }
     }
 
-    if (total === 0) {
-      return {
-        count: 0,
-        offsetX: new Float32Array(0),
-        offsetZ: new Float32Array(0),
-        baseY: new Float32Array(0),
-        rotationY: new Float32Array(0),
-        scale: new Float32Array(0),
-        seed: new Uint32Array(0),
-        speciesRanges: EMPTY_RANGES,
-        maxRadius: 0,
-        minY: 0,
-        maxY: 0,
-      };
-    }
+    if (total === 0) return EMPTY_CELL;
 
     const offsetX = new Float32Array(total);
     const offsetZ = new Float32Array(total);

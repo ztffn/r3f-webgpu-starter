@@ -38,7 +38,6 @@ import {
 } from "./foliageConfig.ts";
 import {
   buildFoliageGeometry,
-  FOLIAGE_IMPOSTOR_LOD,
   FOLIAGE_LOD_COUNT,
   type CardVariant,
 } from "./foliageGeometry.ts";
@@ -169,7 +168,14 @@ export function FoliageCells({
           instance.setUsage(THREE.DynamicDrawUsage);
           seed.setUsage(THREE.DynamicDrawUsage);
 
+          // Keyed on template identity: a prototype species holds the SAME build in every
+          // LOD slot, and four views over one set of attribute buffers are four objects
+          // three has to track for one draw. The LOD swap below then genuinely becomes a
+          // no-op for those species rather than reassigning an identical geometry.
+          const views = new Map<(typeof speciesTemplates)[number], THREE.BufferGeometry>();
           const geometries = speciesTemplates.map((template) => {
+            const cached = views.get(template);
+            if (cached) return cached;
             const geometry = new THREE.BufferGeometry();
             for (const name of SHARED_ATTRIBUTES) {
               const attributeData = template.geometry.getAttribute(name);
@@ -178,6 +184,7 @@ export function FoliageCells({
             geometry.setAttribute("aInstance", instance);
             geometry.setAttribute("aSeed", seed);
             geometry.boundingSphere = template.geometry.boundingSphere;
+            views.set(template, geometry);
             return geometry;
           });
 
@@ -219,12 +226,13 @@ export function FoliageCells({
 
   useEffect(
     () => () => {
+      // Deduplicated throughout: a prototype species holds the SAME build in every LOD
+      // slot, so both its bucket views and its template geometry repeat.
+      const geometries = new Set<THREE.BufferGeometry>();
       for (const bucket of state.buckets) {
         bucket.mesh.dispose();
-        for (const geometry of bucket.geometries) geometry.dispose();
+        for (const geometry of bucket.geometries) geometries.add(geometry);
       }
-      // Deduplicated: a prototype species holds the SAME build in every LOD slot.
-      const geometries = new Set<THREE.BufferGeometry>();
       for (const template of state.templates) {
         for (const build of template ?? []) geometries.add(build.geometry);
       }
@@ -445,7 +453,20 @@ function chooseLod(
       break;
     }
   }
-  return Math.min(lod, FOLIAGE_IMPOSTOR_LOD);
+  return lod;
+}
+
+/**
+ * Flag an attribute for upload, restricted to the elements actually written.
+ *
+ * A zero-length range still needs `needsUpdate`: the mesh's instance count has already
+ * dropped to 0, so nothing reads the buffer, but leaving the flag clear would strand a
+ * later fill behind three's own dirty tracking.
+ */
+function uploadRange(attribute: THREE.BufferAttribute, length: number): void {
+  attribute.clearUpdateRanges();
+  if (length > 0) attribute.addUpdateRange(0, length);
+  attribute.needsUpdate = true;
 }
 
 function fill(
@@ -492,9 +513,13 @@ function fill(
   );
   bucket.mesh.updateMatrix();
   bucket.mesh.updateMatrixWorld(true);
-  bucket.mesh.instanceMatrix.needsUpdate = true;
-  bucket.instance.needsUpdate = true;
-  bucket.seed.needsUpdate = true;
+  // Ranged, like the far ring's upload: `needsUpdate` alone re-sends the WHOLE allocation,
+  // which is sized for every placement site in the cell. The four authored tree species
+  // have densities near 0.01, so most of their buckets hold nothing and were uploading a
+  // full capacity of zeros on every crossing.
+  uploadRange(bucket.mesh.instanceMatrix, used * 16);
+  uploadRange(bucket.instance, used * 4);
+  uploadRange(bucket.seed, used);
   bucket.mesh.visible = used > 0;
 
   // Bounds in the mesh's own space: the cell footprint, from the lowest ground in it to

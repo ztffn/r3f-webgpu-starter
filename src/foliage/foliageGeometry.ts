@@ -27,16 +27,24 @@
 
 import * as THREE from "three/webgpu";
 import type { Species } from "./species.ts";
-import { packVec4 } from "./foliageConfig.ts";
+import { FOLIAGE_LOD_DISTANCES, packVec4 } from "./foliageConfig.ts";
 import { hash3i, rng32 } from "./vegetationHash.ts";
 
 export type CardVariant = "A" | "B" | "C" | "D";
 
 export const CARD_VARIANTS: readonly CardVariant[] = ["A", "B", "C", "D"];
 
-/** LOD 0-2 are geometric; 3 is a single cylindrical billboard. */
-export const FOLIAGE_LOD_COUNT = 4;
-export const FOLIAGE_IMPOSTOR_LOD = 3;
+/**
+ * LOD 0..n-2 are geometric; the last is a single cylindrical billboard.
+ *
+ * DERIVED from the distance table rather than restated, because the two are indexed
+ * against each other: `chooseLod` walks `FOLIAGE_LOD_DISTANCES` and the result indexes a
+ * bucket's per-LOD geometries. A fifth distance added in the config table — the natural
+ * place, where every other knob in this layer lives — would otherwise index past the
+ * templates array with nothing pointing at the cause.
+ */
+export const FOLIAGE_LOD_COUNT = FOLIAGE_LOD_DISTANCES.length;
+export const FOLIAGE_IMPOSTOR_LOD = FOLIAGE_LOD_COUNT - 1;
 
 export interface FoliageGeometryBuild {
   geometry: THREE.BufferGeometry;
@@ -154,10 +162,6 @@ function solveSizeMultiplier(cards: CardSpec[], frontalArea: number): number {
   return (low + high) * 0.5;
 }
 
-function pushCard(target: CardSpec[], spec: CardSpec): void {
-  target.push(spec);
-}
-
 /**
  * Crown extent for a species: foliage occupies [baseY, topY] with radius `radius`.
  *
@@ -208,7 +212,7 @@ function buildRawCardSpecs(species: Species, variant: CardVariant, lod: number):
   if (variant === "A") {
     // Crossed planes through the crown axis.
     for (let i = 0; i < count; i += 1) {
-      pushCard(cards, {
+      cards.push({
         cx: 0,
         cy: midY,
         cz: 0,
@@ -231,7 +235,7 @@ function buildRawCardSpecs(species: Species, variant: CardVariant, lod: number):
       const phi = random() * Math.PI * 2;
       const t = random();
       const r = crown.radius * (0.45 + 0.55 * Math.sqrt(t));
-      pushCard(cards, {
+      cards.push({
         cx: Math.cos(phi) * r,
         cy: crown.baseY + crownHeight * (0.15 + 0.85 * random()),
         cz: Math.sin(phi) * r,
@@ -251,7 +255,7 @@ function buildRawCardSpecs(species: Species, variant: CardVariant, lod: number):
   for (let i = 0; i < count; i += 1) {
     const phi = (i / count) * Math.PI * 2 + random() * 0.5;
     const r = crown.radius * (0.3 + 0.5 * random());
-    pushCard(cards, {
+    cards.push({
       cx: Math.cos(phi) * r,
       cy: crown.baseY + crownHeight * (0.2 + 0.7 * random()),
       cz: Math.sin(phi) * r,

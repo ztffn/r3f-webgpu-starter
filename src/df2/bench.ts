@@ -376,6 +376,14 @@ export function publishFoliage(sample: FoliageBenchSample): void {
  *
  * Ungated: it costs one number per frame and it is the only honest completion signal.
  */
+/**
+ * Mutated in place rather than replaced: this is called from the terrain frame loop, and
+ * a fresh object per frame is garbage the rig never reads. The rig re-reads the property
+ * each poll, so it sees the live value either way.
+ */
+const terrainSignal = { pendingChunks: 0 };
+
 export function publishTerrain(pendingChunks: number): void {
-  window.__terrain = { pendingChunks };
+  terrainSignal.pendingChunks = pendingChunks;
+  window.__terrain = terrainSignal;
 }

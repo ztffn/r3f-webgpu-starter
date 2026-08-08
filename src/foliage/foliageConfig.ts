@@ -55,8 +55,8 @@ export const FOLIAGE_DENSITY = 1;
  * reached 96 m and 64 m cells reached 384 m while both reported ~400 buckets. In metres,
  * the reach is held and the sweep isolates what it is meant to.
  *
- * Impostor-only rings beyond this are NOT yet built; this prototype draws geometry to the
- * window edge and nothing past it.
+ * Geometry is drawn to this edge and nothing past it; the octahedral impostor ring below
+ * takes over from here out.
  */
 export const FOLIAGE_VIEW_RADIUS_METRES = 192;
 

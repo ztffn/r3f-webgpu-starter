@@ -18,7 +18,6 @@ import { loadImpostorAtlases, type ImpostorAtlases } from "./impostorAtlas.ts";
 import { loadTreePrototypes, type TreePrototypes } from "./treePrototypes.ts";
 import { VegetationField, type VegetationTerrain } from "./VegetationField.ts";
 import { VegetationWorldQuery } from "./VegetationWorldQuery.ts";
-import { FOLIAGE_FAR_RADIUS_METRES, FOLIAGE_VIEW_RADIUS_METRES } from "./foliageConfig.ts";
 import type { CompositeWorldQuery } from "../fps/core/WorldQuery.ts";
 import type { Atmosphere } from "../df2/atmosphere.ts";
 import { BENCH, publishFoliage } from "../df2/bench.ts";
@@ -61,15 +60,19 @@ export interface FoliageLayerProps {
    *
    * Spacing is the real lever on plant COUNT. Density saturates, because a site yields at
    * most one plant, so plants per area is bounded by sites per area — 1/spacing².
+   *
+   * REQUIRED, not defaulted here. The scene already resolves `?foliageradius=` into the
+   * state it drives this with, and resolving the same URL flag in two places is what let
+   * `density` disagree with its own seed (see the field's construction below).
    */
-  radiusMetres?: number;
+  radiusMetres: number;
   siteSpacing?: number;
   /**
    * Outer reach of the far impostor ring, metres; 0 disables it. The ring only exists
    * when the baked atlases load — a clone without them keeps the near window and a
-   * console warning, not a crash.
+   * console warning, not a crash. Required for the same reason as `radiusMetres`.
    */
-  farRadiusMetres?: number;
+  farRadiusMetres: number;
   /** Live scene lights, threaded to the far ring's hand-rolled sun term. */
   lights?: FarFoliageLights;
   /** Registered so trunks stop bullets; leaves never do. */
@@ -82,9 +85,9 @@ export function FoliageLayer({
   terrain,
   atmosphere,
   density,
-  radiusMetres: radiusOverride,
+  radiusMetres,
   siteSpacing,
-  farRadiusMetres: farOverride,
+  farRadiusMetres,
   lights,
   worldQuery,
   waterHeight,
@@ -92,8 +95,6 @@ export function FoliageLayer({
 }: FoliageLayerProps) {
   const variant = parseVariant(BENCH.foliageVariant);
   const alphaMode = parseAlphaMode(BENCH.foliageAlpha);
-  const radiusMetres = radiusOverride ?? BENCH.foliageRadius ?? FOLIAGE_VIEW_RADIUS_METRES;
-  const farRadiusMetres = farOverride ?? BENCH.foliageFar ?? FOLIAGE_FAR_RADIUS_METRES;
 
   const field = useMemo(
     () =>
@@ -175,10 +176,8 @@ export function FoliageLayer({
   }, [farEnabled]);
 
   const lastFar = useRef<number | undefined>(undefined);
-  const lastStats = useRef<FoliageStats | null>(null);
   const handleStats = useMemo(
     () => (stats: FoliageStats) => {
-      lastStats.current = stats;
       publishFoliage({
         variant,
         alphaMode,

@@ -57,11 +57,31 @@ export interface FarFoliageCellsProps {
 }
 
 interface SpeciesRing {
+  /** Carried on the ring so the refill can iterate values() and not allocate an entry pair. */
+  speciesIndex: number;
   mesh: THREE.Mesh;
   geometry: THREE.InstancedBufferGeometry;
   instance: THREE.InstancedBufferAttribute;
   data: THREE.InstancedBufferAttribute;
   cursor: number;
+}
+
+/**
+ * Write `colour × intensity` into a vec3 uniform.
+ *
+ * Four call sites per frame, and the intermediate needs no storage between them — a
+ * scratch `THREE.Color` per light was four objects holding a value for one statement.
+ */
+function setLightUniform(
+  target: { value: unknown },
+  color: THREE.Color,
+  intensity: number
+): void {
+  (target.value as THREE.Vector3).set(
+    color.r * intensity,
+    color.g * intensity,
+    color.b * intensity
+  );
 }
 
 /** A single camera-facing quad; corners in [-1,1]², rebuilt entirely in the shader. */
@@ -133,7 +153,7 @@ export function FarFoliageCells({
       mesh.raycast = () => {};
       mesh.visible = false;
       group.add(mesh);
-      rings.set(s, { mesh, geometry, instance, data, cursor: 0 });
+      rings.set(s, { speciesIndex: s, mesh, geometry, instance, data, cursor: 0 });
     }
 
     return { group, rings, farUniforms, quad };
@@ -167,6 +187,15 @@ export function FarFoliageCells({
     });
   }, [state, camera, gl, scene]);
 
+  // Outer fade band: fully gone at the ring's edge, shrinking across the last stretch.
+  // An effect, not the frame loop — it is a pure function of the reach prop, and the
+  // reach only moves when someone drags the dial. The lights below genuinely do need the
+  // frame loop, because the Lighting dials patch those objects in place.
+  useEffect(() => {
+    state.farUniforms.farFadeEnd.value = farRadiusMetres;
+    state.farUniforms.farFadeStart.value = Math.max(1, farRadiusMetres - FOLIAGE_FAR_FADE_METRES);
+  }, [state, farRadiusMetres]);
+
   const scratch = useMemo(
     () => ({
       cameraCellX: Number.NaN,
@@ -175,10 +204,6 @@ export function FarFoliageCells({
       /** Cell cursor of the in-flight refill, or null when the fill is complete. */
       job: null as null | { index: number; camX: number; camY: number; camZ: number },
       statsAt: 0,
-      sunColor: new THREE.Color(),
-      fillSky: new THREE.Color(),
-      fillGround: new THREE.Color(),
-      ambient: new THREE.Color(),
     }),
     [field]
   );
@@ -188,45 +213,19 @@ export function FarFoliageCells({
     const camY = camera.position.y;
     const camZ = camera.position.z;
 
-    // Outer fade band: fully gone at the ring's edge, shrinking across the last stretch.
-    state.farUniforms.farFadeEnd.value = farRadiusMetres;
-    state.farUniforms.farFadeStart.value = Math.max(1, farRadiusMetres - FOLIAGE_FAR_FADE_METRES);
-
     // Live lights → uniforms, every frame: the Lighting dials patch the light objects in
     // place, so copying here is what keeps the ring's sun honest. Cheap — three colours.
     if (lights) {
       const sun = lights.sun.current;
-      if (sun) {
-        scratch.sunColor.copy(sun.color).multiplyScalar(sun.intensity);
-        (state.farUniforms.sunColor.value as THREE.Vector3).set(
-          scratch.sunColor.r,
-          scratch.sunColor.g,
-          scratch.sunColor.b
-        );
-      }
+      if (sun) setLightUniform(state.farUniforms.sunColor, sun.color, sun.intensity);
       const fill = lights.fill.current;
       if (fill) {
-        scratch.fillSky.copy(fill.color).multiplyScalar(fill.intensity);
-        scratch.fillGround.copy(fill.groundColor).multiplyScalar(fill.intensity);
-        (state.farUniforms.fillSky.value as THREE.Vector3).set(
-          scratch.fillSky.r,
-          scratch.fillSky.g,
-          scratch.fillSky.b
-        );
-        (state.farUniforms.fillGround.value as THREE.Vector3).set(
-          scratch.fillGround.r,
-          scratch.fillGround.g,
-          scratch.fillGround.b
-        );
+        setLightUniform(state.farUniforms.fillSky, fill.color, fill.intensity);
+        setLightUniform(state.farUniforms.fillGround, fill.groundColor, fill.intensity);
       }
       const ambient = lights.ambient.current;
       if (ambient) {
-        scratch.ambient.copy(ambient.color).multiplyScalar(ambient.intensity);
-        (state.farUniforms.ambient.value as THREE.Vector3).set(
-          scratch.ambient.r,
-          scratch.ambient.g,
-          scratch.ambient.b
-        );
+        setLightUniform(state.farUniforms.ambient, ambient.color, ambient.intensity);
       }
     }
     (state.farUniforms.sunDirection.value as THREE.Vector3)
@@ -297,6 +296,11 @@ function runFill(
   // covers everything the camera can approach before the next crossing refills.
   const includeStart = (foliageUniforms.fadeStart.value as number) - field.cellSize * 1.5;
   const includeEnd = farRadiusMetres + field.cellSize * 1.5;
+  // Squared bounds for the per-instance test below. `includeStart` can go negative when
+  // the near window's fade start is inside 1.5 cells, and squaring that would reject
+  // everything close in — clamped to 0, which passes every non-negative distance.
+  const includeStartSq = includeStart > 0 ? includeStart * includeStart : 0;
+  const includeEndSq = includeEnd * includeEnd;
   const cellReject = includeStart - field.cellSize; // centre distance that can hold nothing
   const deadline = performance.now() + FOLIAGE_BUILD_MS;
 
@@ -320,8 +324,8 @@ function runFill(
     const originX = field.cellOrigin(cx);
     const originZ = field.cellOrigin(cz);
 
-    for (const [speciesIndex, ring] of rings) {
-      const [start, count] = cell.speciesRanges[speciesIndex] ?? [0, 0];
+    for (const ring of rings.values()) {
+      const [start, count] = cell.speciesRanges[ring.speciesIndex] ?? [0, 0];
       const instanceArray = ring.instance.array as Float32Array;
       const dataArray = ring.data.array as Float32Array;
       for (let i = 0; i < count; i += 1) {
@@ -329,12 +333,14 @@ function runFill(
         const worldX = originX + cell.offsetX[source];
         const worldY = cell.baseY[source];
         const worldZ = originZ + cell.offsetZ[source];
-        const distance = Math.hypot(
-          worldX - job.camX,
-          worldY - job.camY,
-          worldZ - job.camZ
-        );
-        if (distance < includeStart || distance > includeEnd) continue;
+        // Squared, not `Math.hypot`: this is a pure range test that never needs the root,
+        // and it runs once per candidate instance across the whole ring — order tens of
+        // thousands per refill, against a 3 ms budget that stale ring frames are paid from.
+        const ddx = worldX - job.camX;
+        const ddy = worldY - job.camY;
+        const ddz = worldZ - job.camZ;
+        const distanceSq = ddx * ddx + ddy * ddy + ddz * ddz;
+        if (distanceSq < includeStartSq || distanceSq > includeEndSq) continue;
         const rotation = cell.rotationY[source];
         packVec4(instanceArray, ring.cursor, worldX, worldY, worldZ, cell.scale[source]);
         packVec4(

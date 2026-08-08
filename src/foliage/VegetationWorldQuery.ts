@@ -34,9 +34,6 @@ export class VegetationWorldQuery implements WorldQuerySource {
   private readonly direction = new THREE.Vector3();
   private readonly proxyObject = new THREE.Object3D();
   private readonly trunkSpecies: number[];
-  private queries = 0;
-  private cellTests = 0;
-  private trunkTests = 0;
 
   constructor(field: VegetationField) {
     this.field = field;
@@ -44,10 +41,6 @@ export class VegetationWorldQuery implements WorldQuerySource {
     this.trunkSpecies = SPECIES.map((species, index) => (species.trunk ? index : -1)).filter(
       (index) => index >= 0
     );
-  }
-
-  getMetrics(): { queries: number; cellTests: number; trunkTests: number } {
-    return { queries: this.queries, cellTests: this.cellTests, trunkTests: this.trunkTests };
   }
 
   raycast(
@@ -69,7 +62,6 @@ export class VegetationWorldQuery implements WorldQuerySource {
     ) {
       return null;
     }
-    this.queries += 1;
 
     const cellSize = this.field.cellSize;
     let cellX = this.field.cellIndexAt(this.origin.x);
@@ -99,7 +91,6 @@ export class VegetationWorldQuery implements WorldQuerySource {
     for (let visited = 0; visited < maxCells; visited += 1) {
       if (nearest && entry > nearest.distance) break;
 
-      this.cellTests += 1;
       const hit = this.testCell(cellX, cellZ, maxDistance);
       if (hit && (!nearest || hit.distance < nearest.distance)) nearest = hit;
 
@@ -144,7 +135,6 @@ export class VegetationWorldQuery implements WorldQuerySource {
         const base = cell.baseY[source];
         const radius = trunk.radiusMetres * scale;
         const top = base + trunk.heightMetres * scale;
-        this.trunkTests += 1;
 
         const distance = this.intersectCylinder(centreX, centreZ, base, top, radius, maxDistance);
         if (distance === null) continue;
@@ -209,11 +199,18 @@ export class VegetationWorldQuery implements WorldQuerySource {
       const discriminant = b * b - 4 * a * c;
       if (discriminant >= 0) {
         const root = Math.sqrt(discriminant);
-        for (const t of [(-b - root) / (2 * a), (-b + root) / (2 * a)]) {
-          if (t < 0 || t > maxDistance || t >= best) continue;
-          const y = this.origin.y + dy * t;
-          if (y < base || y > top) continue;
-          best = t;
+        // Unrolled rather than iterated over a literal: this is the innermost loop of
+        // every bullet ray, and a shot down a treeline walks tens of cells at up to a
+        // full placement grid of trunks each.
+        const near = (-b - root) / (2 * a);
+        const far = (-b + root) / (2 * a);
+        if (near >= 0 && near <= maxDistance && near < best) {
+          const y = this.origin.y + dy * near;
+          if (y >= base && y <= top) best = near;
+        }
+        if (far >= 0 && far <= maxDistance && far < best) {
+          const y = this.origin.y + dy * far;
+          if (y >= base && y <= top) best = far;
         }
       }
     }
@@ -221,8 +218,8 @@ export class VegetationWorldQuery implements WorldQuerySource {
     // Caps. Cheap, and a shot taken from above a treeline is a real case in a game whose
     // maps are hills and whose engagements start long.
     if (Math.abs(dy) > 1e-9) {
-      for (const planeY of [base, top]) {
-        const t = (planeY - this.origin.y) / dy;
+      for (let cap = 0; cap < 2; cap += 1) {
+        const t = ((cap === 0 ? base : top) - this.origin.y) / dy;
         if (t < 0 || t > maxDistance || t >= best) continue;
         const px = ox + dx * t;
         const pz = oz + dz * t;

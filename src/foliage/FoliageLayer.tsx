@@ -7,6 +7,7 @@
 // cannot be attributed a cost (docs/03 §4.4, and the reason `?grasscap=` exists).
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useThree } from "@react-three/fiber";
 import type * as THREE from "three/webgpu";
 import { FoliageCells, type FoliageStats } from "./FoliageCells.tsx";
 import { createFoliageTexture } from "./foliageTexture.ts";
@@ -23,6 +24,11 @@ import { loadTreePrototypes, type TreePrototypes } from "./treePrototypes.ts";
 import { VegetationField, type VegetationTerrain } from "./VegetationField.ts";
 import { VegetationWorldQuery } from "./VegetationWorldQuery.ts";
 import { foliageHandoffBand } from "./foliageConfig.ts";
+import { FoliageOverdrawProbe } from "./FoliageOverdrawProbe.tsx";
+import {
+  createFoliageDebugControls,
+  type FoliageDebugControls,
+} from "./foliageDebug.ts";
 import type { CompositeWorldQuery } from "../fps/core/WorldQuery.ts";
 import type { Atmosphere } from "../df2/atmosphere.ts";
 import { BENCH, publishFoliage } from "../df2/bench.ts";
@@ -84,6 +90,12 @@ export interface FoliageLayerProps {
   worldQuery?: CompositeWorldQuery | null;
   waterHeight?: number;
   onStats?: (stats: FoliageStats) => void;
+  /**
+   * Hands the layer's live debug handles out so the Foliage panel can drive them, the
+   * same seam the grass shader uses. Mutated directly by the panel, never read back as
+   * React state, so moving a control does not re-render the canvas tree.
+   */
+  onDebugReady?: (controls: FoliageDebugControls | null) => void;
 }
 
 export function FoliageLayer({
@@ -97,7 +109,9 @@ export function FoliageLayer({
   worldQuery,
   waterHeight,
   onStats,
+  onDebugReady,
 }: FoliageLayerProps) {
+  const gl = useThree((s) => s.gl);
   const variant = parseVariant(BENCH.foliageVariant);
   const alphaMode = parseAlphaMode(BENCH.foliageAlpha);
 
@@ -117,10 +131,16 @@ export function FoliageLayer({
 
   const assets = useMemo(() => {
     const foliage = createFoliageTexture();
-    return { foliage, uniforms: createFoliageUniforms() };
+    const uniforms = createFoliageUniforms();
+    return { foliage, uniforms, controls: createFoliageDebugControls(uniforms) };
   }, []);
 
   useEffect(() => () => assets.foliage.texture.dispose(), [assets]);
+
+  useEffect(() => {
+    onDebugReady?.(assets.controls);
+    return () => onDebugReady?.(null);
+  }, [assets, onDebugReady]);
 
   // The handoff band is a contract between the two tiers, so the layer that owns both
   // sets it — from mount, not as a side effect of whichever tier happens to render first.
@@ -178,7 +198,7 @@ export function FoliageLayer({
     if (!farEnabled) return;
     let disposed = false;
     let loaded: ImpostorAtlases | null = null;
-    void loadImpostorAtlases().then((result) => {
+    void loadImpostorAtlases(gl).then((result) => {
       if (disposed) {
         result?.dispose();
         return;
@@ -191,7 +211,7 @@ export function FoliageLayer({
       loaded?.dispose();
       setAtlases(null);
     };
-  }, [farEnabled]);
+  }, [farEnabled, gl]);
 
   const lastFar = useRef<FarFoliageStats | undefined>(undefined);
   const handleStats = useMemo(
@@ -224,11 +244,13 @@ export function FoliageLayer({
 
   return (
     <>
+      <FoliageOverdrawProbe controls={assets.controls} />
       {prototypes !== "pending" && (
         <FoliageCells
           field={field}
           texture={assets.foliage.texture as unknown as THREE.Texture}
           uniforms={assets.uniforms}
+          controls={assets.controls}
           atmosphere={atmosphere}
           variant={variant}
           alphaMode={alphaMode}
@@ -243,6 +265,7 @@ export function FoliageLayer({
           atlases={atlases}
           atmosphere={atmosphere}
           foliageUniforms={assets.uniforms}
+          controls={assets.controls}
           farRadiusMetres={farRadiusMetres}
           lights={lights}
           onStats={handleFarStats}

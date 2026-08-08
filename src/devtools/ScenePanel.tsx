@@ -6,7 +6,7 @@
 // anything without it. It needs to be somewhere a developer looks, not somewhere
 // a player dismisses.
 
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import {
   loadTerrainIndex,
   type LoadedTerrain,
@@ -21,7 +21,7 @@ import {
   type TerrainScale,
 } from "../df2/config";
 import { DialGroup, GROUPED } from "./dialGroup";
-import { BENCH } from "../df2/bench";
+import { CommitDial } from "./CommitDial";
 
 export interface ScenePanelProps {
   terrain: LoadedTerrain | null;
@@ -84,117 +84,6 @@ const SCALE_DIALS: ScaleDial[] = [
  * rate, and every prop here is identity-stable state or a useState setter, so
  * memo bails on all of those renders.
  */
-/**
- * The foliage dials that REBUILD, so they commit on pointer release. Module scope beside
- * `SCALE_DIALS`, reading and writing through `SceneHandles` rather than carrying bound
- * setters, so the descriptor is a plain constant instead of being rebuilt inside JSX on
- * every render.
- */
-const FOLIAGE_REBUILD_DIALS = [
-  {
-    key: "radius",
-    label: "Spawner reach",
-    min: 96,
-    max: 768,
-    step: 32,
-    read: (s: SceneHandles) => s.foliageRadius,
-    write: (s: SceneHandles, v: number) => s.setFoliageRadius(v),
-    hint: "how far plants are placed at all. Nothing is drawn past it, which is why a vista has a bare middle distance. Rebuilds",
-  },
-  {
-    key: "spacing",
-    label: "Site spacing",
-    min: 1.5,
-    max: 8,
-    step: 0.25,
-    read: (s: SceneHandles) => s.foliageSpacing,
-    write: (s: SceneHandles, v: number) => s.setFoliageSpacing(v),
-    hint: "metres between candidate sites. Count scales as 1/spacing², so halving it quadruples the plants. 1.7 m is ~10x the default. Rebuilds",
-  },
-  {
-    key: "far",
-    label: "Far ring",
-    min: 0,
-    max: 1024,
-    step: 64,
-    read: (s: SceneHandles) => s.foliageFar,
-    write: (s: SceneHandles, v: number) => s.setFoliageFar(v),
-    hint: "octahedral-impostor reach past the spawner window; 0 turns the ring off. Capped at 1024 because its instance buffers are sized for the worst case over the whole ring. Rebuilds",
-  },
-] as const;
-
-/**
- * A slider that commits on RELEASE rather than per tick, holding the dragged value itself.
- *
- * One implementation because the markup carries the `data-dev` driver contract that
- * browser automation reads, and `dialGroup.tsx` states the rule that the contract must
- * exist exactly once. It had already drifted: the foliage block was copied from the scale
- * block and lost `onPointerCancel`, so alt-tabbing mid-drag left an uncommitted value on
- * screen looking live. Sharing the markup is orthogonal to which dials ride the visual
- * wire — foliage is deliberately off `VISUAL_DIALS`, and still renders through this.
- */
-function CommitDial({
-  devKey,
-  label,
-  min,
-  max,
-  step,
-  hint,
-  unit = "",
-  value,
-  onCommit,
-}: {
-  devKey: string;
-  label: string;
-  min: number;
-  max: number;
-  step: number;
-  hint: string;
-  unit?: string;
-  value: number;
-  onCommit: (value: number) => void;
-}) {
-  // Null means "not being dragged", so a dial whose real value is 0 still reads its own
-  // committed value rather than the placeholder.
-  const [pending, setPending] = useState<number | null>(null);
-  const live = pending ?? value;
-  const commit = () => {
-    if (pending !== null && pending !== value) onCommit(pending);
-    setPending(null);
-  };
-  return (
-    <label className="dial">
-      <span className="dial-row">
-        <span>{label}</span>
-        <b data-dev={`readout-${devKey}`}>
-          {live.toFixed(step < 1 ? 2 : 0)}
-          {unit}
-        </b>
-      </span>
-      <input
-        type="range"
-        data-dev={`dial-${devKey}`}
-        data-dev-value={live}
-        aria-label={label}
-        min={min}
-        max={max}
-        step={step}
-        value={live}
-        onChange={(e) => setPending(Number(e.target.value))}
-        // Committing rebuilds the world (~a second) — on release, not per tick, or the
-        // drag would stall the drag.
-        onPointerUp={commit}
-        onKeyUp={commit}
-        onBlur={commit}
-        // Alt-tab mid-drag fires pointercancel, not pointerup: drop the uncommitted value
-        // rather than leave a readout that looks live.
-        onPointerCancel={() => setPending(null)}
-      />
-      <em>{hint}</em>
-    </label>
-  );
-}
-
 export const ScenePanel = memo(function ScenePanel({
   terrain,
   grounded,
@@ -216,15 +105,6 @@ export const ScenePanel = memo(function ScenePanel({
   // chunk geometry, grass, motor terrain — so unlike the grass dials these
   // commit on release, and this mirror is what moves under the thumb.
   // Live density is coalesced through a frame; see the dial's onChange.
-  const densityPending = useRef<number | null>(null);
-  const densityFrame = useRef<number | null>(null);
-  useEffect(
-    () => () => {
-      if (densityFrame.current !== null) cancelAnimationFrame(densityFrame.current);
-    },
-    []
-  );
-
   // The prepared-terrain list, for the map selector. Null until fetched (and
   // when no index ships, in which case the selector simply does not render).
   const [maps, setMaps] = useState<TerrainIndexEntry[] | null>(null);
@@ -366,81 +246,9 @@ export const ScenePanel = memo(function ScenePanel({
         ))}
       </div>
 
-      {scene && BENCH.foliage && (
-        <>
-          <span className="eyebrow dev-group">Foliage</span>
-          {networked && BENCH.admin !== true ? (
-            <p className="note" data-dev="foliage-locked">
-              Density is hidden in a networked session. Cover is gameplay — growing
-              yourself twice the bushes changes what you can hide behind, and nobody
-              else would see it. Add <code>?admin=1</code> to unlock it locally, or go
-              offline.
-            </p>
-          ) : (
-            <label className="dial">
-              <span className="dial-row">
-                <span>Density</span>
-                <b data-dev="readout-foliage-density">{scene.foliageDensity.toFixed(2)}</b>
-              </span>
-              <input
-                type="range"
-                data-dev="dial-foliage-density"
-                data-dev-value={scene.foliageDensity}
-                aria-label="Foliage density"
-                min={0}
-                max={10}
-                step={0.25}
-                value={scene.foliageDensity}
-                // Live, unlike the scale dials: this clears the placement cache and the
-                // renderer's budgeted refill rebuilds cells over the next few frames. No
-                // mesh is rebuilt, so there is nothing to stall on and no second pipeline
-                // warm-up.
-                // COALESCED to one apply per animation frame. Each apply clears the
-                // placement cache and invalidates every bucket, so an unthrottled drag
-                // queued a dozen full cell rebuilds and threw all but the last away.
-                onChange={(e) => {
-                  const v = Number(e.target.value);
-                  densityPending.current = v;
-                  if (densityFrame.current !== null) return;
-                  densityFrame.current = requestAnimationFrame(() => {
-                    densityFrame.current = null;
-                    if (densityPending.current !== null) {
-                      scene.setFoliageDensity(densityPending.current);
-                      densityPending.current = null;
-                    }
-                  });
-                }}
-              />
-              <em>
-                multiplies placement PROBABILITY, and SATURATES: a site yields at most one
-                plant, so past ~3 it barely moves (measured: 4x gave 2.8x the plants). Site
-                spacing below is the real lever on count. Live — no rebuild
-                {networked ? " — and LOCAL, so no one else sees it" : ""}
-              </em>
-            </label>
-          )}
-
-          {/* REBUILD dials, so they commit on release. Radius changes how many buckets
-              exist and spacing changes every bucket's buffer capacity, so either one
-              reconstructs the cell window and re-runs the pipeline warm-up. Dragging
-              those per tick would stall the drag. */}
-          {(!networked || BENCH.admin === true) &&
-            FOLIAGE_REBUILD_DIALS.map((d) => (
-              <CommitDial
-                key={d.key}
-                devKey={`foliage-${d.key}`}
-                label={d.label}
-                min={d.min}
-                max={d.max}
-                step={d.step}
-                hint={d.hint}
-                unit=" m"
-                value={d.read(scene)}
-                onCommit={(v) => d.write(scene, v)}
-              />
-            ))}
-        </>
-      )}
+      {/* Foliage moved to its own tab: this section was gated on ?foliage=1, so with
+          the flag off there was no evidence it existed. The Foliage tab always renders
+          and says what is missing. */}
 
       {terrain && (
         <>

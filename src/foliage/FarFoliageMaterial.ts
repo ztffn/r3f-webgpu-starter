@@ -41,7 +41,14 @@ import {
   type FoliageUniforms,
 } from "./FoliageMaterial.ts";
 import type { ImpostorSpeciesAtlas } from "./impostorAtlas.ts";
-import type { Species } from "./species.ts";
+import {
+  foliageDebugCellColor,
+  foliageDebugColor,
+  FOLIAGE_LOD_IMPOSTOR_SLOT,
+  FOLIAGE_OVERDRAW_STEP,
+  FOLIAGE_TIER_FAR_SLOT,
+} from "./foliageDebug.ts";
+import { SPECIES, type Species } from "./species.ts";
 
 // The convention atmosphere.ts already uses: TSL's overloaded node types collapse to
 // unusable intersections under inference, so graph-shaped values go untyped here and
@@ -90,6 +97,8 @@ export interface FarFoliageMaterialOptions {
   spritesPerSide: number;
   tileSize: number;
   species: Species;
+  /** Vegetation cell side, metres — only the `Cells` debug view reads it. */
+  cellSize: number;
   atmosphere: Atmosphere;
   /** The layer's shared uniforms — the grow-in band reads fadeStart/fadeEnd. */
   foliageUniforms: FoliageUniforms;
@@ -254,7 +263,41 @@ export function createFarFoliageMaterial(options: FarFoliageMaterialOptions) {
   const light = farUniforms.ambient.add(fill).add(sun).mul(1 / Math.PI);
   const tone = instanceTone(instanceSeed);
 
-  material.colorNode = atmosphere.shade(albedo.mul(tone).mul(light));
+  // False colour, switched on a uniform rather than by swapping materials the way the
+  // near tier must: the ring already has one material per species, and everything a view
+  // needs to distinguish is either constant for that ring or derivable from `origin`.
+  //
+  // Each view REPLACES the shaded expression instead of tinting it, so no debug colour
+  // passes through atmosphere.shade — grade and fog would otherwise turn a flat palette
+  // entry into a distance-dependent one, which is unreadable as false colour. Alpha is
+  // left alone: unlike the near tier's cards, the impostor's cutout IS the plant's
+  // silhouette, and keeping it is what makes a tree still look like a tree.
+  const shaded = atmosphere.shade(albedo.mul(tone).mul(light));
+  const speciesSlot = SPECIES.indexOf(species);
+  const views: NodeArg[] = [
+    shaded,
+    // LOD view: the ring is the impostor tier, so it takes the ramp's last step.
+    vec3(...foliageDebugColor(FOLIAGE_LOD_IMPOSTOR_SLOT)),
+    vec3(...foliageDebugColor(FOLIAGE_TIER_FAR_SLOT)),
+    vec3(...foliageDebugColor(speciesSlot < 0 ? 0 : speciesSlot)),
+    foliageDebugCellColor(origin.xz, options.cellSize),
+    // Overdraw: one step per layer, same constant the near tier adds, so a pixel covered
+    // by both tiers counts both. Blending is switched on the material by FarFoliageCells
+    // — it is material state, not a node, so it cannot live in this select.
+    vec3(
+      FOLIAGE_OVERDRAW_STEP,
+      FOLIAGE_OVERDRAW_STEP * 0.55,
+      FOLIAGE_OVERDRAW_STEP * 0.15
+    ),
+    // Collision: nothing authoritative to draw yet, so it falls back to the real render
+    // rather than inventing a colour. The panel says so; see foliageDebug.ts.
+    shaded,
+  ];
+  let debugged: NodeArg = views[views.length - 1];
+  for (let i = views.length - 2; i >= 0; i -= 1) {
+    debugged = foliageUniforms.debugMode.lessThan(i + 0.5).select(views[i], debugged);
+  }
+  material.colorNode = debugged;
   material.opacityNode = applyCrossfade(alpha, bandPosition, "far");
 
   return material;

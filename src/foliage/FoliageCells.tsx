@@ -43,6 +43,13 @@ import {
 import { createFoliageMaterial, type FoliageAlphaMode, type FoliageUniforms } from "./FoliageMaterial.ts";
 import { createTreeMaterial } from "./TreeMaterial.ts";
 import { buildTreeTemplate, type TreePrototypes } from "./treePrototypes.ts";
+import { FOLIAGE_LAYER } from "./FoliageOverdrawProbe.tsx";
+import {
+  createFoliageDebugMaterials,
+  foliageDebugSlot,
+  FOLIAGE_DEBUG_OVERDRAW,
+  type FoliageDebugControls,
+} from "./foliageDebug.ts";
 import type { Atmosphere } from "../df2/atmosphere.ts";
 import { SPECIES } from "./species.ts";
 import type { VegetationField } from "./VegetationField.ts";
@@ -68,6 +75,8 @@ export interface FoliageCellsProps {
   field: VegetationField;
   texture: THREE.Texture;
   uniforms: FoliageUniforms;
+  /** Live debug handles: view mode, per-species visibility, LOD distance scale. */
+  controls: FoliageDebugControls;
   /** Grade and fog. Threaded to the material because foliage is LIT (FoliageMaterial). */
   atmosphere: Atmosphere;
   variant: CardVariant;
@@ -108,6 +117,7 @@ export function FoliageCells({
   field,
   texture,
   uniforms,
+  controls,
   atmosphere,
   variant,
   alphaMode,
@@ -192,6 +202,8 @@ export function FoliageCells({
           mesh.count = 0;
           mesh.visible = false;
           mesh.name = `foliage-${SPECIES[s].id}`;
+          // Also on the probe layer, so the overdraw measurement can render foliage alone.
+          mesh.layers.enable(FOLIAGE_LAYER);
           // Explicit, because three culls an InstancedMesh against `object.boundingSphere`
           // when one is present (Frustum.intersectsObject) — and the point of bucketing by
           // cell is that this sphere is a cell, not the map.
@@ -217,7 +229,17 @@ export function FoliageCells({
       }
     }
 
-    return { group, buckets, templates, materials, capacity, radiusCells };
+    const debug = createFoliageDebugMaterials({
+      cellSize: field.cellSize,
+      cardMap: texture,
+      leafMapFor: (s) => {
+        const prototypeId = SPECIES[s]?.prototype;
+        if (!prototypeId) return null;
+        return prototypes?.byId.get(prototypeId)?.leafTexture ?? null;
+      },
+    });
+
+    return { group, buckets, templates, materials, capacity, radiusCells, debug };
     // atmosphere in the deps: a preset switch keeps the same Atmosphere object (its
     // uniforms are live), so this does not rebuild on weather — but a rebuilt world hands
     // down a new one, and materials still carrying the old fog would fog by a dead uniform.
@@ -237,6 +259,7 @@ export function FoliageCells({
       }
       for (const geometry of geometries) geometry.dispose();
       for (const material of state.materials) material?.dispose();
+      state.debug.dispose();
     },
     [state]
   );
@@ -356,6 +379,8 @@ export function FoliageCells({
     const projection = (camera as THREE.PerspectiveCamera).projectionMatrix.elements[5];
     const zoom = Math.max(1, projection / REFERENCE_P11);
 
+    const debugMode = uniforms.debugMode.value as number;
+    const lodDistanceScale = controls.lodDistanceScale;
     const deadline = performance.now() + FOLIAGE_BUILD_MS;
     let visibleBuckets = 0;
     let visibleInstances = 0;
@@ -383,17 +408,48 @@ export function FoliageCells({
         bucket.filled = true;
       }
 
-      if (bucket.mesh.count === 0) continue;
+      // Hidden species leave the frame entirely rather than discarding in the shader:
+      // the point of the toggle is attributing a DRAW, and a discarded fragment still
+      // costs one.
+      if (
+        bucket.mesh.count === 0 ||
+        !controls.speciesVisible[bucket.speciesIndex] ||
+        !controls.nearVisible
+      ) {
+        bucket.mesh.visible = false;
+        continue;
+      }
 
       const species = SPECIES[bucket.speciesIndex];
       const dx = bucket.centreX - camX;
       const dz = bucket.centreZ - camZ;
       const distance = Math.hypot(dx, dz) / zoom;
-      const lod = chooseLod(distance, species.lodScale, bucket.lod, field.wrap(cx), field.wrap(cz));
+      const lod = chooseLod(
+        distance,
+        species.lodScale * lodDistanceScale,
+        bucket.lod,
+        field.wrap(cx),
+        field.wrap(cz)
+      );
       if (lod !== bucket.lod || bucket.mesh.geometry !== bucket.geometries[lod]) {
         bucket.lod = lod;
         bucket.mesh.geometry = bucket.geometries[lod];
       }
+
+      // False-colour views swap the MATERIAL, in the same place and for the same reason
+      // the geometry is swapped: the value being visualised is per bucket, and one
+      // material is shared by every bucket of a species, so no uniform can carry it.
+      const wanted =
+        debugMode === FOLIAGE_DEBUG_OVERDRAW
+          ? state.debug.overdrawMaterialFor(bucket.speciesIndex)
+          : (() => {
+              const slot = foliageDebugSlot(debugMode, bucket.lod, bucket.speciesIndex);
+              return slot === null
+                ? state.materials[bucket.speciesIndex]!
+                : state.debug.materialFor(bucket.speciesIndex, slot);
+            })();
+      if (bucket.mesh.material !== wanted) bucket.mesh.material = wanted;
+
       bucket.mesh.visible = true;
 
       visibleBuckets += 1;

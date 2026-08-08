@@ -34,6 +34,11 @@ import {
 } from "./FarFoliageMaterial.ts";
 import type { ImpostorAtlases } from "./impostorAtlas.ts";
 import { SPECIES } from "./species.ts";
+import {
+  FOLIAGE_DEBUG_OVERDRAW,
+  type FoliageDebugControls,
+} from "./foliageDebug.ts";
+import { FOLIAGE_LAYER } from "./FoliageOverdrawProbe.tsx";
 import type { VegetationField } from "./VegetationField.ts";
 
 export interface FarFoliageLights {
@@ -48,6 +53,8 @@ export interface FarFoliageCellsProps {
   atmosphere: Atmosphere;
   /** The near window's shared uniforms — the ring grows in over the same fade band. */
   foliageUniforms: FoliageUniforms;
+  /** Live debug handles; the ring honours per-species visibility with the near tier. */
+  controls: FoliageDebugControls;
   /** Outer reach of the ring, metres. */
   farRadiusMetres: number;
   /** Live scene lights for the hand-rolled sun term; absent refs keep the defaults. */
@@ -112,6 +119,7 @@ export function FarFoliageCells({
   atlases,
   atmosphere,
   foliageUniforms,
+  controls,
   farRadiusMetres,
   lights,
   onStats,
@@ -158,12 +166,14 @@ export function FarFoliageCells({
         spritesPerSide: atlases.manifest.spritesPerSide,
         tileSize: atlases.manifest.tileSize,
         species,
+        cellSize: field.cellSize,
         atmosphere,
         foliageUniforms,
         farUniforms,
       });
       const mesh = new THREE.Mesh(geometry, material);
       mesh.name = `foliage-far-${species.id}`;
+      mesh.layers.enable(FOLIAGE_LAYER);
       mesh.frustumCulled = false;
       mesh.raycast = () => {};
       mesh.visible = false;
@@ -271,6 +281,27 @@ export function FarFoliageCells({
       if (scratch.job.index < 0) scratch.job = null;
     }
 
+    // EVERY FRAME, not at fill completion. A refill only runs on a camera cell crossing,
+    // so owning visibility in `runFill` meant hiding a species did nothing to the ring
+    // until the player walked into the next cell — the toggle looked broken while the
+    // near window had already responded.
+    const overdraw = (foliageUniforms.debugMode.value as number) === FOLIAGE_DEBUG_OVERDRAW;
+    for (const ring of state.rings.values()) {
+      ring.mesh.visible =
+        ring.geometry.instanceCount > 0 &&
+        controls.speciesVisible[ring.speciesIndex] &&
+        controls.farVisible;
+      // Blending is material STATE, not a shader node, so the overdraw view has to reach
+      // in and set it. Only on a change: `needsUpdate` rebuilds the pipeline.
+      const material = ring.mesh.material as THREE.Material;
+      if (material.blending !== (overdraw ? THREE.AdditiveBlending : THREE.NormalBlending)) {
+        material.blending = overdraw ? THREE.AdditiveBlending : THREE.NormalBlending;
+        material.transparent = overdraw;
+        material.depthWrite = !overdraw;
+        material.needsUpdate = true;
+      }
+    }
+
     if (onStats) {
       const now = performance.now();
       if (now - scratch.statsAt > 250) {
@@ -370,7 +401,6 @@ function runFill(
   // Complete: publish counts and upload in one shot per species.
   for (const ring of rings.values()) {
     ring.geometry.instanceCount = ring.cursor;
-    ring.mesh.visible = ring.cursor > 0;
     ring.instance.clearUpdateRanges();
     ring.data.clearUpdateRanges();
     if (ring.cursor > 0) {

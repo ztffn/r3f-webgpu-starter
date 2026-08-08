@@ -23,6 +23,7 @@ import {
 import { EXPLICIT_LAUNCH_PARAMS } from "../ui/launchParams";
 import { DF2Scene, type SceneHandles } from "../df2/DF2Scene";
 import type { GrassUniforms } from "../df2/GrassMaterial";
+import type { FoliageDebugControls } from "../foliage/foliageDebug";
 import type { FlyState, Stance } from "../df2/FlyControls";
 import type { RoomInfo } from "../net/ColyseusProtocol";
 import { useCombatFeed } from "../fps/useCombatFeed";
@@ -218,6 +219,11 @@ export default function GameApp() {
   // reads back, so changing a slider never re-renders the canvas tree.
   const [grassUniforms, setGrassUniforms] = useState<GrassUniforms | null>(null);
   const onGrassReady = useCallback((u: GrassUniforms | null) => setGrassUniforms(u), []);
+  const [foliageControls, setFoliageControls] = useState<FoliageDebugControls | null>(null);
+  const onFoliageDebugReady = useCallback(
+    (c: FoliageDebugControls | null) => setFoliageControls(c),
+    []
+  );
   const [sceneHandles, setSceneHandles] = useState<SceneHandles | null>(null);
   const onSceneReady = useCallback((s: SceneHandles | null) => setSceneHandles(s), []);
 
@@ -301,6 +307,7 @@ export default function GameApp() {
           setTerrainScale={setTerrainScale}
           networked={netDemo}
           grassUniforms={grassUniforms}
+          foliageControls={foliageControls}
           scene={sceneHandles}
           fpsMode={scopeDemo}
           panels={hudPanels}
@@ -327,6 +334,7 @@ export default function GameApp() {
           onToggleGround={toggleGround}
           onStance={chooseStance}
           onGrassReady={onGrassReady}
+          onFoliageDebugReady={onFoliageDebugReady}
           onSceneReady={onSceneReady}
           scopeDemo={scopeDemo}
           weaponDemo={weaponDemo}

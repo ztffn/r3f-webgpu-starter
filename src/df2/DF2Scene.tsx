@@ -16,6 +16,7 @@ import { FlyControls, type FlyState, type Stance } from "./FlyControls";
 import { Heightfield } from "./Heightfield";
 import { createTerrainMaterial, type TerrainDetailUniforms } from "./TerrainMaterial";
 import { createGrassMaterial, type GrassUniforms } from "./GrassMaterial";
+import type { FoliageDebugControls } from "../foliage/foliageDebug";
 import { createBladeMaterial, createBladeMesh, type BladeUniforms } from "./BladeMaterial";
 import { createColorGrade } from "./colorGrade";
 import { createFog } from "./fog";
@@ -328,6 +329,8 @@ export interface DF2SceneProps {
   onStatus?: (status: { loading: boolean; terrain: LoadedTerrain | null }) => void;
   /** Hands the grass shader's live uniforms out so a debug panel can drive them. */
   onGrassReady?: (u: GrassUniforms | null) => void;
+  /** The same, for the vegetation layer — the Foliage tab writes these directly. */
+  onFoliageDebugReady?: (c: FoliageDebugControls | null) => void;
   /** The same, for everything added this session: weather, fog, rain and blades. */
   onSceneReady?: (s: SceneHandles | null) => void;
   /** Renders the integrated first-person optic prototype on top of this world. */
@@ -394,6 +397,7 @@ export function DF2Scene({
   onToggleGround,
   onStance,
   onGrassReady,
+  onFoliageDebugReady,
   onSceneReady,
   scopeDemo = false,
   weaponDemo = false,
@@ -1091,6 +1095,7 @@ export function DF2Scene({
             lights={lights}
             worldQuery={worldQuery}
             waterHeight={showWater ? waterLevel : undefined}
+            onDebugReady={onFoliageDebugReady}
           />
         </Suspense>
       )}

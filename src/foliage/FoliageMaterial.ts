@@ -188,6 +188,15 @@ export interface FoliageUniforms {
    */
   fadeStart: FoliageUniform;
   fadeEnd: FoliageUniform;
+  /**
+   * False-colour view index (`foliageDebug.ts`), 0 for the real render.
+   *
+   * Shared by both tiers so one control drives the whole layer, but read differently by
+   * each: the far ring consumes it as a real shader uniform, while the near window reads
+   * it on the CPU and swaps materials, because its LOD varies per bucket and one material
+   * serves every bucket of a species.
+   */
+  debugMode: FoliageUniform;
 }
 
 export interface FoliageMaterialOptions {
@@ -220,6 +229,7 @@ export function createFoliageUniforms(options?: {
     time: floatUniform(0),
     windAmplitude: floatUniform(options?.windAmplitude ?? FOLIAGE_WIND_AMPLITUDE),
     windPeriod: floatUniform(options?.windPeriod ?? FOLIAGE_WIND_PERIOD_SECONDS),
+    debugMode: floatUniform(0),
     fadeStart: floatUniform(options?.fadeStart ?? 1e6),
     fadeEnd: floatUniform(options?.fadeEnd ?? 1e6 + 1),
   };

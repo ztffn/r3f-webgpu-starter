@@ -15,6 +15,7 @@ export const DEV_TABS = [
   "launch",
   "telemetry",
   "grass",
+  "foliage",
   "weather",
   "controls",
 ] as const;

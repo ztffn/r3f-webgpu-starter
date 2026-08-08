@@ -357,8 +357,23 @@ export class FirstPersonWeaponRig {
    * own update, while it is iterating its actions, and the rest pose reuses the very
    * action that just finished. Resetting it mid-dispatch mutates the list being walked.
    * One frame holding the clamped last frame costs nothing visible.
+   *
+   * Guarded on the action as well, and BOTH halves are load-bearing — keep them together.
+   * `startAction` fades the outgoing action rather than stopping it, and three keeps a
+   * faded action ENABLED, still advancing its own time and still able to dispatch, until
+   * the fade interpolant runs out. So a segment replaced within SEGMENT_FADE_SECONDS of
+   * its own natural end fires `finished` AFTER its replacement has started, and an
+   * unguarded handler drops that replacement into the rest pose one frame in — a reload
+   * keyed just after a shot simply never plays. Measured against this three build: a
+   * 0.30 s clip replaced at 0.25 s still fires at 0.28 s, while the same swap at 0.10 s
+   * fires nothing, so the window is exactly the fade.
+   *
+   * The bored fidget deliberately still passes the guard: the rest pose and the fidget
+   * are the SAME clip, so `handsAction` is the action that finished, and that identity is
+   * what returns the rig to rest at all.
    */
-  private handleFinished = (): void => {
+  private handleFinished = (event: { action: THREE.AnimationAction }): void => {
+    if (event.action !== this.handsAction) return;
     this.restPending = true;
   };
 

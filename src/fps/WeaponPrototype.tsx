@@ -62,8 +62,12 @@ import {
 } from "./presentation/WeaponPresentationDefinition";
 import { FirstPersonWeaponRig } from "./presentation/FirstPersonWeaponRig.ts";
 import { loadHands, loadWeapon, assertHandClips } from "./presentation/fpRigAssets.ts";
-import { weaponPoses, type PosePlacement } from "./presentation/weaponPoseStore.ts";
+import { weaponPoses } from "./presentation/weaponPoseStore.ts";
 import { WeaponBobController } from "./presentation/WeaponBob.ts";
+import {
+  createWeaponRigPlacementFrame,
+  WeaponRigPlacement,
+} from "./presentation/WeaponRigPlacement.ts";
 import { weaponAimIndicator } from "./ui/WeaponAimIndicator";
 
 const WORLD_LAYER = 0;
@@ -113,7 +117,6 @@ const PERFORMANCE_SAMPLE_SECONDS = 0.25;
 // serve them all, and the proxy's single pair was tuned against a 3x-scaled model with a
 // different internal origin — carried over unchanged it put the hands below the frame.
 const MAX_TRANSITIONAL_SPEED_METRES_PER_SECOND = 30;
-const lerp = THREE.MathUtils.lerp;
 /**
  * How fast the rig blends into and out of the sprint pose.
  *
@@ -439,10 +442,10 @@ export function WeaponPrototype({
   /** Movement bob. The CAMERA never bobs — only this rig does (WeaponBob.ts). */
   const weaponBob = useMemo(() => new WeaponBobController(), []);
   const aimSway = useMemo(() => new AimSwayController(), []);
-  const opticLocal = useMemo(() => new THREE.Vector3(), []);
-  const aimOffset = useMemo(() => new THREE.Vector3(), []);
   const hasOptic = useRef(false);
-  const offset = useMemo(() => new THREE.Vector3(), []);
+  /** Where the rig sits: authored pose, ADS alignment, and the additive layers on top. */
+  const placement = useMemo(() => new WeaponRigPlacement(), []);
+  const placementFrame = useMemo(() => createWeaponRigPlacementFrame(), []);
   const opticWorld = useMemo(() => new THREE.Vector3(), []);
   const opticInEyeSpace = useMemo(() => new THREE.Vector3(), []);
   const lookLag = useMemo(() => new THREE.Vector2(), []);
@@ -1222,64 +1225,39 @@ export function WeaponPrototype({
       playerPose.grounded,
       aim.current
     );
-    // Resolve the optic from a neutral camera-space root first. This rebuilds the
-    // local transform after every mixer update, so an animation cannot leave ADS
-    // aligned to the pose of the previous frame.
-    rig.position.copy(camera.position);
-    rig.quaternion.copy(camera.quaternion);
-    const pose = weaponPoses.get(presentation.rigKey);
-    // The authored pose TILT is applied here, BEFORE the optic is measured, and the order
-    // is the whole reason this works. The ADS offset is derived from where the glass lands
-    // in the rig's own frame, so a tilt applied after that measurement would swing the lens
-    // straight back off the eye. Applied first, the alignment is computed in the tilted
-    // frame and stays exact — which is what lets an iron sight nose down for free.
-    // Sway and recoil deliberately stay AFTER the translation below: those rotate the
-    // weapon about where it is held, which is a different thing from how it is held.
-    // hip -> sprint, then -> ads. Aiming and sprinting are mutually exclusive in the
-    // motor, so layering ADS last means it wins the frame a player aims out of a sprint.
-    const running = (field: keyof PosePlacement) =>
-      lerp(pose.hip[field], pose.sprint[field], sprintBlend.current);
-    const aimed = (field: keyof PosePlacement) =>
-      lerp(running(field), pose.ads[field], aim.current);
-    rig.rotateX(THREE.MathUtils.degToRad(aimed("pitch")));
-    rig.rotateY(THREE.MathUtils.degToRad(aimed("yaw")));
-    rig.rotateZ(THREE.MathUtils.degToRad(aimed("roll")));
-    rig.updateMatrixWorld(true);
-    const opticAnchor = weaponRig.current?.optic ?? null;
-    if (hasOptic.current && opticAnchor) {
-      // The glass's own local centre, pushed to world through the lens node. The lens
-      // is a rigid child of the animated scope, so this tracks the scope through recoil
-      // and reload without needing a separate authored locator.
-      opticAnchor.lens.localToWorld(opticLocal.copy(opticAnchor.centre));
-      rig.worldToLocal(opticLocal);
-      aimOffset.copy(opticLocal).negate();
-      aimOffset.x += pose.ads.x;
-      aimOffset.y += pose.ads.y;
-      aimOffset.z += pose.ads.z;
-    } else {
-      aimOffset.set(pose.ads.x, pose.ads.y, pose.ads.z);
-    }
-
-    // Position takes the hip -> sprint step ONLY. Its ADS step is the `offset.lerp` below,
-    // toward an `aimOffset` that already carries `pose.ads` — going through `aimed()` here
-    // would apply the aimed offset twice, pulling the weapon past the eye at full ADS.
-    offset.set(running("x"), running("y"), running("z"));
+    recoilPitch.current = THREE.MathUtils.damp(recoilPitch.current, 0, 8, delta);
+    recoilYaw.current = THREE.MathUtils.damp(recoilYaw.current, 0, 10, delta);
+    // Where the rig SITS is `WeaponRigPlacement`, and it rebuilds the transform from a
+    // neutral camera-space root every frame — the mixers have already moved the skeleton
+    // by now, and an incremental transform would leave ADS aligned to the previous frame's
+    // pose. It owns the two orderings that are load-bearing (tilt before the optic is
+    // measured; the ADS offset applied once, not twice) and both are asserted in
+    // tests/fps/weapon-rig-placement.test.ts.
+    //
     // A weapon with an optic aligns the glass to the eye and then applies eye relief. One
     // without — the pistol and LMG author no lens — has no anchor to align to, so its
     // stored `ads` offset is the whole raise: a PLACEHOLDER for the main-camera FOV aiming
     // path that claims no sight alignment, not a no-op.
-    offset.lerp(aimOffset, aim.current);
-    rig.translateX(offset.x + aimSway.positionXMetres + lookLag.x + weaponBob.offsetX);
-    rig.translateY(offset.y + aimSway.positionYMetres + lookLag.y + weaponBob.offsetY);
-    rig.translateZ(offset.z + weaponBob.offsetZ);
-    recoilPitch.current = THREE.MathUtils.damp(recoilPitch.current, 0, 8, delta);
-    recoilYaw.current = THREE.MathUtils.damp(recoilYaw.current, 0, 10, delta);
-    rig.rotateY(aimSway.yawRadians + weaponSnapshot.recoilYawRadians + recoilYaw.current);
-    rig.rotateX(aimSway.pitchRadians + weaponSnapshot.recoilPitchRadians + recoilPitch.current);
-    rig.rotateZ(THREE.MathUtils.degToRad(weaponBob.roll));
-    rig.rotateY(THREE.MathUtils.degToRad(weaponBob.yaw));
-    rig.rotateX(THREE.MathUtils.degToRad(weaponBob.pitch));
-    rig.updateMatrixWorld(true);
+    const opticAnchor = weaponRig.current?.optic ?? null;
+    placementFrame.pose = weaponPoses.get(presentation.rigKey);
+    placementFrame.sprintBlend = sprintBlend.current;
+    placementFrame.adsBlend = aim.current;
+    placementFrame.optic = hasOptic.current ? opticAnchor : null;
+    placementFrame.swayXMetres = aimSway.positionXMetres;
+    placementFrame.swayYMetres = aimSway.positionYMetres;
+    placementFrame.swayYawRadians = aimSway.yawRadians;
+    placementFrame.swayPitchRadians = aimSway.pitchRadians;
+    placementFrame.lookLagXMetres = lookLag.x;
+    placementFrame.lookLagYMetres = lookLag.y;
+    placementFrame.recoilYawRadians = weaponSnapshot.recoilYawRadians + recoilYaw.current;
+    placementFrame.recoilPitchRadians = weaponSnapshot.recoilPitchRadians + recoilPitch.current;
+    placementFrame.bobXMetres = weaponBob.offsetX;
+    placementFrame.bobYMetres = weaponBob.offsetY;
+    placementFrame.bobZMetres = weaponBob.offsetZ;
+    placementFrame.bobRollDegrees = weaponBob.roll;
+    placementFrame.bobYawDegrees = weaponBob.yaw;
+    placementFrame.bobPitchDegrees = weaponBob.pitch;
+    placement.apply(rig, camera, placementFrame);
 
     weaponCamera.position.copy(camera.position);
     weaponCamera.quaternion.copy(camera.quaternion);

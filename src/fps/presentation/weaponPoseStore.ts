@@ -82,6 +82,17 @@ export interface WeaponPose {
   ads: PosePlacement;
 }
 
+/**
+ * How long a weapon takes to come up and to come down, in seconds.
+ *
+ * The same shape as `WeaponDefinition["ads"]`, and deliberately so — the panel prints it
+ * back out to be pasted into `weaponDefinitions.ts`, which is where it belongs.
+ */
+export interface AdsTiming {
+  enterSeconds: number;
+  exitSeconds: number;
+}
+
 /** Positional axes only, for the places that lerp or copy them without the angles. */
 export const POSE_MODES = ["hip", "sprint", "ads"] as const;
 export type PoseMode = (typeof POSE_MODES)[number];
@@ -117,8 +128,16 @@ const DEFAULT_POSES: Record<RigWeaponKey, WeaponPose> = {
   knife: { hip: place(0.1, -0.2, -0.42), sprint: place(0.1, -0.2, -0.42), ads: place(0, -0.11, -0.2) },
 };
 
-const SESSION_KEY = "df2.weaponPoses.v2";
-const ADS_SESSION_KEY = "df2.weaponAdsTiming.v2";
+const POSE_KEY = "df2.weaponPoses.v2";
+/**
+ * Bumped from v2 with the authored/override split below.
+ *
+ * A v2 blob is not readable as v3 and must not be: it was written by serialising ONE map
+ * that held both seeded and tuned values, so every weapon the browser had merely equipped
+ * appears in it. Read as v3 those would all become deliberate overrides, which is the
+ * exact failure the split exists to end.
+ */
+const ADS_KEY = "df2.weaponAdsTiming.v3";
 const BOB_KEY = "df2.weaponBob.v3";
 
 /**
@@ -151,7 +170,7 @@ function clonePoses(): Record<RigWeaponKey, WeaponPose> {
  * is ignored rather than widening the table.
  */
 function restore(poses: Record<RigWeaponKey, WeaponPose>): void {
-  const raw = readStored(SESSION_KEY);
+  const raw = readStored(POSE_KEY);
   if (!raw) return;
   try {
     const stored = JSON.parse(raw) as Partial<Record<RigWeaponKey, WeaponPose>>;
@@ -191,53 +210,107 @@ class WeaponPoseStore {
   forceSprint = false;
 
   /**
-   * Per-weapon ADS durations, in seconds, once tuned. Absent means the weapon's own
-   * authored value stands.
+   * What `weaponDefinitions.ts` currently authors. Refreshed every frame the weapon is
+   * equipped, and NEVER persisted.
    *
-   * Kept apart from the pose table because these are GAMEPLAY values — `adsProgress`
-   * drives sway and pointer sensitivity, not just where the model sits — and they belong
-   * to `weaponDefinitions.ts`. This is a tuning surface for them, not their home.
+   * Held apart from the override below, and the separation is a fix rather than a tidy.
+   * When one map served both, a stored value won at construction and the seed declined to
+   * overwrite it — so editing the authored number in source did nothing, for ever, on the
+   * one machine that had tuned that weapon, with nothing on screen saying why and no way
+   * to clear it. These are GAMEPLAY values: `adsProgress` drives sway and pointer
+   * sensitivity, not just where the model sits. The pose and bob tables never had this
+   * problem because they always knew their shipped value and could therefore offer a
+   * reset; this now does too.
    */
-  private readonly adsTiming = new Map<RigWeaponKey, { enterSeconds: number; exitSeconds: number }>();
+  private readonly adsAuthored = new Map<RigWeaponKey, AdsTiming>();
 
-  /** Seeded from the definition the first time a weapon is equipped, so dials start real. */
+  /** A tuned override. ABSENT unless somebody moved a dial. Persisted. */
+  private readonly adsOverrides = new Map<RigWeaponKey, AdsTiming>();
+
+  /**
+   * Record what the definition authors right now.
+   *
+   * Called every frame the weapon is equipped, so it mutates in place rather than
+   * allocating, and it always takes the NEWER value — which is what makes an edit to
+   * `weaponDefinitions.ts` visible immediately instead of one reload later.
+   */
   seedAdsTiming(key: RigWeaponKey, enterSeconds: number, exitSeconds: number): void {
-    if (!this.adsTiming.has(key)) this.adsTiming.set(key, { enterSeconds, exitSeconds });
+    const authored = this.adsAuthored.get(key);
+    if (authored) {
+      authored.enterSeconds = enterSeconds;
+      authored.exitSeconds = exitSeconds;
+    } else {
+      this.adsAuthored.set(key, { enterSeconds, exitSeconds });
+    }
   }
 
-  adsTimingFor(key: RigWeaponKey): { enterSeconds: number; exitSeconds: number } | null {
-    return this.adsTiming.get(key) ?? null;
+  /** What the source holds, or null before the weapon has ever been equipped. */
+  adsAuthoredFor(key: RigWeaponKey): Readonly<AdsTiming> | null {
+    return this.adsAuthored.get(key) ?? null;
   }
 
-  setAdsTiming(key: RigWeaponKey, field: "enterSeconds" | "exitSeconds", value: number): void {
-    const timing = this.adsTiming.get(key);
-    if (!timing) return;
-    timing[field] = value;
-    writeStored(ADS_SESSION_KEY, JSON.stringify([...this.adsTiming]));
+  /** What the frame should APPLY — null means the authored value stands untouched. */
+  adsOverrideFor(key: RigWeaponKey): Readonly<AdsTiming> | null {
+    return this.adsOverrides.get(key) ?? null;
   }
 
-  /** The tuned ADS timings as source, for `weaponDefinitions.ts`. */
+  /** What the panel should SHOW: the override when there is one, else the authored. */
+  adsTimingFor(key: RigWeaponKey): Readonly<AdsTiming> | null {
+    return this.adsOverrides.get(key) ?? this.adsAuthored.get(key) ?? null;
+  }
+
+  /** True while nothing shadows `weaponDefinitions.ts`. */
+  adsIsDefault(key: RigWeaponKey): boolean {
+    return !this.adsOverrides.has(key);
+  }
+
+  setAdsTiming(key: RigWeaponKey, field: keyof AdsTiming, value: number): void {
+    let override = this.adsOverrides.get(key);
+    if (!override) {
+      const authored = this.adsAuthored.get(key);
+      // Nothing to base an override on: the weapon has never been equipped, so the
+      // authored value is not known and inventing one would be the shadowing bug again.
+      if (!authored) return;
+      override = { ...authored };
+      this.adsOverrides.set(key, override);
+    }
+    override[field] = value;
+    this.persistAdsTiming();
+  }
+
+  /** Drop the override so the value in `weaponDefinitions.ts` takes over again. */
+  resetAdsTiming(key: RigWeaponKey): void {
+    this.adsOverrides.delete(key);
+    this.persistAdsTiming();
+  }
+
+  /** The tuned ADS timings as source, for `weaponDefinitions.ts`. Overrides only. */
   serializeAdsTiming(byRigKey: ReadonlyMap<RigWeaponKey, string>): string {
-    const rows = [...this.adsTiming]
+    const rows = [...this.adsOverrides]
       .filter(([key]) => byRigKey.has(key))
       .map(
         ([key, t]) =>
           `  // ${byRigKey.get(key)}\n  ads: { enterSeconds: ${+t.enterSeconds.toFixed(3)}, ` +
           `exitSeconds: ${+t.exitSeconds.toFixed(3)} },`
       );
-    return rows.join("\n") || "  (equip a weapon to seed its timing)";
+    return rows.join("\n") || "  (nothing overrides the authored timings)";
   }
 
-  restoreAdsTiming(): void {
-    const raw = readStored(ADS_SESSION_KEY);
+  private persistAdsTiming(): void {
+    writeStored(ADS_KEY, JSON.stringify([...this.adsOverrides]));
+  }
+
+  private restoreAdsTiming(): void {
+    const raw = readStored(ADS_KEY);
     if (!raw) return;
     try {
-      for (const [key, timing] of JSON.parse(raw) as [RigWeaponKey, {
-        enterSeconds: number;
-        exitSeconds: number;
-      }][]) {
+      for (const [key, timing] of JSON.parse(raw) as [RigWeaponKey, AdsTiming][]) {
+        if (!RIG_WEAPON_KEYS.includes(key)) continue;
         if (Number.isFinite(timing?.enterSeconds) && Number.isFinite(timing?.exitSeconds)) {
-          this.adsTiming.set(key, timing);
+          this.adsOverrides.set(key, {
+            enterSeconds: timing.enterSeconds,
+            exitSeconds: timing.exitSeconds,
+          });
         }
       }
     } catch {
@@ -396,7 +469,7 @@ class WeaponPoseStore {
   }
 
   private persist(): void {
-    writeStored(SESSION_KEY, JSON.stringify(this.poses));
+    writeStored(POSE_KEY, JSON.stringify(this.poses));
   }
 }
 

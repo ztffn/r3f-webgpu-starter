@@ -104,7 +104,12 @@ export function WeaponPosePanel() {
 
   const pose = weaponPoses.get(target);
   const tuned = !weaponPoses.isDefault(target);
+  /** What the dials show — an override when there is one, otherwise the authored value. */
   const adsTiming = weaponPoses.adsTimingFor(target);
+  /** What `weaponDefinitions.ts` holds, so the panel can say when it is being shadowed. */
+  const adsAuthored = weaponPoses.adsAuthoredFor(target);
+  const adsOverridden = !weaponPoses.adsIsDefault(target);
+  const bobTuned = !weaponPoses.bobIsDefault(target);
 
   return (
     <div className="dev-section">
@@ -215,7 +220,7 @@ export function WeaponPosePanel() {
       </button>
 
       <h4>ADS timing — how fast this weapon comes up</h4>
-      {adsTiming ? (
+      {adsTiming && adsAuthored ? (
         <>
           {(["enterSeconds", "exitSeconds"] as const).map((field) => (
             <CommitDial
@@ -234,6 +239,34 @@ export function WeaponPosePanel() {
               }}
             />
           ))}
+          {/*
+            Always says what the SOURCE holds, and says loudly when something else is in
+            force. An override used to win silently and for ever: editing the authored
+            number then did nothing on the one machine that had tuned that weapon, with
+            nothing on screen to explain it and no way to clear it.
+          */}
+          <p className="dev-hint" data-dev="weaponpose-ads-state">
+            {adsOverridden ? (
+              <>
+                <b>Overridden in this browser.</b> weaponDefinitions.ts authors{" "}
+                {adsAuthored.enterSeconds}s / {adsAuthored.exitSeconds}s and is NOT what
+                the game is using. Reset to hand it back.
+              </>
+            ) : (
+              <>Using the authored values from weaponDefinitions.ts. Nothing shadows them.</>
+            )}
+          </p>
+          <button
+            type="button"
+            data-dev="weaponpose-ads-reset"
+            disabled={!adsOverridden}
+            onClick={() => {
+              weaponPoses.resetAdsTiming(target);
+              rerender();
+            }}
+          >
+            Reset {target} ADS timing to authored
+          </button>
           <p className="dev-hint">
             A GAMEPLAY value — it drives sway and pointer sensitivity, not just the model.
             It belongs in <code>weaponDefinitions.ts</code>; paste the block below back
@@ -243,11 +276,18 @@ export function WeaponPosePanel() {
         </>
       ) : (
         <p className="dev-hint">
-          Equip <b>{target}</b> once to seed its timing from the weapon definition.
+          Equip <b>{target}</b> once to read its authored timing from the weapon definition.
         </p>
       )}
 
       <h4>Movement bob — {target}</h4>
+      {/* Same statement as the pose and ADS blocks, so all three tables read alike. */}
+      <p className="dev-hint">
+        <b data-dev="weaponbob-state">
+          {bobTuned ? "Tuned this browser" : "Shipped defaults"}
+        </b>
+        {bobTuned ? " — DEFAULT_WEAPON_BOB is not what this weapon is using." : "."}
+      </p>
       <p className="dev-hint">
         Per weapon. Weight scales every axis at once and is the knob for "too strong".
         Stride is the other big one: it sets distance per two footfalls, so a LONGER stride
@@ -279,7 +319,7 @@ export function WeaponPosePanel() {
       <button
         type="button"
         data-dev="weaponbob-reset"
-        disabled={weaponPoses.bobIsDefault(target)}
+        disabled={!bobTuned}
         onClick={() => {
           weaponPoses.resetBob(target);
           rerender();

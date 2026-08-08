@@ -1085,7 +1085,7 @@ export function WeaponPrototype({
       equippedWeapon.definition.ads.enterSeconds,
       equippedWeapon.definition.ads.exitSeconds
     );
-    const adsOverride = networked ? null : weaponPoses.adsTimingFor(gameplayRigKey);
+    const adsOverride = networked ? null : weaponPoses.adsOverrideFor(gameplayRigKey);
     equippedWeapon.setAdsOverrideSeconds(adsOverride);
     // Raising and lowering are separately authored, so pick the one this frame is doing.
     // Without it a weapon that comes up fast and drops slow would blend at one rate both

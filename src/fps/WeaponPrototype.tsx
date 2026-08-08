@@ -88,8 +88,8 @@ const WEAPON_FAR = 10;
  *
  * It is a RATIO, not a rate, and that is the fix. A single global rate — this was 18, a
  * fixed ~56 ms lag — is applied identically to every weapon, so it smears the authored
- * per-weapon timings into each other: the M4 enters in 0.18 s and the sniper in 0.22 s,
- * a difference of 40 ms, and a shared 56 ms tail on both leaves them feeling the same
+ * per-weapon timings into each other: the M4 enters in 0.14 s and the sniper in 0.22 s,
+ * a difference of 80 ms, and a shared 56 ms tail on both leaves them feeling the same
  * kind of soft. Scaling the rate to the weapon keeps the lag a fixed FRACTION of its own
  * ADS time, so a fast weapon is visibly fast and the authored numbers are what you feel.
  *

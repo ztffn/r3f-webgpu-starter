@@ -99,9 +99,17 @@ player instinctively recognise this?* — applies to features, not to whether a 
   single global constant no longer smears the per-weapon timings together. Only sniper (magnified), carbine and grenadelauncher (authored red dots)
   have glass at all. Hip and ADS placement is **per weapon** (`weaponPoseStore.ts`) and
   tuned live from the dev console's **Weapon pose** tab, which can hold ADS for you,
-  persists to `sessionStorage` and prints the table back as source. Read `docs/10` §11
-  before touching any of it: a glTF node with two material slots arrives as a **Group**,
-  which silently disabled the muzzle flash once already.
+  persists to **`localStorage`** (not sessionStorage — that is per-tab and cost a tuning
+  session once) and prints the table back as source. All three tuning tables — pose, bob
+  and ADS timing — say on screen when a stored value is shadowing the source, and every
+  one of them has a reset: an override that wins silently and permanently over an edit to
+  `weaponDefinitions.ts` is the bug that shape produces. Read `docs/10` §11 before
+  touching any of it: a glTF node with two material slots arrives as a **Group**, which
+  silently disabled the muzzle flash once already, and a `finished` animation event
+  arrives from an action that has already been faded out. Where the rig SITS is
+  `presentation/WeaponRigPlacement.ts`, out of the frame callback so its two load-bearing
+  orderings are asserted rather than commented — and a third ordering the comments
+  insisted on turned out not to matter at all, which only **mutation testing** revealed.
 - **Web product, brand and UI (Aug 2026):** the project has a public name — **Distant
   Front** — and a router. `/` is a landing page, `/faq` and `/supporter` are real pages, and
   **the whole Three.js tree lazy-loads behind `/play`** (entry chunk ~116 KB gzipped, and its

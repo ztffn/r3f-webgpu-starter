@@ -100,11 +100,6 @@ export const ScenePanel = memo(function ScenePanel({
   scene,
 }: ScenePanelProps) {
   const standIn = terrain?.grassSource === "colormap-standin";
-  // The one slider under the pointer during a drag (dragging is one dial at a
-  // time by construction). Committing rebuilds the WHOLE world — heightfield,
-  // chunk geometry, grass, motor terrain — so unlike the grass dials these
-  // commit on release, and this mirror is what moves under the thumb.
-  // Live density is coalesced through a frame; see the dial's onChange.
   // The prepared-terrain list, for the map selector. Null until fetched (and
   // when no index ships, in which case the selector simply does not render).
   const [maps, setMaps] = useState<TerrainIndexEntry[] | null>(null);

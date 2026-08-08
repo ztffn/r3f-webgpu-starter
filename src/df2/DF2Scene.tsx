@@ -991,7 +991,7 @@ export function DF2Scene({
       {/* Scene fog stays declared for what is STILL on three's automatic path, which is
           now only the GLB-loaded surfaces: mission props, dev-placed objects and the
           soldier, all of which arrive as plain non-node materials from the loader. Water
-          and foliage moved to `atmosphere.shadeLit` and set `fog = false` themselves.
+          and foliage moved to `atmosphere.litClass` and set `fog = false` themselves.
           Terrain and grass never used it. Once the GLB material pass lands this
           declaration has no consumer left and should go — a live scene fog that nothing
           reads is a trap for the next material added. */}

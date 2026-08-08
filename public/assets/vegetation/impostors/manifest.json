@@ -14,7 +14,7 @@
       "shippedCoverageDrift": 0,
       "centerY": 12.7,
       "radius": 13.1747,
-      "horizonCoverageMean": 0.4228,
+      "horizonCoverageMean": 0.4233,
       "horizonCoverageMin": 0.4042
     },
     "forest-tree-02": {
@@ -41,7 +41,7 @@
       "shippedCoverageDrift": 0,
       "centerY": 5.15,
       "radius": 5.4951,
-      "horizonCoverageMean": 0.4363,
+      "horizonCoverageMean": 0.4357,
       "horizonCoverageMin": 0.4124
     },
     "acacia": {
@@ -50,7 +50,7 @@
       "shippedCoverageDrift": 0,
       "centerY": 3.1909,
       "radius": 4.5934,
-      "horizonCoverageMean": 0.5319,
+      "horizonCoverageMean": 0.5297,
       "horizonCoverageMin": 0.4686
     },
     "bush": {
@@ -59,7 +59,7 @@
       "shippedCoverageDrift": 0,
       "centerY": 0.8823,
       "radius": 1.4575,
-      "horizonCoverageMean": 0.5443,
+      "horizonCoverageMean": 0.5243,
       "horizonCoverageMin": 0.4451
     },
     "scrub": {
@@ -68,7 +68,7 @@
       "shippedCoverageDrift": 0,
       "centerY": 0.3709,
       "radius": 0.7854,
-      "horizonCoverageMean": 0.5507,
+      "horizonCoverageMean": 0.5516,
       "horizonCoverageMin": 0.5141
     }
   }

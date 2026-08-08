@@ -229,9 +229,22 @@ export function FarFoliageCells({
       /** Cell cursor of the in-flight refill, or null when the fill is complete. */
       job: null as null | { index: number; camX: number; camY: number; camZ: number },
       statsAt: 0,
+      /** Last handoff band the ring selected against; a change invalidates the fill. */
+      bandStart: Number.NaN,
     }),
     [field]
   );
+
+  // A REBUILD MUST FORCE A REFILL. Committing the far-reach dial rebuilds the meshes and
+  // buffers with instanceCount 0, but `scratch` is memoised on [field] alone, so it
+  // survives holding the current cell index and field version — and the refill only
+  // triggers on a cell crossing or a field bump. Nothing would schedule one, and the ring
+  // would stay invisible until the player walked 32 m. Same failure FoliageLayer's own
+  // comment warns about, arriving through the dial instead of through effect ordering.
+  useEffect(() => {
+    scratch.cameraCellX = Number.NaN;
+    scratch.cameraCellZ = Number.NaN;
+  }, [state, scratch]);
 
   useFrame(() => {
     const camX = camera.position.x;
@@ -258,6 +271,15 @@ export function FarFoliageCells({
     const sunDirection = state.farUniforms.sunDirection.value as THREE.Vector3;
     if (sun) sunDirection.copy(sun.position).sub(sun.target.position).normalize();
     else sunDirection.set(SUN_DIRECTION[0], SUN_DIRECTION[1], SUN_DIRECTION[2]).normalize();
+
+    // The handoff band moving is also a placement change: committing "Spawner reach" moves
+    // fadeStart, which is the ring's INNER edge, so instances selected against the old one
+    // leave a gap or a doubled band at the handoff until the next crossing.
+    const bandStart = foliageUniforms.fadeStart.value as number;
+    if (bandStart !== scratch.bandStart) {
+      scratch.bandStart = bandStart;
+      scratch.cameraCellX = Number.NaN;
+    }
 
     // A crossing or a placement change restarts the refill. The old contents keep
     // drawing until the new fill COMPLETES — a stale ring for a few frames is invisible

@@ -5,7 +5,8 @@
  *
  * Renders each species' LOD 0 card geometry from a grid of views into albedo and
  * normal+depth atlases (src/foliage/impostorBake.ts does the actual rasterising) and
- * writes PNGs plus a manifest into public/assets/vegetation/impostors/. Deterministic:
+ * writes KTX2 atlases plus a manifest into public/assets/vegetation/impostors/ (see
+ * ktx2.mjs for the format and its audit). Deterministic:
  * same source, byte-identical output. Run via `npm run bake:impostors` — the script
  * needs Node's --experimental-strip-types because the shared modules are TypeScript.
  *
@@ -67,13 +68,25 @@ function parseArgs(argv) {
   return args;
 }
 
+/**
+ * Mean and min coverage over the atlas's HORIZON tiles — the edge of the view grid.
+ *
+ * Deduplicated by tile INDEX, not by value. The four corners appear twice in this
+ * traversal and have to be dropped once, but two distinct horizon tiles can legitimately
+ * share a coverage number, and dropping the second silently reweights the mean toward
+ * whichever tiles happen to be unique. Measured on the shipped bake, value-dedupe kept 28
+ * of bush's 44 horizon tiles and overstated its mean by 0.020. `impostor-bake.test.ts`
+ * already dedupes by index; this is the tool agreeing with the test.
+ */
 function horizonStats(tileCoverage, n) {
-  const values = [];
+  const indices = new Set();
   for (let k = 0; k < n; k += 1) {
-    for (const index of [k, (n - 1) * n + k, k * n, k * n + (n - 1)]) {
-      const coverage = tileCoverage[index];
-      if (Number.isFinite(coverage) && !values.includes(coverage)) values.push(coverage);
-    }
+    for (const index of [k, (n - 1) * n + k, k * n, k * n + (n - 1)]) indices.add(index);
+  }
+  const values = [];
+  for (const index of indices) {
+    const coverage = tileCoverage[index];
+    if (Number.isFinite(coverage)) values.push(coverage);
   }
   const mean = values.reduce((sum, v) => sum + v, 0) / values.length;
   return { mean, min: Math.min(...values) };

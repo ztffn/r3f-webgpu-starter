@@ -49,6 +49,7 @@ import {
   foliageDebugSlot,
   FOLIAGE_DEBUG_OVERDRAW,
   type FoliageDebugControls,
+  type FoliageDebugMaterials,
 } from "./foliageDebug.ts";
 import type { Atmosphere } from "../df2/atmosphere.ts";
 import { SPECIES } from "./species.ts";
@@ -439,15 +440,7 @@ export function FoliageCells({
       // False-colour views swap the MATERIAL, in the same place and for the same reason
       // the geometry is swapped: the value being visualised is per bucket, and one
       // material is shared by every bucket of a species, so no uniform can carry it.
-      const wanted =
-        debugMode === FOLIAGE_DEBUG_OVERDRAW
-          ? state.debug.overdrawMaterialFor(bucket.speciesIndex)
-          : (() => {
-              const slot = foliageDebugSlot(debugMode, bucket.lod, bucket.speciesIndex);
-              return slot === null
-                ? state.materials[bucket.speciesIndex]!
-                : state.debug.materialFor(bucket.speciesIndex, slot);
-            })();
+      const wanted = materialForBucket(state, bucket, debugMode);
       if (bucket.mesh.material !== wanted) bucket.mesh.material = wanted;
 
       bucket.mesh.visible = true;
@@ -485,6 +478,26 @@ export function FoliageCells({
  * into noise while staying deterministic — the same cell always switches at the same
  * range, so the effect does not swim as the camera moves.
  */
+/**
+ * The material a bucket should draw with this frame — its own, or a debug stand-in.
+ *
+ * A named function rather than an inline closure: this runs once per bucket per frame,
+ * roughly 1,183 times at the default reach, and a closure built there captures the loop's
+ * locals every iteration. Nothing is allocated per frame in this file (see the header).
+ */
+function materialForBucket(
+  state: { materials: (THREE.Material | null)[]; debug: FoliageDebugMaterials },
+  bucket: Bucket,
+  debugMode: number
+): THREE.Material {
+  if (debugMode === FOLIAGE_DEBUG_OVERDRAW) {
+    return state.debug.overdrawMaterialFor(bucket.speciesIndex);
+  }
+  const slot = foliageDebugSlot(debugMode, bucket.lod, bucket.speciesIndex);
+  if (slot === null) return state.materials[bucket.speciesIndex]!;
+  return state.debug.materialFor(bucket.speciesIndex, slot);
+}
+
 function chooseLod(
   distance: number,
   lodScale: number,

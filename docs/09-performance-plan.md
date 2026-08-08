@@ -4,6 +4,32 @@ Goal: **60 fps at ground level on Green Mile**, at full resolution, without shor
 the grass draw distance. The premise is 1 km-plus sightlines and long-range
 concealment, so trading range for frame rate is not on the table.
 
+> **2026-08-07 — THE BUDGET IS NOW ATTRIBUTED, and this document's own premise needs
+> re-reading in light of it.** Ablation at a pinned camera, median of 16 GPU-timer reads:
+> terrain alone **2.2 ms**, plus the grass march **6.75**, plus the near-field blades
+> **10.35**, plus foliage **~10.8**. So the march is 42% of GPU time, the blades 33%,
+> terrain 21% and the whole vegetation layer about 4% — inside the noise.
+>
+> **Grass is three quarters of the budget, and the two grass layers need opposite fixes:**
+> the march is per-FRAGMENT (4.5 ms for only 230k extra triangles), the blades are
+> per-VERTEX (3.6 ms for 2.5M triangles in ONE draw call). Any optimisation has to know
+> which it is aiming at.
+>
+> **The 8.3 ms readings below are CPU frame time, which is pinned to the 120 Hz cadence and
+> reads identically in every configuration.** Attribution on this project has to be done on
+> GPU time — `renderer.resolveTimestampsAsync`, surfaced as `gpu ms` on the Telemetry tab
+> under `?debug=1`. That is what makes the §3.1.2 vsync-staircase warning actionable rather
+> than only a caveat.
+>
+> **Draw calls are cheap here:** 113 extra calls for foliage cost ~0.45 ms, about 4 µs each
+> at the margin. Plan with that number rather than with call counts.
+>
+> The instrument is `src/df2/frameStats.ts` and the protocol — including the scripted camera
+> sweep, and three traps that each produced a WRONG conclusion — is
+> `plans/2026-08-07-foliage-and-scenery-plan-v2.md` §2. **Read §2.2 before measuring
+> anything:** an unfocused Chrome window produces no frames rather than slow ones, so a
+> frame-budgeted loader reads as a hang.
+
 Status: **TARGET MET at the current test vantage.** 8.3 ms standing AND prone at Green Mile
 (5, 375), dpr 1, mains power — which is the 120 Hz vsync cap, so the true cost is lower
 still and unknown. Was 72.10 ms at the §1 baseline.

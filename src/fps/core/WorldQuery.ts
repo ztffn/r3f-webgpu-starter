@@ -29,6 +29,24 @@ export interface WorldHit extends SharedWorldHit {
   readonly object: THREE.Object3D;
 }
 
+/**
+ * An analytic query composed into `CompositeWorldQuery` alongside terrain and colliders.
+ *
+ * Deliberately NOT the shared `WorldQuery`: that contract is Three-free because the
+ * server implements it, so its hit carries no `object`. A source composed here is
+ * browser-side and must name the Three object it stands for — one shared proxy for the
+ * whole system, exactly as `HeightfieldWorldQuery` does, since the point of a source is
+ * that its geometry was never instantiated as scene objects.
+ */
+export interface WorldQuerySource {
+  raycast(
+    origin: THREE.Vector3Like,
+    direction: THREE.Vector3Like,
+    maxDistance: number,
+    excludeObjectId?: string
+  ): WorldHit | null;
+}
+
 export interface WorldQueryRegistration {
   readonly root: THREE.Object3D;
   readonly kind: WorldHitKind;
@@ -492,11 +510,27 @@ export class HeightfieldWorldQuery implements WorldQuery {
 export class CompositeWorldQuery implements RegisteredWorldQuery {
   private readonly colliders: ThreeWorldQuery;
   private readonly terrain: HeightfieldWorldQuery | null;
+  private readonly sources = new Set<WorldQuerySource>();
   private raycasts = 0;
 
   constructor(heightfield: HeightfieldQuerySource | null, layer = 0) {
     this.colliders = new ThreeWorldQuery(layer);
     this.terrain = heightfield ? new HeightfieldWorldQuery(heightfield) : null;
+  }
+
+  /**
+   * Adds an analytic query source alongside terrain and registered colliders.
+   *
+   * For gameplay geometry that exists in bulk and is never instantiated as scene objects
+   * — vegetation trunks are the first case. The terrain precedent applies: a system with
+   * thousands of identical colliders answers for itself analytically rather than
+   * registering thousands of `THREE.Object3D`s for a raycaster to walk.
+   */
+  addSource(source: WorldQuerySource): () => void {
+    this.sources.add(source);
+    return () => {
+      this.sources.delete(source);
+    };
   }
 
   register(registration: WorldQueryRegistration): WorldQueryRegistrationHandle {
@@ -514,16 +548,31 @@ export class CompositeWorldQuery implements RegisteredWorldQuery {
   ): WorldHit | null {
     this.raycasts += 1;
     const terrainHit = this.terrain?.raycast(origin, direction, maxDistance) ?? null;
-    const colliderHit = this.colliders.raycast(
-      origin,
-      direction,
-      terrainHit ? Math.min(maxDistance, terrainHit.distance + TERRAIN_ROOT_EPSILON) : maxDistance,
-      excludeObjectId
-    );
-    if (colliderHit && (!terrainHit || colliderHit.distance <= terrainHit.distance)) {
-      return colliderHit;
+    let nearest = terrainHit;
+    // Terrain bounds every later query: nothing behind the ground can be hit, and the
+    // shorter ray is also the cheaper one for the sources that walk a spatial grid.
+    let limit = nearest ? Math.min(maxDistance, nearest.distance + TERRAIN_ROOT_EPSILON) : maxDistance;
+
+    const colliderHit = this.colliders.raycast(origin, direction, limit, excludeObjectId);
+    if (colliderHit && (!nearest || colliderHit.distance <= nearest.distance)) {
+      nearest = colliderHit;
+      limit = Math.min(limit, colliderHit.distance + TERRAIN_ROOT_EPSILON);
     }
-    return terrainHit;
+
+    // Exclusion is FORWARDED, not dropped. A composite that quietly kept it for its
+    // own colliders would make the contract's exclusion invisible in every source at
+    // once, which is the worse failure — a caller would believe it had excluded
+    // something. Whether a source honours it is that source's business;
+    // `VegetationWorldQuery` currently ignores it, which is honest because a shooter
+    // is never a tree.
+    for (const source of this.sources) {
+      const hit = source.raycast(origin, direction, limit, excludeObjectId);
+      if (hit && (!nearest || hit.distance <= nearest.distance)) {
+        nearest = hit;
+        limit = Math.min(limit, hit.distance + TERRAIN_ROOT_EPSILON);
+      }
+    }
+    return nearest;
   }
 
   getMetrics(): WorldQueryMetrics {

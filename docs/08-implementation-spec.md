@@ -72,6 +72,15 @@ cannot drift apart (`04` §2).
 
 ## 3. Module map
 
+**`src/foliage/` is a second module map, and it is documented elsewhere.** The vegetation
+layer — deterministic placement records, per-cell instanced buckets, analytic trunk
+ballistics, coverage-preserving alpha mips — has its own table in
+`plans/2026-08-02-foliage-vegetation-design.md` §2.1, and everything measured about it plus
+the current open items are in `plans/2026-08-07-foliage-and-scenery-plan-v2.md`. Read the
+v2 record before touching it: two of its defects were invisible to reasoning and obvious to
+a measurement, and one of them meant no plant had ever drawn on WebGPU at all.
+
+
 Everything below `src/df2/` is the Phase-1 spike. The target layout is `05` §7
 (`/src/engine/{terrain,grass,concealment}`, `/src/game/`); nothing has moved yet.
 
@@ -86,7 +95,8 @@ Everything below `src/df2/` is the Phase-1 spike. The target layout is `05` §7
 | `grassField.ts` | THE canopy field as TSL samplers: `columnTop`, `groundAt` (with its half-texel correction), `meshMipAt`, `canopyBase`/`canopyNorm`, `strandHash` | which layer is drawing |
 | `BladeMaterial.ts` | near-field instanced blades: vertex-stage placement, wind, player parting, sun modulation | coverage — it OVERLAYS the march and must never replace it; gameplay queries |
 | `bladeGeometry.ts` | one tapered blade primitive; `bladeVertexData` is Three-free and unit-tested | instancing, placement, materials |
-| `atmosphere.ts` | the COMPOSITION of grade-then-fog as one `shade(rgb, worldPos?)` call — the single thing a scene material asks for | either half's internals; it exposes only `fog`, for debug readouts |
+| `atmosphere.ts` | the COMPOSITION of grade-then-fog, at BOTH attachment points: `shade(rgb, worldPos?)` for unlit `colorNode`, and `litClass(Base)` for lit materials, which shades after lighting and forces `fog = false` (§8 inv 7) | either half's internals; it exposes only `fog`, for debug readouts |
+| `frameStats.ts` | the frame-time DISTRIBUTION — percentiles over a retained ring, a cumulative histogram on vsync-aligned edges, and hitch/stall/pause counters that no report resets | Three.js, React, the DOM. Pure, so Node tests it and the rigs can use it |
 | `colorGrade.ts` | the `.trn` grade — `filter`/`gamma`/`saturation` — plus the exported `luminance()` both it and `fog.ts` need | fog, which must come after it |
 | `fog.ts` | distance fog, the height slab, and the smoke volumes, as one shared term | **smoke will have to leave**: it is about to become an authoritative, networked, concealment-readable system and cannot live in a file that imports `three/webgpu` |
 | `weather.ts` | presets: sky, grade, fog, precipitation, measured from the skyboxes | rendering |
@@ -549,6 +559,22 @@ Nothing throws when these break. Check them after touching `config.ts`.
    concealment query and to any AI. That is the same break inverted, and it is why smoke is
    scoped as a rendering prototype rather than a mechanic.
 
+   **FOR VEGETATION, THE TEST IS PER-ASSET AND RELATIVE — not against 0.55.** `TARGET_BLOCKING
+   = 0.55` (`foliageGeometry.ts`) is the PROCEDURAL generator's own calibration constant:
+   `solveSizeMultiplier` scales card size until the set hits it. It is not a property of
+   foliage and does not apply to authored art. The correct check is that a representation
+   conceals at least as much as ITS OWN LOD 0 — which `foliage-geometry.test.ts` already does
+   for the geometric chain (a RATIO against the asset's own reference), and which
+   `impostor-bake.test.ts` does NOT: it applies 0.55 as an absolute over a hardcoded
+   `["acacia","bush","scrub"]`, so the four authored tree species have never been audited.
+   Fixing that is scoped with the asset pipeline (plan v2 §6).
+
+   **AUDIT WHAT SHIPS, NOT WHAT WAS AUTHORED.** A check that runs on the source cannot see
+   what the pipeline did afterwards. The KTX2 migration (plan v2 §5.4d) is the worked example:
+   block compression is lossy on alpha and alpha IS the silhouette, so the bake decodes the
+   shipped file back out and throws if coverage drops more than 0.005. Pixel-exactness is not
+   required; not thinning is.
+
    Three limits have already done exactly this:
    - `sEnter = inside ? nearClip : fragDistance` with `hitS <= sEnter + span` and
      `span <= GRASS_MAX_SPAN` put a hard 49 m ceiling on every hit on screen the moment the eye
@@ -611,8 +637,30 @@ Nothing throws when these break. Check them after touching `config.ts`.
    material needs fog applied AFTER lighting, on the output node — fogging albedo and then
    lighting the fog is visibly wrong. Three world-space things already bypass the term and none
    of them could adopt it as written: the water plane (`MeshStandardNodeMaterial`), the GLTF
-   targets, and `fps/world/WorldObjectPrefab.ts` (plain non-node `MeshStandardMaterial`). That
-   post-lighting variant is the first thing buildings and foliage will need (§14).
+   targets, and `fps/world/WorldObjectPrefab.ts` (plain non-node `MeshStandardMaterial`).
+
+   **THE POST-LIGHTING PATH NOW EXISTS — `atmosphere.litClass(Base)` (2026-08-07).** It
+   returns a cached subclass whose `setupOutput` grades and fogs the LIT result and whose
+   constructor forces `fog = false`, so three's own linear scene fog cannot double-apply.
+   Both halves in one call, because splitting them is how the blade layer ended up sharp
+   inside a fog bank. A subclass rather than an instance-patched method on purpose: shaded
+   and unshaded materials of the same base are then different CLASSES and cannot share a
+   compiled pipeline. The water plane and the foliage layer take it.
+
+   **The trap it cost two attempts to find, because it looks like nothing.** TSL node types
+   resolve during the BUILD, not when the graph is written, so swizzling a node whose width
+   is not yet known does NOT narrow. `material.outputNode = vec4(shade(output.rgb), output.a)`
+   reads correctly and hands `vec4()` five components; three rejects the whole graph with
+   *"Length of parameters exceeds maximum length of function 'vec4()'"* and the scene renders
+   BLACK with no line of code looking wrong. `vec4(output)` first does not fix it either. The
+   form that works takes the vec4 `setupOutput` is handed, `toVar()`s it, and assigns through
+   a swizzle — which cannot miscount.
+
+   **Still bypassing it:** every GLB-loaded surface, because `GLTFLoader` emits plain
+   non-node materials — mission props, dev-placed objects, the soldier — plus
+   `WorldObjectPrefab`. They still take the declarative `<fog>`, which is why that
+   declaration is still in the scene. `FlatLit` DF2 materials export as
+   `KHR_materials_unlit` and must keep the UNLIT path, not this one.
 
 ---
 
@@ -1101,12 +1149,32 @@ Bundle is ~1.77 MB (490 kB gzip), dominated by Three. Not yet code-split.
 - **Concealment's consumer** — `04` §7: Pillars 5 and 10 suggest concealment should have no
   player-facing readout at all, which turns "boolean vs. percentage" into a question about AI
   input fidelity rather than UI. Decide the consumer first.
-- **A post-lighting `shade`** — §8 invariant 7. `atmosphere.shade` attaches to `colorNode`,
-  which only works for unlit materials. Buildings, props and foliage will be lit, and fog has
-  to reach them after lighting. This is the gating piece for the whole asset phase, not a
-  nicety, and it is the point at which a full-screen post pass becomes worth its cost: the
-  `.trn` grade is a global operation being simulated per material, and a wet lens and
-  dithering are both already wanted and both impossible forward.
+- **A post-lighting `shade`** — **CLOSED 2026-08-07.** `atmosphere.litClass(Base)`; the
+  mechanism and the TSL typing trap are in §8 invariant 7. The full-screen post pass is
+  still the eventual home for effects that are inherently screen-space (a wet lens,
+  dithering) but is NOT needed for this: fogging a lit material after its lighting is
+  naturally per-material.
+- **GLB surfaces still bypass the atmosphere** — the successor to the item above, and the
+  gate on the asset phase now. `GLTFLoader` emits plain non-node materials, so mission
+  props, dev-placed objects and the soldier cannot take `litClass` without being converted
+  first. Once they are, the scene's `<fog>` declaration has no consumer left and should go —
+  a live scene fog nothing reads is a trap for the next material added.
+- **Vegetation is client-only, and damage is server-authoritative** — so a round can stop in
+  a trunk on screen while the server resolves a clean hit. `VegetationWorldQuery` is
+  registered by `FoliageLayer` alone; `tools/game-server`, `src/motor` and `GameServer.ts`
+  contain no vegetation at all. Measured affordable (4.8 µs per 300 m ray at default
+  density, 8.4 µs at ten times the sites), and specified in
+  `plans/2026-08-07-foliage-and-scenery-plan-v2.md` §2.5 — it needs the ray-versus-cylinder
+  math extracted into a Three-free core first, because `ServerWorldQuery` implements the
+  Three-free contract whose hit carries no `object`.
+- **Nothing is drawn past the foliage window**, so every vista has a bare middle distance.
+  The reach is a slider now (Scene tab) so the gap is easy to see; the fix is an
+  impostor-only far ring, and an octahedral impostor is the only far representation assessed
+  that does not thin the silhouette — which §8 invariant 6 forbids.
+- **`gpuMs` reports the last resolved timestamp**, with a ±2.5 ms spread at a static camera.
+  Fine for a 4.5 ms delta, useless for a 0.45 ms one. It should feed its own percentile
+  accumulator the way frame times do; until then treat any GPU delta under ~2 ms as
+  unresolved.
 - **Concealment as a COMPOSITION of occluders** — today the simulation knows exactly one,
   `grassHeightField`, sampled as a field. Smoke already breaks §8 invariant 6 (it conceals on
   screen and nothing else knows it exists), and bushes multiply that. The current design draws

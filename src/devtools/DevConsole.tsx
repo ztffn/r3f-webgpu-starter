@@ -18,6 +18,8 @@ import { GrassPanel } from "./GrassPanel";
 import { WeatherPanel } from "./WeatherPanel";
 import type { GrassUniforms } from "../df2/GrassMaterial";
 import type { SceneHandles } from "../df2/DF2Scene";
+import type { FoliageDebugControls } from "../foliage/foliageDebug";
+import { FoliagePanel } from "./FoliagePanel";
 import type { PerfSample } from "../df2/PerfMonitor";
 import type { FlyState } from "../df2/FlyControls";
 import "./devtools.css";
@@ -28,6 +30,7 @@ const TAB_LABELS: Record<DevTab, string> = {
   launch: "Launch",
   telemetry: "Telemetry",
   grass: "Grass",
+  foliage: "Foliage",
   weather: "Weather",
   controls: "Controls",
 };
@@ -37,6 +40,7 @@ export interface DevConsoleProps extends ScenePanelProps, HudPanelProps {
   perf: PerfSample | null;
   fly: FlyState | null;
   grassUniforms: GrassUniforms | null;
+  foliageControls: FoliageDebugControls | null;
   scene: SceneHandles | null;
   fpsMode: boolean;
 }
@@ -46,6 +50,7 @@ export function DevConsole({
   perf,
   fly,
   grassUniforms,
+  foliageControls,
   scene,
   fpsMode,
   panels,
@@ -145,6 +150,13 @@ export function DevConsole({
           <TelemetryPanel perf={perf} fly={fly} combat={combat} />
         )}
         {state.tab === "grass" && <GrassPanel uniforms={grassUniforms} />}
+        {state.tab === "foliage" && (
+          <FoliagePanel
+            scene={scene}
+            controls={foliageControls}
+            networked={sceneProps.networked}
+          />
+        )}
         {state.tab === "weather" && <WeatherPanel scene={scene} />}
         {state.tab === "controls" && <ControlsPanel fpsMode={fpsMode} />}
       </div>

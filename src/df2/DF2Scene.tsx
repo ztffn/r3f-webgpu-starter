@@ -16,6 +16,7 @@ import { FlyControls, type FlyState, type Stance } from "./FlyControls";
 import { Heightfield } from "./Heightfield";
 import { createTerrainMaterial, type TerrainDetailUniforms } from "./TerrainMaterial";
 import { createGrassMaterial, type GrassUniforms } from "./GrassMaterial";
+import type { FoliageDebugControls } from "../foliage/foliageDebug";
 import { createBladeMaterial, createBladeMesh, type BladeUniforms } from "./BladeMaterial";
 import { createColorGrade } from "./colorGrade";
 import { createFog } from "./fog";
@@ -68,7 +69,17 @@ const ShotTrajectoryDebugView = lazy(() =>
 const ImpactEffects = lazy(() =>
   import("../fps/presentation/ImpactEffects").then((m) => ({ default: m.ImpactEffects }))
 );
+// Code-split for the same reason: the vegetation layer is opt-in, so its geometry
+// builders and texture bake should not sit in the bundle everyone downloads.
+const FoliageLayer = lazy(() =>
+  import("../foliage/FoliageLayer").then((m) => ({ default: m.FoliageLayer }))
+);
 import { BENCH } from "./bench";
+import {
+  FOLIAGE_FAR_RADIUS_METRES,
+  FOLIAGE_SITE_SPACING,
+  FOLIAGE_VIEW_RADIUS_METRES,
+} from "../foliage/foliageConfig";
 import { DevPlacedObject } from "./DevPlacedObject";
 import { MissionObjects } from "./MissionObjects";
 import type { TerrainScale } from "./config";
@@ -253,6 +264,24 @@ export interface SceneHandles {
    * so publishing them separately was three fields encoding one fact.
    */
   roomDials: RoomVisuals | null;
+  /**
+   * Foliage density multiplier, and its setter. Deliberately NOT a `VISUAL_DIALS` entry:
+   * that table is append-only wire identity and room-authoritative, and cover is gameplay
+   * rather than weather. Local only — see `BENCH.admin`.
+   */
+  foliageDensity: number;
+  setFoliageDensity: (value: number) => void;
+  /**
+   * Spawner reach and site spacing. Both REBUILD the layer, so the panel commits them on
+   * release; density is live because it does not.
+   */
+  foliageRadius: number;
+  setFoliageRadius: (value: number) => void;
+  foliageSpacing: number;
+  setFoliageSpacing: (value: number) => void;
+  /** Far impostor ring reach, metres; 0 disables it. Rebuilds the ring, not the field. */
+  foliageFar: number;
+  setFoliageFar: (value: number) => void;
   grade: ReturnType<typeof createColorGrade>;
   fog: ReturnType<typeof createFog>;
   precipitation: ReturnType<typeof createPrecipitation>;
@@ -300,6 +329,8 @@ export interface DF2SceneProps {
   onStatus?: (status: { loading: boolean; terrain: LoadedTerrain | null }) => void;
   /** Hands the grass shader's live uniforms out so a debug panel can drive them. */
   onGrassReady?: (u: GrassUniforms | null) => void;
+  /** The same, for the vegetation layer — the Foliage tab writes these directly. */
+  onFoliageDebugReady?: (c: FoliageDebugControls | null) => void;
   /** The same, for everything added this session: weather, fog, rain and blades. */
   onSceneReady?: (s: SceneHandles | null) => void;
   /** Renders the integrated first-person optic prototype on top of this world. */
@@ -366,6 +397,7 @@ export function DF2Scene({
   onToggleGround,
   onStance,
   onGrassReady,
+  onFoliageDebugReady,
   onSceneReady,
   scopeDemo = false,
   weaponDemo = false,
@@ -864,6 +896,15 @@ export function DF2Scene({
   // A local switch is REFUSED, not merely overwritten, once the room owns the
   // weather: the server broadcasts on change only, so nothing would ever arrive
   // to correct it and the two players would sit in different fog indefinitely.
+  // Live foliage density. Seeded from `?foliagedensity=` so a URL and the slider agree,
+  // then owned here because the layer must not rebuild to change it.
+  const [foliageDensity, setFoliageDensity] = useState(BENCH.foliageDensity ?? 1);
+  const [foliageRadius, setFoliageRadius] = useState(
+    BENCH.foliageRadius ?? FOLIAGE_VIEW_RADIUS_METRES
+  );
+  const [foliageSpacing, setFoliageSpacing] = useState(FOLIAGE_SITE_SPACING);
+  const [foliageFar, setFoliageFar] = useState(BENCH.foliageFar ?? FOLIAGE_FAR_RADIUS_METRES);
+
   const setPreset = useCallback(
     (id: string) => {
       if (netWeather !== null) return;
@@ -881,8 +922,26 @@ export function DF2Scene({
       preset: weather,
       setPreset,
       roomDials: room,
+      foliageDensity,
+      setFoliageDensity,
+      foliageRadius,
+      setFoliageRadius,
+      foliageSpacing,
+      setFoliageSpacing,
+      foliageFar,
+      setFoliageFar,
     });
-  }, [dialTargets, onSceneReady, room, setPreset, weather]);
+  }, [
+    dialTargets,
+    foliageDensity,
+    foliageRadius,
+    foliageSpacing,
+    foliageFar,
+    onSceneReady,
+    room,
+    setPreset,
+    weather,
+  ]);
 
   // Stable identity so Terrain's slot memo does not rebuild; reads the uniform at
   // call time so the canopy slider takes effect without a React render.
@@ -892,13 +951,18 @@ export function DF2Scene({
   );
 
   const waterMaterial = useMemo(() => {
-    const m = new THREE.MeshStandardNodeMaterial();
+    // Lit, so it takes the term after lighting. docs/08 §8 invariant 7 named the water as
+    // one of three surfaces bypassing the atmosphere entirely; it had been taking three's
+    // linear scene fog, which fades to a flat colour while the terrain it meets at the
+    // shoreline fades to the sky.
+    const WaterMaterial = atmosphere.litClass(THREE.MeshStandardNodeMaterial);
+    const m = new WaterMaterial();
     m.color = new THREE.Color(WATER_COLOR);
     m.roughness = 0.15;
     m.transparent = true;
     m.opacity = 0.82;
     return m;
-  }, []);
+  }, [atmosphere]);
   useEffect(() => () => waterMaterial.dispose(), [waterMaterial]);
 
   // Gameplay collision reads the canonical CPU heightfield, never Terrain's
@@ -924,9 +988,13 @@ export function DF2Scene({
 
       {/* The background is set imperatively in an effect above, because it is a NODE
           rather than a texture — it has to be fogged, and a plain cubemap cannot be. */}
-      {/* Scene fog stays declared for anything using three's automatic path — the
-          water, and any object added later. Terrain and grass take the shared term
-          instead, which the scene fog cannot express. */}
+      {/* Scene fog stays declared for what is STILL on three's automatic path, which is
+          now only the GLB-loaded surfaces: mission props, dev-placed objects and the
+          soldier, all of which arrive as plain non-node materials from the loader. Water
+          and foliage moved to `atmosphere.litClass` and set `fog = false` themselves.
+          Terrain and grass never used it. Once the GLB material pass lands this
+          declaration has no consumer left and should go — a live scene fog that nothing
+          reads is a trap for the next material added. */}
       <fog
         attach="fog"
         args={[weather.fogColor, fogRangeOf(weather).near, fogRangeOf(weather).far]}
@@ -1013,6 +1081,24 @@ export function DF2Scene({
 
       {heightfield && <DevPlacedObject heightfield={heightfield} />}
       {heightfield && <MissionObjects heightfield={heightfield} />}
+      {/* Vegetation — bushes and trees, opt-in with ?foliage=1 while it is exploratory,
+          so no existing grass measurement changes underneath anyone. */}
+      {BENCH.foliage && heightfield && (
+        <Suspense fallback={null}>
+          <FoliageLayer
+            terrain={heightfield}
+            atmosphere={atmosphere}
+            density={foliageDensity}
+            radiusMetres={foliageRadius}
+            siteSpacing={foliageSpacing}
+            farRadiusMetres={foliageFar}
+            lights={lights}
+            worldQuery={worldQuery}
+            waterHeight={showWater ? waterLevel : undefined}
+            onDebugReady={onFoliageDebugReady}
+          />
+        </Suspense>
+      )}
 
       {scopeDemo && FPS_DEBUG.shotTrajectory && (
         <Suspense fallback={null}>

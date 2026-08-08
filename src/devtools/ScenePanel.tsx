@@ -21,6 +21,7 @@ import {
   type TerrainScale,
 } from "../df2/config";
 import { DialGroup, GROUPED } from "./dialGroup";
+import { CommitDial } from "./CommitDial";
 
 export interface ScenePanelProps {
   terrain: LoadedTerrain | null;
@@ -99,12 +100,6 @@ export const ScenePanel = memo(function ScenePanel({
   scene,
 }: ScenePanelProps) {
   const standIn = terrain?.grassSource === "colormap-standin";
-  // The one slider under the pointer during a drag (dragging is one dial at a
-  // time by construction). Committing rebuilds the WHOLE world — heightfield,
-  // chunk geometry, grass, motor terrain — so unlike the grass dials these
-  // commit on release, and this mirror is what moves under the thumb.
-  const [drag, setDrag] = useState<{ key: keyof TerrainScale; v: number } | null>(null);
-
   // The prepared-terrain list, for the map selector. Null until fetched (and
   // when no index ships, in which case the selector simply does not render).
   const [maps, setMaps] = useState<TerrainIndexEntry[] | null>(null);
@@ -246,6 +241,10 @@ export const ScenePanel = memo(function ScenePanel({
         ))}
       </div>
 
+      {/* Foliage moved to its own tab: this section was gated on ?foliage=1, so with
+          the flag off there was no evidence it existed. The Foliage tab always renders
+          and says what is missing. */}
+
       {terrain && (
         <>
           <span className="eyebrow dev-group">Scale</span>
@@ -258,53 +257,24 @@ export const ScenePanel = memo(function ScenePanel({
             </p>
           ) : (
             <>
-              {SCALE_DIALS.map((d) => {
-            const live = drag?.key === d.key ? drag.v : terrainScale[d.key];
-            const commit = () => {
-              setDrag(null);
-              if (drag?.key === d.key && drag.v !== terrainScale[d.key])
-                setTerrainScale({ ...terrainScale, [d.key]: drag.v });
-            };
-            // Alt-tab mid-drag fires pointercancel, not pointerup — drop the
-            // uncommitted value rather than leave a readout that looks live.
-            const cancel = () => setDrag(null);
-            return (
-              <label key={d.key} className="dial">
-                <span className="dial-row">
-                  <span>{d.label}</span>
-                  <b data-dev={`readout-${d.key}`}>
-                    {live.toFixed(d.step < 1 ? 2 : 0)}
-                  </b>
-                </span>
-                <input
-                  type="range"
-                  data-dev={`dial-${d.key}`}
-                  data-dev-value={live}
-                  aria-label={d.label}
+              {SCALE_DIALS.map((d) => (
+                <CommitDial
+                  key={d.key}
+                  devKey={d.key}
+                  label={d.label}
                   min={d.min}
                   max={d.max}
                   step={d.step}
-                  value={live}
-                  onChange={(e) => setDrag({ key: d.key, v: Number(e.target.value) })}
-                  // Committing rebuilds the world (~a second) — on release, not
-                  // per tick, or the drag itself would stall the drag.
-                  onPointerUp={commit}
-                  onKeyUp={commit}
-                  onBlur={commit}
-                  onPointerCancel={cancel}
+                  hint={d.hint}
+                  value={terrainScale[d.key]}
+                  onCommit={(v) => setTerrainScale({ ...terrainScale, [d.key]: v })}
                 />
-                <em>{d.hint}</em>
-              </label>
-            );
-          })}
+              ))}
           <div className="btns">
             <button
               type="button"
               data-dev="scale-reset"
-              onClick={() => {
-                setDrag(null);
-                setTerrainScale(CALIBRATED_TERRAIN_SCALE);
-              }}
+              onClick={() => setTerrainScale(CALIBRATED_TERRAIN_SCALE)}
             >
               Reset to calibrated
             </button>

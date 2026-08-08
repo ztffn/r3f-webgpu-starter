@@ -12,6 +12,14 @@ roadmap in `docs/08`, and `docs/00` for the test any aesthetic call has to pass.
 
 ## 0. The prerequisite, and why it is hard
 
+> **PARTLY DELIVERED 2026-08-07.** The post-lighting term exists —
+> `atmosphere.litClass(Base)`, `docs/08` §8 invariant 7 — and the water plane and foliage
+> take it. **The models this document is about still do not**, because `GLTFLoader` emits
+> plain non-node materials that cannot accept it without being converted first. So §2 and §3
+> remain blocked, but on a smaller, named piece of work rather than on an unsolved problem:
+> convert GLB materials to node materials at load and apply `litClass`. Sequencing below is
+> otherwise unchanged, and its §5 item 1 is now that conversion rather than the term itself.
+
 **Nothing here can be judged until lit surfaces receive fog and the colour grade**
 (`docs/08` §8 invariant 7, and the handover task). A normal map is *only* visible through
 the lighting response; a roughness value is *only* visible through a specular highlight.

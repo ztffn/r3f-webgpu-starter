@@ -175,3 +175,8 @@ public/assets/local/
 public/assets/terrain/dfg4
 public/assets/terrain/dfg5
 public/assets/terrain/dmd3
+
+# Stage-1 vegetation ingest output — regenerable via `npm run prepare:vegetation`;
+# the committed artifact is public/assets/vegetation/prototypes/ (extract-prototypes.mjs)
+public/assets/vegetation/*.runtime.glb
+public/assets/vegetation/vegetation-manifest.json

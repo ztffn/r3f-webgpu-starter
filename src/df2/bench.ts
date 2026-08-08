@@ -174,6 +174,42 @@ export interface BenchConfig {
    * Loads third-party models from the untracked testmodels/ directory.
    */
   targets?: boolean;
+  /**
+   * Draw the vegetation layer — bushes and trees, not grass.
+   *
+   * OPT-IN and independent of `?bench=1`, following the precedent `?debug=1` and
+   * `?canopyall=1` set: this is an exploratory subsystem, and switching it on by default
+   * would change every existing frame time and every existing screenshot for everyone
+   * looking at grass. The knobs below only mean anything with it on.
+   */
+  foliage?: boolean;
+  /** Card construction under test: A broad / B trimmed / C hybrid / D geometry. */
+  foliageVariant?: string;
+  /** mask | a2c | hash | blend. */
+  foliageAlpha?: string;
+  /** Cell side in metres — the draw-call / culling / LOD-granularity dial. */
+  foliageCell?: number;
+  /** Global density multiplier. */
+  foliageDensity?: number;
+  /** Window reach in METRES. Cells follow from it, so a cell sweep holds the reach. */
+  foliageRadius?: number;
+  /** Far impostor ring reach in METRES; 0 disables the ring. */
+  foliageFar?: number;
+  /**
+   * `?admin=1` — unlock the dev controls a NETWORKED session otherwise suppresses.
+   *
+   * WHAT IT IS NOT: server authority. The client already sends dial changes upward and
+   * the server refuses them unless it was started with `DF2_ADMIN=1`; a URL parameter
+   * cannot change that and must not be able to, because a flag anyone types is not a
+   * credential. This only says "show me the controls and let them act locally", so the
+   * division is URL reveals UI, server enforces authority.
+   *
+   * Local action on a gameplay quantity is still a fairness statement: growing yourself
+   * twice the cover changes what you can hide behind. Acceptable for a development
+   * instrument on a session you own, which is why the panel labels it rather than
+   * pretending the value is shared.
+   */
+  admin?: boolean;
   stance?: Stance;
   /** Fixed camera position, world metres. */
   x?: number;
@@ -231,6 +267,14 @@ function parse(): BenchConfig {
     rainCount: num("raincount"),
     rainArea: num("rainarea"),
     rainHeight: num("rainheight"),
+    foliage: q.get("foliage") === "1",
+    foliageVariant: q.get("foliagevariant") ?? undefined,
+    foliageAlpha: q.get("foliagealpha") ?? undefined,
+    foliageCell: num("foliagecell"),
+    foliageDensity: num("foliagedensity"),
+    foliageRadius: num("foliageradius"),
+    foliageFar: num("foliagefar"),
+    admin: q.get("admin") === "1",
   };
 
   if (q.get("bench") !== "1") {
@@ -278,12 +322,79 @@ export interface BenchSample {
   agl: number;
 }
 
+/**
+ * Vegetation counters, published whenever the layer is on.
+ *
+ * Separate from `BenchSample` and not gated on `?bench=1`: a foliage number is only
+ * meaningful next to the configuration that produced it, and the configuration is
+ * reachable without the fixed bench vantage — the card-variant comparison in particular
+ * has to be run from several poses, which `?bench=1` pins you out of (docs/08 §11).
+ */
+export interface FoliageBenchSample {
+  variant: string;
+  alphaMode: string;
+  cellSize: number;
+  radiusMetres: number;
+  visibleBuckets: number;
+  visibleInstances: number;
+  trianglesIfAllDrawn: number;
+  cellsCached: number;
+  pendingBuckets: number;
+  /** Texels passing the alpha cutoff at mip 0 — the research memo's cost metric. */
+  alphaOccupancy: number;
+  /** Coverage per mip level; should track level 0, or the silhouette thins with range. */
+  levelCoverage: number[];
+  /** Impostors drawn by the far ring; absent while the ring is off or still loading. */
+  farInstances?: number;
+  /**
+   * Whether the far ring is still compacting cells into its instance buffers.
+   *
+   * Part of the settle contract, not decoration: `pendingBuckets` alone describes the
+   * near window only, so a rig that waits on it can call a world settled while the ring
+   * is half built — two captures taken that way are two different amounts of world.
+   */
+  farFilling?: boolean;
+}
+
 declare global {
   interface Window {
     __perf?: BenchSample;
+    __foliage?: FoliageBenchSample;
+    __terrain?: { pendingChunks: number };
   }
 }
 
 export function publish(sample: BenchSample): void {
   if (BENCH.enabled) window.__perf = sample;
+}
+
+export function publishFoliage(sample: FoliageBenchSample): void {
+  window.__foliage = sample;
+}
+
+/**
+ * Chunks still waiting on the terrain build budget.
+ *
+ * Published so a measurement rig can tell a FINISHED world from one that is still
+ * filling in. Inferring it from a stable draw-call count does not work: chunk building is
+ * budgeted per FRAME, so at a few frames per second it advances a few milliseconds per
+ * second and the draw count sits still for long stretches with chunks plainly missing. A
+ * grass-on/grass-off comparison taken that way reported 175 draw calls against 244 and was
+ * measuring two different amounts of world, not two configurations.
+ *
+ * Ungated: it costs one number per frame and it is the only honest completion signal.
+ */
+/** The one object `publishTerrain` mutates; see its note below. */
+const terrainSignal = { pendingChunks: 0 };
+
+/**
+ * Publish the terrain's remaining build work for the measurement rig.
+ *
+ * Mutates a module-scope object rather than replacing it: this is called from the terrain
+ * frame loop, and a fresh object per frame is garbage the rig never reads. The rig
+ * re-reads the property each poll, so it sees the live value either way.
+ */
+export function publishTerrain(pendingChunks: number): void {
+  terrainSignal.pendingChunks = pendingChunks;
+  window.__terrain = terrainSignal;
 }

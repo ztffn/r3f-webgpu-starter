@@ -926,6 +926,18 @@ export function WeaponPrototype({
     // camera is only a stand-in for it.
     shotOrigin.copy(motorPose !== null ? motorPose.position : camera.position);
 
+    // The pose tab's two held states, refused online.
+    //
+    // Gated for CONSISTENCY with the ADS-timing override, not for the same reason, and
+    // the difference is worth keeping straight. That override is refused online because
+    // the SERVER scores with the authored durations, so a shooter running different
+    // numbers would see an arc the room does not — the `?ammo=` rule (docs/12 §8.1).
+    // These two change nothing the server scores: holding sprint only makes your own
+    // client refuse to fire, and holding ADS only aims a model. Do not read this gate as
+    // evidence that the timing gate was mere tidiness.
+    const heldAds = !networked && weaponPoses.forceAds;
+    const heldSprint = !networked && weaponPoses.forceSprint;
+
     const hadPreviousFrame = framePoseReady.current;
     let yawDelta = 0;
     let pitchDelta = 0;
@@ -972,7 +984,10 @@ export function WeaponPrototype({
     }
     playerPose.position.copy(shotOrigin);
     player.syncMotorPose(playerPose);
-    if (weaponIntent !== null) weaponIntent.aiming = player.wantsAds;
+    // Includes the held aim so the motor's aiming slowdown cannot disagree with the
+    // weapon about whether the player is aiming — one held state, read the same way in
+    // both places, for the same reason `sprinting` below is resolved exactly once.
+    if (weaponIntent !== null) weaponIntent.aiming = player.wantsAds || heldAds;
     handlingContext.stance = player.stance;
     handlingContext.grounded = player.grounded;
     // Only a real motor can report this; without one there is no sprint state
@@ -987,7 +1002,7 @@ export function WeaponPrototype({
     // SPRINTING — the one distinction this pose exists to draw — and free-fly crosses that
     // threshold constantly. Sprint is a state a player enters, so it needs a real one:
     // the motor's, or the dev console holding it.
-    sprinting.current = weaponPoses.forceSprint || (motorPose !== null && motorPose.sprinting);
+    sprinting.current = heldSprint || (motorPose !== null && motorPose.sprinting);
     handlingContext.sprinting = sprinting.current;
     handlingContext.planarSpeedMetresPerSecond = player.planarSpeedMetresPerSecond;
     handlingContext.breathStabilization = aimSway.breathStabilization;
@@ -996,7 +1011,7 @@ export function WeaponPrototype({
     for (const command of commands.weaponCommands) loadout.handleCommand(command);
     // The pose tab can hold ADS so the aimed placement is tunable while the pointer is on
     // a slider — releasing pointer lock to reach the console otherwise drops the aim.
-    loadout.setAdsWanted(commands.adsWanted || weaponPoses.forceAds);
+    loadout.setAdsWanted(commands.adsWanted || heldAds);
     const weaponBeforeUpdate = loadout.equippedWeapon;
     const adsProgressBefore = weaponBeforeUpdate.adsProgress;
     loadout.update(simulationDelta);

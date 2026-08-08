@@ -58,13 +58,6 @@ import {
 
 export type FoliageAlphaMode = "mask" | "mask-a2c" | "hash" | "blend";
 
-export const FOLIAGE_ALPHA_MODES: readonly FoliageAlphaMode[] = [
-  "mask",
-  "mask-a2c",
-  "hash",
-  "blend",
-];
-
 /**
  * Whether a fragment survives the near/far tier crossfade, as a TSL bool node.
  *
@@ -95,6 +88,65 @@ function crossfadeKeep(t: NodeArg, tier: "near" | "far"): NodeArg {
 /** Gate an opacity node through the crossfade; discarded pixels fail every alpha mode. */
 export function applyCrossfade(opacity: NodeArg, t: NodeArg, tier: "near" | "far"): NodeArg {
   return select(crossfadeKeep(t, tier), opacity, float(0));
+}
+
+/**
+ * Band position for the near/far handoff: 0 fully near, 1 fully far.
+ *
+ * Shared rather than transcribed because `applyCrossfade` only partitions exactly if both
+ * tiers feed it the SAME `t` — the two must agree bit for bit, and three hand-copies of a
+ * smoothstep is not agreement, it is a coincidence waiting to be edited.
+ */
+export function handoffBand(uniforms: FoliageUniforms, worldOrigin: NodeArg): NodeArg {
+  return varying(
+    smoothstep(uniforms.fadeStart, uniforms.fadeEnd, worldOrigin.sub(cameraPosition).length())
+  );
+}
+
+/**
+ * Per-plant tone multiplier, so a stand of one species does not read as a stamped repeat.
+ *
+ * One tone per plant, not per card: a plant that varies within itself reads as noise. It
+ * must also match ACROSS the handoff, or every plant changes brightness as the player
+ * walks through the dissolve band — which is why all three tiers call this.
+ */
+export function instanceTone(instanceSeed: NodeArg): NodeArg {
+  return float(0.82).add(instanceSeed.mul(0.36));
+}
+
+/**
+ * Wind displacement for one vertex, in world units.
+ *
+ * Phase comes from world position and the shared clock only — no per-instance random and
+ * no frame counter — so the deformation is reproducible anywhere from (position, time).
+ * That is a fairness requirement, not a style choice (see `FoliageUniforms.time`), and it
+ * only holds if every foliage material uses ONE recipe: a mixed stand of cards and
+ * authored trees has to move as one weather, which two copies of these constants cannot
+ * guarantee. `sway` is the per-vertex weight — the card's baked sway attribute, or a
+ * tree's squared height fraction — and `leafFlag` keeps bullet-stopping trunks rigid.
+ */
+export function windOffset(
+  uniforms: FoliageUniforms,
+  worldOrigin: NodeArg,
+  instanceSeed: NodeArg,
+  sway: NodeArg,
+  leafFlag: NodeArg
+): NodeArg {
+  // Through NodeArg deliberately: a concretely typed uniform makes `.mul()` resolve to a
+  // vector overload and the whole chain widens to vec3, which fails at the `vec3(...)`
+  // below with an error that names neither cause (docs/08 §8 invariant 7).
+  const time: NodeArg = uniforms.time;
+  const period: NodeArg = uniforms.windPeriod;
+  const windAmplitude: NodeArg = uniforms.windAmplitude;
+
+  const phase = time
+    .mul(float(Math.PI * 2).div(period))
+    .add(worldOrigin.x.mul(0.09))
+    .add(worldOrigin.z.mul(0.13))
+    .add(instanceSeed.mul(1.7));
+  const gust = float(0.72).add(phase.mul(0.31).sin().mul(0.28));
+  const amplitude = windAmplitude.mul(sway).mul(leafFlag).mul(gust);
+  return vec3(phase.sin().mul(amplitude), 0, phase.mul(0.83).cos().mul(amplitude.mul(0.6)));
 }
 
 // The convention atmosphere.ts uses: TSL's overloaded node types collapse under
@@ -219,9 +271,7 @@ export function createFoliageMaterial(options: FoliageMaterialOptions): FoliageM
   // mesh transform is a pure translation (the cell's origin), so this is exact. Built
   // outside positionNode because the crossfade gate reads it from the fragment stage.
   const worldOrigin = modelWorldMatrix.mul(vec4(instanceOrigin, 1)).xyz;
-  const bandPosition = varying(
-    smoothstep(uniforms.fadeStart, uniforms.fadeEnd, worldOrigin.sub(cameraPosition).length())
-  );
+  const bandPosition = handoffBand(uniforms, worldOrigin);
 
   material.positionNode = Fn(() => {
     // `positionLocal` here is already instance-transformed: NodeMaterial applies the
@@ -249,27 +299,14 @@ export function createFoliageMaterial(options: FoliageMaterialOptions): FoliageM
     offset.assign(mix(offset, billboardOffset, billboardFlag));
 
     // --- Wind ----------------------------------------------------------------
-    // Phase from world position and the world clock only. No per-instance random and no
-    // frame counter, so the deformation is reproducible anywhere from (position, time).
-    const phase = uniforms.time
-      .mul(float(Math.PI * 2).div(uniforms.windPeriod))
-      .add(worldOrigin.x.mul(0.09))
-      .add(worldOrigin.z.mul(0.13))
-      .add(instanceSeed.mul(1.7));
-    const gust = float(0.72).add(phase.mul(0.31).sin().mul(0.28));
-    const amplitude = uniforms.windAmplitude.mul(swayAttribute).mul(leafFlag).mul(gust);
-    offset.addAssign(
-      vec3(phase.sin().mul(amplitude), 0, phase.mul(0.83).cos().mul(amplitude.mul(0.6)))
-    );
+    offset.addAssign(windOffset(uniforms, worldOrigin, instanceSeed, swayAttribute, leafFlag));
 
     return instanceOrigin.add(offset);
   })();
 
   const texel = texture(map, uv());
   const tint = vec3(species.foliageTint[0], species.foliageTint[1], species.foliageTint[2]);
-  // Per-instance tone, so a stand of one species does not read as a stamped repeat. One
-  // tone per plant, not per card: a plant that varies within itself reads as noise.
-  const tone = float(0.82).add(instanceSeed.mul(0.36));
+  const tone = instanceTone(instanceSeed);
   const bark = vec3(FOLIAGE_BARK_COLOR[0], FOLIAGE_BARK_COLOR[1], FOLIAGE_BARK_COLOR[2]);
 
   material.colorNode = mix(bark, tint.mul(tone), leafFlag);

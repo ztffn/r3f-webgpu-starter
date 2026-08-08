@@ -35,6 +35,8 @@ import type { Atmosphere } from "../df2/atmosphere.ts";
 import { FOLIAGE_IMPOSTOR_ALPHA_CUTOFF } from "./foliageConfig.ts";
 import {
   applyCrossfade,
+  handoffBand,
+  instanceTone,
   type FoliageUniform,
   type FoliageUniforms,
 } from "./FoliageMaterial.ts";
@@ -158,9 +160,7 @@ export function createFarFoliageMaterial(options: FarFoliageMaterialOptions) {
   // player noticed once 25 m trees existed. The ring's OUTER edge keeps the shrink:
   // at 700 m it is subpixel housekeeping, not a visible transition.
   const baseDistance = origin.sub(cameraPosition).length();
-  const bandPosition = varying(
-    smoothstep(foliageUniforms.fadeStart, foliageUniforms.fadeEnd, baseDistance)
-  );
+  const bandPosition = handoffBand(foliageUniforms, origin);
   const sizeFactor = float(1).sub(
     smoothstep(farUniforms.farFadeStart, farUniforms.farFadeEnd, baseDistance)
   );
@@ -252,7 +252,7 @@ export function createFarFoliageMaterial(options: FarFoliageMaterialOptions) {
   const fill = mix(farUniforms.fillGround, farUniforms.fillSky, upness);
   const sun = farUniforms.sunColor.mul(normalWorld.dot(farUniforms.sunDirection).max(0));
   const light = farUniforms.ambient.add(fill).add(sun).mul(1 / Math.PI);
-  const tone = float(0.82).add(instanceSeed.mul(0.36));
+  const tone = instanceTone(instanceSeed);
 
   material.colorNode = atmosphere.shade(albedo.mul(tone).mul(light));
   material.opacityNode = applyCrossfade(alpha, bandPosition, "far");

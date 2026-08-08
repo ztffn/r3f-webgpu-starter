@@ -12,22 +12,21 @@ import * as THREE from "three/webgpu";
 import {
   Fn,
   attribute,
-  cameraPosition,
   float,
   mix,
   modelWorldMatrix,
   positionLocal,
-  smoothstep,
   texture,
   uv,
-  varying,
-  vec3,
   vec4,
 } from "three/tsl";
 import type { Atmosphere } from "../df2/atmosphere.ts";
 import {
   applyAlphaMode,
   applyCrossfade,
+  handoffBand,
+  instanceTone,
+  windOffset,
   type FoliageAlphaMode,
   type FoliageUniforms,
 } from "./FoliageMaterial.ts";
@@ -63,9 +62,7 @@ export function createTreeMaterial(options: TreeMaterialOptions): THREE.MeshStan
   // tree the original shrink-toward-base fade read as the tree GROWING as the player
   // approached, so the handoff dissolves per pixel instead (see FoliageMaterial).
   const worldOrigin = modelWorldMatrix.mul(vec4(instanceOrigin, 1)).xyz;
-  const bandPosition = varying(
-    smoothstep(uniforms.fadeStart, uniforms.fadeEnd, worldOrigin.sub(cameraPosition).length())
-  );
+  const bandPosition = handoffBand(uniforms, worldOrigin);
 
   material.positionNode = Fn(() => {
     // positionLocal arrives instance-transformed; offsets are relative to the plant's
@@ -76,23 +73,20 @@ export function createTreeMaterial(options: TreeMaterialOptions): THREE.MeshStan
 
     // --- Wind: leaves only, rising with height ------------------------------
     // The trunk is a bullet-stopping proxy and must not move (foliageGeometry's rule);
-    // the crown sways on the same shared clock and phase recipe as the card species,
-    // so a mixed stand moves as one weather.
+    // the crown sways on the shared recipe, so a mixed stand moves as one weather. The
+    // sway weight is what differs from a card: height fraction squared, so the canopy
+    // travels and the bole does not.
     const heightFraction = offset.y
       .div(float(species.heightMetres).mul(instanceScale).max(1e-3))
       .clamp(0, 1);
-    const phase = uniforms.time
-      .mul(float(Math.PI * 2).div(uniforms.windPeriod))
-      .add(worldOrigin.x.mul(0.09))
-      .add(worldOrigin.z.mul(0.13))
-      .add(instanceSeed.mul(1.7));
-    const gust = float(0.72).add(phase.mul(0.31).sin().mul(0.28));
-    const amplitude = uniforms.windAmplitude
-      .mul(heightFraction.mul(heightFraction))
-      .mul(leafFlag)
-      .mul(gust);
     offset.addAssign(
-      vec3(phase.sin().mul(amplitude), 0, phase.mul(0.83).cos().mul(amplitude.mul(0.6)))
+      windOffset(
+        uniforms,
+        worldOrigin,
+        instanceSeed,
+        heightFraction.mul(heightFraction),
+        leafFlag
+      )
     );
 
     return instanceOrigin.add(offset);
@@ -100,8 +94,7 @@ export function createTreeMaterial(options: TreeMaterialOptions): THREE.MeshStan
 
   const trunkTexel = texture(prototype.trunkTexture, uv());
   const leafTexel = texture(prototype.leafTexture, uv());
-  // One tone per plant, matching the card species, so a stand varies without noise.
-  const tone = float(0.82).add(instanceSeed.mul(0.36));
+  const tone = instanceTone(instanceSeed);
 
   material.colorNode = mix(trunkTexel.rgb, leafTexel.rgb, leafFlag).mul(tone);
   material.opacityNode = applyCrossfade(

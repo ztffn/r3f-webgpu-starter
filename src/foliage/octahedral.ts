@@ -15,17 +15,39 @@
 export type Vec3 = readonly [number, number, number];
 
 /**
- * Encode a unit direction with y >= 0 into hemi-octahedral coordinates in [-1,1]².
+ * Encode a unit direction into hemi-octahedral coordinates in [-1,1]².
  *
- * Inverse of `hemiOctDecode`. Directions below the horizon are clamped onto it by
- * ignoring the sign of y — the atlas has no views from underneath, and the nearest
- * horizon view is the fairness-preserving substitute (the silhouette stays fully drawn).
+ * Inverse of `hemiOctDecode` over the upper hemisphere. Directions BELOW the horizon
+ * clamp onto it: the atlas holds no views from underneath, and the nearest horizon view
+ * is the fairness-preserving substitute — the silhouette stays fully drawn rather than
+ * sampling a tile that shows less of the plant.
+ *
+ * THE CLAMP IS `max(y, 0)`, NOT `abs(y)`, AND THAT DIFFERENCE IS THE WHOLE POINT.
+ * Dropping the y term pushes the fold outside the square and the clamp lands it on the
+ * boundary, which IS the horizon ring. Taking `abs(y)` instead REFLECTS the direction: a
+ * view from 20° below comes back as the tile for 20° ABOVE — a different photograph, of a
+ * different side of the plant. This file used `abs` while `FarFoliageMaterial`'s TSL
+ * mirror used `max(0)`, so the two disagreed below the horizon for as long as both
+ * existed. Nothing rendered wrong, because only the shader runs at runtime — but this
+ * module's whole job is to be the one definition that cannot drift between bake time and
+ * sample time, and it had drifted. `octahedral.test.ts` now sweeps below the horizon so
+ * the pair stays pinned.
+ *
+ * Looking UP at a treeline is ordinary on these maps — you are in a valley, the trees are
+ * on the ridge — so the below-horizon path is not hypothetical. It is simply reached only
+ * through the shader today.
  */
 export function hemiOctEncode(x: number, y: number, z: number): [number, number] {
-  const denom = Math.abs(x) + Math.abs(y) + Math.abs(z);
+  const denom = Math.abs(x) + Math.max(y, 0) + Math.abs(z);
   const px = denom > 0 ? x / denom : 0;
   const pz = denom > 0 ? z / denom : 0;
-  return [px + pz, pz - px];
+  // Clamped for the same reason the shader clamps after folding: below the horizon the
+  // point lands outside [-1,1]², and the boundary is where it belongs.
+  return [clampUnit(px + pz), clampUnit(pz - px)];
+}
+
+function clampUnit(value: number): number {
+  return value < -1 ? -1 : value > 1 ? 1 : value;
 }
 
 /** Decode hemi-octahedral coordinates in [-1,1]² back to a unit direction, y >= 0. */

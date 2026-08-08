@@ -101,3 +101,73 @@ test("blend weights are barycentric and peak on the exact grid view", () => {
     }
   }
 });
+
+/**
+ * Below the horizon the encoder must CLAMP, not reflect.
+ *
+ * Unpinned until now: the sweep above starts at elevation 0 and goes up, so the encoder
+ * could do anything at all with a negative y and no test would notice. It did — it used
+ * `abs(y)` where `FarFoliageMaterial`'s TSL mirror uses `max(y, 0)`, which reflects a
+ * below-horizon view onto an elevated tile instead of onto the horizon ring. Only the
+ * shader runs at runtime so nothing rendered wrong, but this module exists to be the one
+ * definition that cannot drift, and these are the assertions that keep it honest.
+ */
+test("below-horizon directions clamp onto the horizon ring, not onto a reflected view", () => {
+  for (let a = 0; a < 32; a += 1) {
+    for (let e = 1; e <= 8; e += 1) {
+      const azimuth = (a / 32) * Math.PI * 2;
+      const elevation = -(e / 8) * (Math.PI / 2) * 0.99;
+      const x = Math.cos(azimuth) * Math.cos(elevation);
+      const y = Math.sin(elevation);
+      const z = Math.sin(azimuth) * Math.cos(elevation);
+      const [u, v] = hemiOctEncode(x, y, z);
+
+      assert.ok(u >= -1.0001 && u <= 1.0001, `u in range az ${a} el ${e}`);
+      assert.ok(v >= -1.0001 && v <= 1.0001, `v in range az ${a} el ${e}`);
+
+      // On the boundary: for a horizon direction |px| + |pz| = 1, and u = px + pz,
+      // v = pz - px, so exactly one of |u|, |v| reaches 1.
+      assertClose(Math.max(Math.abs(u), Math.abs(v)), 1, 1e-6, `on the ring az ${a} el ${e}`);
+
+      // Same tile as this direction's own horizon projection — that is what "clamped onto
+      // the horizon" means, and it is the property `abs(y)` silently broke.
+      const flat = Math.hypot(x, z);
+      const [hu, hv] = hemiOctEncode(x / flat, 0, z / flat);
+      assertClose(u, hu, 1e-6, `u matches horizon projection az ${a} el ${e}`);
+      assertClose(v, hv, 1e-6, `v matches horizon projection az ${a} el ${e}`);
+
+      // And NOT the mirrored direction's tile, which is what reflection would have given.
+      const [mu, mv] = hemiOctEncode(x, -y, z);
+      assert.ok(
+        Math.hypot(u - mu, v - mv) > 1e-3,
+        `az ${a} el ${e} encodes the same as its mirror — the encoder is reflecting`
+      );
+    }
+  }
+});
+
+test("the encoder agrees with the shader's fold for a direction either side of the horizon", () => {
+  // The TSL mirror in FarFoliageMaterial: denom = |x| + max(y,0) + |z|, fold to
+  // (px+pz, pz-px), then clamp. Transcribed here so a change to either side has to be
+  // made in both, which is the only enforcement a shader/JS pair can have.
+  const shaderFold = (x: number, y: number, z: number): [number, number] => {
+    const denom = Math.max(Math.abs(x) + Math.max(y, 0) + Math.abs(z), 1e-5);
+    const px = x / denom;
+    const pz = z / denom;
+    const clamp = (n: number) => Math.min(1, Math.max(-1, n));
+    return [clamp(px + pz), clamp(pz - px)];
+  };
+  for (let a = 0; a < 16; a += 1) {
+    for (let e = -6; e <= 6; e += 1) {
+      const azimuth = (a / 16) * Math.PI * 2;
+      const elevation = (e / 6) * (Math.PI / 2) * 0.99;
+      const x = Math.cos(azimuth) * Math.cos(elevation);
+      const y = Math.sin(elevation);
+      const z = Math.sin(azimuth) * Math.cos(elevation);
+      const [u, v] = hemiOctEncode(x, y, z);
+      const [su, sv] = shaderFold(x, y, z);
+      assertClose(u, su, 1e-6, `u matches the shader az ${a} el ${e}`);
+      assertClose(v, sv, 1e-6, `v matches the shader az ${a} el ${e}`);
+    }
+  }
+});

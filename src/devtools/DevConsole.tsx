@@ -20,6 +20,7 @@ import type { GrassUniforms } from "../df2/GrassMaterial";
 import type { SceneHandles } from "../df2/DF2Scene";
 import type { FoliageDebugControls } from "../foliage/foliageDebug";
 import { FoliagePanel } from "./FoliagePanel";
+import { WeaponPosePanel } from "./WeaponPosePanel";
 import type { PerfSample } from "../df2/PerfMonitor";
 import type { FlyState } from "../df2/FlyControls";
 import "./devtools.css";
@@ -32,6 +33,7 @@ const TAB_LABELS: Record<DevTab, string> = {
   grass: "Grass",
   foliage: "Foliage",
   weather: "Weather",
+  weaponpose: "Weapon pose",
   controls: "Controls",
 };
 
@@ -145,6 +147,7 @@ export function DevConsole({
             setPanelAlpha={setPanelAlpha}
           />
         )}
+        {state.tab === "weaponpose" && <WeaponPosePanel />}
         {state.tab === "launch" && <LaunchPanel />}
         {state.tab === "telemetry" && (
           <TelemetryPanel perf={perf} fly={fly} combat={combat} />

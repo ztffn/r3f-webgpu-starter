@@ -52,6 +52,26 @@ adds three explicit stages — the first two exist now (2026-08-07):
    authors leaf uvs in v ∈ [1,2] and relies on REPEAT wrap — a clamping sampler bakes every
    crown to nothing). Geometric LODs beyond the authored mesh are still unauthored; at
    ~600 triangles per tree nothing needs them yet.
+
+   **Output is KTX2 (UASTC + Zstd), not PNG**, since 2026-08-08. `ktx2.mjs` owns the encode
+   and the audit. Requires **KTX-Software on PATH** (`toktx` and `ktx`; `brew install ktx`) —
+   the bake fails loudly without it. Three rules that are not negotiable:
+   - Never `--genmipmap`. Levels are supplied explicitly; the encoder's box filter over alpha
+     undoes the coverage solve in `alphaMips.ts`.
+   - Albedo uses `buildCoveragePreservingMips`; normal uses `weightedNormalMips`. Swapping
+     them rescales the depth channel and brightens the whole far ring.
+   - The audit decodes the SHIPPED file and throws if coverage drops more than 0.005. Do not
+     move it back onto the source — that is how the authored trees ended up unaudited.
+
+   Format was chosen by measurement, not preference: ETC1S flips 0.569% of pixels across the
+   runtime alpha cutoff and thins the silhouette; UASTC flips 0.000%. Raw UASTC without
+   `--zcmp` is an 18x download regression. Numbers and method in plan v2 §5.4d.
+
+   **Reusable for the asset pipeline:** `ktx2.mjs` takes any mip-level array, so authored
+   prop and vehicle textures can go through the same encode and the same shipped-artefact
+   audit. Keep one path — three copies of the glTF flattening loop already exist across
+   `bake-impostors.mjs`, `extract-prototypes.mjs` and `prepare-vegetation.mjs`, and
+   consolidating them is scoped with the asset-authoring work.
 3. map logical species to collider records and add parity tests comparing analytic trunk hits
    with the expected cylinder bounds. (`species.ts` carries the records, pinned to the
    extraction manifest by `tests/foliage/species-prototypes.test.ts`; the ray-parity tests

@@ -559,6 +559,22 @@ Nothing throws when these break. Check them after touching `config.ts`.
    concealment query and to any AI. That is the same break inverted, and it is why smoke is
    scoped as a rendering prototype rather than a mechanic.
 
+   **FOR VEGETATION, THE TEST IS PER-ASSET AND RELATIVE — not against 0.55.** `TARGET_BLOCKING
+   = 0.55` (`foliageGeometry.ts`) is the PROCEDURAL generator's own calibration constant:
+   `solveSizeMultiplier` scales card size until the set hits it. It is not a property of
+   foliage and does not apply to authored art. The correct check is that a representation
+   conceals at least as much as ITS OWN LOD 0 — which `foliage-geometry.test.ts` already does
+   for the geometric chain (a RATIO against the asset's own reference), and which
+   `impostor-bake.test.ts` does NOT: it applies 0.55 as an absolute over a hardcoded
+   `["acacia","bush","scrub"]`, so the four authored tree species have never been audited.
+   Fixing that is scoped with the asset pipeline (plan v2 §6).
+
+   **AUDIT WHAT SHIPS, NOT WHAT WAS AUTHORED.** A check that runs on the source cannot see
+   what the pipeline did afterwards. The KTX2 migration (plan v2 §5.4d) is the worked example:
+   block compression is lossy on alpha and alpha IS the silhouette, so the bake decodes the
+   shipped file back out and throws if coverage drops more than 0.005. Pixel-exactness is not
+   required; not thinning is.
+
    Three limits have already done exactly this:
    - `sEnter = inside ? nearClip : fragDistance` with `hitS <= sEnter + span` and
      `span <= GRASS_MAX_SPAN` put a hard 49 m ceiling on every hit on screen the moment the eye

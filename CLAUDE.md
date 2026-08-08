@@ -220,6 +220,24 @@ player instinctively recognise this?* — applies to features, not to whether a 
   through both tiers as species `forest-tree-01..04`; the window-edge handoff is a
   per-pixel dithered dissolve, not a size fade — the shrink read as trees GROWING once
   25 m pines existed (plan v2 §5.4b).
+- **Impostor atlases are KTX2, not PNG (Aug 2026):** UASTC + Zstd with the mip chains solved
+  at BAKE time — download 24.6 → 13.5 MB, VRAM ~296 → ~74 MB, and the browser's hand-rolled
+  PNG decode plus per-load mip derivation are gone from the load path entirely. Baking needs
+  KTX-Software on PATH (`toktx`, `ktx`); the runtime needs only three's `KTX2Loader` and the
+  Basis transcoder committed at `public/basis/` (a CDN would be blocked by the page CSP).
+  ETC1S is REJECTED on measurement — it flips 0.569% of pixels across the alpha cutoff and
+  thins the silhouette; UASTC flips 0.000%. Never `--genmipmap` (its box filter undoes the
+  coverage solve), and albedo and normal atlases take DIFFERENT solvers. The bake audits the
+  decoded shipped file and throws if coverage drops. Plan v2 §5.4d has all of it.
+  **The in-browser transcode is not yet verified** — assets, audit and build are.
+- **Foliage debug tab (Aug 2026):** dev console → **Foliage** (needs `?foliage=1`, plus
+  `?admin=1` when networked). False-colour views for LOD, tier, species and cell grid; a
+  **measured** overdraw view (both tiers rendered alone to a half-float target and read back
+  — `null` means not measured, never zero); per-species and per-tier isolation toggles that
+  remove the DRAW so GPU-ms deltas attribute honestly; and a LOD-distance multiplier. Built
+  because the old dials lived in the Scene tab behind `?foliage=1` and rendered NOTHING
+  without it. Plan v2 §5.4c. Known gap: the near tier's LOD is FOV-aware but the tier
+  handoff and far ring are not, so a scoped target past the spawner reach is an impostor.
 - **Lit surfaces get fog and the grade (Aug 2026):** `atmosphere.litClass(Base)` shades AFTER
   lighting and forces the scene fog off in one call. This was the gating piece for the whole
   asset phase (`docs/08` §8 invariant 7, which carries the TSL typing trap that cost two

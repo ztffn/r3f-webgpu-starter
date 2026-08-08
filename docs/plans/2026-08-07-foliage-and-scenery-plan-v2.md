@@ -366,10 +366,8 @@ Built in the session after this document was written. What exists now:
 - **Offline bake** (`npm run bake:impostors` → `tools/vegetation/bake-impostors.mjs`): a
   software rasteriser (`src/foliage/impostorBake.ts`, Three-free, deterministic) renders
   each species' LOD 0 from a 12×12 hemi-octahedral view grid into a 2040² albedo atlas
-  and a packed normal+depth atlas, written as PNGs plus a manifest to
-  `public/assets/vegetation/impostors/`. The PNGs are decoded at runtime by our own codec
-  (`impostorPng.ts`) because canvas decode premultiplies alpha — it zeroes the RGB of
-  transparent texels, which is the alphaMips dark-fringe defect reintroduced at level 0.
+  and a packed normal+depth atlas, written as **KTX2** plus a manifest to
+  `public/assets/vegetation/impostors/` (see §5.4d — this was PNG until 2026-08-08).
 - **Far ring** (`src/foliage/FarFoliageCells.tsx`, behind `?foliage=1`, `?foliagefar=`
   and a Scene-tab dial, default 768 m): ONE plain Mesh over an InstancedBufferGeometry
   per species — 3 draw calls for the whole ring — filled from the same `VegetationField`
@@ -388,6 +386,123 @@ Built in the session after this document was written. What exists now:
 Measured at the §2.3 vantage: 22,370 far impostors = **+3 draw calls, +45k triangles,
 GPU delta unresolved** (inside the ±2.5 ms timer spread), and a §2.1 camera sweep adds
 **0 hitches** — the ring's three pipelines ride the same mount-time warm-up.
+
+## 5.4c LANDED 2026-08-08: the Foliage tab — false colour, isolation, measured overdraw
+
+The vegetation layer had four dials buried in the Scene tab behind `?foliage=1`, which
+rendered NOTHING when the flag was absent — no heading, no hint that the controls
+existed. That discoverability failure is why this tab exists. It always renders and says
+what is missing.
+
+**Dev console → Foliage tab** (`src/devtools/FoliagePanel.tsx`). Reach it with
+`?foliage=1`, plus `?admin=1` in a networked session or the spawn dials stay read-only.
+
+**View modes** (`src/foliage/foliageDebug.ts`). Every mode replaces the shaded output
+rather than tinting it, so no debug colour passes through `atmosphere.shade` — grade and
+fog would turn a flat palette entry into a distance-dependent one:
+
+| Mode | Answers |
+|---|---|
+| LOD | geometric detail per cell; green nearest, red the in-window impostor |
+| Tier | near window (cyan) vs far ring (magenta) — where the handoff lands |
+| Species | one colour per plant type |
+| Cells | the 32 m bucket — the unit of culling AND of LOD choice |
+| Overdraw | foliage layers per pixel, with measured figures |
+| Collision | RESERVED and disabled — trunk proxies are client-only, so nothing authoritative exists to draw |
+
+**Two mechanisms, because the tiers differ.** The near window is LIT, and a flat colour
+written to a lit material's `colorNode` comes back multiplied by PBR then graded and
+fogged — unreadable as false colour. Its LOD also varies PER BUCKET while one material is
+shared by every bucket of a species, so no uniform can carry it. It therefore swaps in a
+material keyed on (species, palette slot). The far ring is unlit and already one material
+per species, so it switches on the shared `debugMode` uniform.
+
+**The debug materials keep the alpha cutout**, unlike the grass debug views which force
+opacity. Measured in the browser: opaque turned every card into a solid quad and filled
+the frame with one flat colour. A foliage card is mostly hole by construction.
+
+**Overdraw is measured, not estimated** (`src/foliage/FoliageOverdrawProbe.tsx`).
+Projected-area arithmetic on the CPU ignores occlusion, the cutout and the frustum, and
+reads high by an unbounded factor — exactly the plausible-number failure this project has
+been burned by. Instead both tiers render alone into a half-float target twice a second,
+via a dedicated camera layer (`FOLIAGE_LAYER = 5`), and the pixels are read back.
+
+- Half-float because additive blending needs a blendable format, `rgba32float` is not
+  blendable in WebGPU without an optional feature, and 8-bit unorm would clamp at exactly
+  8 layers — hiding the tail the tool exists to find.
+- Reports mean layers where covered, peak, screen coverage, and the fraction of covered
+  pixels above 8. `null` means NOT MEASURED and renders as absent, never as zero.
+- It counts fragments passing the alpha test and ignores occlusion by terrain, so it is
+  **depth complexity — the upper bound on shading work**, which is the quantity that
+  grows with density. Stated in the panel, not implied.
+- Only samples while the Overdraw view is selected; every other view costs nothing.
+
+**Isolation for attribution.** Three exposes no per-pass GPU timestamps, so the only
+honest split is removal and subtraction against the GPU ms on the Telemetry tab. Per-
+species toggles and near/far tier toggles both remove the DRAW rather than discarding in
+the shader — a discarded fragment still costs one.
+
+**LOD distance dial:** one multiplier on the whole ramp rather than three thresholds,
+since the tiers are already tuned relative to each other and per-species by `lodScale`.
+
+**Known gap:** the near tier's LOD is FOV-aware (it divides distance by the scope zoom
+factor), but the tier HANDOFF and the far ring are not. A scoped target past the spawner
+reach is hiding behind a baked impostor no matter how far you zoom.
+
+## 5.4d LANDED 2026-08-08: the atlases are KTX2, not PNG
+
+The far ring shipped as PNG and derived its mip chains in the browser. Replaced with
+UASTC + Zstd KTX2 carrying bake-time mips. Every number below was measured on the real
+seven-species set, not estimated.
+
+| | download | VRAM |
+|---|---|---|
+| PNG (old) | 24.6 MB | ~296 MB |
+| **KTX2 UASTC+Zstd** | **13.5 MB** | **~74 MB** |
+
+**Why UASTC and not ETC1S**, which is smaller still. Measured on the acacia albedo atlas
+against the runtime cutoff (0.4) that the far material actually tests at:
+
+| | coverage vs source | mean alpha error | pixels flipping the alpha test |
+|---|---|---|---|
+| UASTC+Zstd | exact (0.1506) | 0.22/255 | **0.000%** |
+| ETC1S | 0.1497, thinner | 1.84/255 | **0.569%** |
+
+ETC1S thins the silhouette, which is the fairness-violating direction (docs/08 §8
+invariant 6). It is rejected on evidence, not taste. Re-run the comparison before
+changing format again.
+
+**Four traps, each of which cost time:**
+
+1. **Raw UASTC is an 18x download REGRESSION** — 5.5 MB against the PNG's 305 KB for one
+   atlas, because UASTC is fixed-rate 8 bpp and these atlases are mostly empty, which
+   PNG's entropy coding crushes. `--zcmp` is mandatory, not an optimisation.
+2. **`--genmipmap` must never be used.** The encoder's box filter over alpha undoes the
+   coverage solve `alphaMips.ts` exists to perform. Levels are supplied explicitly with
+   `--mipmap --levels N`.
+3. **The albedo and normal atlases need DIFFERENT mip solvers.** Albedo takes
+   `buildCoveragePreservingMips`; normal takes `weightedNormalMips` (moved to
+   `impostorBake.ts` when this landed). Using the alpha solver on the normal atlas
+   rescales the depth channel and lets the empty margin's fill normals dominate deep
+   levels — the defect that rendered the whole ring a shade too bright.
+4. **The download win comes from the NORMAL atlases, not the albedo ones.** Albedo is
+   sparse so PNG beats KTX2 there (+45%); normal is noisy so KTX2 wins big (−57%). The
+   normals are ~18 MB of the 24.6 MB total, which is why the overall figure is −45%. A
+   conclusion drawn from the albedo atlas alone would have been backwards.
+
+**The audit moved onto the shipped artefact.** `tools/vegetation/ktx2.mjs` decodes level 0
+back out (`ktx extract --transcode rgba8 --raw`), and the bake THROWS if coverage drops
+more than 0.005. Measured drift across all seven species: at most −0.00001. This is the
+same "audit what ships, not what was authored" point as the authored-tree bypass in §6.
+
+**Toolchain:** KTX-Software's `toktx` and `ktx` must be on PATH to bake (`brew install
+ktx`). The runtime needs no toolchain — three's `KTX2Loader` plus the Basis transcoder,
+committed at `public/basis/` rather than fetched from a CDN because a published page runs
+under a CSP that blocks external hosts.
+
+**Not verified:** the in-browser transcode. The assets, the audit and the build are
+proven; nobody has yet confirmed `detectSupport` picks a format the adapter accepts and
+the ring draws. A failure would be loud (a console warning from the loader), not silent.
 
 Three findings that will save the next person time:
 

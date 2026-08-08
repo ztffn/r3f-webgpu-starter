@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "skills": {
+    "brand-copywriter": {
+      "source": "ognjengt/founder-skills",
+      "sourceType": "github",
+      "skillPath": "skills/brand-copywriter/SKILL.md",
+      "computedHash": "bfd41574a7398ed931604760a5858649d8b4a0b2003994f7f800c0f4810f270d"
+    },
+    "dev-multiplayer-prediction-movement": {
+      "source": "feliperyba/ralph-orchestra",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/dev-multiplayer-prediction-movement/SKILL.md",
+      "computedHash": "b2fb062bfb1ad7e74ab0fae5610c0e6bac3b488f51e0fa405f60151512d24e96"
+    },
+    "dev-multiplayer-server-authoritative": {
+      "source": "feliperyba/ralph-orchestra",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/dev-multiplayer-server-authoritative/SKILL.md",
+      "computedHash": "d14f4fa6e691458feae71971c0ae05b263940fb6426d879bba65ef6a3602121e"
+    },
+    "economy-balancing": {
+      "source": "mrcalderon3d/everything-game-dev-code",
+      "sourceType": "github",
+      "skillPath": "skills/design/economy-balancing/SKILL.md",
+      "computedHash": "e1edfde99332bd7759c2ca9bca1b37ec5b68e2c62d60670dc81701a1751b49e7"
+    },
+    "fps-shooter": {
+      "source": "gamedev-skills/awesome-gamedev-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/genres/fps-shooter/SKILL.md",
+      "computedHash": "9dd39d4ee95914002bc4f49d7819d22c550b8581392bc1f3148d90cd42a8cf65"
+    },
+    "game-analytics-setup": {
+      "source": "alterlab-ieu/alterlab_gameforge",
+      "sourceType": "github",
+      "skillPath": "skills/workflows/game-analytics-setup/SKILL.md",
+      "computedHash": "7f0402a24e1bd221d0606a2338948cab3e75f32e3e9ea9257028ef1cc680971f"
+    },
+    "game-monetization": {
+      "source": "omer-metin/skills-for-antigravity",
+      "sourceType": "github",
+      "skillPath": "skills/game-monetization/SKILL.md",
+      "computedHash": "7c62ab952adbb62647fc450d5892402cc23a3373ed1eec567d043eb86d93b0ff"
+    },
+    "monetization-analyzer": {
+      "source": "natea/fitfinder",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/monetization-analyzer/SKILL.md",
+      "computedHash": "f6dc5a33f66afd0399ab5a18de32da397b1427a1111662e74dc004fd7362dbab"
+    },
+    "monetization-design": {
+      "source": "mrcalderon3d/everything-game-dev-code",
+      "sourceType": "github",
+      "skillPath": "skills/design/monetization-design/SKILL.md",
+      "computedHash": "5845b7889fd005acce001e92050944d697ae0237f8780d73b8347084cec2b3ec"
+    }
+  }
+}

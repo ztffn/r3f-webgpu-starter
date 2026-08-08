@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DF2 HUD — HTML Reconstruction</title>
+<style>
+:root{
+  --olive:#a9bd61;
+  --olive-hi:#c1d979;
+  --amber:#ffae24;
+  --white:#e7e9df;
+  --muted:#a9afa5;
+  --blue:#63a9c7;
+  --glass:rgba(10,14,12,.72);
+  --glass2:rgba(10,14,12,.48);
+  --line:rgba(167,187,103,.34);
+  --line2:rgba(193,217,121,.62);
+  --font:"Arial Narrow","Roboto Condensed","Inter Tight",Arial,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#050806;font-family:var(--font);color:var(--white)}
+body{display:grid;place-items:center}
+.stage-wrap{position:relative;width:100vw;height:100vh;background:#030503;overflow:hidden}
+.stage{
+  position:absolute;left:50%;top:50%;
+  width:1448px;height:1086px;
+  transform-origin:center center;
+  background:url("scene.jpg") center/cover no-repeat;
+  overflow:hidden;
+}
+.stage:after{
+  content:"";position:absolute;inset:0;pointer-events:none;
+  background:linear-gradient(to bottom,rgba(2,5,4,.36),transparent 9%,transparent 78%,rgba(2,5,4,.16));
+}
+.reference{
+  position:absolute;inset:0;background:url("reference.jpg") center/cover no-repeat;
+  z-index:50;opacity:0;pointer-events:none;transition:opacity .16s ease;
+}
+body.show-reference .reference{opacity:1}
+body.show-split .reference{opacity:1;clip-path:inset(0 0 0 50%)}
+body.show-split .stage:before{content:"";position:absolute;left:50%;top:0;bottom:0;width:1px;background:rgba(255,255,255,.72);z-index:60;box-shadow:0 0 8px rgba(0,0,0,.8)}
+.controls{
+  position:fixed;right:12px;top:12px;z-index:100;
+  display:flex;gap:8px;
+}
+.controls button{
+  border:1px solid rgba(255,255,255,.18);
+  background:rgba(5,8,7,.72);color:#dfe4da;padding:8px 11px;
+  font:12px var(--font);letter-spacing:.08em;cursor:pointer;
+  backdrop-filter:blur(8px)
+}
+.controls button.active{border-color:var(--olive);color:var(--olive-hi)}
+.hud{position:absolute;inset:0;z-index:10;pointer-events:none}
+.panel{
+  position:absolute;
+  isolation:isolate;
+  overflow:visible;
+  clip-path:polygon(
+    14px 0,
+    calc(100% - 14px) 0,
+    100% 14px,
+    100% calc(100% - 14px),
+    calc(100% - 14px) 100%,
+    14px 100%,
+    0 calc(100% - 14px),
+    0 14px
+  );
+  background:
+    radial-gradient(circle at 10px 10px,rgba(202,218,150,.22) 0 1px,transparent 2px),
+    radial-gradient(circle at calc(100% - 10px) 10px,rgba(202,218,150,.18) 0 1px,transparent 2px),
+    radial-gradient(circle at 10px calc(100% - 10px),rgba(202,218,150,.14) 0 1px,transparent 2px),
+    radial-gradient(circle at calc(100% - 10px) calc(100% - 10px),rgba(202,218,150,.18) 0 1px,transparent 2px),
+    linear-gradient(180deg,rgba(230,238,210,.055),transparent 18%),
+    linear-gradient(135deg,rgba(18,24,20,.94),rgba(8,12,10,.83));
+  filter:
+    drop-shadow(0 13px 18px rgba(0,0,0,.48))
+    drop-shadow(0 0 7px rgba(173,198,103,.10));
+  backdrop-filter:blur(9px) saturate(.82);
+}
+.panel::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  z-index:-1;
+  clip-path:inherit;
+  padding:1px;
+  background:
+    linear-gradient(135deg,
+      rgba(214,230,160,.82) 0,
+      rgba(156,178,98,.30) 23%,
+      rgba(79,91,57,.16) 52%,
+      rgba(205,222,144,.68) 100%
+    );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite:xor;
+  mask-composite:exclude;
+}
+.panel::after{
+  content:"";
+  position:absolute;
+  inset:5px;
+  z-index:-1;
+  pointer-events:none;
+  clip-path:polygon(
+    9px 0,
+    calc(100% - 9px) 0,
+    100% 9px,
+    100% calc(100% - 9px),
+    calc(100% - 9px) 100%,
+    9px 100%,
+    0 calc(100% - 9px),
+    0 9px
+  );
+  background:
+    linear-gradient(90deg,rgba(205,222,144,.22),transparent 24%) top left/74px 1px no-repeat,
+    linear-gradient(180deg,rgba(205,222,144,.16),transparent 42%) top left/1px 58px no-repeat,
+    linear-gradient(270deg,rgba(205,222,144,.18),transparent 24%) bottom right/74px 1px no-repeat,
+    linear-gradient(0deg,rgba(205,222,144,.13),transparent 42%) bottom right/1px 58px no-repeat,
+    linear-gradient(180deg,rgba(255,255,255,.025),transparent 38%),
+    linear-gradient(0deg,rgba(0,0,0,.20),transparent 42%);
+  border:1px solid rgba(198,216,137,.075);
+  box-shadow:
+    inset 0 1px rgba(255,255,255,.025),
+    inset 0 0 20px rgba(0,0,0,.16);
+}
+
+/* Per-module frame weight */
+.weapon,.vitals,.nav{
+  background:
+    radial-gradient(circle at 10px 10px,rgba(202,218,150,.26) 0 1px,transparent 2px),
+    radial-gradient(circle at calc(100% - 10px) 10px,rgba(202,218,150,.22) 0 1px,transparent 2px),
+    radial-gradient(circle at 10px calc(100% - 10px),rgba(202,218,150,.18) 0 1px,transparent 2px),
+    radial-gradient(circle at calc(100% - 10px) calc(100% - 10px),rgba(202,218,150,.22) 0 1px,transparent 2px),
+    linear-gradient(180deg,rgba(225,235,202,.07),transparent 20%),
+    linear-gradient(135deg,rgba(17,22,19,.96),rgba(7,10,9,.88));
+}
+.wind,.objective,.chat{
+  background:
+    linear-gradient(180deg,rgba(225,235,202,.045),transparent 22%),
+    linear-gradient(135deg,rgba(17,22,19,.91),rgba(7,10,9,.77));
+}
+.small{font-size:13px;color:var(--muted);letter-spacing:.04em}
+.label{font-size:13px;color:var(--muted);letter-spacing:.06em}
+.amber{color:var(--amber)} .olive{color:var(--olive-hi)} .blue{color:var(--blue)}
+/* Top compass */
+.compass{
+ position:absolute;left:430px;top:4px;width:590px;height:58px;
+ color:#dfe4da;
+}
+.compass-fade{
+ position:absolute;inset:0;
+ background:linear-gradient(to right,transparent 0,rgba(4,7,6,.68) 13%,rgba(4,7,6,.68) 87%,transparent 100%);
+}
+.compass-line{position:absolute;left:20px;right:20px;top:26px;height:1px;background:rgba(225,232,218,.28)}
+.compass-ticks{
+ position:absolute;left:20px;right:20px;top:19px;height:16px;
+ background:repeating-linear-gradient(to right,rgba(225,232,218,.34) 0 1px,transparent 1px 15px);
+}
+.compass .tri{position:absolute;left:289px;top:2px;color:var(--olive-hi);font-size:13px}
+.heading{position:absolute;top:26px;font-size:17px;transform:translateX(-50%)}
+.heading.w{top:23px;font-size:25px;color:var(--olive-hi);font-weight:700}
+.h210{left:58px}.h240{left:160px}.hW{left:290px}.h300{left:403px}.h330{left:505px}.hN{left:588px}
+
+/* Wind */
+.wind{right:64px;top:121px;width:200px;height:82px;padding:13px 16px}
+.wind .r{display:flex;justify-content:space-between;align-items:center;height:27px}
+.wind .r+r{border-top:1px solid rgba(255,255,255,.06);padding-top:5px}
+.wind .icon{font-size:22px;margin-right:9px}
+.wind .val{font-size:17px}
+
+/* Objective and chat */
+.objective{left:20px;top:643px;width:227px;height:76px;padding:14px 16px}
+.objective .title{color:var(--olive-hi);font-weight:700;font-size:14px;letter-spacing:.05em}
+.objective .title:before{content:"◇";margin-right:10px}
+.objective .body{font-size:14px;margin:11px 0 0 22px;color:#e2e5dd}
+.chat{left:20px;top:729px;width:260px;height:93px;padding:10px 14px;font-size:13px;line-height:1.72}
+.chat .team{color:#65aed0}.chat .lead{color:var(--olive-hi)}
+
+/* Weapon */
+.weapon{left:19px;bottom:57px;width:287px;height:139px;padding:14px 18px}
+.weapon-head{display:flex;justify-content:space-between;align-items:center;font-size:14px}
+.rifle-icon{position:absolute;left:31px;top:55px;width:146px;height:34px}
+.rifle-icon .barrel{position:absolute;left:61px;top:13px;width:80px;height:4px;background:#a4b170}
+.rifle-icon .body{position:absolute;left:22px;top:8px;width:57px;height:15px;background:#a4b170}
+.rifle-icon .stock{position:absolute;left:0;top:11px;width:30px;height:10px;background:#a4b170;clip-path:polygon(0 15%,100% 0,100% 100%,0 85%)}
+.rifle-icon .mag{position:absolute;left:58px;top:22px;width:14px;height:17px;background:#a4b170;transform:skew(-8deg)}
+.rifle-icon .grip{position:absolute;left:44px;top:21px;width:8px;height:16px;background:#a4b170;transform:rotate(12deg)}
+.ammo{position:absolute;left:24px;bottom:10px;font-size:27px;color:#7f857f}
+.ammo b{font-size:43px;color:#fff;font-weight:500}.ammo span{font-size:26px;color:#858b84}
+.utility{position:absolute;right:17px;bottom:17px;color:#c6cbbb;font-size:14px}
+
+/* Vitals */
+.vitals{left:450px;bottom:58px;width:487px;height:90px;padding:12px 17px;display:grid;grid-template-columns:1fr 1fr;column-gap:25px;row-gap:8px}
+.metric{display:grid;grid-template-columns:21px 70px 1fr 38px;align-items:center;gap:8px;font-size:12px}
+.metric .ico{font-size:19px;color:var(--olive-hi)}
+.metric.blue-m .ico{color:var(--blue)}
+.mbar{height:7px;background:rgba(255,255,255,.11)}
+.mbar i{display:block;height:100%;background:linear-gradient(90deg,var(--olive-hi),#829b40)}
+.blue-m .mbar i{background:linear-gradient(90deg,var(--blue),#407d98)}
+.pct{text-align:right;font-size:13px}
+
+/* Nav */
+.nav{right:32px;bottom:57px;width:382px;height:179px;padding:16px 170px 14px 16px}
+.nav-title{font-size:15px;color:var(--amber);letter-spacing:.04em;margin-bottom:20px}
+.nav .k{font-size:12px;color:var(--muted);margin-top:12px}
+.nav .v{font-size:18px;margin-top:2px}
+.radar{
+ position:absolute;right:7px;top:5px;width:169px;height:169px;border-radius:50%;
+ border:1px solid rgba(183,203,114,.42);
+ background:
+ radial-gradient(circle at 67% 34%,var(--amber) 0 4px,transparent 5px),
+ radial-gradient(circle at center,transparent 0 18%,rgba(183,203,114,.17) 19% 20%,transparent 21% 40%,rgba(183,203,114,.14) 41% 42%,transparent 43%),
+ repeating-conic-gradient(from 0deg,rgba(183,203,114,.14) 0 1deg,transparent 1deg 15deg),
+ radial-gradient(circle,#273126 0,#0a0f0c 72%);
+}
+.radar:before{content:"▲";position:absolute;left:50%;top:50%;transform:translate(-50%,-42%);font-size:18px;color:#fff}
+.radar span{position:absolute;font-size:14px}
+.radar .n{left:50%;top:7px;transform:translateX(-50%)}.radar .s{left:50%;bottom:7px;transform:translateX(-50%)}
+.radar .w{left:8px;top:50%;transform:translateY(-50%)}.radar .e{right:8px;top:50%;transform:translateY(-50%)}
+
+
+/* Reference-matched finish */
+.weapon,.nav{clip-path:polygon(16px 0,calc(100% - 16px) 0,100% 16px,100% calc(100% - 16px),calc(100% - 16px) 100%,16px 100%,0 calc(100% - 16px),0 16px)}
+.vitals{clip-path:polygon(13px 0,calc(100% - 13px) 0,100% 13px,100% calc(100% - 13px),calc(100% - 13px) 100%,13px 100%,0 calc(100% - 13px),0 13px)}
+.wind,.objective,.chat{clip-path:polygon(10px 0,calc(100% - 10px) 0,100% 10px,100% calc(100% - 10px),calc(100% - 10px) 100%,10px 100%,0 calc(100% - 10px),0 10px)}
+
+.weapon-head{
+  padding-bottom:8px;
+  border-bottom:1px solid rgba(193,217,121,.14);
+}
+.nav-title{
+  padding-bottom:9px;
+  border-bottom:1px solid rgba(193,217,121,.14);
+}
+.wind .r+r{border-top:1px solid rgba(193,217,121,.12)}
+.chat div+div{border-top:1px solid rgba(255,255,255,.035)}
+.chat div{padding:1px 0}
+.objective .title,.weapon-head,.nav-title{
+  text-shadow:0 0 9px rgba(191,215,121,.16);
+}
+.amber{
+  text-shadow:0 0 8px rgba(255,174,36,.14);
+}
+.vitals:before,.weapon:before,.nav:before{
+  filter:drop-shadow(0 0 3px rgba(183,203,114,.11));
+}
+.mbar{
+  border:1px solid rgba(204,220,153,.08);
+  box-shadow:inset 0 1px 2px rgba(0,0,0,.38);
+}
+.mbar i{
+  box-shadow:0 0 6px rgba(181,204,103,.16);
+}
+.blue-m .mbar i{
+  box-shadow:0 0 6px rgba(99,169,199,.16);
+}
+.radar{
+  box-shadow:
+    inset 0 0 0 5px rgba(8,12,10,.46),
+    inset 0 0 26px rgba(0,0,0,.52),
+    0 0 0 1px rgba(183,203,114,.12),
+    0 0 10px rgba(173,198,103,.06);
+}
+
+</style>
+</head>
+<body>
+<div class="controls">
+  <button id="htmlBtn" class="active">HTML HUD</button>
+  <button id="splitBtn">50/50</button>
+  <button id="refBtn">REFERENCE</button>
+</div>
+
+<div class="stage-wrap">
+  <main class="stage" id="stage">
+    <div class="hud">
+      <div class="compass">
+        <div class="compass-fade"></div><div class="compass-line"></div><div class="compass-ticks"></div>
+        <span class="tri">▼</span>
+        <span class="heading h210">210</span><span class="heading h240">240</span>
+        <span class="heading hW w">W</span><span class="heading h300">300</span>
+        <span class="heading h330">330</span><span class="heading hN">N</span>
+      </div>
+
+      <section class="panel wind">
+        <div class="r"><span class="label"><span class="icon">≋</span>WIND</span><span class="val"><b class="amber">E</b>&nbsp;&nbsp;4 kph</span></div>
+        <div class="r"><span class="label">HOLD</span><span class="val">0.3 mil <b class="amber">R</b></span></div>
+      </section>
+
+      <section class="panel objective">
+        <div class="title">OBJECTIVE UPDATED</div>
+        <div class="body">Proceed to extraction point</div>
+      </section>
+
+      <section class="panel chat">
+        <div><span class="team">[TEAM]</span> Viper: Eyes on tower</div>
+        <div><span class="team">[TEAM]</span> Raven: Moving to ridge</div>
+        <div><span class="lead">[LEAD]</span> Proceed to extraction point</div>
+      </section>
+
+      <section class="panel weapon">
+        <div class="weapon-head"><span>M4A1 SOPMOD</span><span class="amber">BURST</span></div>
+        <div class="rifle-icon"><i class="stock"></i><i class="body"></i><i class="barrel"></i><i class="mag"></i><i class="grip"></i></div>
+        <div class="ammo"><b>31</b> <span>/</span> 210</div>
+        <div class="utility">▣ 6</div>
+      </section>
+
+      <section class="panel vitals">
+        <div class="metric"><span class="ico">✚</span><span>HEALTH</span><span class="mbar"><i style="width:100%"></i></span><span class="pct">100%</span></div>
+        <div class="metric blue-m"><span class="ico">◆</span><span>HYDRATION</span><span class="mbar"><i style="width:76%"></i></span><span class="pct">76%</span></div>
+        <div class="metric"><span class="ico">➟</span><span>STAMINA</span><span class="mbar"><i style="width:100%"></i></span><span class="pct">100%</span></div>
+        <div class="metric blue-m"><span class="ico">⬟</span><span>ARMOR</span><span class="mbar"><i style="width:60%"></i></span><span class="pct">60%</span></div>
+      </section>
+
+      <section class="panel nav">
+        <div class="nav-title">WPT: INSERTION</div>
+        <div class="k">RANGE</div><div class="v">284m</div>
+        <div class="k">ELEV</div><div class="v">41m</div>
+        <div class="radar"><span class="n">N</span><span class="e">E</span><span class="s">S</span><span class="w">W</span></div>
+      </section>
+    </div>
+    <div class="reference"></div>
+  </main>
+</div>
+
+<script>
+const stage=document.getElementById('stage');
+function fit(){
+  const s=Math.min(innerWidth/1448,innerHeight/1086);
+  stage.style.transform=`translate(-50%,-50%) scale(${s})`;
+}
+addEventListener('resize',fit); fit();
+
+const refBtn=document.getElementById('refBtn');
+const htmlBtn=document.getElementById('htmlBtn');
+const splitBtn=document.getElementById('splitBtn');
+function setMode(mode){
+  document.body.classList.toggle('show-reference',mode==='ref');
+  document.body.classList.toggle('show-split',mode==='split');
+  htmlBtn.classList.toggle('active',mode==='html');
+  splitBtn.classList.toggle('active',mode==='split');
+  refBtn.classList.toggle('active',mode==='ref');
+}
+refBtn.onclick=()=>setMode('ref');
+splitBtn.onclick=()=>setMode('split');
+htmlBtn.onclick=()=>setMode('html');
+</script>
+</body>
+</html>

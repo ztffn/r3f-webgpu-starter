@@ -472,6 +472,16 @@ ETC1S thins the silhouette, which is the fairness-violating direction (docs/08 �
 invariant 6). It is rejected on evidence, not taste. Re-run the comparison before
 changing format again.
 
+**The rejection is now guarded in CI** (`tests/foliage/ktx2-encode.test.ts`), which took
+three fixtures to achieve and the two failures are the reusable part. A synthetic atlas
+only reproduces the 0.000%/0.6% split if its alpha edges are FRACTIONAL at the bake's own
+2x supersample — binary alpha passes under either encoder, and 4x supersample starts
+flipping texels under UASTC too — and if its RGB is LOW-frequency. That second one is
+counter-intuitive: UASTC is fixed-rate and trades colour bits against alpha bits inside a
+block, so full-range RGB noise wrecks UASTC's alpha (0.494%) while leaving ETC1S's
+untouched (0.562%), and the test reads as a wash. Measured on the shipped fixture: UASTC
+flips **0.000%** of texels at the runtime cutoff, ETC1S **0.698%**, against a 0.1% bound.
+
 **Four traps, each of which cost time:**
 
 1. **Raw UASTC is an 18x download REGRESSION** — 5.5 MB against the PNG's 305 KB for one

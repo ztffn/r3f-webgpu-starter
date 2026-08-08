@@ -6,18 +6,23 @@
 // layer, and a subsystem that cannot be measured against its own absence at the same pose
 // cannot be attributed a cost (docs/03 §4.4, and the reason `?grasscap=` exists).
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type * as THREE from "three/webgpu";
 import { FoliageCells, type FoliageStats } from "./FoliageCells.tsx";
 import { createFoliageTexture } from "./foliageTexture.ts";
 import { createFoliageUniforms } from "./FoliageMaterial.ts";
 import type { FoliageAlphaMode } from "./FoliageMaterial.ts";
 import type { CardVariant } from "./foliageGeometry.ts";
-import { FarFoliageCells, type FarFoliageLights } from "./FarFoliageCells.tsx";
+import {
+  FarFoliageCells,
+  type FarFoliageLights,
+  type FarFoliageStats,
+} from "./FarFoliageCells.tsx";
 import { loadImpostorAtlases, type ImpostorAtlases } from "./impostorAtlas.ts";
 import { loadTreePrototypes, type TreePrototypes } from "./treePrototypes.ts";
 import { VegetationField, type VegetationTerrain } from "./VegetationField.ts";
 import { VegetationWorldQuery } from "./VegetationWorldQuery.ts";
+import { foliageHandoffBand } from "./foliageConfig.ts";
 import type { CompositeWorldQuery } from "../fps/core/WorldQuery.ts";
 import type { Atmosphere } from "../df2/atmosphere.ts";
 import { BENCH, publishFoliage } from "../df2/bench.ts";
@@ -117,6 +122,19 @@ export function FoliageLayer({
 
   useEffect(() => () => assets.foliage.texture.dispose(), [assets]);
 
+  // The handoff band is a contract between the two tiers, so the layer that owns both
+  // sets it — from mount, not as a side effect of whichever tier happens to render first.
+  //
+  // LAYOUT, not passive. React may flush a passive effect after a frame has already run,
+  // and a far-ring fill that ran first would build against the placeholder defaults and
+  // produce an EMPTY ring that nothing refills until the next cell crossing. Layout
+  // effects complete during commit, before any useFrame callback can fire.
+  useLayoutEffect(() => {
+    const band = foliageHandoffBand(radiusMetres, field.cellSize);
+    assets.uniforms.fadeStart.value = band.fadeStart;
+    assets.uniforms.fadeEnd.value = band.fadeEnd;
+  }, [assets, radiusMetres, field]);
+
   // Not in the field's constructor options: rebuilding the field would rebuild every
   // bucket mesh and re-run the pipeline warm-up on every drag.
   useEffect(() => {
@@ -175,7 +193,7 @@ export function FoliageLayer({
     };
   }, [farEnabled]);
 
-  const lastFar = useRef<number | undefined>(undefined);
+  const lastFar = useRef<FarFoliageStats | undefined>(undefined);
   const handleStats = useMemo(
     () => (stats: FoliageStats) => {
       publishFoliage({
@@ -190,15 +208,16 @@ export function FoliageLayer({
         pendingBuckets: stats.pendingBuckets,
         alphaOccupancy: assets.foliage.alphaOccupancy,
         levelCoverage: assets.foliage.levelCoverage,
-        farInstances: lastFar.current,
+        farInstances: lastFar.current?.instances,
+        farFilling: lastFar.current?.filling,
       });
       onStats?.(stats);
     },
     [variant, alphaMode, field, radiusMetres, assets, onStats]
   );
   const handleFarStats = useMemo(
-    () => (farInstances: number) => {
-      lastFar.current = farInstances;
+    () => (stats: FarFoliageStats) => {
+      lastFar.current = stats;
     },
     []
   );

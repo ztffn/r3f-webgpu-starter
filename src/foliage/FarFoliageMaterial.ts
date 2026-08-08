@@ -91,7 +91,7 @@ export interface FarFoliageMaterialOptions {
   tileSize: number;
   species: Species;
   atmosphere: Atmosphere;
-  /** The near field's shared uniforms — the grow-in band reads fadeStart/fadeEnd. */
+  /** The layer's shared uniforms — the grow-in band reads fadeStart/fadeEnd. */
   foliageUniforms: FoliageUniforms;
   farUniforms: FarFoliageUniforms;
 }

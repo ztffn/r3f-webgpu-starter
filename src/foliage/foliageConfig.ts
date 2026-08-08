@@ -137,6 +137,29 @@ export const FOLIAGE_WIND_PERIOD_SECONDS = 4.7;
 export const FOLIAGE_FADE_METRES = 24;
 
 /**
+ * The distance band where the near window hands off to the far impostor ring.
+ *
+ * A CONTRACT BETWEEN TWO TIERS, so it is derived here rather than owned by either one.
+ * It used to be computed inside the near tier's frame loop, which made it a side effect
+ * of that tier rendering: the ring read the uniforms back as data and guessed whether
+ * they were real yet by testing them against a sentinel. That is only correct while the
+ * near window is guaranteed to be mounted and drawing, and an unfilled ring looks exactly
+ * like the bare middle distance the ring exists to remove — so the failure is silent.
+ *
+ * Both bounds fall out of the cell window's outer edge, which is a pure function of the
+ * spawner reach and the cell size. The half-cell is because a bucket is keyed on its cell
+ * CENTRE, so the geometry actually reaches half a cell beyond the last cell's origin.
+ */
+export function foliageHandoffBand(
+  radiusMetres: number,
+  cellSize: number
+): { fadeStart: number; fadeEnd: number } {
+  const radiusCells = Math.max(1, Math.ceil(radiusMetres / cellSize));
+  const reach = (radiusCells + 0.5) * cellSize;
+  return { fadeStart: Math.max(1, reach - FOLIAGE_FADE_METRES), fadeEnd: reach };
+}
+
+/**
  * Write four floats into `dst` at vec4 slot `index`.
  *
  * Exists because WebGPU's eight-vertex-buffer ceiling forces packing in TWO places — the

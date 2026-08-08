@@ -178,6 +178,14 @@ export interface FoliageUniforms {
   time: FoliageUniform;
   windAmplitude: FoliageUniform;
   windPeriod: FoliageUniform;
+  /**
+   * The near/far handoff band, in metres from the plant's base.
+   *
+   * Owned by `FoliageLayer`, which sets both from `foliageHandoffBand` in a LAYOUT effect
+   * — neither tier owns it, because it is the contract between them. The 1e6 defaults
+   * below are a placeholder that no frame should ever observe; they exist only so a
+   * material built outside the layer still compiles to something inert.
+   */
   fadeStart: FoliageUniform;
   fadeEnd: FoliageUniform;
 }

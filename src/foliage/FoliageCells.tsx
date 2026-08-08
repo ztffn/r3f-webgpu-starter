@@ -30,7 +30,6 @@ import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three/webgpu";
 import {
   FOLIAGE_BUILD_MS,
-  FOLIAGE_FADE_METRES,
   FOLIAGE_LOD_DISTANCES,
   FOLIAGE_LOD_HYSTERESIS,
   packVec4,
@@ -356,10 +355,6 @@ export function FoliageCells({
     // detail exactly where a sniper is looking (docs/08 §6.4).
     const projection = (camera as THREE.PerspectiveCamera).projectionMatrix.elements[5];
     const zoom = Math.max(1, projection / REFERENCE_P11);
-
-    const reach = (state.radiusCells + 0.5) * field.cellSize;
-    uniforms.fadeStart.value = Math.max(1, reach - FOLIAGE_FADE_METRES);
-    uniforms.fadeEnd.value = reach;
 
     const deadline = performance.now() + FOLIAGE_BUILD_MS;
     let visibleBuckets = 0;

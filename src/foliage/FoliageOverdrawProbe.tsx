@@ -137,12 +137,29 @@ export function FoliageOverdrawProbe({ controls }: { controls: FoliageDebugContr
 
     // Restrict the camera to the foliage layer for one render, so the target holds the
     // two tiers and nothing else — no terrain, no sky, no weapon.
+    //
+    // The draw-call and triangle counters are SAVED AND RESTORED around it. `info.reset()`
+    // runs once per animation frame, not per `render()` call, so a second render in the
+    // same frame accumulates into the same counters — the Telemetry tab would report this
+    // probe's draws as if the scene had issued them, twice a second, only while the
+    // overdraw view is open. An instrument that quietly inflates another instrument is the
+    // exact failure this whole view exists to avoid.
+    const info = (gl as unknown as { info?: { render?: { drawCalls: number; triangles: number } } })
+      .info?.render;
+    const drawCalls = info?.drawCalls ?? 0;
+    const triangles = info?.triangles ?? 0;
+
     const mask = camera.layers.mask;
     camera.layers.set(FOLIAGE_LAYER);
     renderer.setRenderTarget(target);
     renderer.render(scene, camera);
     renderer.setRenderTarget(null);
     camera.layers.mask = mask;
+
+    if (info) {
+      info.drawCalls = drawCalls;
+      info.triangles = triangles;
+    }
 
     void renderer
       .readRenderTargetPixelsAsync(target, 0, 0, PROBE_SIZE, PROBE_SIZE)

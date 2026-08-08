@@ -7,12 +7,11 @@
 // if variant A and variant D are drawn on different hand-authored textures, the
 // comparison measures the art, not the construction.
 //
-// The delivery-format questions the research memo raises (KTX2 vs PNG, ETC1S vs UASTC,
-// one GLB per species vs geometry packs) are real, but they are questions about SHIPPING
-// authored art. None of them changes the runtime contract, and answering them before
-// there is any art to ship would be answering them blind. What this module does commit
-// to is the part that would be expensive to retrofit: a mip chain whose alpha-test
-// coverage does not thin with distance (see alphaMips.ts).
+// The delivery-format questions the research memo raised are now ANSWERED for the baked
+// impostor atlases — KTX2 with UASTC, measured, plan v2 §5.4d — but not for this texture,
+// which is generated rather than shipped and so has no delivery format at all. What this
+// module commits to is the part that would be expensive to retrofit: a mip chain whose
+// alpha-test coverage does not thin with distance (see alphaMips.ts).
 
 import * as THREE from "three/webgpu";
 import { buildCoveragePreservingMips, alphaCoverage, type MipLevel } from "./alphaMips.ts";
@@ -109,12 +108,12 @@ function paintLeaves(size: number, seed: number): MipLevel {
 /**
  * A clamped, mip-supplied RGBA `DataTexture` over an existing level chain.
  *
- * Shared by the leaf texture and the impostor atlases: both supply levels that were
- * solved on the CPU, so `generateMipmaps` must stay off in both — the GPU's own box
- * filter would undo the coverage correction that is the whole point of alphaMips.ts.
- * The `mipmaps` assertion is here once rather than transcribed at each site.
+ * Module-private since the impostor atlases became KTX2 (plan v2 §5.4d) and stopped
+ * needing it — the leaf texture is the only CPU-solved chain left. `generateMipmaps`
+ * stays off: the GPU's own box filter would undo the coverage correction that is the
+ * whole point of alphaMips.ts.
  */
-export function dataTextureFromMips(
+function dataTextureFromMips(
   levels: MipLevel[],
   options: { colorSpace: THREE.ColorSpace; anisotropy?: number }
 ): THREE.DataTexture {

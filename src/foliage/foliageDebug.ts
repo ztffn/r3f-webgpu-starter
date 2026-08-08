@@ -48,11 +48,10 @@ export const FOLIAGE_DEBUG_HINTS: readonly string[] = [
 
 export type FoliageDebugMode = (typeof FOLIAGE_DEBUG_MODES)[number];
 
-export const FOLIAGE_DEBUG_OFF = 0;
 export const FOLIAGE_DEBUG_LOD = 1;
 export const FOLIAGE_DEBUG_TIER = 2;
 export const FOLIAGE_DEBUG_SPECIES = 3;
-export const FOLIAGE_DEBUG_CELL = 4;
+const FOLIAGE_DEBUG_CELL = 4;
 export const FOLIAGE_DEBUG_OVERDRAW = 5;
 export const FOLIAGE_DEBUG_COLLISION = 6;
 

@@ -1,0 +1,216 @@
+{
+  "generated": "npm run prepare:fphands",
+  "attachBone": "R_wrist",
+  "hands": {
+    "file": "hands.glb",
+    "bytes": 6646424,
+    "clips": 80
+  },
+  "weapons": {
+    "carbine": {
+      "file": "carbine.glb",
+      "bytes": 4214332,
+      "segments": [
+        "shoot",
+        "reload_fast",
+        "reload_slow",
+        "weapon_down",
+        "weapon_up",
+        "idle",
+        "melee"
+      ],
+      "missingSegments": [],
+      "optic": {
+        "node": "Carbine_Lens",
+        "vertices": 33,
+        "centre": [
+          0,
+          0,
+          -0.172021746635437
+        ],
+        "axis": "z",
+        "radius": 1.4415556192398071,
+        "planar": false
+      },
+      "muzzleFlash": true,
+      "leftWristGoal": null
+    },
+    "ak": {
+      "file": "ak.glb",
+      "bytes": 5180288,
+      "segments": [
+        "shoot",
+        "reload_fast",
+        "reload_slow",
+        "weapon_down",
+        "weapon_up",
+        "idle",
+        "melee"
+      ],
+      "missingSegments": [],
+      "optic": null,
+      "muzzleFlash": true,
+      "leftWristGoal": null
+    },
+    "smg": {
+      "file": "smg.glb",
+      "bytes": 4900800,
+      "segments": [
+        "shoot",
+        "reload_fast",
+        "reload_slow",
+        "weapon_down",
+        "weapon_up",
+        "idle",
+        "melee"
+      ],
+      "missingSegments": [],
+      "optic": null,
+      "muzzleFlash": true,
+      "leftWristGoal": null
+    },
+    "pistol": {
+      "file": "pistol.glb",
+      "bytes": 4059508,
+      "segments": [
+        "shoot",
+        "reload_fast",
+        "reload_slow",
+        "weapon_down",
+        "weapon_up",
+        "idle",
+        "melee"
+      ],
+      "missingSegments": [],
+      "optic": null,
+      "muzzleFlash": true,
+      "leftWristGoal": "Pistol_L_wrist_goal"
+    },
+    "fiftycal": {
+      "file": "fiftycal.glb",
+      "bytes": 4824840,
+      "segments": [
+        "shoot",
+        "reload_fast",
+        "reload_slow",
+        "weapon_down",
+        "weapon_up",
+        "idle",
+        "melee"
+      ],
+      "missingSegments": [],
+      "optic": null,
+      "muzzleFlash": true,
+      "leftWristGoal": null
+    },
+    "sniper": {
+      "file": "sniper.glb",
+      "bytes": 4725652,
+      "segments": [
+        "shoot",
+        "chamber_round",
+        "reload",
+        "weapon_down",
+        "weapon_up",
+        "idle",
+        "melee"
+      ],
+      "missingSegments": [],
+      "optic": {
+        "node": "Sniper_Glass",
+        "vertices": 17,
+        "centre": [
+          0,
+          0,
+          1.0596086978912354
+        ],
+        "axis": "z",
+        "radius": 2.1295549869537354,
+        "planar": true
+      },
+      "muzzleFlash": true,
+      "leftWristGoal": null
+    },
+    "lmg": {
+      "file": "lmg.glb",
+      "bytes": 3371772,
+      "segments": [
+        "shoot",
+        "reload",
+        "weapon_down",
+        "weapon_up",
+        "idle",
+        "melee"
+      ],
+      "missingSegments": [
+        "reload_alt"
+      ],
+      "optic": null,
+      "muzzleFlash": true,
+      "leftWristGoal": null
+    },
+    "grenadelauncher": {
+      "file": "grenadelauncher.glb",
+      "bytes": 5010092,
+      "segments": [
+        "shoot",
+        "reload",
+        "weapon_down",
+        "weapon_up",
+        "idle",
+        "melee"
+      ],
+      "missingSegments": [],
+      "optic": {
+        "node": "GrenadeLauncher_Lens",
+        "vertices": 17,
+        "centre": [
+          0,
+          0,
+          0
+        ],
+        "axis": "z",
+        "radius": 0.9023709893226624,
+        "planar": true
+      },
+      "muzzleFlash": true,
+      "leftWristGoal": null
+    },
+    "shotgun": {
+      "file": "shotgun.glb",
+      "bytes": 4096640,
+      "segments": [
+        "shoot",
+        "weapon_down",
+        "weapon_up",
+        "idle",
+        "melee"
+      ],
+      "missingSegments": [
+        "pump",
+        "reload_single_shell",
+        "reload_complete"
+      ],
+      "optic": null,
+      "muzzleFlash": true,
+      "leftWristGoal": null
+    },
+    "knife": {
+      "file": "knife.glb",
+      "bytes": 2400328,
+      "segments": [
+        "idle",
+        "attack_slice1",
+        "attack_slice2",
+        "attack_stab1",
+        "attack_stab2",
+        "weapon_down",
+        "weapon_up"
+      ],
+      "missingSegments": [],
+      "optic": null,
+      "muzzleFlash": false,
+      "leftWristGoal": "Knife_L_wrist_goal"
+    }
+  }
+}

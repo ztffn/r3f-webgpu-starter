@@ -69,7 +69,7 @@ export const M4_DEFINITION: WeaponDefinition = {
     default: "semi",
     burstSize: 3,
   },
-  ads: { enterSeconds: 0.18, exitSeconds: 0.14 },
+  ads: { enterSeconds: 0.14, exitSeconds: 0.14 },
   accuracy: {
     mechanicalDispersionRadians: 0.00045,
     hipDispersionRadians: 0.008,

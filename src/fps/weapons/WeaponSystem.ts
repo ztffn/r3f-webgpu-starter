@@ -175,6 +175,22 @@ export class WeaponSystem {
   private bloomPerShotFactor = DEFAULT_WEAPON_HANDLING_MODIFIERS.bloomPerShotFactor;
   private bloomRecoveryFactor = DEFAULT_WEAPON_HANDLING_MODIFIERS.bloomRecoveryFactor;
   private swayFactor = DEFAULT_WEAPON_HANDLING_MODIFIERS.swayFactor;
+  /**
+   * Dev-console override of the authored ADS durations, or absent for the definition's own.
+   *
+   * Deliberately absolute seconds rather than a factor on the handling-modifier path:
+   * modifiers model attachments and perks, which SCALE an authored value, while this
+   * replaces it so a tuning session reads and writes the same numbers that live in
+   * `weaponDefinitions.ts` and can be pasted straight back there. Offline tuning only —
+   * the server scores with the canonical definitions and never sees this.
+   *
+   * Three scalars rather than a nullable object because the setter is called every frame:
+   * storing the caller's object would publish a reference this class does not own, and
+   * building a validated copy would allocate on a hot path.
+   */
+  private hasAdsOverride = false;
+  private adsOverrideEnterSeconds = 0;
+  private adsOverrideExitSeconds = 0;
   private readonly instanceSeed: number;
   private readonly events: WeaponEvent[] = [];
 
@@ -214,6 +230,20 @@ export class WeaponSystem {
     this.handlingGrounded = context.grounded;
     this.handlingPlanarSpeed = finiteNonNegative(context.planarSpeedMetresPerSecond);
     this.handlingBreath = Math.min(1, finiteNonNegative(context.breathStabilization));
+  }
+
+  /**
+   * Guarded like every other setter on this class — not because anything reaches it dirty
+   * today (the store validates on restore and the dial is bounded) but because this was
+   * the one unguarded path. A non-finite duration makes `adsProgress` NaN,
+   * `Math.min(1, Math.max(0, NaN))` keeps it NaN, and it travels from there into sway,
+   * pointer sensitivity and the rig transform.
+   */
+  setAdsOverrideSeconds(override: { enterSeconds: number; exitSeconds: number } | null): void {
+    this.hasAdsOverride = override !== null;
+    if (!override) return;
+    this.adsOverrideEnterSeconds = finiteNonNegative(override.enterSeconds);
+    this.adsOverrideExitSeconds = finiteNonNegative(override.exitSeconds);
   }
 
   setHandlingModifiers(modifiers: WeaponHandlingModifiers): void {
@@ -412,9 +442,13 @@ export class WeaponSystem {
   private advanceContinuousState(dtSeconds: number): void {
     if (dtSeconds <= 0) return;
     this.cooldownRemaining = Math.max(0, this.cooldownRemaining - dtSeconds);
-    const adsDuration = this.adsWanted
-      ? this.definition.ads.enterSeconds
+    const enterSeconds = this.hasAdsOverride
+      ? this.adsOverrideEnterSeconds
+      : this.definition.ads.enterSeconds;
+    const exitSeconds = this.hasAdsOverride
+      ? this.adsOverrideExitSeconds
       : this.definition.ads.exitSeconds;
+    const adsDuration = this.adsWanted ? enterSeconds : exitSeconds;
     const adsDirection = this.adsWanted ? 1 : -1;
     const adsStep = adsDuration <= 0 ? 1 : dtSeconds / adsDuration;
     this.adsProgress = Math.min(1, Math.max(0, this.adsProgress + adsDirection * adsStep));

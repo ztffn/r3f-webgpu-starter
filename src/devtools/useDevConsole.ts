@@ -17,6 +17,7 @@ export const DEV_TABS = [
   "grass",
   "foliage",
   "weather",
+  "weaponpose",
   "controls",
 ] as const;
 export type DevTab = (typeof DEV_TABS)[number];

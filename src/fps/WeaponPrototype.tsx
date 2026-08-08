@@ -5,7 +5,6 @@
 import { useFrame, useThree } from "@react-three/fiber";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three/webgpu";
-import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { float, mix, positionGeometry, smoothstep, texture, uniform, vec2, vec3 } from "three/tsl";
 import { CAMERA_FAR, CAMERA_FOV, CAMERA_NEAR } from "../df2/config";
 import { publishRange, type RangeSample } from "./rangeTelemetry";
@@ -56,13 +55,24 @@ import {
   scopeAdjustmentActionForKey,
   type ScopeAdjustmentSnapshot,
 } from "./core/ScopeAdjustmentController";
-import { weaponPresentationFor } from "./presentation/WeaponPresentationDefinition";
+import {
+  presentationForRigKey,
+  weaponPresentationFor,
+  type RigWeaponKey,
+} from "./presentation/WeaponPresentationDefinition";
+import { FirstPersonWeaponRig } from "./presentation/FirstPersonWeaponRig.ts";
+import { loadHands, loadWeapon, assertHandClips } from "./presentation/fpRigAssets.ts";
+import { weaponPoses } from "./presentation/weaponPoseStore.ts";
+import { WeaponBobController } from "./presentation/WeaponBob.ts";
+import {
+  createWeaponRigPlacementFrame,
+  WeaponRigPlacement,
+} from "./presentation/WeaponRigPlacement.ts";
 import { weaponAimIndicator } from "./ui/WeaponAimIndicator";
 
 const WORLD_LAYER = 0;
 const WEAPON_LAYER = 1;
 const RETICLE_URL = "/assets/reticles/default-mildot.png";
-const MODEL_SCALE = 3;
 const SCOPE_TARGET_SIZE = 512;
 const SCOPE_STATUS_SIZE = 512;
 const SCOPE_FOV = 5.5;
@@ -72,25 +82,79 @@ const SCOPE_FOV_STEP = 0.5;
 const WEAPON_FOV = 40;
 const WEAPON_NEAR = 0.01;
 const WEAPON_FAR = 10;
-const AIM_RESPONSE = 18;
+/**
+ * How tightly the rig's visual ADS blend follows the weapon's authoritative progress,
+ * expressed in damping time-constants per second of that weapon's own ADS duration.
+ *
+ * It is a RATIO, not a rate, and that is the fix. A single global rate — this was 18, a
+ * fixed ~56 ms lag — is applied identically to every weapon, so it smears the authored
+ * per-weapon timings into each other: the M4 enters in 0.14 s and the sniper in 0.22 s,
+ * a difference of 80 ms, and a shared 56 ms tail on both leaves them feeling the same
+ * kind of soft. Scaling the rate to the weapon keeps the lag a fixed FRACTION of its own
+ * ADS time, so a fast weapon is visibly fast and the authored numbers are what you feel.
+ *
+ * 4 is ANCHORED, not chosen for snappiness: it reproduces the old flat 18 at the sniper's
+ * 0.22 s, so the slowest scoped weapon feels exactly as it did and the change is purely
+ * the per-weapon SPREAD it was hiding. Faster weapons get faster and the LMG, at 0.24 s,
+ * gets slightly slower — which is the point. Raising this speeds up every weapon at once,
+ * which is a different decision and should be made deliberately.
+ */
+const AIM_RESPONSE_PER_ADS_SECOND = 4;
+
+/** Below this the derived rate would be absurd; no authored ADS time is near it. */
+const MIN_ADS_SECONDS = 0.05;
 const EYEBOX_RADIUS_METRES = 0.02;
 const EYEBOX_MAX_OFFSET = 0.32;
 const FAKE_PARALLAX_STRENGTH = 0.04;
-const LOOK_LAG_METRES_PER_RADIAN = 0.045;
-const LOOK_LAG_MAX_METRES = 0.006;
-const LOOK_LAG_RETURN = 12;
+const LOOK_LAG_METRES_PER_RADIAN = 0.02;
+const LOOK_LAG_MAX_METRES = 0.08;
+/** ln2 / 0.14 s — Source's own look-lag half-life, where the weight actually comes from. */
+const LOOK_LAG_RETURN = 4.95;
 const RANGE_SAMPLE_INTERVAL_MS = 160;
 const PERFORMANCE_SAMPLE_SECONDS = 0.25;
-const HIP_OFFSET = new THREE.Vector3(0.24, -0.37, -0.56);
-const OPTIC_EYE_OFFSET = new THREE.Vector3(0, 0, -0.075);
+// Hip and ADS placement are PER WEAPON and live in `weaponPoseStore`, tunable from the
+// dev console's Weapon pose tab. The authored models differ enough that one offset cannot
+// serve them all, and the proxy's single pair was tuned against a 3x-scaled model with a
+// different internal origin — carried over unchanged it put the hands below the frame.
 const MAX_TRANSITIONAL_SPEED_METRES_PER_SECOND = 30;
-// The circular lens mesh is authored in this local X/Y square. Use geometry
-// coordinates for its optical screen space—the texture-atlas UV island is
-// rotated relative to the physical glass.
-const LENS_MIN_X = -0.010685681;
-const LENS_MIN_Y = 0.08512605;
-const LENS_DIAMETER = 0.02137136;
+/**
+ * How fast the rig blends into and out of the sprint pose.
+ *
+ * Deliberately quicker than any ADS blend: dropping out of a sprint is the moment before
+ * the player wants to shoot, and a slow return would read as the weapon being sticky.
+ * Provisional — the sprint animation pass has reference values to check this against.
+ */
+const SPRINT_BLEND_RESPONSE = 12;
 
+/**
+ * The authored hands face +Z while a Three camera looks down -Z.
+ *
+ * Applied to the hands root once, so every bone, the attached weapon and its lens all
+ * share one forward axis. There is no scale term any more: the proxy needed 3x, while
+ * the authored armature already carries Blender's 0.01 unit conversion and arrives in
+ * metres.
+ */
+const RIG_YAW = Math.PI;
+
+/**
+ * Debug-only bindings for the rig weapons no gameplay definition maps to.
+ *
+ * Pressing the same key again clears the override and returns to the equipped weapon's own
+ * model, so there is always a way back without cycling through the whole set.
+ *
+ * `Digit0` is ALSO the scope zero/windage reset, and the two do not collide: the turret
+ * handler runs on the capture phase and stops propagation only while aiming and pointer
+ * locked, so 0 resets the zero while scoped and reaches the knife otherwise. Deliberate,
+ * because six weapons need six keys and 0 is the only one left.
+ */
+const DEBUG_RIG_KEYS: readonly { code: string; key: RigWeaponKey }[] = [
+  { code: "Digit5", key: "ak" },
+  { code: "Digit6", key: "smg" },
+  { code: "Digit7", key: "shotgun" },
+  { code: "Digit8", key: "fiftycal" },
+  { code: "Digit9", key: "grenadelauncher" },
+  { code: "Digit0", key: "knife" },
+];
 export interface WeaponPrototypeProps {
   /** Mount PiP display to the animated rifle's actual scope mesh. */
   scopeDemo?: boolean;
@@ -129,55 +193,6 @@ export interface WeaponPrototypeProps {
    */
   onWeaponSelected?: ((weaponIndex: number) => void) | null;
   onReloadStarted?: (() => void) | null;
-}
-
-function collectTextures(material: THREE.Material, into: Set<THREE.Texture>) {
-  for (const value of Object.values(material)) {
-    if (value && (value as THREE.Texture).isTexture) into.add(value as THREE.Texture);
-  }
-}
-
-/**
- * Releases the GPU resources a loaded rig owns. Three.js material disposal does
- * not touch referenced textures, and both materials and geometries can be
- * shared between meshes, so each is collected once and disposed once.
- * `preservedMaterial` is created and disposed by this component; neither it nor
- * its textures belong to the rig. `replacedMaterials` are rig materials that
- * were swapped out at load time and would otherwise never be reachable again.
- */
-function disposeObject(
-  root: THREE.Object3D,
-  preservedMaterial?: THREE.Material,
-  replacedMaterials: readonly THREE.Material[] = []
-) {
-  const geometries = new Set<THREE.BufferGeometry>();
-  const materials = new Set<THREE.Material>(replacedMaterials);
-  // A skinned mesh owns a bone-matrix DataTexture that only Skeleton.dispose()
-  // releases; nothing reachable from geometry or material frees it.
-  const skeletons = new Set<THREE.Skeleton>();
-  root.traverse((object) => {
-    const mesh = object as THREE.SkinnedMesh;
-    if (mesh.geometry) geometries.add(mesh.geometry);
-    if (mesh.isSkinnedMesh && mesh.skeleton) skeletons.add(mesh.skeleton);
-    const material = mesh.material;
-    if (Array.isArray(material)) {
-      for (const item of material) if (item) materials.add(item);
-    } else if (material) materials.add(material);
-  });
-  if (preservedMaterial) materials.delete(preservedMaterial);
-
-  const preservedTextures = new Set<THREE.Texture>();
-  if (preservedMaterial) collectTextures(preservedMaterial, preservedTextures);
-  const textures = new Set<THREE.Texture>();
-  for (const material of materials) {
-    collectTextures(material, textures);
-    material.dispose();
-  }
-  for (const geometry of geometries) geometry.dispose();
-  for (const skeleton of skeletons) skeleton.dispose();
-  for (const texture of textures) {
-    if (!preservedTextures.has(texture)) texture.dispose();
-  }
 }
 
 // TSL's uniform node generic is erased when passed across a helper boundary.
@@ -219,16 +234,22 @@ function createLensMaterial(
   target: THREE.RenderTarget,
   eyeOffset: any,
   scopeActive: any,
+  lensFrame: any,
   reticleMap: THREE.Texture,
   scopeStatusMap: THREE.Texture
 ) {
   const material = new THREE.MeshBasicNodeMaterial();
-  // `SCOPE_Lens` uses a rotated atlas UV island. Its raw geometry coordinates
-  // describe the actual circular glass, so they keep the capture and reticle
-  // aligned to the scope instead of the atlas.
-  const lensUv = vec2(positionGeometry.x.sub(LENS_MIN_X), positionGeometry.y.sub(LENS_MIN_Y)).div(
-    LENS_DIAMETER
-  );
+  // Optical screen space comes from the glass's own GEOMETRY, never its UVs — an
+  // authored lens maps its atlas island at whatever rotation the artist found
+  // convenient, and the proxy's was rotated relative to the physical glass.
+  //
+  // The frame is a uniform rather than three baked constants because the rig now ships
+  // more than one optic: the sniper's glass is a flat 17-vertex disc and the carbine's
+  // is a slightly domed 33-vertex plane, measured at different sizes. `lensFrame` is
+  // (centre.x, centre.y, radius) in lens-local space, published when a weapon is
+  // equipped. Both authored lenses are flat on local Z, so X/Y is the screen plane.
+  const lensMin = lensFrame.xy.sub(lensFrame.z);
+  const lensUv = positionGeometry.xy.sub(lensMin).div(lensFrame.z.mul(2));
   const centred = lensUv.sub(vec2(0.5)).mul(2);
   // The render target is vertically inverted, while the physical lens's local
   // X axis faces the player in the opposite direction. Flip both sampling axes
@@ -259,8 +280,8 @@ function createLensMaterial(
 
   material.colorNode = mix(hipDisplay, activeDisplay, scopeActive);
   material.side = THREE.DoubleSide;
-  // `SCOPE_Lens` is a dedicated mesh in fps_rig.glb, so this material can take
-  // part in normal depth testing against the scope body.
+  // Every authored optic keeps its glass as a dedicated mesh under the scope body, so
+  // this material can take part in normal depth testing rather than being sorted around.
   material.depthTest = true;
   material.depthWrite = true;
   material.toneMapped = false;
@@ -318,7 +339,26 @@ export function WeaponPrototype({
     [sniperDefinition]
   );
   const [presentationWeaponId, setPresentationWeaponId] = useState(sniperDefinition.id);
-  const presentation = weaponPresentationFor(presentationWeaponId);
+  /**
+   * A rig weapon shown INSTEAD of the equipped weapon's own, or null.
+   *
+   * Six of the ten rig weapons have no gameplay definition, so nothing can equip them and
+   * they cannot be posed or inspected. This puts one on screen without touching gameplay:
+   * ammunition, cadence and the ballistics all remain those of whatever is really equipped,
+   * so firing on a debug model is the equipped weapon firing behind a different mesh.
+   */
+  const [presentationOverride, setPresentationOverride] = useState<RigWeaponKey | null>(null);
+  // Memoised because `presentationForRigKey` builds a fresh object each call and this is
+  // a dependency of the asset-load-and-equip effect: unmemoised, any re-render of this
+  // component re-equipped the weapon from scratch and replayed its raise on screen. The
+  // normal path was safe by luck — `weaponPresentationFor` returns stable table entries.
+  const presentation = useMemo(
+    () =>
+      presentationOverride
+        ? presentationForRigKey(presentationOverride)
+        : weaponPresentationFor(presentationWeaponId),
+    [presentationOverride, presentationWeaponId]
+  );
   // URL wind overrides are offline toys for the same reason as `?ammo=`: the
   // server integrates far shots with the default environment, and wind that
   // differs between shooter and authority is drift the shooter cannot hold for.
@@ -392,16 +432,20 @@ export function WeaponPrototype({
     light.layers.set(WEAPON_LAYER);
     return light;
   }, []);
-  const mixer = useRef<THREE.AnimationMixer | null>(null);
-  const segmentActions = useRef<THREE.AnimationAction[]>([]);
-  const activeAction = useRef<THREE.AnimationAction | null>(null);
+  /** Owns both mixers, the wrist attach, the muzzle flash and the optic anchor. */
+  const weaponRig = useRef<FirstPersonWeaponRig | null>(null);
   const aim = useRef(0);
+  /** 0 at the hip, 1 fully in the sprint pose. Damped like `aim`. */
+  const sprintBlend = useRef(0);
+  /** The frame's single sprint truth, resolved once and read by pose and gameplay alike. */
+  const sprinting = useRef(false);
+  /** Movement bob. The CAMERA never bobs — only this rig does (WeaponBob.ts). */
+  const weaponBob = useMemo(() => new WeaponBobController(), []);
   const aimSway = useMemo(() => new AimSwayController(), []);
-  const optic = useRef<THREE.Object3D | null>(null);
-  const opticLocal = useMemo(() => new THREE.Vector3(), []);
-  const aimOffset = useMemo(() => new THREE.Vector3(), []);
   const hasOptic = useRef(false);
-  const offset = useMemo(() => new THREE.Vector3(), []);
+  /** Where the rig sits: authored pose, ADS alignment, and the additive layers on top. */
+  const placement = useMemo(() => new WeaponRigPlacement(), []);
+  const placementFrame = useMemo(() => createWeaponRigPlacementFrame(), []);
   const opticWorld = useMemo(() => new THREE.Vector3(), []);
   const opticInEyeSpace = useMemo(() => new THREE.Vector3(), []);
   const lookLag = useMemo(() => new THREE.Vector2(), []);
@@ -474,6 +518,8 @@ export function WeaponPrototype({
   }, []);
   const eyeOffset = useMemo(() => uniform(new THREE.Vector2()), []);
   const scopeActive = useMemo(() => uniform(0), []);
+  /** (centre.x, centre.y, radius) of the equipped weapon's glass, in lens-local space. */
+  const lensFrame = useMemo(() => uniform(new THREE.Vector3(0, 0, 1)), []);
   const reticleMap = useMemo(() => {
     const map = new THREE.TextureLoader().load(RETICLE_URL);
     map.colorSpace = THREE.SRGBColorSpace;
@@ -487,22 +533,20 @@ export function WeaponPrototype({
     []
   );
   const lensMaterial = useMemo(
-    () => createLensMaterial(target, eyeOffset, scopeActive, reticleMap, scopeStatusMap),
-    [eyeOffset, reticleMap, scopeActive, scopeStatusMap, target]
+    () => createLensMaterial(target, eyeOffset, scopeActive, lensFrame, reticleMap, scopeStatusMap),
+    [eyeOffset, lensFrame, reticleMap, scopeActive, scopeStatusMap, target]
   );
 
-  const playSegment = useCallback((segmentNumber: number) => {
-    const next = segmentActions.current[segmentNumber - 1];
-    if (!next) return;
-    // A clamped action must be stopped before another authored action takes over.
-    if (activeAction.current?.paused) activeAction.current.stop();
-    else activeAction.current?.fadeOut(0.1);
-    next.reset();
-    next.paused = false;
-    next.setLoop(THREE.LoopOnce, 1);
-    next.clampWhenFinished = true;
-    next.fadeIn(0.1).play();
-    activeAction.current = next;
+  /**
+   * Play one authored segment on both mixers.
+   *
+   * Takes the clip NAME. The proxy addressed segments as numbers because it was one long
+   * timeline sliced by frame range; the authored rig ships each segment as its own glTF
+   * animation, so the indirection has no remaining purpose. An undefined segment means
+   * the rig authored no clip for that event and nothing should play.
+   */
+  const playSegment = useCallback((segment: string | undefined) => {
+    if (segment !== undefined) weaponRig.current?.play(segment);
   }, []);
 
   const handleAcceptedShot = useCallback(
@@ -510,8 +554,9 @@ export function WeaponPrototype({
       if (!shot.spawned) combatTelemetry.publishProjectileRejected();
       recoilPitch.current += event.recoilImpulsePitchRadians;
       recoilYaw.current += event.recoilImpulseYawRadians;
-      const segment = weaponPresentationFor(event.weaponId).animationSegments.fire;
-      if (segment !== undefined) playSegment(segment);
+      playSegment(presentation.segments.fire);
+      // Every weapon except the knife ships its own flash mesh, positioned per calibre.
+      weaponRig.current?.triggerMuzzleFlash();
       // The PROJECTILE direction, not the sight direction: the round is what can
       // hit somebody, and the two differ by the dispersion the server does not
       // simulate — which is exactly the deviation its clamp is sized for.
@@ -524,26 +569,27 @@ export function WeaponPrototype({
         onShotFired(angles.yawRadians, angles.pitchRadians);
       }
     },
-    [onShotFired, playSegment]
+    [onShotFired, playSegment, presentation]
   );
 
   const handleWeaponEvent = useCallback(
     (event: Exclude<LoadoutEvent, { type: "shot" }>) => {
       if (event.type === "dry-fire") {
         combatTelemetry.publishDryFire();
-        const segment = weaponPresentationFor(event.weaponId).animationSegments.dryFire;
-        if (segment !== undefined) playSegment(segment);
+        // The authored rig has NO dry-fire clip. Playing the reload or a shoot here
+        // would show the player an action they did not take, so this stays silent
+        // until one is authored; the HUD still reports the dry fire.
+        playSegment(presentation.segments.dryFire);
         return;
       }
       if (event.type === "reload-started") {
-        const segment = weaponPresentationFor(event.weaponId).animationSegments.reload;
-        if (segment !== undefined) playSegment(segment);
+        playSegment(presentation.segments.reload);
         onReloadStarted?.();
         return;
       }
       if (event.type === "weapon-switch-started") {
-        const idle = weaponPresentationFor(loadout.equippedWeapon.definition.id).animationSegments.idle;
-        if (idle !== undefined) playSegment(idle);
+        // The outgoing weapon lowers; the incoming one raises when it is equipped.
+        playSegment(presentation.segments.holster);
         return;
       }
       if (event.type === "weapon-equipped") {
@@ -554,7 +600,7 @@ export function WeaponPrototype({
         }
       }
     },
-    [loadout, onReloadStarted, onWeaponSelected, playSegment]
+    [onReloadStarted, onWeaponSelected, playSegment, presentation]
   );
 
   // `runFrame` takes its handlers per call, so this needs no stable identity.
@@ -604,14 +650,20 @@ export function WeaponPrototype({
 
   useEffect(() => {
     if (!FPS_DEBUG.weaponAnimations || scopeDemo) return;
+    // Digits inspect the equipped weapon's own segments, in the order the presentation
+    // declares them. The proxy's 1–8 addressed slices of a single timeline; these
+    // address named clips, so the set differs per weapon and a weapon with fewer
+    // segments simply has fewer live keys.
     const playDebugSegment = (event: KeyboardEvent) => {
-      const match = /^Digit([1-8])$/.exec(event.code);
+      const match = /^Digit([1-9])$/.exec(event.code);
       if (!match || event.repeat) return;
-      playSegment(Number(match[1]));
+      const segments = Object.values(presentation.segments);
+      const segment = segments[Number(match[1]) - 1];
+      if (segment !== undefined) playSegment(segment);
     };
     addEventListener("keydown", playDebugSegment);
     return () => removeEventListener("keydown", playDebugSegment);
-  }, [playSegment, scopeDemo]);
+  }, [playSegment, presentation, scopeDemo]);
 
   useEffect(() => {
     if (!scopeDemo) return;
@@ -629,7 +681,17 @@ export function WeaponPrototype({
       const equipMatch = /^Digit([1-4])$/.exec(event.code);
       if (equipMatch) {
         player.setAdsWanted(false);
+        // A real equip drops the debug model, so the two cannot disagree about what is held.
+        setPresentationOverride(null);
         player.equipSlot(Number(equipMatch[1]));
+        return;
+      }
+      // 5-0 show the six rig weapons no gameplay definition maps to. Six weapons need six
+      // keys, which is why this reaches past 9 to 0 — and 5 is free, since fire mode is B.
+      const debugKey = DEBUG_RIG_KEYS.find((entry) => entry.code === event.code);
+      if (debugKey) {
+        player.setAdsWanted(false);
+        setPresentationOverride((was) => (was === debugKey.key ? null : debugKey.key));
       }
     };
     const holdBreath = (event: KeyboardEvent) => {
@@ -736,106 +798,94 @@ export function WeaponPrototype({
 
   useEffect(() => {
     let alive = true;
-    optic.current = null;
     hasOptic.current = false;
-    // Materials this component swaps out of the loaded rig. Nothing else can
-    // reach them afterwards, so teardown owns their disposal.
-    const replacedMaterials: THREE.Material[] = [];
-    // The mixer is built on the loaded scene, not on the host group, and
-    // uncacheRoot silently does nothing when handed the wrong root.
-    let mixerRoot: THREE.Object3D | null = null;
-    const loader = new GLTFLoader();
-    loader.load(
-      presentation.modelUrl,
-      (gltf) => {
-        if (!alive) {
-          disposeObject(gltf.scene);
-          return;
-        }
+    // The authored lens material is swapped for the picture-in-picture one while this
+    // scene owns the weapon, and has to be put back. Weapon assets are cached for the
+    // session, so a lens left holding the scope material would carry it into the next
+    // mount — including `?scene=weapon`, which has no render target feeding it.
+    let restoreLens: (() => void) | null = null;
 
-        gltf.scene.scale.setScalar(MODEL_SCALE);
-        // Blender exported this FPS rig facing +Z, while a Three camera looks
-        // down -Z. Correct the MODEL once here (not the scope camera) so all
-        // bones, the lens and ScopeCam_Target share the same forward axis.
-        gltf.scene.rotation.y = Math.PI;
-        gltf.scene.traverse((object) => {
+    const renderer = gl as unknown as THREE.WebGPURenderer;
+    Promise.all([loadHands(renderer), loadWeapon(renderer, presentation)])
+      .then(([hands, weapon]) => {
+        if (!alive) return;
+        assertHandClips(hands, presentation);
+
+        let rigInstance = weaponRig.current;
+        if (!rigInstance) {
+          rigInstance = new FirstPersonWeaponRig(hands);
+          weaponRig.current = rigInstance;
+          // Correct the HANDS once, so every bone, the attached weapon and its lens
+          // share one forward axis — the same reasoning the proxy used, minus its scale.
+          rigInstance.root.rotation.y = RIG_YAW;
+          rig.add(rigInstance.root);
+        }
+        rigInstance.equip(weapon, presentation);
+
+        // Applied after the equip so the newly attached weapon is included. Frustum
+        // culling stays off: the rig renders in camera space, nowhere near the bounds
+        // computed from its bind pose.
+        rig.traverse((object) => {
           object.layers.set(WEAPON_LAYER);
           object.frustumCulled = false;
         });
-        rig.add(gltf.scene);
 
-        if (scopeDemo) {
-          // The prepared rig exposes both the lens and optical camera target as
-          // named objects. Do not infer either from a combined scope mesh.
-          const scopeLens = gltf.scene.getObjectByName("SCOPE_Lens") as THREE.Mesh | undefined;
-          const scopeCameraTarget = gltf.scene.getObjectByName("ScopeCam_Target");
-          if (scopeLens?.geometry && scopeCameraTarget) {
-            const authoredLensMaterial = scopeLens.material;
-            if (Array.isArray(authoredLensMaterial)) {
-              replacedMaterials.push(...authoredLensMaterial);
-            } else if (authoredLensMaterial) replacedMaterials.push(authoredLensMaterial);
-            scopeLens.material = lensMaterial;
-            scopeLens.renderOrder = 1;
-            optic.current = scopeCameraTarget;
-
-            // SCOPE_Lens is skinned: its Object3D origin remains at the rifle
-            // root while only its vertices follow the weapon bones. The target
-            // is bone-parented and therefore is the actual physical reference
-            // point for both ADS placement and the PiP camera.
-            // The frame loop recomputes aimOffset from this locator immediately
-            // before every use, so a load-time copy would be dead state.
-            hasOptic.current = true;
+        const optic = rigInstance.optic;
+        if (scopeDemo && optic) {
+          // EVERY mesh of the glass, not just the first. A lens authored with two
+          // material slots arrives as a Group of primitives, and swapping one of them
+          // would leave the rest showing the authored material over half the sight
+          // picture — the muzzle flash's bug in a place that is harder to notice.
+          const authored = optic.meshes.map((mesh) => mesh.material);
+          for (const mesh of optic.meshes) {
+            mesh.material = lensMaterial;
+            mesh.renderOrder = 1;
           }
-        }
-
-        const nextMixer = new THREE.AnimationMixer(gltf.scene);
-        mixerRoot = gltf.scene;
-        const clip = gltf.animations[0];
-        const sourceAnimation = presentation.sourceAnimation;
-        if (clip && sourceAnimation) {
-          segmentActions.current = sourceAnimation.segmentsSeconds.map(([start, end], index) => {
-            const segment = THREE.AnimationUtils.subclip(
-              clip,
-              `source-action-${index + 1}`,
-              Math.round(start * sourceAnimation.framesPerSecond),
-              Math.round(end * sourceAnimation.framesPerSecond),
-              sourceAnimation.framesPerSecond
+          restoreLens = () => {
+            optic.meshes.forEach((mesh, index) => {
+              mesh.material = authored[index];
+            });
+          };
+          // The shader reads the glass's own geometry, so tell it where that glass is.
+          lensFrame.value.set(optic.centre.x, optic.centre.y, optic.radius);
+          if (optic.axis !== "z") {
+            // Both authored lenses are flat on local Z, and the shader treats X/Y as the
+            // optical screen plane. One flat on another axis would sample the sight
+            // picture edge-on, which looks like a broken scope rather than a bad guess.
+            console.error(
+              `[fp-rig] ${presentation.rigKey} lens "${optic.lens.name}" is flat on ` +
+                `${optic.axis}, not z — the scope picture is mapped on the wrong axes`
             );
-            return nextMixer.clipAction(segment);
-          });
-          // The glTF bind pose leaves the first-person arms out of frame. Start
-          // the first authored action at its first real keyed pose so the rig
-          // enters in a complete, animated first-person presentation.
-          const initialPose = segmentActions.current[0];
-          initialPose.reset();
-          initialPose.time = sourceAnimation.initialPoseSeconds;
-          initialPose.setLoop(THREE.LoopOnce, 1);
-          initialPose.clampWhenFinished = true;
-          initialPose.play();
-          nextMixer.update(0);
-          activeAction.current = initialPose;
+          }
+          hasOptic.current = true;
         }
-        mixer.current = nextMixer;
-      },
-      undefined,
-      (error) => console.error("Unable to load the animated weapon rig", error)
-    );
+        // Published so the pose tab tunes what is actually on screen, and labels the ADS
+        // dials as eye relief or as a placeholder raise depending on what resolved.
+        weaponPoses.equipped = presentation.rigKey;
+        weaponPoses.equippedHasOptic = hasOptic.current;
+      })
+      .catch((error) => console.error("Unable to load the first-person weapon rig", error));
 
     return () => {
       alive = false;
-      mixer.current?.stopAllAction();
-      if (mixerRoot) mixer.current?.uncacheRoot(mixerRoot);
-      mixer.current = null;
-      mixerRoot = null;
-      segmentActions.current = [];
-      activeAction.current = null;
-      optic.current = null;
+      restoreLens?.();
+      restoreLens = null;
       hasOptic.current = false;
-      disposeObject(rig, lensMaterial, replacedMaterials);
-      replacedMaterials.length = 0;
-      rig.clear();
     };
-  }, [lensMaterial, presentation, rig, scopeDemo]);
+  }, [gl, lensFrame, lensMaterial, presentation, rig, scopeDemo]);
+
+  // The rig outlives individual weapon swaps, so its teardown is separate from the
+  // per-weapon effect above. It detaches without disposing: fpRigAssets caches the
+  // hands and every equipped weapon for the session, and a remount reuses those very
+  // objects, so freeing their geometry here would break the second mount.
+  useEffect(
+    () => () => {
+      weaponRig.current?.dispose();
+      weaponRig.current = null;
+      rig.clear();
+    },
+    [rig]
+  );
 
   useEffect(() => {
     scene.add(rig);
@@ -878,6 +928,18 @@ export function WeaponPrototype({
     // wrong place. The motor's eye is authoritative whenever it exists; the
     // camera is only a stand-in for it.
     shotOrigin.copy(motorPose !== null ? motorPose.position : camera.position);
+
+    // The pose tab's two held states, refused online.
+    //
+    // Gated for CONSISTENCY with the ADS-timing override, not for the same reason, and
+    // the difference is worth keeping straight. That override is refused online because
+    // the SERVER scores with the authored durations, so a shooter running different
+    // numbers would see an arc the room does not — the `?ammo=` rule (docs/12 §8.1).
+    // These two change nothing the server scores: holding sprint only makes your own
+    // client refuse to fire, and holding ADS only aims a model. Do not read this gate as
+    // evidence that the timing gate was mere tidiness.
+    const heldAds = !networked && weaponPoses.forceAds;
+    const heldSprint = !networked && weaponPoses.forceSprint;
 
     const hadPreviousFrame = framePoseReady.current;
     let yawDelta = 0;
@@ -925,18 +987,34 @@ export function WeaponPrototype({
     }
     playerPose.position.copy(shotOrigin);
     player.syncMotorPose(playerPose);
-    if (weaponIntent !== null) weaponIntent.aiming = player.wantsAds;
+    // Includes the held aim so the motor's aiming slowdown cannot disagree with the
+    // weapon about whether the player is aiming — one held state, read the same way in
+    // both places, for the same reason `sprinting` below is resolved exactly once.
+    if (weaponIntent !== null) weaponIntent.aiming = player.wantsAds || heldAds;
     handlingContext.stance = player.stance;
     handlingContext.grounded = player.grounded;
     // Only a real motor can report this; without one there is no sprint state
     // to block on, and the weapon behaves as it always did.
-    handlingContext.sprinting = motorPose !== null && motorPose.sprinting;
+    // ONE sprint state, read by BOTH the pose blend and the weapon's refusal to fire.
+    // Having two produced exactly the contradiction it sounds like: a weapon posed
+    // mid-sprint that would still shoot, because the visual condition and the gameplay
+    // condition were different expressions that disagreed.
+    //
+    // No speed fallback. An earlier version treated "moving faster than 4.5 m/s" as
+    // sprinting so the pose would work without a motor, which conflates RUNNING with
+    // SPRINTING — the one distinction this pose exists to draw — and free-fly crosses that
+    // threshold constantly. Sprint is a state a player enters, so it needs a real one:
+    // the motor's, or the dev console holding it.
+    sprinting.current = heldSprint || (motorPose !== null && motorPose.sprinting);
+    handlingContext.sprinting = sprinting.current;
     handlingContext.planarSpeedMetresPerSecond = player.planarSpeedMetresPerSecond;
     handlingContext.breathStabilization = aimSway.breathStabilization;
     loadout.setHandlingContext(handlingContext);
     player.consumeCommands(commands);
     for (const command of commands.weaponCommands) loadout.handleCommand(command);
-    loadout.setAdsWanted(commands.adsWanted);
+    // The pose tab can hold ADS so the aimed placement is tunable while the pointer is on
+    // a slider — releasing pointer lock to reach the console otherwise drops the aim.
+    loadout.setAdsWanted(commands.adsWanted || heldAds);
     const weaponBeforeUpdate = loadout.equippedWeapon;
     const adsProgressBefore = weaponBeforeUpdate.adsProgress;
     loadout.update(simulationDelta);
@@ -1013,14 +1091,56 @@ export function WeaponPrototype({
     ballistics.drainImpactEvents(handleImpact);
     ballistics.drainResults(handleBallisticResult);
 
-    const aimTarget = scopeDemo && hasOptic.current ? equippedWeapon.adsProgress : 0;
-    aim.current = THREE.MathUtils.damp(aim.current, aimTarget, AIM_RESPONSE, delta);
+    // No longer gated on having an optic: every weapon now moves for ADS, and one
+    // without a lens takes the placeholder raise rather than staying at the hip.
+    const aimTarget = scopeDemo ? equippedWeapon.adsProgress : 0;
+    // Seeded from the definition on first sight, then the dev console owns it. Offline
+    // only: `networked` weapons keep the canonical timings, for the same reason `?ammo=`
+    // is refused online — the server scores with the authored values.
+    const gameplayRigKey = weaponPresentationFor(equippedWeapon.definition.id).rigKey;
+    weaponPoses.seedAdsTiming(
+      gameplayRigKey,
+      equippedWeapon.definition.ads.enterSeconds,
+      equippedWeapon.definition.ads.exitSeconds
+    );
+    const adsOverride = networked ? null : weaponPoses.adsOverrideFor(gameplayRigKey);
+    equippedWeapon.setAdsOverrideSeconds(adsOverride);
+    // Raising and lowering are separately authored, so pick the one this frame is doing.
+    // Without it a weapon that comes up fast and drops slow would blend at one rate both
+    // ways, which is the same flattening at a smaller scale.
+    const adsDefinition = adsOverride ?? equippedWeapon.definition.ads;
+    const adsSeconds =
+      aimTarget >= aim.current ? adsDefinition.enterSeconds : adsDefinition.exitSeconds;
+    aim.current = THREE.MathUtils.damp(
+      aim.current,
+      aimTarget,
+      AIM_RESPONSE_PER_ADS_SECOND / Math.max(MIN_ADS_SECONDS, adsSeconds),
+      delta
+    );
+    // Damped beside the ADS blend, because the pose rotations below read both; computing
+    // it after them would apply the previous frame's value.
+    const sprintWanted = sprinting.current;
+    sprintBlend.current = THREE.MathUtils.damp(
+      sprintBlend.current,
+      sprintWanted ? 1 : 0,
+      SPRINT_BLEND_RESPONSE,
+      delta
+    );
     if (scopeDemo) {
       lookSensitivity.setOpticState(
         aim.current,
         aimSway.breathStabilization,
         CAMERA_FOV,
-        scopeFov.current
+        // The equipped weapon's OWN optic, not a global one. `scopeFov` is a single value
+        // seeded from the sniper's 5.5 degrees, so passing it unconditionally handed every
+        // weapon a magnified weapon's sensitivity: aiming the pistol or the SAW — neither
+        // of which has a lens — cut pointer speed by roughly the factor an 8x scope would,
+        // for no magnification at all. A weapon with no optic sees no magnification, so its
+        // ratio is 1 and aimed sensitivity equals hipfire.
+        //
+        // A deliberate per-weapon ADS sensitivity multiplier is a separate, deferred knob;
+        // this only stops the unmagnified weapons inheriting the sniper's.
+        hasOptic.current ? scopeFov.current : CAMERA_FOV
       );
     } else lookSensitivity.reset();
     combatTelemetry.publishAimDiagnostics(
@@ -1056,7 +1176,11 @@ export function WeaponPrototype({
       (crosshairPoint.x * 0.5 + 0.5) * size.width,
       (-crosshairPoint.y * 0.5 + 0.5) * size.height,
       coneRadiusPixels,
-      1 - THREE.MathUtils.smoothstep(aim.current, 0.15, 0.75),
+      // Fade the crosshair only for a weapon that has glass to replace it with. The
+      // pistol and the LMG author no lens, so ADS raises them (see IRON_SIGHT_OFFSET)
+      // without offering a sight picture — fading here would leave the player aiming at
+      // nothing at all. Restore the fade for them once an authored iron sight exists.
+      hasOptic.current ? 1 - THREE.MathUtils.smoothstep(aim.current, 0.15, 0.75) : 1,
       scopeDemo &&
         FPS_DEBUG.hipfireCrosshair &&
         document.pointerLockElement === gl.domElement &&
@@ -1065,7 +1189,10 @@ export function WeaponPrototype({
     );
     combatTelemetry.publishWeapon(weaponSnapshot);
 
-    mixer.current?.update(delta);
+    // Both mixers, one delta. They were keyed frame-for-frame against each other, so
+    // equal playback rate IS the synchronisation — and this deliberately takes the raw
+    // render delta rather than the clamped simulation delta (docs/10 §3).
+    weaponRig.current?.update(delta, { idleSpiceAllowed: aim.current < 0.02 });
     scopeActive.value = scopeDemo ? aim.current : 0;
 
     // Mouse-look rotates the camera immediately, but a held rifle has a small
@@ -1086,36 +1213,59 @@ export function WeaponPrototype({
     );
     lookLag.x = THREE.MathUtils.damp(lookLag.x, 0, LOOK_LAG_RETURN, delta);
     lookLag.y = THREE.MathUtils.damp(lookLag.y, 0, LOOK_LAG_RETURN, delta);
-    // Query the bone-attached locator from a neutral camera-space root first.
-    // This creates an up-to-date local transform after every mixer update, so
-    // an animation cannot leave ADS aligned to its previous pose.
-    rig.position.copy(camera.position);
-    rig.quaternion.copy(camera.quaternion);
-    rig.updateMatrixWorld(true);
-    if (hasOptic.current && optic.current) {
-      optic.current.getWorldPosition(opticLocal);
-      rig.worldToLocal(opticLocal);
-      aimOffset.copy(opticLocal).negate().add(OPTIC_EYE_OFFSET);
-    }
-
-    offset.copy(HIP_OFFSET);
-    if (hasOptic.current) offset.lerp(aimOffset, aim.current);
-    rig.translateX(offset.x + aimSway.positionXMetres + lookLag.x);
-    rig.translateY(offset.y + aimSway.positionYMetres + lookLag.y);
-    rig.translateZ(offset.z);
+    // Raw render delta, like the rest of the presentation damping. Speed and grounded
+    // come from the authoritative pose, so the gait follows the motor rather than a
+    // differentiated camera position.
+    // Repointed rather than copied: the store hands back a live config per weapon, so a
+    // dial moved mid-frame is read on the next one without a subscription.
+    weaponBob.setConfig(weaponPoses.bobFor(presentation.rigKey));
+    weaponBob.update(
+      delta,
+      playerPose.planarSpeedMetresPerSecond,
+      playerPose.grounded,
+      aim.current
+    );
     recoilPitch.current = THREE.MathUtils.damp(recoilPitch.current, 0, 8, delta);
     recoilYaw.current = THREE.MathUtils.damp(recoilYaw.current, 0, 10, delta);
-    rig.rotateY(aimSway.yawRadians + weaponSnapshot.recoilYawRadians + recoilYaw.current);
-    rig.rotateX(aimSway.pitchRadians + weaponSnapshot.recoilPitchRadians + recoilPitch.current);
-    rig.updateMatrixWorld(true);
+    // Where the rig SITS is `WeaponRigPlacement`, and it rebuilds the transform from a
+    // neutral camera-space root every frame — the mixers have already moved the skeleton
+    // by now, and an incremental transform would leave ADS aligned to the previous frame's
+    // pose. It owns the two orderings that are load-bearing (tilt before the optic is
+    // measured; the ADS offset applied once, not twice) and both are asserted in
+    // tests/fps/weapon-rig-placement.test.ts.
+    //
+    // A weapon with an optic aligns the glass to the eye and then applies eye relief. One
+    // without — the pistol and LMG author no lens — has no anchor to align to, so its
+    // stored `ads` offset is the whole raise: a PLACEHOLDER for the main-camera FOV aiming
+    // path that claims no sight alignment, not a no-op.
+    const opticAnchor = weaponRig.current?.optic ?? null;
+    placementFrame.pose = weaponPoses.get(presentation.rigKey);
+    placementFrame.sprintBlend = sprintBlend.current;
+    placementFrame.adsBlend = aim.current;
+    placementFrame.optic = hasOptic.current ? opticAnchor : null;
+    placementFrame.swayXMetres = aimSway.positionXMetres;
+    placementFrame.swayYMetres = aimSway.positionYMetres;
+    placementFrame.swayYawRadians = aimSway.yawRadians;
+    placementFrame.swayPitchRadians = aimSway.pitchRadians;
+    placementFrame.lookLagXMetres = lookLag.x;
+    placementFrame.lookLagYMetres = lookLag.y;
+    placementFrame.recoilYawRadians = weaponSnapshot.recoilYawRadians + recoilYaw.current;
+    placementFrame.recoilPitchRadians = weaponSnapshot.recoilPitchRadians + recoilPitch.current;
+    placementFrame.bobXMetres = weaponBob.offsetX;
+    placementFrame.bobYMetres = weaponBob.offsetY;
+    placementFrame.bobZMetres = weaponBob.offsetZ;
+    placementFrame.bobRollDegrees = weaponBob.roll;
+    placementFrame.bobYawDegrees = weaponBob.yaw;
+    placementFrame.bobPitchDegrees = weaponBob.pitch;
+    placement.apply(rig, camera, placementFrame);
 
     weaponCamera.position.copy(camera.position);
     weaponCamera.quaternion.copy(camera.quaternion);
     weaponCamera.updateMatrixWorld();
 
     const renderer = gl as unknown as THREE.WebGPURenderer;
-    if (scopeDemo && aim.current > 0.02 && optic.current) {
-      optic.current.getWorldPosition(opticWorld);
+    if (scopeDemo && aim.current > 0.02 && opticAnchor) {
+      opticAnchor.lens.localToWorld(opticWorld.copy(opticAnchor.centre));
       // The eye is the player camera; the lens moves with weapon sway. Their
       // relative X/Y displacement drives both the deliberately subtle fake
       // image parallax and the asymmetric eyebox/tube occlusion.

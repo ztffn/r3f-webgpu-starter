@@ -36,10 +36,11 @@ existing animated sniper presentation. It currently provides:
   counters, and opt-in trajectory debug;
 - deterministic unit/load coverage for the gameplay systems.
 
-This is not yet a complete player, weapon library, or multiplayer match. There
-is one proxy FPS rig shared by the selectable sniper, M4, Glock, and SAW, and no
-in-game loadout or settings screen. Authored per-weapon models and animations
-have not been added. What HAS landed since this document's first draft: the
+This is not yet a complete player, weapon library, or multiplayer match, and
+there is no in-game loadout or settings screen. The proxy rig is GONE (2026-08-08):
+the authored hands-and-weapons rig replaced it, so each weapon carries its own
+model, its own moving parts and its own named clips — see §11. What HAS landed
+since this document's first draft: the
 character motor and remote-soldier presentation (docs/12), and **server-
 authoritative PvP damage on the shared ballistic model** — the shared core now
 lives in `src/combat/` and the authority contract is docs/11 §15.3 with the wire
@@ -292,6 +293,7 @@ capture click does not fire. Escape releases the pointer.
 | R | leave ADS and reload |
 | T | reset targets and husks |
 | 1 / 2 / 3 / 4 | equip sniper / M4 / Glock / SAW (900 RPM automatic default) |
+| 5 / 6 / 7 / 8 / 9 / 0 | DEBUG: show ak / smg / shotgun / fiftycal / grenadelauncher / knife. Presentation only — the equipped weapon still owns ammunition, cadence and ballistics. Press again to return. `0` still resets the scope zero while aiming, which takes precedence |
 | B | cycle the equipped weapon's supported fire modes |
 | `,` / `.` while ADS | increase / decrease magnification |
 | Arrow Up / Down | increase / decrease elevation zero |
@@ -306,9 +308,13 @@ so compact Mac keyboards do not need Page Up/Down. Magnification is on comma/per
 rather than `Z`/`X`: those are stance keys, and with a real motor mounted
 (`&motor=1`) aiming and pressing `Z` both zoomed and went prone. Brackets were
 tried first and rejected — `event.code` is physical position, so `BracketLeft`
-is the `Å` key on a Nordic layout. Reload is authored animation
-segment 4 (10.833333–15.0 s); gameplay reload lasts 4.2 s so a newly accepted
-shot cannot cut the clip short.
+is the `Å` key on a Nordic layout. Reload plays the equipped weapon's authored
+`reload` (or `reload_slow`) clip. **Gameplay reload is a flat 4.2 s for every
+weapon and the authored clips are not**: sniper 1.63 s, carbine and pistol 2.20 s,
+LMG 5.77 s. The first three finish early and hold their last frame; the LMG is CUT
+1.57 s short, which is the failure the proxy's 4.2 s was chosen to avoid. Deriving
+the gameplay duration from the clip is a balance change that the server also
+re-times, so it was left alone rather than changed quietly (§11).
 
 Useful URLs:
 
@@ -354,6 +360,12 @@ is the evidence of gravity and wind curvature.
 | `presentation/CharacterAnimator.ts` | mixer driver: crossfades, speed matching, hips pin |
 | `presentation/CharacterView.ts` | animated soldier host: model + animator + mounted aim rig |
 | `presentation/soldierAssets.ts` | cached Draco GLB load + per-instance skeleton clones |
+| `presentation/WeaponPresentationDefinition.ts` | gameplay weapon id to rig weapon + named clip per event; pure, Three-free |
+| `presentation/fpRigAssets.ts` | cached hands/weapon GLB loads through the Draco and KTX2 decoders |
+| `presentation/FirstPersonWeaponRig.ts` | the two-mixer rig: wrist attach, clip playback, rest pose, muzzle flash, optic anchor |
+| `presentation/WeaponBob.ts` | distance-driven movement bob; pure and Three-free, so it is Node-tested |
+| `presentation/weaponPoseStore.ts` | per-weapon hip/sprint/ADS placement, bob overrides and the ADS-timing tuning surface; Three-free |
+| `presentation/WeaponRigPlacement.ts` | where the rig SITS each frame: authored pose, ADS alignment, additive sway/look-lag/recoil/bob. Node-tested |
 | `ui/CombatTelemetry.ts` | throttled immutable HUD snapshots |
 | `ui/WeaponAimIndicator.ts` / `HipfireCrosshair.tsx` | mutable mean/cone feedback without frame-rate React state |
 | `WeaponPrototype.tsx` | transitional first-person GLB/scope/frame host |
@@ -386,7 +398,8 @@ Then test `?scene=scope&shotdebug=1` at 600, 1,000, and 1,300 m:
 3. normal ADS can scan while Shift gives finer movement and visibly less sway;
 4. stationary crouch and prone contract the hipfire crosshair while movement
    expands it; sustained fire blooms it and a pause recovers it;
-5. the crosshair centre follows authoritative recoil and fades during ADS;
+5. the crosshair centre follows authoritative recoil, and fades during ADS **only on a
+   weapon that has an optic** — the pistol and SAW author no lens, so they keep it;
 6. the scope readout is two small dark text rows at lower right inside the lens;
 7. zeroing changes the yellow bore but not the optical rangefinder line;
 8. the cyan trajectory curves and wind changes its signed drift;
@@ -431,7 +444,9 @@ with a real screen effect.
 - a test harness for the R3F frame host itself: `FiringTimeline` is covered
   directly, but `WeaponPrototype.tsx`'s frame ordering is only checked by
   reading it;
-- authored per-weapon GLBs, animations, sounds, and final tuning;
+- authored per-weapon SOUNDS, and final pose/timing tuning. The GLBs and
+  animations landed 2026-08-08 (§11); what remains is audio, the reload-duration
+  reconciliation, and iron-sight alignment;
 - in-game ammunition/loadout selection and saved/rebindable controls;
 - reading ecctrl for technique. The spike is CLOSED at outcome 3, custom controllers —
   see `plans/2026-08-03-ecctrl-spike-outcome.md` — but nothing was harvested because it
@@ -466,3 +481,328 @@ Keep those additions behind the existing boundaries. In particular, do not use
 Rapier rigid bodies for rifle bullets, do not derive gameplay surface behavior
 from render materials, do not read bones to resolve a shot, and do not restore
 recursive raycasts over visual terrain.
+
+## 11. The authored first-person rig (2026-08-08)
+
+Replaced the proxy: one GLB with segments addressed as NUMBERS sliced out of a single
+27-second timeline, shared by all four weapons. The authored rig ships a hands skeleton
+and ten weapons, each segment its own named glTF animation.
+
+**Two mixers, one delta.** Hand clips live in `hands.glb` namespaced per weapon
+(`hand_sniper_shoot`); each weapon's moving parts live in its own GLB with unnamespaced
+clips (`shoot`). They were keyed frame-for-frame against each other, so equal start time
+and equal playback rate IS the synchronisation contract — there is no per-frame
+correction and adding one would mask a real desync. Both mixers take the raw render
+delta, deliberately outside the one-clock rule of §3.
+
+**Attaching is parenting.** Every weapon root's transform is already baked into
+`R_wrist`-local space, so there is no offset math. The weapon files export Z-up while
+`hands.glb` exports Y-up, and that does NOT intrude on the attach: the `Hands_Armature`
+node carries both the axis conversion and the 0.01 unit scale, and everything under the
+wrist inherits them. The Z-up caveat only matters when inspecting a weapon file alone.
+
+**The optic anchor is measured, not authored.** The proxy needed a bone-parented
+`ScopeCam_Target` locator because its `SCOPE_Lens` was skinned, leaving the mesh origin
+stuck at the rifle root. Every authored lens is a RIGID node under its scope, so the node's
+own transform is the physical reference. `FirstPersonWeaponRig` measures the glass's local
+bounding box for the centre, radius and flat axis; the picture-in-picture camera and the
+lens shader's UV frame both read it. The three hardcoded lens constants are gone, replaced
+by a `lensFrame` uniform. The lens SHADER is unchanged from the proxy.
+
+`OpticAnchor` carries EVERY mesh the glass is made of, not the first. A lens with two
+material slots arrives as a Group of primitives, so measuring one would scale the eyebox
+to half a disc and swapping the material on one would leave the authored material over
+half the sight picture. Every shipped lens has exactly one primitive today, which is why
+this had to be handled rather than noticed. A name match that resolves to no geometry is
+skipped rather than ending the search, so the runtime and the bake — whose predicate
+already required a mesh — cannot disagree about whether a weapon has an optic.
+
+Only three weapons carry glass — sniper (magnified), carbine and grenade launcher (both
+authored emissive red dots with a real `redDot` texture). The rest have no optic node at
+all. `fiftycal` carries a `Sniper_Glass.001` that is deliberate scope-shader contamination,
+not a lens; the bake and the runtime both match the suffix exactly so neither picks it up,
+and they must keep agreeing.
+
+**`idle` is not a loop.** It is a rare "bored" spice clip over a static rest pose. The rig
+holds frame 0 of `idle` paused between actions, and the motion the player sees is the
+procedural sway, look-lag and recoil the host already applies to the rig group. The spice
+fires after 12–26 s at rest and is SUPPRESSED while aiming, because it moves the whole
+weapon and would walk the glass off the eye; playing it scoped needs the optic pinned to
+the eye, which is deferred.
+
+### Weapon feel, and where each part of it lives
+
+Four separate things move the weapon, and confusing them is how this gets broken:
+
+| Motion | Owner | Authoritative? |
+| --- | --- | --- |
+| stance/breath sway | `AimSwayController` | YES — it moves the shot |
+| recoil | `WeaponSystem` (aim) + a cosmetic rig kick | the first, not the second |
+| movement bob | `presentation/WeaponBob.ts` | no |
+| hip / sprint / ADS pose | `presentation/weaponPoseStore.ts` | no |
+
+**The camera never bobs.** Only the rig does. That is a motion-sickness decision and also
+what gives the weapon parallax against a still world. Bob phase accumulates from DISTANCE
+TRAVELLED, not elapsed time, so the gait locks to stride and is identical at any frame
+rate — a test asserts exactly that, and asserts the visible output only within a looser
+bound, because the damped follow is a filter and filters discretise. The vertical
+component runs at twice the lateral frequency: one lateral sweep, two footfalls.
+
+**ADS blend rate is derived, not global.** `AIM_RESPONSE_PER_ADS_SECOND` is a RATIO
+against each weapon's own `ads.enterSeconds`/`exitSeconds`, anchored at 4 so the sniper
+lands on the old flat 18. A single global rate smears the authored per-weapon timings into
+each other, which is what made every weapon feel the same kind of soft. The authored
+spread it was hiding, as shipped: M4 0.14 / 0.14, Glock 0.14 / 0.12, sniper 0.22 / 0.16,
+SAW 0.24 / 0.18. Raising the ratio speeds up every weapon at once and is a different
+decision. **The M4's enter was tuned from 0.18 to 0.14 in this session** — a gameplay
+value, though not one the server scores; nothing reads `definition.ads` except
+`WeaponSystem`.
+
+### Placing the rig
+
+Hip and ADS offsets are **per weapon**, in `presentation/weaponPoseStore.ts`, and tunable
+live from the dev console's **Weapon pose** tab (backtick or `?debug=1`). One global pair
+cannot serve a 42 cm-scoped sniper and a pistol a third its length.
+
+`ads` means two different things by design. With an optic it is EYE RELIEF, applied after
+the glass has already been aligned to the eye, so `z` is how far behind the lens the eye
+sits. Without one it is the entire placeholder raise, because there is no anchor to align
+to. The tab labels itself accordingly from what the rig actually resolved.
+
+The transform itself is `presentation/WeaponRigPlacement.ts`, lifted out of the frame
+callback so its two orderings could be asserted instead of merely commented. It rebuilds
+from a neutral camera-space root every frame — the mixers have already moved the skeleton
+by then, and an incremental transform would leave ADS aligned to the previous frame's pose.
+
+**The two orderings, and one that turned out not to be an ordering at all:**
+
+1. The authored tilt must precede the TRANSLATION. The rig rotates about its own origin and
+   the lens is a descendant, so tilting after the weapon has been moved onto the eye swings
+   the glass back off it.
+2. Position takes the hip → sprint step ONLY. Its ADS step is the lerp toward an offset that
+   already carries `pose.ads`, so blending it twice weights ADS 0.75 instead of 0.5. This is
+   invisible at full ADS — the final lerp overwrites the error — and largest mid-transition,
+   which is where the player sees it. A test asserting only the fully-aimed case proves
+   nothing; the test uses 0.5.
+3. **NOT an ordering:** the tilt versus the optic MEASUREMENT. `localToWorld` and
+   `worldToLocal` run through the same rig transform, so its rotation cancels and
+   `opticLocal` is the glass's rig-local position whatever the rig is doing. The original
+   comment claimed this was "the whole reason this works" and it was wrong the entire time.
+   Mutation testing separated the three; reading could not, and the wrong claim had already
+   survived a review by sounding plausible.
+
+The tab holds ADS on demand — tuning the aimed pose otherwise means keeping pointer lock
+with one hand while dragging a slider with the other, and reaching the console drops the
+aim. Tuned values persist in `localStorage` (see the next section for why not
+sessionStorage), because terrain decode costs roughly half a minute and a reload that
+discarded them would make every reload a restart. The tab prints the table back out as
+source; paste it over `DEFAULT_POSES` to keep a session's work.
+
+Both held states — ADS and sprint — are refused while networked, for CONSISTENCY with the
+ADS-timing override rather than for the same reason. That override is refused because the
+server scores with the authored durations; these two change nothing the server scores, and
+holding sprint only makes your own client refuse to fire. Do not read the weaker gate back
+onto the stronger one.
+
+Only the four mapped weapons have measured defaults. The other six are seeded from their
+closest neighbour and are UNTUNED — nothing has ever rendered them.
+
+### Tuning: where the numbers live, and how they get out
+
+Three tables, all reachable from the dev console's **Weapon pose** tab (backtick or
+`?debug=1`), all persisted in **localStorage** — not sessionStorage, which is per-TAB and
+is discarded on close; that cost a tuning session once and read exactly like the values
+being overwritten.
+
+| Table | Home | Scope |
+| --- | --- | --- |
+| hip / sprint / ADS placement | `DEFAULT_POSES` in `weaponPoseStore.ts` | per weapon |
+| movement bob | `BOB_BY_WEAPON` in `weaponPoseStore.ts`, sparse over `DEFAULT_WEAPON_BOB` | per weapon |
+| ADS enter/exit seconds | `ads` in `src/combat/weaponDefinitions.ts` | per weapon, GAMEPLAY |
+
+Each prints itself back as source, and pasting it in is the only thing that makes tuning
+permanent — the browser copy is one machine's. **The bob table is deliberately SPARSE:** a
+weapon with no entry uses the shared defaults, so ten near-identical configs never enter
+source to rot the moment the shared values move.
+
+ADS timing is the odd one: `adsProgress` drives sway and pointer sensitivity, so it is
+gameplay, and the override is ignored while networked because the server scores with the
+authored values. `WeaponSystem.setAdsOverrideSeconds` takes absolute seconds rather than
+riding the handling-modifier path, because modifiers SCALE an authored value for
+attachments and perks while this REPLACES it with the number you paste back.
+
+**A stored value must never shadow its source silently.** Every one of the three tables
+keeps its shipped value alongside the tuned one, says on screen which is in force, and
+offers a reset. ADS timing did not, and the consequence was specific: one map held both
+the authored value and the override, a stored entry won at construction, and the seed
+declined to overwrite it — so editing `M4_DEFINITION.ads` did *nothing at all* on the one
+machine that had ever tuned the M4, with no indication and no way to clear it short of
+wiping site data. `adsAuthored` (refreshed from the definition every frame, never stored)
+is now separate from `adsOverrides` (stored, absent unless a dial moved), and the key was
+bumped to `v3` because a `v2` blob recorded merely-equipped weapons as if they were tuned.
+If you add a fourth tuning table, it needs all three of those properties on day one.
+
+**Hold ADS** and **Hold sprint** hold those states without pointer lock, because neither
+pose can be judged while also dragging a slider. Hold sprint gates firing exactly as real
+sprinting does — they resolve from one shared value, and having two is what once produced
+a weapon posed mid-sprint that would still shoot.
+
+### Traps paid for once
+
+- **A glTF node with two material slots becomes a `Group`, not a `Mesh`.** Every
+  `muzzlemesh` has two (`muzzle1`, `muzzle2`), so reading `.geometry` off the node found
+  nothing, the roll axis came back null and `triggerMuzzleFlash` returned early — the flash
+  never fired, silently. The optic lookup resolves through a Group for the same reason, and
+  it keeps the WHOLE set of primitives rather than the first: measuring one of two would
+  scale the eyebox to half a disc, and swapping the material on one of two would leave the
+  authored material over half the sight picture. No shipped lens has two slots today, which
+  is exactly why this has to be handled now rather than noticed later.
+- **`finished` arrives from an action you already replaced.** `startAction` fades the
+  outgoing action rather than stopping it, and three keeps a faded action enabled — still
+  advancing its time, still able to dispatch — until the fade interpolant runs out. A
+  segment replaced within `SEGMENT_FADE_SECONDS` of its own end therefore fires `finished`
+  *after* its replacement started, and an unguarded handler dropped that replacement into
+  the rest pose one frame in: a reload keyed just after a shot simply never played.
+  Measured on this build — a 0.30 s clip replaced at 0.25 s still fires at 0.28 s, the same
+  swap at 0.10 s fires nothing. `handleFinished` now checks `event.action`, and it keeps
+  the one-frame deferral as well: three dispatches from inside the mixer's own update while
+  iterating its action list, and the rest pose resets the very action that just finished.
+  Fix one and drop the other and a visible bug becomes an intermittent one.
+- **The gameplay reload and the authored clips disagree** (§7). Not fixed here.
+- **Weapons without an optic** take a placeholder raise for ADS rather than staying at the
+  hip. It is not an authored sight alignment and does not claim to be; the main-camera FOV
+  aiming path replaces it.
+- **`sniper.glb` ships a second copy of the hands** — armature, skinned mesh and 8.31 MB of
+  arm textures. The prepare step strips it and asserts the output; `tools/fphands/README.md`
+  has why the obvious strip does not work.
+- **`lmg.glb` and `shotgun.glb` are missing clips the hands carry.** Nothing the game maps
+  reaches them and a test keeps it that way.
+- **`|sin 2θ|` is FOUR times the stride rate, not two.** Rectification already doubles, so
+  rectifying a doubled wave doubles twice — and it adds a cusp at every footfall. Together
+  they read as fast, snappy, tiny steps. The figure-eight wants unrectified `sin 2θ`.
+- **Never filter the bob.** Source computes look lag first and ADDS bob on top; DarkPlaces
+  puts them behind separate cvars. A follow filter exists to manufacture lag from an input
+  you do not control — the mouse — and the bob is already the motion you want. Measured
+  here: a follow rate of 12 passed 75% of the lateral and 27% of the vertical, deforming
+  the figure rather than merely quietening it. Weight comes from `lookLag`, at Source's own
+  0.14 s half-life.
+- **A fixed distance-per-cycle turns all extra speed into cadence.** Half-Life 2 drives bob
+  from distance exactly as this does, over a 7.32 m stride; at 1.9 m a sprint reads as a
+  shuffle. Stride must lengthen with speed, and a cadence clamp keeps it bounded.
+- **One state, read twice, will disagree.** Sprint was written as a motor check in one place
+  and a speed threshold in another; the pose said sprinting while gameplay said not. Resolve
+  such a state ONCE per frame into a single value.
+- **A blend weight pinned at zero is invisible.** `motorPose` is null without `&motor=1`, so
+  a sprint pose keyed only off it was applied at weight 0 for ever — indistinguishable from
+  not existing, and it swallowed a tuning session before anyone looked at the weight.
+- **A confident comment is not evidence.** The rig placement carried a detailed explanation
+  of why the authored tilt had to be applied before the optic was measured. It was wrong:
+  the rig's rotation cancels between `localToWorld` and `worldToLocal`, so the two orders
+  are identical. It survived being written, reviewed and carried through a refactor because
+  it sounded like exactly the sort of thing that would be true. What found it was MUTATION
+  testing — reversing the order and watching the tests not care. When a comment claims an
+  ordering is load-bearing, break it on purpose and see what fails; if nothing does, the
+  comment is the bug. This is the same category as the `friendships` unique index that
+  claimed a normalisation the code never did.
+- **A test at the extreme can miss the error entirely.** The ADS offset double-application
+  is invisible at `adsBlend === 1`, because the final lerp lands on the target either way.
+  A test asserting only the fully-aimed case passed against the bug. Assert mid-transition,
+  where blend errors are largest and where the player actually sees them.
+
+## 12. Deferred after the rig replacement (2026-08-08)
+
+Everything below was raised in the rig session and deliberately NOT built. Ordered roughly
+by what the next phase wants first.
+
+**Shot feedback.** View shake, an FOV punch on firing, and a stronger cosmetic kick. The
+constraint that makes this non-trivial: **the camera IS the authoritative aim source** —
+`authoritativeAimQuaternion` composes from `camera.quaternion`, so shaking the camera shakes
+where bullets go. Shake must be applied after the aim is sampled AND after the scope pass,
+or the optic image shakes at magnification. FOV punch cannot affect aim at all and is the
+safer half, but wants scaling down while scoped. The research also turned up a better idea
+than continuous camera bob for footfalls: OpenSpades pulses `cos^16` for a narrow 6 cm drop
+once per cycle, user-gated and default off.
+
+**Per-weapon ADS sensitivity.** Magnification-derived sensitivity is already automatic and
+correct. What is missing is an authored multiplier on top, which is what iron-sight weapons
+need — they currently reduce sensitivity by nothing. `DEFAULT_SCOPE_PRECISION_SCALE` (0.25,
+breath-held only) and the `?mousesens=` / `?scopesens=` overrides are three separate
+mechanisms that should probably fold into that one per-weapon table.
+
+**Iron sights and a holographic red dot** — the feature the rig replacement was for. The
+carbine and grenade launcher already ship a working emissive red-dot lens with a real
+texture, so a red dot needs no second render; a main-camera FOV aiming path does the rest.
+Weapons with no optic currently take a placeholder raise that claims no sight alignment.
+
+*Surveyed 2026-08-08, deferred with the asset side already done.* The authored materials
+already draw the distinction the code does not:
+
+| Weapon | Lens material | Alpha | Base texture | Emissive |
+| --- | --- | --- | --- | --- |
+| sniper | `lens.001` | OPAQUE | none | 0, 0, 0 |
+| carbine | `lens` | BLEND | `redDot` | 1.0, 0.35, 0.0 |
+| grenadelauncher | `lens.002` | BLEND | `redDot` | 1.0, 0.6, 0.1 |
+
+The sniper's glass is blank BECAUSE it is meant to be replaced by a render target. The
+other two are already working reflex sights. **The equip effect currently swaps the
+picture-in-picture material onto every optic it finds**, which throws the authored red dot
+away and hands the carbine the sniper's 5.5° field of view and its aimed pointer
+sensitivity — confirmed on screen. So the red-dot path is not "add a reticle", it is *stop
+replacing the material*, and that also removes the second scene render for those weapons.
+
+Three things that will come up when it is built:
+
+- **A per-weapon reticle is a `Map`, not a rewrite.** `createLensMaterial` already takes the
+  reticle as a parameter; the only thing making it global is that its result is one
+  `useMemo`. Cache a material per reticle and look it up on equip. If the count ever grows
+  past a handful, switch to one material sampling a `DataArrayTexture` with the layer
+  chosen by a uniform — every file in `public/assets/reticles/` is already 1024×1024 RGBA,
+  so they would pack without resizing. The reticle NAME belongs in
+  `WeaponPresentationDefinition`, next to the clip names: it is pure data and that module is
+  Three-free. `lensFrame` needs no change — one weapon is equipped at a time.
+- **`hasOptic` answers two different questions and a reflex sight splits them.** It drives
+  aimed pointer sensitivity ("does this weapon magnify?") AND the crosshair fade ("is there
+  a sight picture?"). A red dot answers no and yes. Leaving it as one boolean is the same
+  one-state-read-twice trap the sprint bug already cost this file.
+- **Declare the optic kind and assert it against the bake.** `"magnified" | "reflex" | null`
+  alongside the reticle, checked against `index.json` in `weapon-presentation.test.ts` — a
+  weapon declared `reflex` whose GLB ships an opaque untextured lens is a re-export mistake
+  and that is cheap to catch.
+
+**A BDC reticle must derive its stadia from the real ballistics or claim nothing.** An
+ACOG-style reticle with 100–600 m holdovers was offered and deferred for this reason: the
+marks only mean something at a fixed magnification and a fixed round, and nothing connects
+them to the drop `ScopeAdjustmentController` actually computes. Holding on the "4" would not
+put the round at 400 m. The mil-dot in use now is honest because a mil is angular and
+ammunition-independent. Either derive the marks from the drag model or ship the reticle
+without range numbers. This is the "unknown rendered as a plausible number" category.
+
+*Not a blocker, contrary to a first reading:* the candidate reticle PNGs are already
+1024×1024 RGBA with transparent backgrounds, matching `default-mildot.png`. An attachment
+preview composites alpha onto white, which is what made them look opaque — decode the file
+rather than trusting the preview.
+
+**Audio.** `AUDIO_SYNC_HANDOVER.md` in the export was never opened.
+
+**Source asset gaps, for whoever owns the Blender file.** `sniper.glb` ships a second copy
+of the hands (armature, skinned mesh, 8.31 MB of arm textures) that the prepare step strips;
+`lmg.glb` has no `reload_alt`; `shotgun.glb` has none of `pump`, `reload_single_shell` or
+`reload_complete`, so the shotgun has no reload at all. There is also no dry-fire clip for
+any weapon, and the knife has no `melee` of its own — its attacks stand in.
+
+**Reload duration disagrees with the clips** (§7). The LMG's authored reload is 5.77 s
+against a flat 4.20 s gameplay reload, so it is cut 1.57 s short; sniper, carbine and pistol
+finish early and hold. Reconciling means either per-weapon gameplay reload times — which the
+server also re-times — or re-authoring.
+
+**Untuned surface.** Six rig weapons have no gameplay definition and only placeholder poses,
+reachable on the debug keys. Every weapon's bob starts identical until separated by hand.
+Scope eye relief is untuned, so the sniper's glass fills roughly three quarters of screen
+height. The left-wrist IK goal on the pistol and knife is detected and undriven.
+
+**Sprint needs `&motor=1`.** Without a motor there is no sprint state to read, by design
+after the speed-proxy attempt was removed. The Hold sprint toggle covers tuning.
+
+**Tuning has no shared home.** Values live in one browser's localStorage until someone
+pastes them into source. Fine for one person; not a system for two.
+

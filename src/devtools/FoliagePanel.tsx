@@ -83,13 +83,19 @@ export const FoliagePanel = memo(function FoliagePanel({
   const [lodScale, setLodScale] = useState(1);
   // Tier buttons read the mutable handles directly; this just forces the repaint.
   const [, setTierNonce] = useState(0);
-  const seeded = useRef(false);
+  // Keyed on the CONTROLS OBJECT, not a boolean latch. A remount — switching map, or the
+  // layer rebuilding — hands down a fresh controls object at defaults, and a `seeded`
+  // flag that only ever flips once would leave the panel mirroring the DEAD object's
+  // species and LOD state: buttons lit for species that are actually visible, a LOD
+  // multiplier that no longer matches. Re-seeding per identity costs one render and
+  // cannot go stale.
+  const seededFor = useRef<FoliageDebugControls | null>(null);
   useEffect(() => {
-    if (!controls || seeded.current) return;
+    if (!controls || seededFor.current === controls) return;
     setDebugMode(Number(controls.uniforms.debugMode.value));
     setHidden(controls.speciesVisible.map((v) => !v));
     setLodScale(controls.lodDistanceScale);
-    seeded.current = true;
+    seededFor.current = controls;
   }, [controls]);
 
   // The published sample, polled rather than pushed — the layer already throttles it to

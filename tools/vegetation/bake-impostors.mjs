@@ -22,9 +22,10 @@ import { NodeIO } from "@gltf-transform/core";
 import { ALL_EXTENSIONS } from "@gltf-transform/extensions";
 import {
   FOLIAGE_ALPHA_CUTOFF,
+  FOLIAGE_BARK_COLOR,
   FOLIAGE_IMPOSTOR_ALPHA_CUTOFF,
 } from "../../src/foliage/foliageConfig.ts";
-import { bakeImpostorAtlas } from "../../src/foliage/impostorBake.ts";
+import { bakeImpostorAtlas, srgbToLinear } from "../../src/foliage/impostorBake.ts";
 import { decodePng, encodePng } from "../../src/foliage/impostorPng.ts";
 import { impostorBakeOptionsFor } from "../../src/foliage/impostorSource.ts";
 import { SPECIES } from "../../src/foliage/species.ts";
@@ -125,19 +126,15 @@ async function prototypeBakeOptions(species, args, prototypes) {
 
   // Alpha-weighted mean leaf colour, linear — the dilation fill for uncovered texels,
   // so filtered silhouette edges pull leaf-green instead of black.
-  const srgb = (byte) => {
-    const c = byte / 255;
-    return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
-  };
   let r = 0;
   let g = 0;
   let b = 0;
   let weight = 0;
   for (let i = 0; i < leafTexture.data.length; i += 4) {
     const a = leafTexture.data[i + 3];
-    r += srgb(leafTexture.data[i]) * a;
-    g += srgb(leafTexture.data[i + 1]) * a;
-    b += srgb(leafTexture.data[i + 2]) * a;
+    r += srgbToLinear(leafTexture.data[i]) * a;
+    g += srgbToLinear(leafTexture.data[i + 1]) * a;
+    b += srgbToLinear(leafTexture.data[i + 2]) * a;
     weight += a;
   }
   const leafColor = weight > 0 ? [r / weight, g / weight, b / weight] : [0.3, 0.4, 0.25];
@@ -152,7 +149,7 @@ async function prototypeBakeOptions(species, args, prototypes) {
     leafTexture,
     barkTexture,
     leafColor,
-    barkColor: [0.19, 0.15, 0.11],
+    barkColor: FOLIAGE_BARK_COLOR,
     alphaCutoff: FOLIAGE_ALPHA_CUTOFF,
     spritesPerSide: args.spritesPerSide,
     tileSize: args.tileSize,

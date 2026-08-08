@@ -152,16 +152,28 @@ for (const node of root.listNodes()) {
 }
 if (trunkNodes.length === 0) throw new Error("No trunk nodes found");
 
+// Bake each node ONCE. Pairing is a nested walk, so baking inside it made the work
+// O(trunks × branches) full vertex transforms for what is O(trunks + branches) — and
+// every node was then baked a third time to measure it.
+const baked = new Map();
+const bakeOnce = (node) => {
+  let data = baked.get(node);
+  if (!data) {
+    data = bakeNode(node);
+    baked.set(node, data);
+  }
+  return data;
+};
+
 const pairs = [];
 for (const trunk of trunkNodes) {
-  const baked = bakeNode(trunk);
-  const b = boundsOf(baked.positions);
+  const b = boundsOf(bakeOnce(trunk).positions);
   const cx = (b.min[0] + b.max[0]) / 2;
   const cz = (b.min[2] + b.max[2]) / 2;
   let best = null;
   let bestDistance = Infinity;
   for (const branches of branchNodes) {
-    const bb = boundsOf(bakeNode(branches).positions);
+    const bb = boundsOf(bakeOnce(branches).positions);
     const d = Math.hypot((bb.min[0] + bb.max[0]) / 2 - cx, (bb.min[2] + bb.max[2]) / 2 - cz);
     if (d < bestDistance) {
       bestDistance = d;
@@ -177,8 +189,8 @@ for (const trunk of trunkNodes) {
 
 // Tallest first, so prototype ids stay stable if the pack gains small extras later.
 const measured = pairs.map((pair) => {
-  const trunk = bakeNode(pair.trunk);
-  const branches = bakeNode(pair.branches);
+  const trunk = bakeOnce(pair.trunk);
+  const branches = bakeOnce(pair.branches);
   const all = boundsOf([...trunk.positions, ...branches.positions]);
   return { ...pair, trunkData: trunk, branchData: branches, height: all.max[1] - all.min[1] };
 });

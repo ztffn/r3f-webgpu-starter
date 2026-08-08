@@ -54,11 +54,10 @@ while (Date.now() < deadline && clear < 2) {
   }));
   clear = last.chunks === 0 && last.buckets === 0 ? clear + 1 : 0;
 }
-const stable = clear >= 2 ? 4 : 0;
 
 const foliage = await page.evaluate(() => window.__foliage ?? null);
 const perf = await page.evaluate(() => window.__perf ?? null);
 // `settled: false` means the numbers below are a half-built world. Do not compare them.
-console.log(JSON.stringify({ settled: stable >= 4, pending: last, foliage, perf, errors: errors.slice(0, 8) }));
+console.log(JSON.stringify({ settled: clear >= 2, pending: last, foliage, perf, errors: errors.slice(0, 8) }));
 if (shot) await page.screenshot({ path: shot });
 await browser.close();

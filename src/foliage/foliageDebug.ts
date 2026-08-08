@@ -41,7 +41,7 @@ export const FOLIAGE_DEBUG_HINTS: readonly string[] = [
   "geometric detail per cell: green nearest, then yellow and orange, red is the in-window impostor. A whole cell switches at once, so the bands are cell-shaped.",
   "which renderer drew it — cyan is the near window (real geometry), magenta is the far ring (baked impostor photos). Shows where the handoff lands, and any gap or overlap.",
   "one colour per plant type, for reading the placement mix.",
-  "the 32 m bucket each plant belongs to. That bucket is the unit of frustum culling AND the unit of LOD choice, which is why plants pop in groups.",
+  "the vegetation cell each plant belongs to (32 m by default, `?foliagecell=` changes it). That cell is the unit of frustum culling AND the unit of LOD choice, which is why plants pop in groups.",
   "foliage layers per pixel — the fill cost that dominates dense vegetation. Each layer adds one eighth, so white on screen is 8 or more. The measured figures below are exact.",
   "reserved — see below.",
 ];

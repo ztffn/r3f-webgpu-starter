@@ -252,7 +252,7 @@ export const FoliagePanel = memo(function FoliagePanel({
               min={0}
               max={10}
               step={0.25}
-              hint="global multiplier on every species. Saturates — spacing is the real lever on count. Live, no rebuild"
+              hint="global multiplier on every species. Saturates — spacing is the real lever on count. Applies on release; refills the cells but does not rebuild them"
               value={scene.foliageDensity}
               onCommit={(v) => scene.setFoliageDensity(v)}
             />

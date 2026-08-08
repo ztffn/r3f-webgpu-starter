@@ -59,7 +59,15 @@ export interface ImpostorBakeOptions {
 
 export interface ImpostorBakeResult {
   albedo: MipLevel;
-  /** RGB = plant-space normal * 0.5 + 0.5; A = depth along the view, 0-1 across bounds. */
+  /**
+   * RGB = plant-space normal * 0.5 + 0.5; A = depth along the view, 0-1 across bounds.
+   *
+   * NOTHING READS THE DEPTH CHANNEL TODAY — `FarFoliageMaterial` samples `.rgb` only. It
+   * is baked and kept because it is the alpha of a texture that has to exist anyway, so
+   * it costs no runtime memory, and dropping it would change every committed atlas and
+   * foreclose depth-offset or parallax work on the ring. Recorded here so the next reader
+   * does not have to re-derive whether it is load-bearing.
+   */
   normalDepth: MipLevel;
   /** Height of the framed square's centre above the plant base, metres. */
   centerY: number;

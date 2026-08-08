@@ -53,7 +53,22 @@ export interface FarFoliageCellsProps {
   /** Live scene lights for the hand-rolled sun term; absent refs keep the defaults. */
   lights?: FarFoliageLights;
   /** Instances drawn by the ring, reported on the same throttle as the near stats. */
-  onStats?: (farInstances: number) => void;
+  onStats?: (stats: FarFoliageStats) => void;
+}
+
+export interface FarFoliageStats {
+  /** Impostors the ring is currently drawing. */
+  instances: number;
+  /**
+   * Whether a budgeted refill is still walking the ring's cells.
+   *
+   * Reported because the measurement rig's settle predicate is what decides whether two
+   * captures describe the same amount of world. The near window publishes
+   * `pendingBuckets` for exactly this reason; a tier that stayed silent would let the rig
+   * call a world settled while thousands of ring cells were still being compacted, which
+   * is the failure the rig's own header records having already produced twice.
+   */
+  filling: boolean;
 }
 
 interface SpeciesRing {
@@ -260,7 +275,7 @@ export function FarFoliageCells({
         scratch.statsAt = now;
         let total = 0;
         for (const ring of state.rings.values()) total += ring.geometry.instanceCount;
-        onStats(total);
+        onStats({ instances: total, filling: scratch.job !== null });
       }
     }
   });
@@ -283,12 +298,6 @@ function runFill(
   cellX: number,
   cellZ: number
 ): void {
-  // The near window owns these uniforms and sets them from its frame loop — which the
-  // pipeline warm-up holds off for a moment at mount. Filling against the defaults
-  // (1e6) would build an EMPTY ring that nothing refills until the next cell crossing,
-  // so the job simply waits for real values; it re-enters every frame until then.
-  if ((foliageUniforms.fadeEnd.value as number) > 1e5) return;
-
   const cellRadius = Math.ceil(farRadiusMetres / field.cellSize) + 1;
   const span = 2 * cellRadius + 1;
   const totalCells = span * span;

@@ -40,8 +40,12 @@ await page.waitForFunction(() => window.__perf !== undefined, null, { timeout: 1
 // pair taken that way read 175 draw calls against 244 — two different amounts of world,
 // not two configurations.
 //
-// `window.__terrain.pendingChunks` and `window.__foliage.pendingBuckets` are published by
-// the builders themselves and go to zero only when there is nothing left to build.
+// `window.__terrain.pendingChunks`, `window.__foliage.pendingBuckets` and
+// `window.__foliage.farFilling` are published by the builders themselves and clear only
+// when there is nothing left to build. EVERY budgeted builder has to publish one of these:
+// the far impostor ring was added without joining the contract, and because it walks
+// thousands of cells under the same per-frame budget, the rig would call a world settled
+// with the ring half built — reintroducing the exact defect described above.
 let clear = 0;
 const deadline = Date.now() + 900000;
 let last = null;
@@ -50,9 +54,12 @@ while (Date.now() < deadline && clear < 2) {
   last = await page.evaluate(() => ({
     chunks: window.__terrain?.pendingChunks ?? 0,
     buckets: window.__foliage?.pendingBuckets ?? 0,
+    // The far ring is budgeted like the near window and walks thousands of cells, so it
+    // joins the settle contract. Defaults to false when the ring is off or absent.
+    farFilling: window.__foliage?.farFilling ?? false,
     draws: window.__perf?.drawCalls ?? 0,
   }));
-  clear = last.chunks === 0 && last.buckets === 0 ? clear + 1 : 0;
+  clear = last.chunks === 0 && last.buckets === 0 && !last.farFilling ? clear + 1 : 0;
 }
 
 const foliage = await page.evaluate(() => window.__foliage ?? null);

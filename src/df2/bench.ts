@@ -346,6 +346,14 @@ export interface FoliageBenchSample {
   levelCoverage: number[];
   /** Impostors drawn by the far ring; absent while the ring is off or still loading. */
   farInstances?: number;
+  /**
+   * Whether the far ring is still compacting cells into its instance buffers.
+   *
+   * Part of the settle contract, not decoration: `pendingBuckets` alone describes the
+   * near window only, so a rig that waits on it can call a world settled while the ring
+   * is half built — two captures taken that way are two different amounts of world.
+   */
+  farFilling?: boolean;
 }
 
 declare global {

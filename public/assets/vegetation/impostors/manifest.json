@@ -1,5 +1,6 @@
 {
-  "version": 1,
+  "version": 2,
+  "format": "ktx2-uastc",
   "source": "src/foliage procedural geometry; prototype species derived from the CC-BY pack in prototypes-manifest.json",
   "variant": "B",
   "spritesPerSide": 12,
@@ -8,56 +9,63 @@
   "runtimeAlphaCutoff": 0.4,
   "species": {
     "forest-tree-01": {
-      "albedo": "forest-tree-01-albedo.png",
-      "normalDepth": "forest-tree-01-normal.png",
+      "albedo": "forest-tree-01-albedo.ktx2",
+      "normalDepth": "forest-tree-01-normal.ktx2",
+      "shippedCoverageDrift": 0,
       "centerY": 12.7,
       "radius": 13.1747,
       "horizonCoverageMean": 0.4228,
       "horizonCoverageMin": 0.4042
     },
     "forest-tree-02": {
-      "albedo": "forest-tree-02-albedo.png",
-      "normalDepth": "forest-tree-02-normal.png",
+      "albedo": "forest-tree-02-albedo.ktx2",
+      "normalDepth": "forest-tree-02-normal.ktx2",
+      "shippedCoverageDrift": 0,
       "centerY": 9.25,
       "radius": 9.9198,
       "horizonCoverageMean": 0.4254,
       "horizonCoverageMin": 0.3972
     },
     "forest-tree-03": {
-      "albedo": "forest-tree-03-albedo.png",
-      "normalDepth": "forest-tree-03-normal.png",
+      "albedo": "forest-tree-03-albedo.ktx2",
+      "normalDepth": "forest-tree-03-normal.ktx2",
+      "shippedCoverageDrift": -0.00001,
       "centerY": 5.95,
       "radius": 6.3548,
       "horizonCoverageMean": 0.4339,
       "horizonCoverageMin": 0.4108
     },
     "forest-tree-04": {
-      "albedo": "forest-tree-04-albedo.png",
-      "normalDepth": "forest-tree-04-normal.png",
+      "albedo": "forest-tree-04-albedo.ktx2",
+      "normalDepth": "forest-tree-04-normal.ktx2",
+      "shippedCoverageDrift": 0,
       "centerY": 5.15,
       "radius": 5.4951,
       "horizonCoverageMean": 0.4363,
       "horizonCoverageMin": 0.4124
     },
     "acacia": {
-      "albedo": "acacia-albedo.png",
-      "normalDepth": "acacia-normal.png",
+      "albedo": "acacia-albedo.ktx2",
+      "normalDepth": "acacia-normal.ktx2",
+      "shippedCoverageDrift": 0,
       "centerY": 3.1909,
       "radius": 4.5934,
       "horizonCoverageMean": 0.5319,
       "horizonCoverageMin": 0.4686
     },
     "bush": {
-      "albedo": "bush-albedo.png",
-      "normalDepth": "bush-normal.png",
+      "albedo": "bush-albedo.ktx2",
+      "normalDepth": "bush-normal.ktx2",
+      "shippedCoverageDrift": 0,
       "centerY": 0.8823,
       "radius": 1.4575,
       "horizonCoverageMean": 0.5443,
       "horizonCoverageMin": 0.4451
     },
     "scrub": {
-      "albedo": "scrub-albedo.png",
-      "normalDepth": "scrub-normal.png",
+      "albedo": "scrub-albedo.ktx2",
+      "normalDepth": "scrub-normal.ktx2",
+      "shippedCoverageDrift": 0,
       "centerY": 0.3709,
       "radius": 0.7854,
       "horizonCoverageMean": 0.5507,

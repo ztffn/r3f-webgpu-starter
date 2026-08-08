@@ -1,4 +1,8 @@
-// Minimal PNG codec for the impostor atlases — exact texels, both directions.
+// Minimal PNG codec for the impostor BAKE — exact texels, both directions.
+//
+// BAKE-TIME ONLY since the atlases became KTX2 (plan v2 §5.4d): the runtime loads through
+// three's KTX2Loader and decodes nothing by hand. What still needs this is the bake —
+// reading the authored prototype textures, and writing the mip levels `toktx` consumes.
 //
 // Hand-rolled for one reason: the browser's own decode paths are not faithful. Decoding
 // through createImageBitmap/canvas premultiplies alpha, which zeroes the RGB of every

@@ -1,17 +1,14 @@
 // Runtime loader for the baked hemi-octahedral impostor atlases.
 //
-// Fetches the manifest and per-species PNGs from public/assets/vegetation/impostors/,
-// decodes them with the project's own codec (impostorPng.ts — the canvas decode path
-// premultiplies alpha and is not texel-faithful), rebuilds the coverage-preserving mip
-// chain for the albedo atlas and plain box mips for the normal atlas, and wraps both in
-// DataTextures. Resolves to null when the assets are absent or unreadable, so the far
-// ring declines to exist without taking the foliage layer down with it.
+// Fetches the manifest and per-species KTX2 atlases from public/assets/vegetation/
+// impostors/ and hands them to three's KTX2Loader, which transcodes UASTC to whatever
+// block format the adapter reports. The mip chains are SOLVED AT BAKE TIME and carried
+// inside the files, so nothing is derived here — the previous PNG path decoded ~26 MB by
+// hand and rebuilt every chain on the main thread. Resolves to null when the assets are
+// absent or unreadable, so the far ring declines to exist without taking the layer down.
 
 import * as THREE from "three/webgpu";
-import { buildCoveragePreservingMips, type MipLevel } from "./alphaMips.ts";
-import { FOLIAGE_ALPHA_CUTOFF } from "./foliageConfig.ts";
-import { dataTextureFromMips } from "./foliageTexture.ts";
-import { decodePng } from "./impostorPng.ts";
+import { KTX2Loader } from "three/addons/loaders/KTX2Loader.js";
 
 export interface ImpostorManifestSpecies {
   albedo: string;
@@ -33,8 +30,9 @@ export interface ImpostorManifest {
 }
 
 export interface ImpostorSpeciesAtlas {
-  albedo: THREE.DataTexture;
-  normalDepth: THREE.DataTexture;
+  /** Block-compressed after transcode; a plain Texture, not a DataTexture. */
+  albedo: THREE.Texture;
+  normalDepth: THREE.Texture;
   centerY: number;
   radius: number;
 }
@@ -45,86 +43,16 @@ export interface ImpostorAtlases {
   dispose(): void;
 }
 
-/**
- * Coverage-weighted mips for the normal+depth atlas.
- *
- * Weighted by the ALBEDO chain's alpha at the same level, for the same reason the
- * albedo's own colours are alpha-weighted: an unweighted box average lets the empty
- * margin's fill normals dominate deep levels. Measured on screen before this existed:
- * every distant impostor's normal converged toward straight-up, which maxed both the
- * sun term and the sky fill and rendered the whole far ring a shade too bright. The
- * shader renormalises after decode, so the stored average never needs to be unit.
- */
-function weightedNormalMips(base: MipLevel, albedoLevels: MipLevel[]): MipLevel[] {
-  const levels: MipLevel[] = [base];
-  let current = base;
-  let level = 0;
-  while (current.width > 1 || current.height > 1) {
-    const weights = albedoLevels[level];
-    const width = Math.max(1, current.width >> 1);
-    const height = Math.max(1, current.height >> 1);
-    const data = new Uint8Array(width * height * 4);
-    for (let y = 0; y < height; y += 1) {
-      for (let x = 0; x < width; x += 1) {
-        let nx = 0;
-        let ny = 0;
-        let nz = 0;
-        let depth = 0;
-        let weight = 0;
-        let plainX = 0;
-        let plainY = 0;
-        let plainZ = 0;
-        let plainDepth = 0;
-        for (let dy = 0; dy < 2; dy += 1) {
-          for (let dx = 0; dx < 2; dx += 1) {
-            const sx = Math.min(current.width - 1, x * 2 + dx);
-            const sy = Math.min(current.height - 1, y * 2 + dy);
-            const s = (sy * current.width + sx) * 4;
-            const a = weights.data[s + 3];
-            nx += current.data[s] * a;
-            ny += current.data[s + 1] * a;
-            nz += current.data[s + 2] * a;
-            depth += current.data[s + 3] * a;
-            weight += a;
-            plainX += current.data[s];
-            plainY += current.data[s + 1];
-            plainZ += current.data[s + 2];
-            plainDepth += current.data[s + 3];
-          }
-        }
-        const o = (y * width + x) * 4;
-        if (weight > 0) {
-          data[o] = Math.round(nx / weight);
-          data[o + 1] = Math.round(ny / weight);
-          data[o + 2] = Math.round(nz / weight);
-          data[o + 3] = Math.round(depth / weight);
-        } else {
-          data[o] = Math.round(plainX / 4);
-          data[o + 1] = Math.round(plainY / 4);
-          data[o + 2] = Math.round(plainZ / 4);
-          data[o + 3] = Math.round(plainDepth / 4);
-        }
-      }
-    }
-    current = { data, width, height };
-    levels.push(current);
-    level += 1;
-  }
-  return levels;
-}
-
-function makeTexture(levels: MipLevel[]): THREE.DataTexture {
-  return dataTextureFromMips(levels, {
-    // The bake writes LINEAR values (the same constants the near-field colorNode uses);
-    // marking the texture sRGB would re-transform them and the tiers would stop matching.
-    colorSpace: THREE.NoColorSpace,
-    // Anisotropy stays at the default 1: anisotropic taps walk a line in uv space, and on
-    // a tiled atlas that line crosses into the neighbouring VIEW well before the tile-edge
-    // clamp in the shader can stop it.
-  });
-}
-
 export async function loadImpostorAtlases(
+  /**
+   * Needed for `detectSupport` — which block formats the adapter can actually take.
+   *
+   * OPTIONAL only so a caller that has no renderer still compiles; without one the
+   * atlases cannot be transcoded and this resolves to null with a warning naming the
+   * fix. It does not fall back to anything, because a silent fallback here would be a
+   * different silhouette from the one the bake audited.
+   */
+  renderer?: Parameters<KTX2Loader["detectSupport"]>[0],
   baseUrl = "/assets/vegetation/impostors"
 ): Promise<ImpostorAtlases | null> {
   let manifest: ImpostorManifest;
@@ -141,22 +69,43 @@ export async function loadImpostorAtlases(
     return null;
   }
 
+  // The transcoder is a WASM module the loader fetches once; both files are committed
+  // under public/basis rather than pulled from a CDN, because a published page runs under
+  // a CSP that blocks external hosts.
+  if (!renderer) {
+    console.warn(
+      "[foliage] loadImpostorAtlases needs the renderer to detect supported texture " +
+        "formats; pass it as the first argument. Impostors are unavailable without it."
+    );
+    return null;
+  }
+  const loader = new KTX2Loader().setTranscoderPath("/basis/").detectSupport(renderer);
+
   try {
     const entries = await Promise.all(
       Object.entries(manifest.species).map(async ([id, entry]) => {
-        const [albedoBytes, normalBytes] = await Promise.all(
-          [entry.albedo, entry.normalDepth].map(async (name) => {
-            const response = await fetch(`${baseUrl}/${name}`);
-            if (!response.ok) throw new Error(`missing atlas ${name}`);
-            return new Uint8Array(await response.arrayBuffer());
-          })
+        const [albedo, normalDepth] = await Promise.all(
+          [entry.albedo, entry.normalDepth].map((name) => loader.loadAsync(`${baseUrl}/${name}`))
         );
-        const albedo = await decodePng(albedoBytes);
-        const normalDepth = await decodePng(normalBytes);
-        const albedoLevels = buildCoveragePreservingMips(albedo, FOLIAGE_ALPHA_CUTOFF);
+        // Everything the old path did on the main thread — a per-byte PNG unfilter and a
+        // coverage-preserving mip solve per atlas — is now bake-time work carried inside
+        // the file. What arrives is already the mip chain, already GPU-compressed.
+        for (const texture of [albedo, normalDepth]) {
+          texture.wrapS = THREE.ClampToEdgeWrapping;
+          texture.wrapT = THREE.ClampToEdgeWrapping;
+          // NoColorSpace: the bake writes LINEAR values and the file is tagged linear.
+          // Marking these sRGB would re-transform them and the two tiers would stop
+          // matching — the same trap the PNG path documented.
+          texture.colorSpace = THREE.NoColorSpace;
+          // Anisotropy stays at 1: anisotropic taps walk a line in uv space, and on a
+          // tiled atlas that line crosses into the neighbouring VIEW well before the
+          // tile-edge clamp in the shader can stop it.
+          texture.anisotropy = 1;
+          texture.needsUpdate = true;
+        }
         const atlas: ImpostorSpeciesAtlas = {
-          albedo: makeTexture(albedoLevels),
-          normalDepth: makeTexture(weightedNormalMips(normalDepth, albedoLevels)),
+          albedo,
+          normalDepth,
           centerY: entry.centerY,
           radius: entry.radius,
         };
@@ -172,9 +121,11 @@ export async function loadImpostorAtlases(
           atlas.albedo.dispose();
           atlas.normalDepth.dispose();
         }
+        loader.dispose();
       },
     };
   } catch (error) {
+    loader.dispose();
     console.warn("[foliage] impostor atlases unavailable, far ring disabled:", error);
     return null;
   }

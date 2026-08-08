@@ -473,3 +473,73 @@ function measureTileCoverage(
   }
   return total > 0 ? passed / total : 0;
 }
+
+/**
+ * Coverage-weighted mips for the normal+depth atlas.
+ *
+ * Bake-time work now: it used to run in the browser on every load.
+ *
+ * Weighted by the ALBEDO chain's alpha at the same level, for the same reason the
+ * albedo's own colours are alpha-weighted: an unweighted box average lets the empty
+ * margin's fill normals dominate deep levels. Measured on screen before this existed:
+ * every distant impostor's normal converged toward straight-up, which maxed both the
+ * sun term and the sky fill and rendered the whole far ring a shade too bright. The
+ * shader renormalises after decode, so the stored average never needs to be unit.
+ */
+export function weightedNormalMips(base: MipLevel, albedoLevels: MipLevel[]): MipLevel[] {
+  const levels: MipLevel[] = [base];
+  let current = base;
+  let level = 0;
+  while (current.width > 1 || current.height > 1) {
+    const weights = albedoLevels[level];
+    const width = Math.max(1, current.width >> 1);
+    const height = Math.max(1, current.height >> 1);
+    const data = new Uint8Array(width * height * 4);
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        let nx = 0;
+        let ny = 0;
+        let nz = 0;
+        let depth = 0;
+        let weight = 0;
+        let plainX = 0;
+        let plainY = 0;
+        let plainZ = 0;
+        let plainDepth = 0;
+        for (let dy = 0; dy < 2; dy += 1) {
+          for (let dx = 0; dx < 2; dx += 1) {
+            const sx = Math.min(current.width - 1, x * 2 + dx);
+            const sy = Math.min(current.height - 1, y * 2 + dy);
+            const s = (sy * current.width + sx) * 4;
+            const a = weights.data[s + 3];
+            nx += current.data[s] * a;
+            ny += current.data[s + 1] * a;
+            nz += current.data[s + 2] * a;
+            depth += current.data[s + 3] * a;
+            weight += a;
+            plainX += current.data[s];
+            plainY += current.data[s + 1];
+            plainZ += current.data[s + 2];
+            plainDepth += current.data[s + 3];
+          }
+        }
+        const o = (y * width + x) * 4;
+        if (weight > 0) {
+          data[o] = Math.round(nx / weight);
+          data[o + 1] = Math.round(ny / weight);
+          data[o + 2] = Math.round(nz / weight);
+          data[o + 3] = Math.round(depth / weight);
+        } else {
+          data[o] = Math.round(plainX / 4);
+          data[o + 1] = Math.round(plainY / 4);
+          data[o + 2] = Math.round(plainZ / 4);
+          data[o + 3] = Math.round(plainDepth / 4);
+        }
+      }
+    }
+    current = { data, width, height };
+    levels.push(current);
+    level += 1;
+  }
+  return levels;
+}

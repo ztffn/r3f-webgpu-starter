@@ -25,8 +25,14 @@ import {
   FOLIAGE_BARK_COLOR,
   FOLIAGE_IMPOSTOR_ALPHA_CUTOFF,
 } from "../../src/foliage/foliageConfig.ts";
-import { bakeImpostorAtlas, srgbToLinear } from "../../src/foliage/impostorBake.ts";
-import { decodePng, encodePng } from "../../src/foliage/impostorPng.ts";
+import {
+  bakeImpostorAtlas,
+  srgbToLinear,
+  weightedNormalMips,
+} from "../../src/foliage/impostorBake.ts";
+import { decodePng } from "../../src/foliage/impostorPng.ts";
+import { alphaCoverage, buildCoveragePreservingMips } from "../../src/foliage/alphaMips.ts";
+import { encodeKtx2, ktx2Alpha } from "./ktx2.mjs";
 import { impostorBakeOptionsFor } from "../../src/foliage/impostorSource.ts";
 import { SPECIES } from "../../src/foliage/species.ts";
 
@@ -175,7 +181,9 @@ if (SPECIES.some((species) => species.prototype)) {
 }
 
 const manifest = {
-  version: 1,
+  version: 2,
+  // UASTC + Zstd, mips supplied by the bake. See tools/vegetation/ktx2.mjs.
+  format: "ktx2-uastc",
   // Per species, because the two art paths have different provenance and the atlas is a
   // DERIVED work of whichever fed it: the card species are the project's own procedural
   // geometry, the prototype species are the CC-BY pack the prototypes manifest attributes.
@@ -203,17 +211,42 @@ for (const species of SPECIES) {
           supersample: args.supersample,
         })
   );
-  const albedoName = `${species.id}-albedo.png`;
-  const normalName = `${species.id}-normal.png`;
-  const albedoPng = await encodePng(bake.albedo);
-  const normalPng = await encodePng(bake.normalDepth);
-  await fs.writeFile(path.join(args.output, albedoName), albedoPng);
-  await fs.writeFile(path.join(args.output, normalName), normalPng);
+  const albedoName = `${species.id}-albedo.ktx2`;
+  const normalName = `${species.id}-normal.ktx2`;
+  // The mip chain is solved HERE and shipped inside the KTX2, so the runtime derives
+  // nothing: the coverage solve is bake-time work and the browser only decodes.
+  const albedoLevels = buildCoveragePreservingMips(bake.albedo, FOLIAGE_ALPHA_CUTOFF);
+  // Weighted by the albedo chain's alpha, NOT the coverage solver: scaling alpha on a
+  // normal atlas would rescale the depth channel, and an unweighted average lets the
+  // empty margin's fill normals dominate deep levels and brighten the whole ring.
+  const normalLevels = weightedNormalMips(bake.normalDepth, albedoLevels);
+  const albedoBytes = await encodeKtx2(path.join(args.output, albedoName), albedoLevels);
+  const normalBytes = await encodeKtx2(path.join(args.output, normalName), normalLevels);
+
+  // Audit the TRANSCODED albedo, not the source. Block compression is lossy on alpha and
+  // alpha is the silhouette, so the only meaningful question is what the shipped file
+  // conceals — measured against the cutoff the far material actually tests at.
+  const shipped = await ktx2Alpha(
+    path.join(args.output, albedoName),
+    bake.albedo.width,
+    bake.albedo.height
+  );
+  const sourceCoverage = alphaCoverage(bake.albedo.data, FOLIAGE_IMPOSTOR_ALPHA_CUTOFF);
+  const shippedCoverage = alphaCoverage(shipped.data, FOLIAGE_IMPOSTOR_ALPHA_CUTOFF);
+  const coverageDrift = shippedCoverage - sourceCoverage;
+  if (coverageDrift < -0.005) {
+    throw new Error(
+      `${species.id}: encoding thinned the silhouette — coverage ` +
+        `${sourceCoverage.toFixed(4)} -> ${shippedCoverage.toFixed(4)}. ` +
+        `Concealing less than the source is the fairness-violating direction (docs/08 §8 inv. 6).`
+    );
+  }
 
   const coverage = horizonStats(bake.tileCoverage, args.spritesPerSide);
   manifest.species[species.id] = {
     albedo: albedoName,
     normalDepth: normalName,
+    shippedCoverageDrift: Number(coverageDrift.toFixed(5)),
     centerY: Number(bake.centerY.toFixed(4)),
     radius: Number(bake.radius.toFixed(4)),
     horizonCoverageMean: Number(coverage.mean.toFixed(4)),
@@ -221,8 +254,9 @@ for (const species of SPECIES) {
   };
   console.log(
     `${species.id}: ${(performance.now() - started).toFixed(0)} ms, ` +
-      `albedo ${(albedoPng.length / 1024).toFixed(0)} KB, normal ${(normalPng.length / 1024).toFixed(0)} KB, ` +
-      `horizon coverage mean ${coverage.mean.toFixed(3)} min ${coverage.min.toFixed(3)}`
+      `albedo ${(albedoBytes / 1024).toFixed(0)} KB, normal ${(normalBytes / 1024).toFixed(0)} KB, ` +
+      `horizon coverage mean ${coverage.mean.toFixed(3)} min ${coverage.min.toFixed(3)}, ` +
+      `shipped drift ${coverageDrift >= 0 ? "+" : ""}${coverageDrift.toFixed(5)}`
   );
 }
 

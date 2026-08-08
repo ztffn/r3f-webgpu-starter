@@ -175,6 +175,16 @@ export class WeaponSystem {
   private bloomPerShotFactor = DEFAULT_WEAPON_HANDLING_MODIFIERS.bloomPerShotFactor;
   private bloomRecoveryFactor = DEFAULT_WEAPON_HANDLING_MODIFIERS.bloomRecoveryFactor;
   private swayFactor = DEFAULT_WEAPON_HANDLING_MODIFIERS.swayFactor;
+  /**
+   * Dev-console override of the authored ADS durations, or null for the definition's own.
+   *
+   * Deliberately absolute seconds rather than a factor on the handling-modifier path:
+   * modifiers model attachments and perks, which SCALE an authored value, while this
+   * replaces it so a tuning session reads and writes the same numbers that live in
+   * `weaponDefinitions.ts` and can be pasted straight back there. Offline tuning only —
+   * the server scores with the canonical definitions and never sees this.
+   */
+  private adsOverrideSeconds: { enterSeconds: number; exitSeconds: number } | null = null;
   private readonly instanceSeed: number;
   private readonly events: WeaponEvent[] = [];
 
@@ -214,6 +224,10 @@ export class WeaponSystem {
     this.handlingGrounded = context.grounded;
     this.handlingPlanarSpeed = finiteNonNegative(context.planarSpeedMetresPerSecond);
     this.handlingBreath = Math.min(1, finiteNonNegative(context.breathStabilization));
+  }
+
+  setAdsOverrideSeconds(override: { enterSeconds: number; exitSeconds: number } | null): void {
+    this.adsOverrideSeconds = override;
   }
 
   setHandlingModifiers(modifiers: WeaponHandlingModifiers): void {
@@ -412,9 +426,8 @@ export class WeaponSystem {
   private advanceContinuousState(dtSeconds: number): void {
     if (dtSeconds <= 0) return;
     this.cooldownRemaining = Math.max(0, this.cooldownRemaining - dtSeconds);
-    const adsDuration = this.adsWanted
-      ? this.definition.ads.enterSeconds
-      : this.definition.ads.exitSeconds;
+    const ads = this.adsOverrideSeconds ?? this.definition.ads;
+    const adsDuration = this.adsWanted ? ads.enterSeconds : ads.exitSeconds;
     const adsDirection = this.adsWanted ? 1 : -1;
     const adsStep = adsDuration <= 0 ? 1 : dtSeconds / adsDuration;
     this.adsProgress = Math.min(1, Math.max(0, this.adsProgress + adsDirection * adsStep));

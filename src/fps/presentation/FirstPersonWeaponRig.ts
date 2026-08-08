@@ -42,7 +42,19 @@ const IDLE_SPICE_MAX_SECONDS = 26;
  * and the lens shader's UV frame both need.
  */
 export interface OpticAnchor {
+  /** The mesh the disc is measured through, and the `localToWorld` reference. */
   readonly lens: THREE.Mesh;
+  /**
+   * EVERY mesh the glass is made of, in primitive order.
+   *
+   * More than one when the lens node carries two material slots: glTF hands that node a
+   * Group with one Mesh per primitive, which is the same shape that silently disabled
+   * the muzzle flash. Anything that swaps the glass material has to cover all of them or
+   * half the lens keeps its authored look, and the disc has to be measured across all of
+   * them or the eyebox is scaled to half a circle. Sibling primitives share the node's
+   * transform, so they are all in one local space and can simply be unioned.
+   */
+  readonly meshes: readonly THREE.Mesh[];
   /** Centre of the glass disc in the lens mesh's own local space. */
   readonly centre: THREE.Vector3;
   /** Half the disc's width — what the eyebox and reticle are scaled against. */
@@ -72,19 +84,27 @@ interface EquippedWeapon {
  * manifest the bake writes, which applies this same rule.
  */
 function findOptic(scene: THREE.Object3D): OpticAnchor | null {
-  let node: THREE.Object3D | null = null;
-  scene.traverse((object) => {
-    if (!node && /(_Lens|_Glass)$/.test(object.name)) node = object;
-  });
-  if (!node) return null;
   // Resolved through a possible Group for the same reason the muzzle flash is: a lens
   // authored with two material slots would otherwise report no optic at all, while the
   // bake's manifest — which reads the glTF node directly — still claims one.
-  const mesh = firstMesh(node);
-  if (!mesh?.geometry) return null;
-  mesh.geometry.computeBoundingBox();
-  const box = mesh.geometry.boundingBox;
-  if (!box) return null;
+  //
+  // A name match that resolves to NO geometry does not end the search, it is skipped.
+  // Giving up on the first one would disagree with the bake, whose predicate requires a
+  // mesh and keeps looking, so an authored empty named `..._Lens` sitting before the real
+  // glass would ship a manifest claiming an optic and a runtime reporting none.
+  let meshes: THREE.Mesh[] = [];
+  scene.traverse((object) => {
+    if (meshes.length > 0 || !/(_Lens|_Glass)$/.test(object.name)) return;
+    meshes = meshesUnder(object);
+  });
+  if (meshes.length === 0) return null;
+  const box = new THREE.Box3();
+  for (const mesh of meshes) {
+    if (!mesh.geometry) continue;
+    mesh.geometry.computeBoundingBox();
+    if (mesh.geometry.boundingBox) box.union(mesh.geometry.boundingBox);
+  }
+  if (box.isEmpty()) return null;
   const size = box.getSize(new THREE.Vector3());
   const spans: [("x" | "y" | "z"), number][] = [
     ["x", size.x],
@@ -94,7 +114,8 @@ function findOptic(scene: THREE.Object3D): OpticAnchor | null {
   spans.sort((a, b) => a[1] - b[1]);
   const axis = spans[0][0];
   return {
-    lens: mesh,
+    lens: meshes[0],
+    meshes,
     centre: box.getCenter(new THREE.Vector3()),
     // The two non-flat spans are a disc's diameter; take the larger so a slightly
     // domed lens (the carbine's is 33 vertices and not perfectly planar) is covered.
@@ -104,18 +125,19 @@ function findOptic(scene: THREE.Object3D): OpticAnchor | null {
 }
 
 /**
- * First mesh at or beneath a node.
+ * Every mesh at or beneath a node, in primitive order.
  *
  * glTF gives a node with more than one material slot a Group in three, with one child
  * Mesh per primitive. Reading `.geometry` straight off the node then finds nothing and
  * the feature disables itself in silence, which is exactly what happened to the muzzle
- * flash: every weapon's flash carries two slots ("muzzle1" and "muzzle2").
+ * flash: every weapon's flash carries two slots ("muzzle1" and "muzzle2"). Returning the
+ * whole set rather than the first is what keeps the two-slot case honest downstream —
+ * one primitive is only ever part of the shape.
  */
-function firstMesh(root: THREE.Object3D): THREE.Mesh | null {
-  if ((root as THREE.Mesh).isMesh) return root as THREE.Mesh;
-  let found: THREE.Mesh | null = null;
+function meshesUnder(root: THREE.Object3D): THREE.Mesh[] {
+  const found: THREE.Mesh[] = [];
   root.traverse((object) => {
-    if (!found && (object as THREE.Mesh).isMesh) found = object as THREE.Mesh;
+    if ((object as THREE.Mesh).isMesh) found.push(object as THREE.Mesh);
   });
   return found;
 }

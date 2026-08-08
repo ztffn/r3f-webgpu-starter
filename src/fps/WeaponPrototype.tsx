@@ -829,11 +829,19 @@ export function WeaponPrototype({
 
         const optic = rigInstance.optic;
         if (scopeDemo && optic) {
-          const authored = optic.lens.material;
-          optic.lens.material = lensMaterial;
-          optic.lens.renderOrder = 1;
+          // EVERY mesh of the glass, not just the first. A lens authored with two
+          // material slots arrives as a Group of primitives, and swapping one of them
+          // would leave the rest showing the authored material over half the sight
+          // picture — the muzzle flash's bug in a place that is harder to notice.
+          const authored = optic.meshes.map((mesh) => mesh.material);
+          for (const mesh of optic.meshes) {
+            mesh.material = lensMaterial;
+            mesh.renderOrder = 1;
+          }
           restoreLens = () => {
-            optic.lens.material = authored;
+            optic.meshes.forEach((mesh, index) => {
+              mesh.material = authored[index];
+            });
           };
           // The shader reads the glass's own geometry, so tell it where that glass is.
           lensFrame.value.set(optic.centre.x, optic.centre.y, optic.radius);

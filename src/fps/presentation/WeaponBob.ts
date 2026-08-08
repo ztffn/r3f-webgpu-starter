@@ -101,7 +101,11 @@ function damp(current: number, target: number, lambda: number, dt: number): numb
   return target + (current - target) * Math.exp(-lambda * dt);
 }
 
-const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
+// Guarded, matching the shared `clamp01` in weapons/WeaponHandling.ts. Dropping the
+// finite check is not a simplification: a non-finite adsProgress then returns NaN instead
+// of 0, and a NaN here reaches the rig transform and blanks the weapon.
+const clamp01 = (value: number): number =>
+  Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0;
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 
 export class WeaponBobController {

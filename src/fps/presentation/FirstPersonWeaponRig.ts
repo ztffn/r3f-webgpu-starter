@@ -59,7 +59,6 @@ interface EquippedWeapon {
   readonly muzzle: THREE.Object3D | null;
   readonly muzzleRollAxis: THREE.Vector3 | null;
   readonly muzzleBaseQuaternion: THREE.Quaternion | null;
-  readonly leftWristGoal: THREE.Object3D | null;
 }
 
 /**
@@ -182,9 +181,6 @@ export class FirstPersonWeaponRig {
     return this.equipped?.optic ?? null;
   }
 
-  get equippedDefinition(): WeaponPresentationDefinition | null {
-    return this.equipped?.definition ?? null;
-  }
 
   /**
    * Attach a weapon to the wrist bone.
@@ -217,10 +213,6 @@ export class FirstPersonWeaponRig {
       muzzle,
       muzzleRollAxis: muzzle ? muzzleRollAxis(muzzle) : null,
       muzzleBaseQuaternion: muzzle ? (muzzle as THREE.Object3D).quaternion.clone() : null,
-      leftWristGoal:
-        asset.scene.getObjectByName(`${definition.rigKey}_l_wrist_goal`) ??
-        asset.scene.children.find((child) => /_l_wrist_goal$/i.test(child.name)) ??
-        null,
     };
     this.muzzleFlashRemaining = 0;
     this.atRest = false;

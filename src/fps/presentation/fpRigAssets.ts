@@ -27,7 +27,6 @@ export const ATTACH_BONE = "R_wrist";
 
 export interface LoadedRigAsset {
   readonly scene: THREE.Object3D;
-  readonly animations: readonly THREE.AnimationClip[];
   readonly clips: ReadonlyMap<string, THREE.AnimationClip>;
 }
 
@@ -81,7 +80,15 @@ export function loadHands(renderer: THREE.WebGPURenderer): Promise<LoadedRigAsse
       if (!gltf.scene.getObjectByName(ATTACH_BONE)) {
         throw new Error(`hands.glb has no "${ATTACH_BONE}" bone; no weapon could attach`);
       }
-      return { scene: gltf.scene, animations: gltf.animations, clips: indexClips(gltf.animations) };
+      return { scene: gltf.scene, clips: indexClips(gltf.animations) };
+    })
+    // A transient failure must not be memoised for the session, or one dropped fetch
+    // costs the first-person rig until reload — every remount replaying the same stored
+    // rejection. soldierAssets.ts learned this first; this file copied its caching and
+    // not its reset.
+    .catch((error) => {
+      handsPromise = null;
+      throw error;
     });
   return handsPromise;
 }
@@ -99,7 +106,11 @@ export function loadWeapon(
       .then((gltf) => {
         const clips = indexClips(gltf.animations);
         assertClips(`${key}.glb`, clips, weaponClipNamesFor(definition));
-        return { scene: gltf.scene, animations: gltf.animations, clips };
+        return { scene: gltf.scene, clips };
+      })
+      .catch((error) => {
+        weaponPromises.delete(key);
+        throw error;
       });
     weaponPromises.set(key, promise);
   }

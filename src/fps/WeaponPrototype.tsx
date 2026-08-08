@@ -152,10 +152,6 @@ const DEBUG_RIG_KEYS: readonly { code: string; key: RigWeaponKey }[] = [
   { code: "Digit9", key: "grenadelauncher" },
   { code: "Digit0", key: "knife" },
 ];
-// A weapon with no optic node — the pistol and LMG author no lens — has no anchor to
-// align an eye to, so its stored `ads` offset is the whole raise rather than eye relief.
-// It is a PLACEHOLDER for the main-camera FOV aiming path and claims no sight alignment.
-
 export interface WeaponPrototypeProps {
   /** Mount PiP display to the animated rifle's actual scope mesh. */
   scopeDemo?: boolean;
@@ -349,9 +345,17 @@ export function WeaponPrototype({
    * so firing on a debug model is the equipped weapon firing behind a different mesh.
    */
   const [presentationOverride, setPresentationOverride] = useState<RigWeaponKey | null>(null);
-  const presentation = presentationOverride
-    ? presentationForRigKey(presentationOverride)
-    : weaponPresentationFor(presentationWeaponId);
+  // Memoised because `presentationForRigKey` builds a fresh object each call and this is
+  // a dependency of the asset-load-and-equip effect: unmemoised, any re-render of this
+  // component re-equipped the weapon from scratch and replayed its raise on screen. The
+  // normal path was safe by luck — `weaponPresentationFor` returns stable table entries.
+  const presentation = useMemo(
+    () =>
+      presentationOverride
+        ? presentationForRigKey(presentationOverride)
+        : weaponPresentationFor(presentationWeaponId),
+    [presentationOverride, presentationWeaponId]
+  );
   // URL wind overrides are offline toys for the same reason as `?ammo=`: the
   // server integrates far shots with the default environment, and wind that
   // differs between shooter and authority is drift the shooter cannot hold for.
@@ -547,7 +551,7 @@ export function WeaponPrototype({
       if (!shot.spawned) combatTelemetry.publishProjectileRejected();
       recoilPitch.current += event.recoilImpulsePitchRadians;
       recoilYaw.current += event.recoilImpulseYawRadians;
-      playSegment(weaponPresentationFor(event.weaponId).segments.fire);
+      playSegment(presentation.segments.fire);
       // Every weapon except the knife ships its own flash mesh, positioned per calibre.
       weaponRig.current?.triggerMuzzleFlash();
       // The PROJECTILE direction, not the sight direction: the round is what can
@@ -562,7 +566,7 @@ export function WeaponPrototype({
         onShotFired(angles.yawRadians, angles.pitchRadians);
       }
     },
-    [onShotFired, playSegment]
+    [onShotFired, playSegment, presentation]
   );
 
   const handleWeaponEvent = useCallback(
@@ -572,17 +576,17 @@ export function WeaponPrototype({
         // The authored rig has NO dry-fire clip. Playing the reload or a shoot here
         // would show the player an action they did not take, so this stays silent
         // until one is authored; the HUD still reports the dry fire.
-        playSegment(weaponPresentationFor(event.weaponId).segments.dryFire);
+        playSegment(presentation.segments.dryFire);
         return;
       }
       if (event.type === "reload-started") {
-        playSegment(weaponPresentationFor(event.weaponId).segments.reload);
+        playSegment(presentation.segments.reload);
         onReloadStarted?.();
         return;
       }
       if (event.type === "weapon-switch-started") {
         // The outgoing weapon lowers; the incoming one raises when it is equipped.
-        playSegment(weaponPresentationFor(loadout.equippedWeapon.definition.id).segments.holster);
+        playSegment(presentation.segments.holster);
         return;
       }
       if (event.type === "weapon-equipped") {
@@ -593,7 +597,7 @@ export function WeaponPrototype({
         }
       }
     },
-    [loadout, onReloadStarted, onWeaponSelected, playSegment]
+    [onReloadStarted, onWeaponSelected, playSegment, presentation]
   );
 
   // `runFrame` takes its handlers per call, so this needs no stable identity.
@@ -650,13 +654,13 @@ export function WeaponPrototype({
     const playDebugSegment = (event: KeyboardEvent) => {
       const match = /^Digit([1-9])$/.exec(event.code);
       if (!match || event.repeat) return;
-      const segments = Object.values(weaponPresentationFor(presentationWeaponId).segments);
+      const segments = Object.values(presentation.segments);
       const segment = segments[Number(match[1]) - 1];
       if (segment !== undefined) playSegment(segment);
     };
     addEventListener("keydown", playDebugSegment);
     return () => removeEventListener("keydown", playDebugSegment);
-  }, [playSegment, presentationWeaponId, scopeDemo]);
+  }, [playSegment, presentation, scopeDemo]);
 
   useEffect(() => {
     if (!scopeDemo) return;
@@ -681,11 +685,10 @@ export function WeaponPrototype({
       }
       // 5-0 show the six rig weapons no gameplay definition maps to. Six weapons need six
       // keys, which is why this reaches past 9 to 0 — and 5 is free, since fire mode is B.
-      const debugIndex = DEBUG_RIG_KEYS.findIndex((entry) => entry.code === event.code);
-      if (debugIndex >= 0) {
+      const debugKey = DEBUG_RIG_KEYS.find((entry) => entry.code === event.code);
+      if (debugKey) {
         player.setAdsWanted(false);
-        const next = DEBUG_RIG_KEYS[debugIndex].key;
-        setPresentationOverride((was) => (was === next ? null : next));
+        setPresentationOverride((was) => (was === debugKey.key ? null : debugKey.key));
       }
     };
     const holdBreath = (event: KeyboardEvent) => {
@@ -1068,12 +1071,13 @@ export function WeaponPrototype({
     // Seeded from the definition on first sight, then the dev console owns it. Offline
     // only: `networked` weapons keep the canonical timings, for the same reason `?ammo=`
     // is refused online — the server scores with the authored values.
+    const gameplayRigKey = weaponPresentationFor(equippedWeapon.definition.id).rigKey;
     weaponPoses.seedAdsTiming(
-      presentation.rigKey,
+      gameplayRigKey,
       equippedWeapon.definition.ads.enterSeconds,
       equippedWeapon.definition.ads.exitSeconds
     );
-    const adsOverride = networked ? null : weaponPoses.adsTimingFor(presentation.rigKey);
+    const adsOverride = networked ? null : weaponPoses.adsTimingFor(gameplayRigKey);
     equippedWeapon.setAdsOverrideSeconds(adsOverride);
     // Raising and lowering are separately authored, so pick the one this frame is doing.
     // Without it a weapon that comes up fast and drops slow would blend at one rate both
@@ -1237,8 +1241,10 @@ export function WeaponPrototype({
     // toward an `aimOffset` that already carries `pose.ads` — going through `aimed()` here
     // would apply the aimed offset twice, pulling the weapon past the eye at full ADS.
     offset.set(running("x"), running("y"), running("z"));
-    // A weapon with an optic aligns the glass to the eye and then applies eye relief; one
-    // without has nothing to align to and takes the raise whole, so ADS is never a no-op.
+    // A weapon with an optic aligns the glass to the eye and then applies eye relief. One
+    // without — the pistol and LMG author no lens — has no anchor to align to, so its
+    // stored `ads` offset is the whole raise: a PLACEHOLDER for the main-camera FOV aiming
+    // path that claims no sight alignment, not a no-op.
     offset.lerp(aimOffset, aim.current);
     rig.translateX(offset.x + aimSway.positionXMetres + lookLag.x + weaponBob.offsetX);
     rig.translateY(offset.y + aimSway.positionYMetres + lookLag.y + weaponBob.offsetY);

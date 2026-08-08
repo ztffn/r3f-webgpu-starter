@@ -83,6 +83,15 @@ const ATTACH_BONE = "R_wrist";
 /** The hands armature node name — and, in a WEAPON file, the marker of a bad export. */
 const HANDS_ARMATURE = "Hands_Armature";
 
+/**
+ * Measured, not preferred, and the SAME PAIR as tools/vegetation/ktx2.mjs.
+ *
+ * That file's audit is what established them — ETC1S was rejected there on a 0.569% alpha
+ * cutoff flip — and its comment says to re-read the audit before changing the quality
+ * level. Deliberately duplicated rather than imported: that module pulls in a TypeScript
+ * helper, and this script runs under a bare `node` with no strip-types flag. If you retune
+ * one, retune both.
+ */
 const UASTC_QUALITY = 2;
 const ZSTD_LEVEL = 18;
 
@@ -144,7 +153,7 @@ async function encodeTexture(image, mimeType, srgb, size) {
     const fit = (value) => Math.max(4, Math.floor((value * scale) / 4) * 4);
     const width = fit(meta.width);
     const height = fit(meta.height);
-    await pipeline.resize(width, height, { fit: "fill" }).png().toFile(input);
+    await pipeline.resize(width, height, { fit: "fill" }).png({ compressionLevel: 0 }).toFile(input);
     await run("toktx", [
       "--t2",
       "--encode",
@@ -165,24 +174,16 @@ async function encodeTexture(image, mimeType, srgb, size) {
   }
 }
 
-async function compressTextures(document, size, report) {
+async function compressTextures(document, size) {
   document.createExtension(KHRTextureBasisu).setRequired(true);
   for (const texture of document.getRoot().listTextures()) {
     const image = texture.getImage();
     if (!image) continue;
-    const before = image.byteLength;
     const srgb = getTextureColorSpace(document, texture) === "srgb";
     const encoded = await encodeTexture(image, texture.getMimeType(), srgb, size);
     texture.setImage(encoded.data).setMimeType("image/ktx2");
     const uri = texture.getURI();
     if (uri) texture.setURI(uri.replace(/\.\w+$/, ".ktx2"));
-    report.push({
-      name: texture.getName(),
-      srgb,
-      before,
-      after: encoded.data.byteLength,
-      size: `${encoded.width}x${encoded.height}`,
-    });
   }
 }
 
@@ -280,7 +281,7 @@ async function assertNoHands(io, outPath, key) {
  * silently stopped exporting shows up as `optic: null` in the manifest instead of as a
  * scope that renders nothing.
  */
-function describeOptic(document, key) {
+function describeOptic(document) {
   const lens = document
     .getRoot()
     .listNodes()
@@ -308,7 +309,7 @@ function describeOptic(document, key) {
 
 async function prepareWeapon(io, key, sourcePath, outPath, size) {
   const document = await io.read(sourcePath);
-  const removedRoots = stripNonWeaponRoots(document, key);
+  stripNonWeaponRoots(document, key);
 
   const clips = document.getRoot().listAnimations().map((animation) => animation.getName());
   const documented = WEAPON_SEGMENTS[key];
@@ -347,7 +348,7 @@ async function prepareWeapon(io, key, sourcePath, outPath, size) {
     throw new Error(`${key}.glb keyframes were never rebased to zero: ${unrebased.join("; ")}`);
   }
 
-  const optic = describeOptic(document, key);
+  const optic = describeOptic(document);
   const muzzle = document
     .getRoot()
     .listNodes()
@@ -360,8 +361,7 @@ async function prepareWeapon(io, key, sourcePath, outPath, size) {
     .listNodes()
     .find((node) => /_l_wrist_goal$/i.test(node.getName()));
 
-  const textures = [];
-  await compressTextures(document, size, textures);
+  await compressTextures(document, size);
   await optimise(document);
   await io.write(outPath, document);
   await assertNoHands(io, outPath, key);
@@ -376,8 +376,6 @@ async function prepareWeapon(io, key, sourcePath, outPath, size) {
     optic,
     muzzleFlash: muzzle,
     leftWristGoal: wristGoal?.getName() ?? null,
-    removedRoots,
-    textures,
   };
 }
 
@@ -407,11 +405,10 @@ async function prepareHands(io, sourcePath, outPath, size) {
   }
   if (missing.length > 0) console.warn(`  ! hands: missing optional clip(s): ${missing.join(", ")}`);
 
-  const textures = [];
-  await compressTextures(document, size, textures);
+  await compressTextures(document, size);
   await optimise(document);
   await io.write(outPath, document);
-  return { file: path.basename(outPath), bytes: (await fs.stat(outPath)).size, clips, textures };
+  return { file: path.basename(outPath), bytes: (await fs.stat(outPath)).size, clips };
 }
 
 async function main() {

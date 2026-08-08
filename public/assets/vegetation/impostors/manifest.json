@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "source": "procedural (src/foliage, bake-impostors.mjs)",
+  "source": "src/foliage procedural geometry; prototype species derived from the CC-BY pack in prototypes-manifest.json",
   "variant": "B",
   "spritesPerSide": 12,
   "tileSize": 170,

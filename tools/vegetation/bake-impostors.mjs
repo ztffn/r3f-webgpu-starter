@@ -176,9 +176,12 @@ if (SPECIES.some((species) => species.prototype)) {
 
 const manifest = {
   version: 1,
-  // Generated entirely from the project's own procedural geometry and leaf texture —
-  // no third-party art. Re-run the bake instead of editing these files.
-  source: "procedural (src/foliage, bake-impostors.mjs)",
+  // Per species, because the two art paths have different provenance and the atlas is a
+  // DERIVED work of whichever fed it: the card species are the project's own procedural
+  // geometry, the prototype species are the CC-BY pack the prototypes manifest attributes.
+  // A blanket "no third-party art" here was wrong for four of the seven. Re-run the bake
+  // instead of editing these files.
+  source: "src/foliage procedural geometry; prototype species derived from the CC-BY pack in prototypes-manifest.json",
   variant: args.variant,
   spritesPerSide: args.spritesPerSide,
   tileSize: args.tileSize,

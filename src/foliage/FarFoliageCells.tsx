@@ -230,22 +230,24 @@ export function FarFoliageCells({
 
     // Live lights → uniforms, every frame: the Lighting dials patch the light objects in
     // place, so copying here is what keeps the ring's sun honest. Cheap — three colours.
-    if (lights) {
-      const sun = lights.sun.current;
-      if (sun) setLightUniform(state.farUniforms.sunColor, sun.color, sun.intensity);
-      const fill = lights.fill.current;
-      if (fill) {
-        setLightUniform(state.farUniforms.fillSky, fill.color, fill.intensity);
-        setLightUniform(state.farUniforms.fillGround, fill.groundColor, fill.intensity);
-      }
-      const ambient = lights.ambient.current;
-      if (ambient) {
-        setLightUniform(state.farUniforms.ambient, ambient.color, ambient.intensity);
-      }
+    const sun = lights?.sun.current;
+    if (sun) setLightUniform(state.farUniforms.sunColor, sun.color, sun.intensity);
+    const fill = lights?.fill.current;
+    if (fill) {
+      setLightUniform(state.farUniforms.fillSky, fill.color, fill.intensity);
+      setLightUniform(state.farUniforms.fillGround, fill.groundColor, fill.intensity);
     }
-    (state.farUniforms.sunDirection.value as THREE.Vector3)
-      .set(SUN_DIRECTION[0], SUN_DIRECTION[1], SUN_DIRECTION[2])
-      .normalize();
+    const ambient = lights?.ambient.current;
+    if (ambient) setLightUniform(state.farUniforms.ambient, ambient.color, ambient.intensity);
+
+    // Direction TO the sun, taken from the light the scene actually renders with rather
+    // than from the constant DF2Scene happens to position that light along. Identical
+    // today by construction — which is exactly what makes the constant dangerous: the two
+    // tiers would silently disagree the moment a time-of-day sun moved, and the near tier
+    // (real PBR against the light object) would be the one telling the truth.
+    const sunDirection = state.farUniforms.sunDirection.value as THREE.Vector3;
+    if (sun) sunDirection.copy(sun.position).sub(sun.target.position).normalize();
+    else sunDirection.set(SUN_DIRECTION[0], SUN_DIRECTION[1], SUN_DIRECTION[2]).normalize();
 
     // A crossing or a placement change restarts the refill. The old contents keep
     // drawing until the new fill COMPLETES — a stale ring for a few frames is invisible

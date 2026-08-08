@@ -81,6 +81,27 @@ player instinctively recognise this?* — applies to features, not to whether a 
   (no prone clips baked yet) — except a DEAD prone player, who shows the character,
   because the fall is the whole feedback. Combat/damage is server-authoritative and its
   feedback layer landed Aug 2026; the six death clips are wired (`docs/12` §8.0).
+- **First-person weapon rig (Aug 2026):** the proxy `fps_rig.glb` is GONE. The authored
+  hands-and-weapons rig ships a shared `hands.glb` plus ten weapons, prepared by
+  `npm run prepare:fphands` into `public/assets/weapons/` (150 → 49 MB, Draco + KTX2
+  UASTC/Zstd). **Two AnimationMixers in lockstep** — hands play `hand_<key>_<segment>`,
+  the weapon plays `<segment>` — with NAMED clips, not numeric slices of one timeline.
+  Weapons parent to the `R_wrist` bone with **no offset math**; the Z-up/Y-up split
+  between the files does not intrude because `Hands_Armature` carries the conversion.
+  The scope anchor is **measured from the glass geometry**, not an authored locator, so
+  the three hardcoded lens constants are gone — the lens shader itself is unchanged.
+  `idle` is a rare bored fidget over a static rest pose, NOT a loop, and is suppressed
+  while aiming. **Movement bob is per weapon and the camera NEVER bobs** — phase accumulates
+  from distance travelled so the gait locks to stride at any frame rate, and the bob is
+  never filtered (Source adds bob on top of look lag; a follow filter ate 73% of the
+  vertical and deformed the figure). Weight comes from `lookLag` at Source's 0.14 s
+  half-life. ADS blend rate is a RATIO against each weapon's own enter/exit seconds, so a
+  single global constant no longer smears the per-weapon timings together. Only sniper (magnified), carbine and grenadelauncher (authored red dots)
+  have glass at all. Hip and ADS placement is **per weapon** (`weaponPoseStore.ts`) and
+  tuned live from the dev console's **Weapon pose** tab, which can hold ADS for you,
+  persists to `sessionStorage` and prints the table back as source. Read `docs/10` §11
+  before touching any of it: a glTF node with two material slots arrives as a **Group**,
+  which silently disabled the muzzle flash once already.
 - **Web product, brand and UI (Aug 2026):** the project has a public name — **Distant
   Front** — and a router. `/` is a landing page, `/faq` and `/supporter` are real pages, and
   **the whole Three.js tree lazy-loads behind `/play`** (entry chunk ~116 KB gzipped, and its

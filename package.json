@@ -16,6 +16,7 @@
     "dev": "vite",
     "build": "npm run typecheck && vite build",
     "prepare:vegetation": "node tools/vegetation/prepare-vegetation.mjs",
+    "prepare:fphands": "node tools/fphands/prepare-fphands.mjs",
     "bake:impostors": "node --experimental-strip-types --experimental-specifier-resolution=node tools/vegetation/bake-impostors.mjs",
     "validate:vegetation": "node tools/vegetation/validate-manifest.mjs",
     "test": "node --experimental-strip-types --experimental-specifier-resolution=node --test tests/*/*.test.ts",

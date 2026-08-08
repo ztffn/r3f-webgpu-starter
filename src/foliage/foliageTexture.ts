@@ -106,29 +106,47 @@ function paintLeaves(size: number, seed: number): MipLevel {
   return { data, width: size, height: size };
 }
 
-/** Builds the shared leaf texture and its coverage-preserving mip chain. */
-export function createFoliageTexture(seed = 1): FoliageTexture {
-  const base = paintLeaves(TEXTURE_SIZE, seed);
-  const levels = buildCoveragePreservingMips(base, FOLIAGE_ALPHA_CUTOFF);
-
+/**
+ * A clamped, mip-supplied RGBA `DataTexture` over an existing level chain.
+ *
+ * Shared by the leaf texture and the impostor atlases: both supply levels that were
+ * solved on the CPU, so `generateMipmaps` must stay off in both — the GPU's own box
+ * filter would undo the coverage correction that is the whole point of alphaMips.ts.
+ * The `mipmaps` assertion is here once rather than transcribed at each site.
+ */
+export function dataTextureFromMips(
+  levels: MipLevel[],
+  options: { colorSpace: THREE.ColorSpace; anisotropy?: number }
+): THREE.DataTexture {
+  const base = levels[0];
   const texture = new THREE.DataTexture(base.data, base.width, base.height);
   texture.format = THREE.RGBAFormat;
   texture.type = THREE.UnsignedByteType;
-  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.colorSpace = options.colorSpace;
   texture.wrapS = THREE.ClampToEdgeWrapping;
   texture.wrapT = THREE.ClampToEdgeWrapping;
   texture.magFilter = THREE.LinearFilter;
   texture.minFilter = THREE.LinearMipmapLinearFilter;
-  // Supplied, not generated. `generateMipmaps` would run the GPU's own box filter and
-  // undo the coverage correction — the whole point of alphaMips.ts.
   texture.generateMipmaps = false;
   texture.mipmaps = levels.map((level) => ({
     data: level.data,
     width: level.width,
     height: level.height,
   })) as unknown as THREE.DataTexture["mipmaps"];
-  texture.anisotropy = 4;
+  texture.anisotropy = options.anisotropy ?? 1;
   texture.needsUpdate = true;
+  return texture;
+}
+
+/** Builds the shared leaf texture and its coverage-preserving mip chain. */
+export function createFoliageTexture(seed = 1): FoliageTexture {
+  const base = paintLeaves(TEXTURE_SIZE, seed);
+  const levels = buildCoveragePreservingMips(base, FOLIAGE_ALPHA_CUTOFF);
+
+  const texture = dataTextureFromMips(levels, {
+    colorSpace: THREE.SRGBColorSpace,
+    anisotropy: 4,
+  });
 
   return {
     texture,

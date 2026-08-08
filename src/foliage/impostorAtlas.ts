@@ -10,6 +10,7 @@
 import * as THREE from "three/webgpu";
 import { buildCoveragePreservingMips, type MipLevel } from "./alphaMips.ts";
 import { FOLIAGE_ALPHA_CUTOFF } from "./foliageConfig.ts";
+import { dataTextureFromMips } from "./foliageTexture.ts";
 import { decodePng } from "./impostorPng.ts";
 
 export interface ImpostorManifestSpecies {
@@ -113,28 +114,14 @@ function weightedNormalMips(base: MipLevel, albedoLevels: MipLevel[]): MipLevel[
 }
 
 function makeTexture(levels: MipLevel[]): THREE.DataTexture {
-  const base = levels[0];
-  const texture = new THREE.DataTexture(base.data, base.width, base.height);
-  texture.format = THREE.RGBAFormat;
-  texture.type = THREE.UnsignedByteType;
-  // The bake writes LINEAR values (the same constants the near-field colorNode uses);
-  // marking the texture sRGB would re-transform them and the tiers would stop matching.
-  texture.colorSpace = THREE.NoColorSpace;
-  texture.wrapS = THREE.ClampToEdgeWrapping;
-  texture.wrapT = THREE.ClampToEdgeWrapping;
-  texture.magFilter = THREE.LinearFilter;
-  texture.minFilter = THREE.LinearMipmapLinearFilter;
-  // Anisotropy stays at 1: anisotropic taps walk a line in uv space, and on a tiled
-  // atlas that line crosses into the neighbouring VIEW well before the tile-edge clamp
-  // in the shader can stop it.
-  texture.generateMipmaps = false;
-  texture.mipmaps = levels.map((level) => ({
-    data: level.data,
-    width: level.width,
-    height: level.height,
-  })) as unknown as THREE.DataTexture["mipmaps"];
-  texture.needsUpdate = true;
-  return texture;
+  return dataTextureFromMips(levels, {
+    // The bake writes LINEAR values (the same constants the near-field colorNode uses);
+    // marking the texture sRGB would re-transform them and the tiers would stop matching.
+    colorSpace: THREE.NoColorSpace,
+    // Anisotropy stays at the default 1: anisotropic taps walk a line in uv space, and on
+    // a tiled atlas that line crosses into the neighbouring VIEW well before the tile-edge
+    // clamp in the shader can stop it.
+  });
 }
 
 export async function loadImpostorAtlases(

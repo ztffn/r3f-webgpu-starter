@@ -79,7 +79,8 @@ interface LinearTexture {
   height: number;
 }
 
-function srgbToLinear(byte: number): number {
+/** sRGB byte to linear float. Exported so the CLI baker cannot transcribe a second curve. */
+export function srgbToLinear(byte: number): number {
   const c = byte / 255;
   return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
 }
@@ -167,18 +168,19 @@ export function bakeImpostorAtlas(options: ImpostorBakeOptions): ImpostorBakeRes
     wrap: options.barkTexture !== undefined,
   };
 
-  // Supersampled per-tile scratch, reused across every view.
+  // Supersampled per-tile scratch plus per-vertex projection, reused across every view.
   const ssSize = tile * ss;
-  const covered = new Uint8Array(ssSize * ssSize);
-  const color = new Float32Array(ssSize * ssSize * 3);
-  const normalAcc = new Float32Array(ssSize * ssSize * 3);
-  const depthBuf = new Float32Array(ssSize * ssSize);
-  const zbuf = new Float32Array(ssSize * ssSize);
-
-  // Per-vertex projection scratch.
-  const projX = new Float32Array(vertexCount);
-  const projY = new Float32Array(vertexCount);
-  const projZ = new Float32Array(vertexCount);
+  const scratch: BakeScratch = {
+    ssSize,
+    covered: new Uint8Array(ssSize * ssSize),
+    color: new Float32Array(ssSize * ssSize * 3),
+    normalAcc: new Float32Array(ssSize * ssSize * 3),
+    zbuf: new Float32Array(ssSize * ssSize),
+    projX: new Float32Array(vertexCount),
+    projY: new Float32Array(vertexCount),
+    projZ: new Float32Array(vertexCount),
+  };
+  const { covered, color, normalAcc, zbuf, projX, projY, projZ } = scratch;
 
   for (let j = 0; j < n; j += 1) {
     for (let i = 0; i < n; i += 1) {
@@ -187,7 +189,6 @@ export function bakeImpostorAtlas(options: ImpostorBakeOptions): ImpostorBakeRes
       covered.fill(0);
       color.fill(0);
       normalAcc.fill(0);
-      depthBuf.fill(0);
       zbuf.fill(-Infinity);
 
       // Project every vertex into the view's image plane, in supersampled pixels.
@@ -204,7 +205,7 @@ export function bakeImpostorAtlas(options: ImpostorBakeOptions): ImpostorBakeRes
       }
 
       for (let t = 0; t < vertexCount; t += 3) {
-        rasteriseTriangle(t, options, shading, projX, projY, projZ, ssSize, covered, color, normalAcc, depthBuf, zbuf, basis.toCamera);
+        rasteriseTriangle(t, options, shading, scratch, basis.toCamera);
       }
 
       // Box-reduce the supersampled tile into the two atlases.
@@ -234,7 +235,7 @@ export function bakeImpostorAtlas(options: ImpostorBakeOptions): ImpostorBakeRes
               nx += normalAcc[s * 3];
               ny += normalAcc[s * 3 + 1];
               nz += normalAcc[s * 3 + 2];
-              depth += depthBuf[s];
+              depth += zbuf[s];
             }
           }
           const out = ((tileBaseY + ty) * atlasSize + tileBaseX + tx) * 4;
@@ -310,21 +311,41 @@ export function bakeImpostorAtlas(options: ImpostorBakeOptions): ImpostorBakeRes
   };
 }
 
+/**
+ * The per-view scratch the rasteriser reads and writes.
+ *
+ * One object rather than nine positional arguments: five of them are `Float32Array` and
+ * the argument order was unchecked by types, so a transposed pair would have compiled and
+ * produced a subtly wrong atlas. Allocated once per bake and cleared per view.
+ */
+interface BakeScratch {
+  projX: Float32Array;
+  projY: Float32Array;
+  projZ: Float32Array;
+  ssSize: number;
+  covered: Uint8Array;
+  color: Float32Array;
+  normalAcc: Float32Array;
+  /**
+   * Depth of the nearest surviving fragment, in view units.
+   *
+   * ONE buffer, not two. The depth TEST and the depth the tile average reads are the same
+   * number written at the same point, so a second copy was a full supersampled
+   * `Float32Array` cleared once per view to hold a duplicate. The averaging pass only
+   * reads texels `covered` marks, which are exactly the texels this was written for, so
+   * the differing clear values (-Infinity here, 0 there) were never observable.
+   */
+  zbuf: Float32Array;
+}
+
 function rasteriseTriangle(
   t: number,
   options: ImpostorBakeOptions,
   shading: { leaf: LinearTexture; bark: LinearTexture | null; wrap: boolean },
-  projX: Float32Array,
-  projY: Float32Array,
-  projZ: Float32Array,
-  ssSize: number,
-  covered: Uint8Array,
-  color: Float32Array,
-  normalAcc: Float32Array,
-  depthBuf: Float32Array,
-  zbuf: Float32Array,
+  scratch: BakeScratch,
   toCamera: readonly [number, number, number]
 ): void {
+  const { projX, projY, projZ, ssSize, covered, color, normalAcc, zbuf } = scratch;
   const { mesh, alphaCutoff, leafColor, barkColor } = options;
   const a = t;
   const b = t + 1;
@@ -406,7 +427,6 @@ function rasteriseTriangle(
       normalAcc[s * 3] = nx;
       normalAcc[s * 3 + 1] = ny;
       normalAcc[s * 3 + 2] = nz;
-      depthBuf[s] = depth;
     }
   }
 }

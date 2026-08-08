@@ -103,6 +103,28 @@ export function solveAlphaScale(
   target: number,
   iterations = 16
 ): number {
+  // Alpha is a BYTE, so coverage at any scale is fully described by 256 suffix counts:
+  // one O(texels) pass answers every bisection step in O(256) instead of re-walking the
+  // level 17 times. At an atlas mip that is the difference between one pass over a
+  // million texels and seventeen. The comparison below is character-identical to
+  // `alphaCoverage`'s, so the answers are exact rather than approximately the same.
+  const threshold = cutoff * 255;
+  const texels = data.length / 4;
+  const histogram = new Int32Array(256);
+  for (let i = 0; i < texels; i += 1) histogram[data[i * 4 + 3]] += 1;
+  const atLeast = new Int32Array(257);
+  for (let a = 255; a >= 0; a -= 1) atLeast[a] = atLeast[a + 1] + histogram[a];
+
+  // Scale is non-negative over the whole bracket, so `a * scale` is non-decreasing in `a`
+  // and the first passing byte value makes every larger one pass too.
+  const coverageAt = (scale: number): number => {
+    if (texels === 0) return 0;
+    for (let a = 0; a < 256; a += 1) {
+      if (a * scale >= threshold) return atLeast[a] / texels;
+    }
+    return 0;
+  };
+
   let low = 0;
   let high = 4;
   let overshoot = Infinity;
@@ -110,7 +132,7 @@ export function solveAlphaScale(
   let closestError = Infinity;
   for (let i = 0; i < iterations; i += 1) {
     const mid = (low + high) * 0.5;
-    const coverage = alphaCoverage(data, cutoff, mid);
+    const coverage = coverageAt(mid);
     const error = Math.abs(coverage - target);
     if (error < closestError) {
       closestError = error;
@@ -124,7 +146,7 @@ export function solveAlphaScale(
   // Nothing in the bracket reaches the target. Take the most coverage available rather
   // than the closest number: over-concealing is a visual cost, under-concealing is a
   // competitive one.
-  return alphaCoverage(data, cutoff, 4) > alphaCoverage(data, cutoff, closest) ? 4 : closest;
+  return coverageAt(4) > coverageAt(closest) ? 4 : closest;
 }
 
 /**
